@@ -2,16 +2,16 @@
   "name": "wb-headless",
   "version": "1.0.0",
   "type": "module",
-  "engines": {
-    "node": ">=18"
+  "dependencies": {
+    "express": "^4.19.2",
+    "puppeteer": "^22.10.0",
+    "uuid": "^9.0.1"
   },
   "scripts": {
+    "build:chrome": "npx @puppeteer/browsers install chrome@stable --install-dir=./chrome --cache-dir=./chrome",
     "start": "node server.js"
   },
-  "dependencies": {
-    "@puppeteer/browsers": "^2.3.0",
-    "express": "^4.19.2",
-    "puppeteer-core": "^22.12.1",
-    "uuid": "^9.0.1"
+  "engines": {
+    "node": ">=18"
   }
 }
