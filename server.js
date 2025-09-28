@@ -8,6 +8,10 @@ app.use(express.json({ limit: '1mb' }));
 // healthchecks (и /health, и /healthz — чтобы что ни стояло в Render)
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
+// healthchecks (оба пути, и корень на всякий случай)
+app.get(['/health', '/healthz', '/'], (req, res) => {
+  res.json({ ok: true, uptime: process.uptime() });
+});
 
 // простой api-key
 const API_KEY = process.env.API_KEY || 'supersecret';
