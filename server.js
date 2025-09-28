@@ -1,32 +1,44 @@
-// server.js — полная версия без page.waitForTimeout, с поддержкой фреймов и OTP
+// server.js — вход в WB с поддержкой Shadow-DOM и contenteditable
 
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import puppeteer from 'puppeteer';
+import { v4 as uuidv4 } from 'uuid';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
-// ----- конфиг -----
 const API_KEY = process.env.API_KEY || 'supersecret';
 const PORT = process.env.PORT || 8080;
 const WB_AUTH_URL = 'https://seller-auth.wildberries.ru/ru/';
 
-// Render-хром (ставим в build: `npx @puppeteer/browsers install chrome@stable --cache-dir=./.cache/puppeteer`)
+// ---------- helpers ----------
+function requireKey(req, res, next) {
+  if ((req.headers['x-api-key'] || '') !== API_KEY) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  next();
+}
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+function normalizePhone(input) {
+  const digits = String(input || '').replace(/\D+/g, '');
+  const tail = digits.slice(-10);
+  return tail.length === 10 ? tail : null;
+}
+
 function findLocalChrome() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
   try {
     const base = path.resolve(process.cwd(), 'chrome');
     if (!fs.existsSync(base)) return null;
-    const dirs = fs.readdirSync(base).filter(d => d.startsWith('linux-'));
-    // берём максимальную версию
-    dirs.sort().reverse();
+    const dirs = fs.readdirSync(base).filter(d => d.startsWith('linux-')).sort().reverse();
     for (const d of dirs) {
       const p = path.join(base, d, 'chrome-linux64', 'chrome');
       if (fs.existsSync(p)) return p;
     }
-  } catch (_) { /* noop */ }
+  } catch (_) {}
   return null;
 }
 
@@ -39,6 +51,7 @@ async function launchBrowser() {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
+      '--disable-blink-features=AutomationControlled',
       '--window-size=1280,900'
     ],
     defaultViewport: { width: 1280, height: 900 }
@@ -48,32 +61,29 @@ async function launchBrowser() {
   return { browser, chromePath: chromePath || 'bundled Chromium' };
 }
 
-// ----- утилиты -----
-function requireKey(req, res, next) {
-  if ((req.headers['x-api-key'] || '') !== API_KEY)
-    return res.status(401).json({ error: 'unauthorized' });
-  next();
-}
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-function normalizePhone(input) {
-  const digits = String(input || '').replace(/\D+/g, '');
-  // берём последние 10 цифр
-  const tail = digits.slice(-10);
-  if (tail.length !== 10) return null;
-  return tail;
+async function preparePage(page) {
+  // реальный UA, убираем webdriver
+  const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  await page.setUserAgent(ua);
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  });
 }
 
-// Ищем элемент по набору селекторов во всех фреймах страницы
-async function findFirst(page, selectors, opts = {}) {
-  const timeout = opts.timeout ?? 30000;
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    const frames = page.frames();
-    for (const sel of selectors) {
-      for (const f of frames) {
-        const h = await f.$(sel);
-        if (h) return { frame: f, handle: h, selector: sel };
+// ищем элемент во всех фреймах; поддерживаем обычные и pierce/ селекторы для Shadow-DOM
+async function findFirst(page, selectors, { timeout = 30000 } = {}) {
+  const end = Date.now() + timeout;
+  const selAll = [
+    ...selectors,
+    ...selectors.map(s => (s.startsWith('pierce/') ? s : `pierce/${s}`))
+  ];
+  while (Date.now() < end) {
+    for (const frame of page.frames()) {
+      for (const s of selAll) {
+        try {
+          const handle = await frame.$(s);
+          if (handle) return { frame, handle, selector: s };
+        } catch (_) {}
       }
     }
     await sleep(250);
@@ -81,74 +91,90 @@ async function findFirst(page, selectors, opts = {}) {
   return null;
 }
 
-async function typeSlow(handle, text, delay = 50) {
-  // Фокус на элемент
-  await handle.focus();
-  // Очищаем поле (на всякий случай)
-  await handle.click({ clickCount: 3 });
-  await handle.press('Backspace');
-  for (const ch of String(text)) {
-    await handle.type(ch, { delay });
+async function typeSlowInto(page, handle, text, delay = 60) {
+  // определим тип узла
+  const tag = (await (await handle.getProperty('tagName')).jsonValue?.()) || '';
+  const isCE = await (await handle.getProperty('isContentEditable')).jsonValue?.();
+
+  if (tag === 'INPUT' || tag === 'TEXTAREA') {
+    await handle.focus();
+    await handle.click({ clickCount: 3 });
+    await handle.press('Backspace');
+    await handle.type(text, { delay });
+  } else if (isCE) {
+    await handle.click();
+    await page.keyboard.down('Control');
+    await page.keyboard.press('KeyA');
+    await page.keyboard.up('Control');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type(text, { delay });
+  } else {
+    // как fallback: кликаем и печатаем в активный элемент
+    await handle.click();
+    await page.keyboard.type(text, { delay });
   }
 }
 
-async function pressEnter(handle) {
-  await handle.press('Enter');
-}
-
-// ----- хранилище сессий -----
+// ---------- storage ----------
 const sessions = new Map(); // sessionId -> { browser, page }
-import { v4 as uuidv4 } from 'uuid';
 
-// ----- health/debug -----
+// ---------- health & debug ----------
 app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
-
 app.get('/debug-chrome', requireKey, (req, res) => {
   const chromePath = findLocalChrome();
-  res.json({
-    cwd: process.cwd(),
-    chromePath: chromePath || null,
-    exists: !!chromePath
-  });
+  res.json({ cwd: process.cwd(), chromePath: chromePath || null, exists: !!chromePath });
 });
 
-// ----- START: ввод телефона -----
+// ---------- START ----------
 app.post('/start', requireKey, async (req, res) => {
-  try {
-    const phoneRaw = req.body?.phone;
-    const localPart = normalizePhone(phoneRaw);
-    if (!localPart) return res.status(400).json({ error: 'bad_phone' });
+  const phoneRaw = req.body?.phone;
+  const localPart = normalizePhone(phoneRaw);
+  if (!localPart) return res.status(400).json({ error: 'bad_phone' });
 
-    const { browser, chromePath } = await launchBrowser();
+  let browser;
+  try {
+    const launched = await launchBrowser();
+    browser = launched.browser;
     const page = await browser.newPage();
+    await preparePage(page);
+
+    // иногда редиректят с seller на auth — идём сразу на auth
     await page.goto(WB_AUTH_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    // ищем поле телефона — главная страница или фрейм
+    // набор селекторов для поля телефона (включая Shadow-DOM/контейнеры)
     const phoneSelectors = [
       'input[type="tel"]',
-      'input[name*="phone"]',
+      'input[name*="phone" i]',
       'input[autocomplete="tel"]',
-      'input.input__phone' // на случай кастомного класса
+      'input[inputmode="numeric"]',
+      'input[placeholder*="999" i]',
+      'div[contenteditable="true"]',
+      '[role="textbox"]'
     ];
-    const phone = await findFirst(page, phoneSelectors, { timeout: 45000 });
-    if (!phone) {
+
+    const found = await findFirst(page, phoneSelectors, { timeout: 45000 });
+    if (!found) {
       await browser.close();
-      return res.status(500).json({ error: 'start_failed', detail: 'Не найдено поле ввода телефона (во всех фреймах).' });
+      return res.status(500).json({
+        error: 'start_failed',
+        detail: 'Не найдено поле ввода телефона (во всех фреймах, включая Shadow-DOM).'
+      });
     }
 
-    await typeSlow(phone.handle, localPart, 60);
-    await pressEnter(phone.handle);
+    await typeSlowInto(page, found.handle, localPart, 60);
+    await page.keyboard.press('Enter');
 
-    // ждём появления OTP (6 инпутов или одно поле для кода)
+    // ждём появления полей для кода (одно поле либо 6 ячеек)
     const otpSelectors = [
       'input[autocomplete="one-time-code"]',
-      'input[name*="code"]',
-      'input[type="tel"][maxlength="1"]', // набор из 6 ячеек
-      'input[data-qa*="otp"]'
+      'input[name*="code" i]',
+      'input[type="tel"][maxlength="1"]',
+      '[data-qa*="otp"]',
+      'div[contenteditable="true"][data-qa*="otp"]'
     ];
     const otp = await findFirst(page, otpSelectors, { timeout: 60000 });
     if (!otp) {
-      // иногда WB рисует экран, но не пускает — дайте странице договорить загрузку
+      // контент иногда «догружается»
       await sleep(2000);
     }
 
@@ -158,16 +184,15 @@ app.post('/start', requireKey, async (req, res) => {
     return res.json({
       ok: true,
       status: 'waiting_sms',
-      sessionId,
-      debug: { chrome: chromePath, localPart }
+      sessionId
     });
   } catch (err) {
-    console.error('START error:', err);
+    if (browser) try { await browser.close(); } catch (_) {}
     return res.status(500).json({ error: 'start_failed', detail: String(err?.message || err) });
   }
 });
 
-// ----- VERIFY: ввод СМС и возврат cookies -----
+// ---------- VERIFY ----------
 app.post('/verify', requireKey, async (req, res) => {
   const { sessionId, code } = req.body || {};
   const sess = sessions.get(sessionId);
@@ -178,43 +203,32 @@ app.post('/verify', requireKey, async (req, res) => {
     const codeStr = String(code || '').replace(/\D+/g, '');
     if (codeStr.length !== 6) return res.status(400).json({ error: 'bad_code' });
 
-    // ищем OTP-поля во всех фреймах
-    const singleFieldSelectors = [
+    // 1 поле
+    const single = await findFirst(page, [
       'input[autocomplete="one-time-code"]',
-      'input[name*="code"]'
-    ];
-    const multiFieldSelector = 'input[type="tel"][maxlength="1"]';
+      'input[name*="code" i]'
+    ], { timeout: 10000 });
 
-    let filled = false;
-
-    // Вариант 1: одно поле
-    const single = await findFirst(page, singleFieldSelectors, { timeout: 10000 });
     if (single) {
-      await typeSlow(single.handle, codeStr, 80);
-      filled = true;
+      await typeSlowInto(page, single.handle, codeStr, 80);
     } else {
-      // Вариант 2: шесть ячеек
-      // Собираем сразу все 6 во всех фреймах
+      // 6 ячеек
       const frames = page.frames();
       let inputs = [];
       for (const f of frames) {
-        const hs = await f.$$(multiFieldSelector);
-        if (hs && hs.length) inputs = inputs.concat(hs);
+        const hs = await f.$$('input[type="tel"][maxlength="1"]');
+        if (hs?.length) inputs = inputs.concat(hs);
       }
       if (inputs.length >= 6) {
         for (let i = 0; i < 6; i++) {
-          await typeSlow(inputs[i], codeStr[i], 80);
+          await typeSlowInto(page, inputs[i], codeStr[i], 80);
         }
-        filled = true;
+      } else {
+        return res.status(500).json({ error: 'verify_failed', detail: 'Поля ввода кода не найдены.' });
       }
     }
 
-    if (!filled) {
-      return res.status(500).json({ error: 'verify_failed', detail: 'Не удалось найти поля ввода SMS-кода.' });
-    }
-
-    // ждём перехода в ЛК/подтверждения
-    // Либо ждём network idle, либо небольшой «дыхательный» интервал
+    // ждём подтверждение/редирект
     try {
       await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
     } catch (_) {
@@ -222,13 +236,11 @@ app.post('/verify', requireKey, async (req, res) => {
     }
 
     const cookies = await page.cookies();
-
     await browser.close();
     sessions.delete(sessionId);
 
     return res.json({ ok: true, cookies });
   } catch (err) {
-    console.error('VERIFY error:', err);
     try { await browser.close(); } catch (_) {}
     sessions.delete(sessionId);
     return res.status(500).json({ error: 'verify_failed', detail: String(err?.message || err) });
