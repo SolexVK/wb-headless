@@ -1,19 +1,88 @@
-// server.js — устойчивый вход в ЛК WB + сбор СПП + отладочные ручки
-
+// server.js
 import express from 'express';
-import puppeteer from 'puppeteer';
-import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import puppeteer from 'puppeteer-core';
+import { v4 as uuidv4 } from 'uuid';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
-// -----------------------------
-// 1) Здоровье и защита
-// -----------------------------
-app.get('/health', (req, res) => res.json({ ok: true }));
+// ----------- utils -----------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function exists(p) {
+  try { return fs.existsSync(p); } catch { return false; }
+}
+
+/** Ищем бинарник Chrome: сначала env, потом типовые каталоги */
+function findChrome() {
+  const envPath = process.env.CHROME_PATH;
+  if (envPath && exists(envPath)) return envPath;
+
+  // кандидаты (Render + наш билд-скрипт)
+  const candidates = [
+    path.join(__dirname, 'chrome'), // если кто-то вручную положит
+    path.join(__dirname, 'chrome', 'linux-stable', 'chrome'),
+    path.join(__dirname, '.cache', 'puppeteer', 'chrome'), // старый cache-dir
+  ];
+
+  // разворачиваем папки-корни: внутри ищем *chrome*/chrome
+  for (const base of candidates) {
+    if (!exists(base)) continue;
+
+    // 1) прямой бинарник
+    if (base.endsWith('chrome') && exists(base)) return base;
+
+    // 2) ищем глубже: linux-xxx/chrome
+    try {
+      const sub = fs.readdirSync(base);
+      for (const s of sub) {
+        const p = path.join(base, s);
+        // версия
+        if (fs.lstatSync(p).isDirectory()) {
+          const linux = path.join(p, 'chrome-linux64', 'chrome');
+          const linuxAlt = path.join(p, 'linux-stable', 'chrome');
+          const justChrome = path.join(p, 'chrome');
+          if (exists(linux)) return linux;
+          if (exists(linuxAlt)) return linuxAlt;
+          if (exists(justChrome)) return justChrome;
+        }
+      }
+    } catch {}
+  }
+
+  // частый путь из логов Render, если «попали в точку»
+  // (обновится автоматически при новой установке — не критично если не существует)
+  const guess = '/opt/render/project/src/chrome/linux-stable/chrome';
+  if (exists(guess)) return guess;
+
+  return null;
+}
+
+function ppLaunchOpts() {
+  const executablePath = findChrome();
+  if (!executablePath) {
+    throw new Error('Chrome binary not found. Check build step and CHROME_PATH.');
+  }
+  return {
+    executablePath,
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--window-size=1280,900',
+    ],
+  };
+}
+
+// простой «кей» для API
 const API_KEY = process.env.API_KEY || 'supersecret';
 function requireKey(req, res, next) {
   if ((req.headers['x-api-key'] || '') !== API_KEY) {
@@ -22,384 +91,234 @@ function requireKey(req, res, next) {
   next();
 }
 
-// -----------------------------
-// 2) Поиск Chrome (устойчиво)
-// -----------------------------
-function resolveChromePath() {
-  // 1) Явный путь из переменных окружения
-  if (process.env.CHROME_PATH && fs.existsSync(process.env.CHROME_PATH)) {
-    return process.env.CHROME_PATH;
-  }
+// сессии для подтверждения SMS
+const sessions = new Map(); // sessionId -> { browser, pageOrFrame }
 
-  // 2) Где чаще всего ставит @puppeteer/browsers при флаге --path=./chrome
-  try {
-    const root = path.resolve(process.cwd(), 'chrome');
-    if (fs.existsSync(root)) {
-      const entries = fs.readdirSync(root, { withFileTypes: true })
-        .filter(d => d.isDirectory())
-        .map(d => d.name)
-        .sort();
-      for (const dir of entries) {
-        const guess = path.join(root, dir, 'chrome-linux64', 'chrome');
-        if (fs.existsSync(guess)) return guess;
-      }
-    }
-  } catch (_) {}
+// ----------- health & debug -----------
+app.get('/', (req, res) => {
+  res.json({ ok: true, uptime: process.uptime() });
+});
 
-  // 3) Fallback — старый cache каталог
-  const fallback = path.resolve(
-    process.cwd(),
-    '.cache/puppeteer/chrome/linux-stable/chrome-linux64/chrome'
-  );
-  return fallback;
-}
-const CHROME_PATH = resolveChromePath();
+app.get('/healthz', (req, res) => res.json({ ok: true }));
 
-// быстрая ручка проверки расположения браузера
 app.get('/debug-chrome', requireKey, (req, res) => {
-  res.json({
-    cwd: process.cwd(),
-    chromePath: CHROME_PATH,
-    exists: fs.existsSync(CHROME_PATH)
-  });
+  const p = findChrome();
+  res.json({ cwd: process.cwd(), chromePath: p, exists: !!p && exists(p) });
 });
 
-// -----------------------------
-// 3) Внутренние утилиты
-// -----------------------------
-const sessions = new Map(); // sessionId -> { browser, page }
-let sharedCookieJar = [];   // общий пул куки (опционально reuse)
-
-async function applyCookies(page, cookies) {
-  if (!cookies || !cookies.length) return;
-  const client = await page.target().createCDPSession();
-  for (const c of cookies) {
-    try {
-      await client.send('Network.setCookie', {
-        name: c.name,
-        value: c.value,
-        domain: c.domain || '.wildberries.ru',
-        path: c.path || '/',
-        secure: !!c.secure,
-        httpOnly: !!c.httpOnly,
-        expires: c.expires ? Math.floor(+c.expires / 1000) : undefined,
-        sameSite: (c.sameSite || 'Lax')
-      });
-    } catch { /* ignore */ }
-  }
-}
-
-// Отладка: скачать HTML текущей страницы
-app.get('/debug-html', requireKey, async (req, res) => {
-  try {
-    const { url } = req.query;
-    const browser = await puppeteer.launch({
-      headless: 'new',
-      executablePath: fs.existsSync(CHROME_PATH) ? CHROME_PATH : undefined,
-      args: ['--no-sandbox', '--disable-gpu']
-    });
-    const page = await browser.newPage();
-    await page.goto(url || 'https://seller.wildberries.ru', { waitUntil: 'domcontentloaded' });
-    const html = await page.content();
-    await browser.close();
-    res.type('text/html').send(html);
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
-
-// Снимок скриншота для диагностики (base64)
-app.get('/snap', requireKey, async (req, res) => {
-  try {
-    const { url } = req.query;
-    const browser = await puppeteer.launch({
-      headless: 'new',
-      executablePath: fs.existsSync(CHROME_PATH) ? CHROME_PATH : undefined,
-      args: ['--no-sandbox', '--disable-gpu']
-    });
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 900 });
-    await page.goto(url || 'https://seller.wildberries.ru', { waitUntil: 'networkidle2' });
-    const b64 = (await page.screenshot({ fullPage: true })).toString('base64');
-    await browser.close();
-    res.json({ ok: true, pngBase64: b64 });
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
-
-// Универсальный ожидатель «первого доступного» селектора из списка
-async function waitAny(page, selectors = [], timeout = 30000) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    for (const sel of selectors) {
-      try {
-        const h = await page.$(sel);
-        if (h) return sel;
-      } catch {}
-    }
-    await page.waitForTimeout(300);
-  }
-  throw new Error(`waitAny timeout: ${selectors.join(' | ')}`);
-}
-
-// Клик по кнопке по тексту
-async function clickByText(page, texts = []) {
-  return page.evaluate((texts) => {
-    const elements = Array.from(document.querySelectorAll('button,[role="button"],a'));
-    const match = elements.find(el => {
-      const t = (el.innerText || el.textContent || '').trim().toLowerCase();
-      return texts.some(x => t.includes(x));
-    });
-    if (match) {
-      (match).click();
-      return true;
-    }
-    return false;
-  }, texts.map(t => t.toLowerCase()));
-}
-
-// -----------------------------
-// 4) Старт логина: отправка СМС
-// -----------------------------
+// ----------- авторизация: шаг 1 — отправка кода -----------
 app.post('/start', requireKey, async (req, res) => {
   const { phone } = req.body || {};
   if (!phone) return res.status(400).json({ error: 'phone required' });
 
   let browser;
   try {
-    browser = await puppeteer.launch({
-      headless: 'new',
-      executablePath: fs.existsSync(CHROME_PATH) ? CHROME_PATH : undefined,
-      args: [
-        '--no-sandbox',
-        '--disable-gpu',
-        '--lang=ru-RU,ru',
-      ]
-    });
+    browser = await puppeteer.launch(ppLaunchOpts());
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 900 });
 
-    // 1) Идём сразу на страницу, где наверняка потребует авторизацию
-    //    (эта страница доступна только после входа)
-    await page.goto('https://seller.wildberries.ru/discount-and-prices', { waitUntil: 'domcontentloaded' });
+    // 1) открываем ЛК
+    await page.goto('https://seller.wildberries.ru', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    // 2) Если редиректит на логин — подстрахуемся несколькими прямыми путями
-    const candidateAuthUrls = [
-      'https://seller.wildberries.ru/security/login',
-      'https://seller.wildberries.ru/login',
-      'https://seller.wildberries.ru/ru/auth',
-      'https://seller.wildberries.ru',
-    ];
+    // иногда первая загрузка тяжёлая — дадим сети устаканиться
+    await sleep(1200);
 
-    // Пробуем цепочку навигаций, пока не увидим поле телефона
-    let phoneSelector = null;
-    const phoneSelectors = [
+    // 2) пробуем найти форму ввода телефона
+    // форма может быть либо сразу в DOM, либо в iframe
+    const telSel = [
       'input[type="tel"]',
-      'input[name*="phone"]',
-      'input[name*="tel"]',
-      'input[name*="phoneNumber"]',
       'input[inputmode="tel"]',
-    ];
+      'input[name*="phone"]',
+      'input[placeholder*="тел"]',
+      'input[placeholder*="Тел"]',
+      'input[aria-label*="тел"]',
+    ].join(',');
 
-    async function ensureOnLogin() {
-      // уже есть поле телефона?
-      try {
-        phoneSelector = await waitAny(page, phoneSelectors, 4000);
-        return true;
-      } catch {}
+    /** Возвращает { ctx, frame } где ctx - страница или фрейм, в котором есть инпут */
+    async function findPhoneContext() {
+      // 2.1 в основной странице
+      const found = await page.$(telSel);
+      if (found) return { ctx: page, frame: null };
 
-      // клик по «Войти/Личный кабинет» если на главной
-      await clickByText(page, ['войти', 'личный кабинет', 'вход']).catch(()=>{});
-      await page.waitForTimeout(1200);
-
-      try {
-        phoneSelector = await waitAny(page, phoneSelectors, 4000);
-        return true;
-      } catch {}
-
-      // прямые адреса логина
-      for (const url of candidateAuthUrls) {
-        await page.goto(url, { waitUntil: 'domcontentloaded' }).catch(()=>{});
-        await page.waitForTimeout(800);
-        try {
-          phoneSelector = await waitAny(page, phoneSelectors, 4000);
-          return true;
-        } catch {}
+      // 2.2 в iframe
+      const targetFrame = page.frames().find(f => /auth|login|signin/i.test(f.url()));
+      if (targetFrame) {
+        const inFrame = await targetFrame.$(telSel);
+        if (inFrame) return { ctx: targetFrame, frame: targetFrame };
       }
 
-      // ещё одна попытка: снова на «закрытую» страницу — WB сам редиректит на логин
-      await page.goto('https://seller.wildberries.ru/discount-and-prices', { waitUntil: 'networkidle2' }).catch(()=>{});
-      await page.waitForTimeout(800);
-      phoneSelector = await waitAny(page, phoneSelectors, 10000); // финальная попытка
-      return true;
+      // 2.3 попробуем кликнуть «Войти»/«Вход», чтобы появилась форма
+      const loginBtnSel = [
+        'a[href*="login"]',
+        'a[href*="auth"]',
+        'button:has-text("Войти")',
+        'button:has-text("Вход")',
+        '[data-qa*="login"]',
+      ].join(',');
+
+      try {
+        const loginBtn = await page.$(loginBtnSel);
+        if (loginBtn) {
+          await loginBtn.click().catch(() => {});
+          await sleep(800);
+        }
+      } catch {}
+      // снова ищем
+      const again = await page.$(telSel);
+      if (again) return { ctx: page, frame: null };
+
+      // ещё раз проверим фрейм после клика
+      const f2 = page.frames().find(f => /auth|login|signin/i.test(f.url()));
+      if (f2) {
+        const inFrame2 = await f2.$(telSel);
+        if (inFrame2) return { ctx: f2, frame: f2 };
+      }
+      return null;
     }
 
-    await ensureOnLogin();
-
-    // 3) Ввод телефона
-    await page.focus(phoneSelector);
-    await page.keyboard.down('Control').catch(()=>{});
-    await page.keyboard.press('A').catch(()=>{});
-    await page.keyboard.up('Control').catch(()=>{});
-    await page.type(phoneSelector, String(phone), { delay: 50 });
-
-    // 4) Нажимаем подходящую кнопку: «Отправить код», «Продолжить», «Далее»
-    const clicked =
-      await clickByText(page, ['отправить код', 'получить код', 'продолжить', 'далее', 'войти']) ||
-      await page.$eval('button[type="submit"]', (b) => { (b).click(); return true; }).catch(()=>false);
-
-    if (!clicked) {
-      throw new Error('Не удалось нажать кнопку отправки кода');
+    const ctxInfo = await findPhoneContext();
+    if (!ctxInfo) {
+      return res.status(500).json({
+        error: 'start_failed',
+        detail: 'Не удалось найти поле ввода телефона (в DOM или iframe).',
+      });
     }
 
-    // 5) Ждём поле для СМС (6 цифр)
-    const codeSelector = await waitAny(page, [
-      'input[autocomplete="one-time-code"]',
+    const ctx = ctxInfo.ctx;
+
+    // 3) вводим телефон
+    const telInput = await ctx.$(telSel);
+    if (!telInput) {
+      return res.status(500).json({
+        error: 'start_failed',
+        detail: 'Поле телефона не найдено после определения контекста.',
+      });
+    }
+    await telInput.click({ clickCount: 3 }).catch(() => {});
+    await telInput.type(phone, { delay: 50 });
+
+    // 4) ищем кнопку «Получить код/Отправить» и кликаем
+    const sendBtnSel = [
+      'button[type="submit"]',
+      'button:has-text("получить")',
+      'button:has-text("Получить")',
+      'button:has-text("код")',
+      'button:has-text("Код")',
+      '[data-qa*="send"]',
+      '[role="button"]',
+    ].join(',');
+
+    let sendBtn = await ctx.$(sendBtnSel);
+    // если явного сабмита нет — попробуем Enter по инпуту
+    if (!sendBtn) {
+      await telInput.press('Enter').catch(() => {});
+    } else {
+      await sendBtn.click().catch(() => {});
+    }
+
+    // 5) ждём появления поля для кода — маркер успеха отправки SMS
+    const codeSel = [
       'input[name*="code"]',
-      'input[maxlength="6"]',
-      'input[type="text"]'
-    ], 30000);
+      'input[autocomplete="one-time-code"]',
+      'input[placeholder*="код"]',
+      'input[placeholder*="Код"]',
+    ].join(',');
+    // проверим в текущем контексте и параллельно — в возможном всплывшем фрейме
+    let hasCode = await ctx.$(codeSel);
+    if (!hasCode) {
+      // иногда форма перерисовывается — дадим чуть времени
+      await sleep(2000);
+      // на всякий ещё раз просканируем фреймы
+      const codeFrame = page.frames().find(f => /auth|login|signin|confirm|code/i.test(f.url()));
+      if (codeFrame) {
+        hasCode = await codeFrame.$(codeSel);
+        if (hasCode) sessions.set; // просто оставим контекст как есть, подтвердим на этапе /verify
+      }
+    }
 
+    if (!hasCode) {
+      return res.status(500).json({
+        error: 'start_failed',
+        detail: 'Не появилось поле ввода кода. Возможно, изменились селекторы/поток авторизации.',
+      });
+    }
+
+    // держим браузер открытым до верификации
     const sessionId = uuidv4();
-    sessions.set(sessionId, { browser, page });
-    return res.json({ sessionId, codeSelectorFound: !!codeSelector });
+    sessions.set(sessionId, { browser, pageOrFrame: ctx });
+    return res.json({ ok: true, sessionId });
 
   } catch (e) {
-    if (browser) await browser.close().catch(() => {});
-    return res.status(500).json({
-      error: 'start_failed',
-      detail: String(e && e.message ? e.message : e)
-    });
+    if (browser) { try { await browser.close(); } catch {} }
+    return res.status(500).json({ error: 'start_failed', detail: String(e.message || e) });
   }
 });
 
-// -----------------------------
-// 5) Подтверждение СМС: вернуть cookies
-// -----------------------------
+// ----------- авторизация: шаг 2 — ввод кода из SMS -----------
 app.post('/verify', requireKey, async (req, res) => {
   const { sessionId, smsCode } = req.body || {};
+  if (!sessionId || !smsCode) return res.status(400).json({ error: 'sessionId and smsCode required' });
+
   const sess = sessions.get(sessionId);
   if (!sess) return res.status(400).json({ error: 'session not found' });
-  const { browser, page } = sess;
 
+  const { browser, pageOrFrame } = sess;
   try {
-    // вводим код
-    const codeSel = await waitAny(page, [
-      'input[autocomplete="one-time-code"]',
+    const ctx = pageOrFrame;
+
+    const codeSel = [
       'input[name*="code"]',
-      'input[maxlength="6"]',
-      'input[type="text"]'
-    ], 15000);
+      'input[autocomplete="one-time-code"]',
+      'input[placeholder*="код"]',
+      'input[placeholder*="Код"]',
+    ].join(',');
 
-    await page.type(codeSel, String(smsCode), { delay: 80 });
+    const codeInput = await ctx.$(codeSel);
+    if (!codeInput) throw new Error('Поле для кода не найдено.');
 
-    // сабмит
-    await clickByText(page, ['подтвердить', 'войти', 'готово', 'далее']).catch(()=>{});
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(()=>{});
-    await page.waitForTimeout(1200);
+    await codeInput.click({ clickCount: 3 }).catch(() => {});
+    await codeInput.type(String(smsCode), { delay: 60 });
 
-    const cookies = await page.cookies();
-    await browser.close();
+    // клик «Подтвердить» или Enter
+    const confirmSel = [
+      'button[type="submit"]',
+      'button:has-text("Подтверд")',
+      'button:has-text("Войти")',
+      '[data-qa*="confirm"]',
+    ].join(',');
+    const btn = await ctx.$(confirmSel);
+    if (btn) await btn.click().catch(() => {});
+    else await codeInput.press('Enter').catch(() => {});
+
+    // ждём, чтобы куки установились и редирект прошёл
+    await sleep(2000);
+
+    const cookies = await (ctx.page ? ctx.page() : ctx).cookies
+      ? await (ctx.page ? ctx.page() : ctx).cookies()
+      : await browser.pages().then(ps => ps[0].cookies());
+
+    await browser.close().catch(() => {});
     sessions.delete(sessionId);
 
     return res.json({ ok: true, cookies });
   } catch (e) {
-    await browser.close().catch(() => {});
+    try { await browser.close(); } catch {}
     sessions.delete(sessionId);
-    return res.status(500).json({ error: 'verify_failed', detail: String(e && e.message ? e.message : e) });
+    return res.status(500).json({ error: 'verify_failed', detail: String(e.message || e) });
   }
 });
 
-// -----------------------------
-// 6) Общий банку куки (опционально)
-// -----------------------------
-app.post('/set-cookies', requireKey, async (req, res) => {
+// ---------- пул общих cookies (опционально) ----------
+let sharedCookieJar = [];
+app.post('/set-cookies', requireKey, (req, res) => {
   sharedCookieJar = Array.isArray(req.body.cookies) ? req.body.cookies : [];
-  return res.json({ ok: true, count: sharedCookieJar.length });
+  res.json({ ok: true, count: sharedCookieJar.length });
 });
 
-// -----------------------------
-// 7) Получение СПП с «Цены и скидки» (XHR перехват + DOM-fallback)
-// -----------------------------
+// ---------- заглушка для будущего /spp (после логина куками) ----------
 app.post('/spp', requireKey, async (req, res) => {
-  const { cookies, nmList } = req.body || {};
-  const jar = (Array.isArray(cookies) && cookies.length) ? cookies : sharedCookieJar;
-  if (!jar || !jar.length) return res.status(400).json({ error: 'no cookies' });
-  if (!Array.isArray(nmList) || !nmList.length) return res.status(400).json({ error: 'nmList required' });
-
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    executablePath: fs.existsSync(CHROME_PATH) ? CHROME_PATH : undefined,
-    args: ['--no-sandbox', '--disable-gpu']
-  });
-  const page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 900 });
-
-  try {
-    await page.goto('https://seller.wildberries.ru', { waitUntil: 'domcontentloaded' });
-    await applyCookies(page, jar);
-    await page.reload({ waitUntil: 'networkidle2' });
-
-    let priceJson = null;
-    page.on('response', async (resp) => {
-      try {
-        const url = resp.url();
-        if (/discount.*prices.*list|prices.*list|discount-and-prices.*list/i.test(url)) {
-          const ct = resp.headers()['content-type'] || '';
-          if (ct.includes('application/json')) {
-            priceJson = await resp.json();
-          }
-        }
-      } catch {}
-    });
-
-    await page.goto('https://seller.wildberries.ru/discount-and-prices', { waitUntil: 'networkidle2' });
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(1500);
-
-    let result = {};
-    if (priceJson) {
-      const rows = priceJson.items || priceJson.data || priceJson.list || [];
-      for (const r of rows) {
-        const nm = Number(r.nmID || r.nmId); if (!nm) continue;
-        if (!nmList.includes(nm)) continue;
-        const spp = (r.spp != null) ? Number(r.spp)
-          : (r.wbDiscountPct != null) ? Number(r.wbDiscountPct) : null;
-        const final = r.finalPrice ?? r.wbPrice ?? r.priceWithWB ?? null;
-        if (spp != null || final != null) result[nm] = { sppPct: spp, priceAfterSpp: final };
-      }
-    }
-
-    if (Object.keys(result).length === 0) {
-      result = await page.evaluate((nmList) => {
-        const map = {};
-        const rows = document.querySelectorAll('table tr');
-        rows.forEach(tr => {
-          const cells = tr.querySelectorAll('td');
-          if (cells.length < 6) return;
-          const nm = Number((cells[0].innerText || '').replace(/\D+/g, ''));
-          if (!nm || !nmList.includes(nm)) return;
-          const sppText = (cells[4].innerText || '').replace(/\s+|%/g, '');
-          const priceText = (cells[5].innerText || '').replace(/[^\d]/g, '');
-          const spp = sppText ? Number(sppText) : null;
-          const price = priceText ? Number(priceText) : null;
-          if (spp != null || price != null) map[nm] = { sppPct: spp, priceAfterSpp: price };
-        });
-        return map;
-      }, nmList);
-    }
-
-    await browser.close();
-    return res.json(result);
-  } catch (e) {
-    await browser.close().catch(() => {});
-    return res.status(500).json({ error: 'spp_failed', detail: String(e && e.message ? e.message : e) });
-  }
+  res.json({ ok: false, note: 'Spp endpoint will be implemented after stable auth flow.' });
 });
 
-// -----------------------------
-// 8) Запуск сервера
-// -----------------------------
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log('WB headless listening on', PORT));
