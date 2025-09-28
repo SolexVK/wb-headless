@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "type": "module",
   "engines": {
-    "node": ">=20.x"
+    "node": ">=18.18.0 <21"
   },
   "scripts": {
     "start": "node server.js",
-    "postinstall": "npx @puppeteer/browsers install chrome@stable --path=/opt/render/.cache/puppeteer"
+    "build:chrome": "npx puppeteer browsers install chrome --force --path=/opt/render/.cache/puppeteer",
+    "postinstall": "npm run build:chrome"
   },
   "dependencies": {
-    "@puppeteer/browsers": "^2.3.0",
     "express": "^4.19.2",
     "puppeteer": "^22.10.0",
     "uuid": "^9.0.1"
