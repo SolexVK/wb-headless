@@ -1,0 +1,11 @@
+# секреты — никогда не коммитим
+.env
+.env.local
+
+# зависимости и артефакты
+node_modules/
+chrome/
+
+# логи
+*.log
+npm-debug.log*
