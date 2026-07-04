@@ -5,6 +5,8 @@ import fs from 'fs';
 import path from 'path';
 import puppeteer from 'puppeteer';
 import { v4 as uuidv4 } from 'uuid';
+import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
+import { defaultPeriod, loadSkus, writeOutputs } from './report-stock.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -123,6 +125,38 @@ app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }
 app.get('/debug-chrome', requireKey, (req, res) => {
   const chromePath = findLocalChrome();
   res.json({ cwd: process.cwd(), chromePath: chromePath || null, exists: !!chromePath });
+});
+
+// ---------- REPORT: наличие товара и упущенная выручка ----------
+// GET /reports/stock-availability?d1=YYYY-MM-DD&d2=YYYY-MM-DD&format=json|csv
+// Без d1/d2 берётся период = последние REPORT_DAYS (по умолчанию 30) дней.
+app.get('/reports/stock-availability', requireKey, async (req, res) => {
+  try {
+    if (!process.env.MPSTATS_TOKEN) {
+      return res.status(500).json({ error: 'mpstats_token_missing' });
+    }
+    let { d1, d2, format } = req.query;
+    if (!d1 || !d2) ({ d1, d2 } = defaultPeriod(Number(process.env.REPORT_DAYS) || 30));
+
+    const report = await buildStockAvailabilityReport({
+      skus: loadSkus(),
+      d1,
+      d2,
+      concurrency: Number(process.env.REPORT_CONCURRENCY) || 5,
+    });
+
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="stock-${d1}_${d2}.csv"`
+      );
+      return res.send(reportToCSV(report));
+    }
+    return res.json(report);
+  } catch (err) {
+    return res.status(500).json({ error: 'report_failed', detail: String(err?.message || err) });
+  }
 });
 
 // ---------- START ----------
@@ -247,4 +281,47 @@ app.post('/verify', requireKey, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log('WB headless listening on', PORT));
+// ---------- ПЛАНИРОВЩИК регулярного отчёта ----------
+// Включается через REPORT_SCHEDULE_ENABLED=1. Раз в сутки в REPORT_SCHEDULE_HOUR
+// (UTC, по умолчанию 6:00) строит отчёт и сохраняет CSV/JSON в reports-output/.
+// Лёгкая реализация без внешних зависимостей: проверяем время раз в минуту.
+function startReportScheduler() {
+  if (process.env.REPORT_SCHEDULE_ENABLED !== '1') return;
+  const hour = Number(process.env.REPORT_SCHEDULE_HOUR ?? 6);
+  let lastRunDay = null;
+
+  setInterval(async () => {
+    const now = new Date();
+    const dayKey = now.toISOString().slice(0, 10);
+    if (now.getUTCHours() !== hour || lastRunDay === dayKey) return;
+    lastRunDay = dayKey;
+
+    if (!process.env.MPSTATS_TOKEN) {
+      console.warn('[scheduler] MPSTATS_TOKEN не задан — отчёт пропущен');
+      return;
+    }
+    try {
+      const { d1, d2 } = defaultPeriod(Number(process.env.REPORT_DAYS) || 30);
+      console.log(`[scheduler] строю отчёт по наличию за ${d1}…${d2}`);
+      const report = await buildStockAvailabilityReport({
+        skus: loadSkus(),
+        d1,
+        d2,
+        concurrency: Number(process.env.REPORT_CONCURRENCY) || 5,
+      });
+      const { csvPath } = writeOutputs(report);
+      console.log(
+        `[scheduler] готово: упущено ≈ ${report.totals.lostRevenue} ₽, файл ${csvPath}`
+      );
+    } catch (err) {
+      console.error('[scheduler] ошибка отчёта:', err?.message || err);
+    }
+  }, 60 * 1000);
+
+  console.log(`Планировщик отчёта включён: ежедневно в ${hour}:00 UTC`);
+}
+
+app.listen(PORT, () => {
+  console.log('WB headless listening on', PORT);
+  startReportScheduler();
+});
