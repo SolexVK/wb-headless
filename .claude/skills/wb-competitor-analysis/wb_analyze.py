@@ -25,7 +25,7 @@ MPSTATS_TOKEN или из .env (никогда не хардкодить).
   python3 wb_analyze.py --path "Женщинам/Блузки и рубашки/Рубашки" --my-sku 123456789
   python3 wb_analyze.py --selftest         # прогон сборки отчёта без сети (на синтетике)
 """
-import argparse, html as _html, json, os, subprocess, sys, tempfile, urllib.parse
+import argparse, html as _html, json, os, subprocess, sys, tempfile, time, urllib.parse
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -231,6 +231,120 @@ def fetch_items(token, path, d1, d2, name_filter=None):
             break
         start += page
     return items, total
+
+
+# ======================= публичные API Wildberries (без квоты MPStats) =======================
+# Фаза 2: слой данных. search.wb.ru — выдача по запросу; basket card.json — характеристики/слайды.
+WB_UA = "Mozilla/5.0 (compatible; wb-analyze/1.0)"
+WB_DEST = -1257786  # обобщённый регион доставки
+_WB_CACHE = {}      # in-process кэш на время запуска
+
+
+def _wb_curl(url, tries=4):
+    """GET с распаковкой; ретраи на 429/пусто/HTML. Возвращает текст или None."""
+    for i in range(tries):
+        r = subprocess.run(["curl", "-sS", "-m", "20", "--compressed", "-H", f"User-Agent: {WB_UA}", url],
+                           capture_output=True, text=True)
+        t = (r.stdout or "").strip()
+        if r.returncode == 0 and t and t[:1] in "{[":
+            return t
+        time.sleep(1.2 * (i + 1))
+    return None
+
+
+def wb_search(query, limit=30):
+    """Выдача WB по запросу → нормализованные карточки конкурентов (без MPStats)."""
+    ck = ("search", query, limit)
+    if ck in _WB_CACHE:
+        return _WB_CACHE[ck]
+    q = urllib.parse.quote(query)
+    url = (f"https://search.wb.ru/exactmatch/ru/common/v5/search?appType=1&curr=rub&dest={WB_DEST}"
+           f"&query={q}&resultset=catalog&sort=popular&spp=30&limit={limit}")
+    t = _wb_curl(url)
+    out = []
+    if t:
+        try:
+            d = json.loads(t)
+            prods = (d.get("data") or {}).get("products") or d.get("products") or []
+        except json.JSONDecodeError:
+            prods = []
+        for p in prods[:limit]:
+            szs = p.get("sizes") or []
+            price = (szs[0]["price"].get("product") / 100) if (szs and szs[0].get("price")) else 0
+            out.append({"id": p.get("id"), "name": p.get("name"), "brand": p.get("brand"),
+                        "seller": p.get("supplier"), "seller_id": p.get("supplierId"),
+                        "colors": [c.get("name") for c in (p.get("colors") or [])],
+                        "pics": p.get("pics"), "rating": p.get("reviewRating") or p.get("rating"),
+                        "feedbacks": p.get("feedbacks"), "price": price, "root": p.get("root")})
+    _WB_CACHE[ck] = out
+    return out
+
+
+# basket-хосты WB по vol (nm//100000); при промахе пробуем соседние
+BASKET_RANGES = [(0, 143, '01'), (144, 287, '02'), (288, 431, '03'), (432, 719, '04'),
+                 (720, 1007, '05'), (1008, 1061, '06'), (1062, 1115, '07'), (1116, 1169, '08'),
+                 (1170, 1313, '09'), (1314, 1601, '10'), (1602, 1655, '11'), (1656, 1919, '12'),
+                 (1920, 2045, '13'), (2046, 2189, '14'), (2190, 2405, '15'), (2406, 2621, '16'),
+                 (2622, 2837, '17'), (2838, 3053, '18'), (3054, 3269, '19'), (3270, 3485, '20'),
+                 (3486, 3701, '21'), (3702, 3917, '22'), (3918, 4133, '23'), (4134, 4349, '24'),
+                 (4350, 4565, '25'), (4566, 4877, '26'), (4878, 5189, '27')]
+
+
+def wb_basket_host(vol):
+    for a, b, h in BASKET_RANGES:
+        if a <= vol <= b:
+            return h
+    return '28'
+
+
+def wb_basket_card(nm):
+    """card.json карточки: характеристики (options), описание, цвета склейки, слайды. Кэш + фолбэк хостов."""
+    ck = ("card", int(nm))
+    if ck in _WB_CACHE:
+        return _WB_CACHE[ck]
+    nm = int(nm)
+    vol, part = nm // 100000, nm // 1000
+    h0 = int(wb_basket_host(vol))
+    order = [f"{h0:02d}"] + [f"{h:02d}" for h in (h0 - 1, h0 + 1, h0 - 2, h0 + 2) if 1 <= h <= 40]
+    res = None
+    for h in order:
+        t = _wb_curl(f"https://basket-{h}.wbbasket.ru/vol{vol}/part{part}/{nm}/info/ru/card.json", tries=1)
+        if t and t[:1] == "{":
+            try:
+                d = json.loads(t)
+                d["_host"], d["_vol"], d["_part"] = h, vol, part
+                res = d
+                break
+            except json.JSONDecodeError:
+                pass
+    _WB_CACHE[ck] = res
+    return res
+
+
+def wb_slide_urls(card, limit=5):
+    if not card:
+        return []
+    nm = card.get("nm_id") or card.get("_nm")
+    media = card.get("media") or {}
+    n = media.get("photo_count") or limit
+    h, vol, part = card["_host"], card["_vol"], card["_part"]
+    return [f"https://basket-{h}.wbbasket.ru/vol{vol}/part{part}/{nm}/images/big/{i}.webp"
+            for i in range(1, min(int(n or limit), limit) + 1)]
+
+
+def wb_characteristics(card):
+    """Плоский список видимых характеристик [(name,value)] из card.json."""
+    if not card:
+        return []
+    opts = card.get("options")
+    if isinstance(opts, list) and opts:
+        return [(o.get("name"), o.get("value")) for o in opts if o.get("name")]
+    out = []
+    for g in (card.get("grouped_options") or []):
+        for o in g.get("options", []):
+            if o.get("name"):
+                out.append((o.get("name"), o.get("value")))
+    return out
 
 
 # ======================= утилиты чисел/форматов =======================
@@ -524,7 +638,7 @@ def compute_economics(items, cost, pr):
 
 # ======================= сборка отчёта =======================
 def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
-                 pz, cb, colors, seas, review, mine, notes, econ=None):
+                 pz, cb, colors, seas, review, mine, notes, econ=None, kw=None):
     by_label = "продавцам" if args.by == "seller" else "брендам"
     ranked = sorted(agg.items(), key=lambda kv: kv[1]["rev"], reverse=True)
     top = ranked[:args.top]
@@ -563,6 +677,25 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
         L.append(f"| {i} | **{name}** | {fmt_money(v['rev'])} | {share:.1f}% | {fmt_int(v['sales'])} "
                  f"| {fmt_int(avg_price)} ₽ | {v['items']} | {rating:.2f} | {fmt_money(v['lost'])} |")
     L.append("")
+
+    # --- B2. Конкуренты по ключевым запросам (выдача WB) ---
+    if kw:
+        top_sellers = {n for n, _ in top}
+        L.append("## B2. Конкуренты из поиска по запросам (WB)")
+        for q, cards in kw.items():
+            if not cards:
+                L += [f"**«{q}»** — выдача недоступна (429/пусто), повторить позже.", ""]
+                continue
+            L += [f"**«{q}»** — топ выдачи:", ""]
+            for c in cards:
+                new = " 🆕" if c.get("seller") not in top_sellers else ""
+                L.append(f"- {(c.get('name') or '—')[:52]} — {c.get('seller') or '—'}{new} · "
+                         f"{fmt_int(c.get('price'))} ₽ · ⭐{num(c.get('rating')):.1f} "
+                         f"({fmt_int(c.get('feedbacks'))}) · фото {fmt_int(c.get('pics'))} · "
+                         f"[карточка]({WB_CARD.format(c.get('id'))})")
+            L.append("")
+        L += ["> 🆕 = продавца нет в ТОП категории (блок B) — конкурент, которого «вниз по категории» "
+              "не видно. Данные из публичной выдачи WB (популярность), без учёта СПП-фильтра.", ""]
 
     # --- C. Цена × юнит-экономика ---
     if econ:
@@ -881,7 +1014,7 @@ JS_REPORT = """
 
 
 def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
-               pz, cb, colors, seas, review, mine, gaps, notes, econ=None, embed=False):
+               pz, cb, colors, seas, review, mine, gaps, notes, econ=None, kw=None, embed=False):
     title = args.query or (name_filter or path.split('/')[-1])
     by_label = "Продавец" if args.by == "seller" else "Бренд"
     top_share = sum(v["rev"] for _, v in top) / tot_rev * 100 if tot_rev else 0
@@ -927,6 +1060,32 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
              '<th class="r">Продажи</th><th class="r">Ср. цена</th><th class="r">SKU</th>'
              '<th class="r">Рейтинг</th><th class="r">Упущено</th></tr></thead><tbody>'
              .format(args.top, by_label) + "".join(rows) + '</tbody></table></div></section>')
+
+    # B2. keyword competitors (WB search)
+    if kw:
+        top_sellers = {n for n, _ in top}
+        blocks = []
+        for q, cards in kw.items():
+            if not cards:
+                blocks.append(f'<div><h3 style="margin:0 0 8px">«{esc(q)}»</h3>'
+                              '<p class="meta">Выдача недоступна (429/пусто), повторить позже.</p></div>')
+                continue
+            cc = []
+            for c in cards:
+                new = '<span class="chip bad" style="padding:1px 7px;font-size:.7rem">🆕 не в ТОП</span>' \
+                    if c.get("seller") not in top_sellers else ""
+                cc.append(
+                    f'<a class="pcard" href="{esc(WB_CARD.format(c.get("id")))}" target="_blank" rel="noopener">'
+                    f'<div class="nm">{esc((c.get("name") or "—")[:60])}</div>'
+                    f'<div class="st">{esc(c.get("seller") or "—")} · {fmt_int(c.get("price"))} ₽ · '
+                    f'⭐{num(c.get("rating")):.1f} ({fmt_int(c.get("feedbacks"))}) · фото {fmt_int(c.get("pics"))}</div>'
+                    f'<div class="go">{new} Открыть ↗</div></a>')
+            blocks.append(f'<div style="margin-top:10px"><h3 style="margin:0 0 8px">«{esc(q)}»</h3>'
+                          f'<div class="cards">{"".join(cc)}</div></div>')
+        P.append('<section><h2>Конкуренты из поиска по запросам (WB)</h2>'
+                 '<p class="meta">🆕 = продавца нет в ТОП категории (блок B) — тех, кого «вниз по категории» '
+                 'не видно. Из публичной выдачи WB по популярности.</p>'
+                 + "".join(blocks) + '</section>')
 
     # C. price × unit-economics
     if econ:
@@ -1178,23 +1337,28 @@ def _demo_inputs():
     agg, tot = aggregate(items, "seller")
     path = "Женщинам/Блузки и рубашки/Рубашка"
     econ = compute_economics(items, 536, econ_params())   # себестоимость 536 ₽ (демо)
+    kw = {"рубашка в полоску оверсайз": [
+              {"id": 239612805, "name": "Хлопковая рубашка в полоску оверсайз", "seller": "NA_SEBE_FOCUS",
+               "price": 2792, "rating": 4.8, "feedbacks": 640, "pics": 11, "colors": ["голубой", "синий"]},
+              {"id": 804478782, "name": "Летняя рубашка в полоску", "seller": "ИП Продавец 6",
+               "price": 1312, "rating": 4.7, "feedbacks": 218, "pics": 18, "colors": ["голубой"]}]}
     return dict(A=A, path=path, path_note="синтетика (демо)", nfilter="полос", items=items,
                 agg=agg, tot=tot, pz=price_zone(items), cb=content_benchmark(items, 20),
                 colors=color_distribution(items, agg, "seller", 10), seas={"delta_pct": 14.0},
                 review=cards_for_review(items, agg, "seller", 6), mine=profile_sku(items, 777),
-                econ=econ, notes=["trends (демо)"])
+                econ=econ, kw=kw, notes=["trends (демо)"])
 
 
 def selftest(html_out=None, pdf_out=None):
     d = _demo_inputs()
     rep, top, gaps = build_report(d["A"], d["path"], d["path_note"], d["nfilter"], d["items"],
                                   len(d["items"]), d["agg"], d["tot"], d["pz"], d["cb"], d["colors"],
-                                  d["seas"], d["review"], d["mine"], d["notes"], d["econ"])
+                                  d["seas"], d["review"], d["mine"], d["notes"], d["econ"], d["kw"])
     print(rep)
     if html_out or pdf_out:
         html = build_html(d["A"], d["path"], d["path_note"], d["nfilter"], d["items"], d["agg"],
                           d["tot"], top, d["pz"], d["cb"], d["colors"], d["seas"], d["review"],
-                          d["mine"], gaps, d["notes"], d["econ"])
+                          d["mine"], gaps, d["notes"], d["econ"], d["kw"])
         if html_out:
             open(html_out, "w", encoding="utf-8").write(html)
             print(f"[selftest] HTML → {html_out}", file=sys.stderr)
@@ -1222,6 +1386,8 @@ def main():
     ap.add_argument("--json-out", default=None, help="файл для JSON с агрегатами")
     ap.add_argument("--html-out", dest="html_out", default=None, help="файл для HTML-отчёта (кликабельный)")
     ap.add_argument("--pdf-out", dest="pdf_out", default=None, help="файл для PDF-отчёта (кликабельные ссылки, через Chromium)")
+    ap.add_argument("--keywords", default=None, help="ключевые запросы через запятую — искать конкурентов в выдаче WB")
+    ap.add_argument("--kw-limit", dest="kw_limit", type=int, default=8, help="сколько карточек брать из выдачи на запрос")
     ap.add_argument("--selftest", action="store_true", help="прогон сборки отчёта на синтетике (без сети)")
     # --- юнит-экономика (дефолты = подтверждённые пользователем цифры; себестоимость обязательна) ---
     ap.add_argument("--cost", type=float, default=None,
@@ -1313,8 +1479,16 @@ def main():
     else:
         notes.append("юнит-экономика пропущена — не задан --cost")
 
+    # конкуренты по ключевым запросам (публичный API WB, не тратит квоту MPStats)
+    kw = None
+    if args.keywords:
+        qs = [q.strip() for q in args.keywords.split(",") if q.strip()]
+        kw = {q: wb_search(q, args.kw_limit) for q in qs}
+        if not any(kw.values()):
+            notes.append("поиск WB по запросам недоступен (429/пусто)")
+
     report, top, gaps = build_report(args, path, path_note, nfilter, items, total, agg,
-                                     tot_rev, pz, cb, colors, seas, review, mine, notes, econ)
+                                     tot_rev, pz, cb, colors, seas, review, mine, notes, econ, kw)
     if alts:
         report += "\n\n_Альтернативные категории (перезапуск с `--path`): " + \
                   "; ".join(f"`{a}`" for a in alts) + "._"
@@ -1324,7 +1498,7 @@ def main():
         open(args.out, "w", encoding="utf-8").write(report)
     if args.html_out or args.pdf_out:
         html = build_html(args, path, path_note, nfilter, items, agg, tot_rev, top,
-                          pz, cb, colors, seas, review, mine, gaps, notes, econ)
+                          pz, cb, colors, seas, review, mine, gaps, notes, econ, kw)
         if args.html_out:
             open(args.html_out, "w", encoding="utf-8").write(html)
             print(f"[html] отчёт → {args.html_out}", file=sys.stderr)
@@ -1353,6 +1527,7 @@ def main():
                 "lost_profit": v["lost"], "stock": v["stock"], "brands": sorted(v["brands"])[:6],
                 "top_item": {k: (v["top_item"] or {}).get(k) for k in FIELDS_KEEP},
             } for i, (n, v) in enumerate(top, 1)],
+            "keyword_competitors": kw,
             "review_cards": [{k: it.get(k) for k in FIELDS_KEEP} for it in review],
             "my_card": ({k: mine.get(k) for k in FIELDS_KEEP} if mine else None),
             "gaps": gaps,
