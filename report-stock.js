@@ -11,6 +11,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
+import { WbClient } from './lib/wbClient.js';
+import { makeWbSource } from './lib/wbStats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -117,11 +119,27 @@ export async function runReport({ d1, d2, items, filter, group } = {}) {
     process.stderr.write('⚠ Фильтр не выбрал ни одного товара — проверьте значение фильтра.\n');
   }
 
+  // Источник данных: WB API (первичные данные, без чужой квоты) или MPSTATS.
+  // REPORT_SOURCE=wb → WB API; иначе — MPSTATS (поведение по умолчанию, как было).
+  const source = String(process.env.REPORT_SOURCE || 'mpstats').toLowerCase();
+  let dataSource;
+  if (source === 'wb') {
+    const wb = new WbClient({
+      token: process.env.WB_API_TOKEN,
+      tokenType: process.env.WB_TOKEN_TYPE, // personal|service|base|test
+    });
+    dataSource = makeWbSource(wb); // bulk: заказы + история остатков одним пакетом
+    process.stderr.write('Источник данных: WB API (заказы + история остатков)\n');
+  } else {
+    process.stderr.write('Источник данных: MPSTATS\n');
+  }
+
   const report = await buildStockAvailabilityReport({
     items: selected,
     d1: period.d1,
     d2: period.d2,
     concurrency: Number(process.env.REPORT_CONCURRENCY) || 5,
+    dataSource, // undefined → ветка MPSTATS; функция → ветка WB API
     onProgress: (done, total) => {
       if (done % 10 === 0 || done === total) {
         process.stderr.write(`  обработано ${done}/${total}\n`);

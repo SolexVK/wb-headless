@@ -4,6 +4,14 @@
     {
       "url": "https://dev.wildberries.ru/docs/openapi/api-information",
       "out": "docs/wb-api/limits.md"
+    },
+    {
+      "url": "https://dev.wildberries.ru/docs/openapi/analytics",
+      "out": "docs/wb-api/analytics.md"
+    },
+    {
+      "url": "https://dev.wildberries.ru/docs/openapi/reports",
+      "out": "docs/wb-api/reports-statistics.md"
     }
   ]
 }
