@@ -374,9 +374,113 @@ def profile_sku(items, sku):
     return None
 
 
+# ======================= юнит-экономика (ядро, база под UNIT-калькулятор) =======================
+# Модель (со слов пользователя, подтверждено):
+#   S — цена продавца БЕЗ СПП (наша база маржи и комиссии).  P — цена покупателя С СПП (как в MPStats).
+#   P = S·(1 − спп)  ⇔  S = P / (1 − спп).
+#   Комиссия ВБ (до СПП) — от S.  Эквайринг, налог, ДРР — от P (с СПП).  Брак — от себестоимости.
+#   Логистика/хранение = 0 (индивидуальные условия).  Маржа % = операционная прибыль / S.
+ECON_DEFAULTS = dict(
+    commission=0.357,   # комиссия ВБ до СПП
+    spp=0.04,           # средняя СПП
+    acquiring=0.047,    # эквайринг
+    tax=0.02,           # налог (от цены с СПП)
+    drr_launch=0.30,    # ДРР первые недели
+    drr_steady=0.08,    # ДРР на выходе
+    defect=0.025,       # брак (от себестоимости)
+    redemption=0.36,    # выкуп (для оценки объёма, не статья затрат)
+    logistics=0.0, storage=0.0,   # ₽/ед (общий вид, у нас 0)
+    m_min=0.25, m_max=0.30,       # целевой коридор маржи
+)
+
+
+def econ_params(**over):
+    p = dict(ECON_DEFAULTS)
+    p.update({k: v for k, v in over.items() if v is not None})
+    return p
+
+
+def unit_calc(P_buyer, cost, pr, drr):
+    """Разложение экономики на единицу при цене покупателя P_buyer (с СПП) и данном ДРР."""
+    P = num(P_buyer)
+    S = P / (1 - pr["spp"]) if (1 - pr["spp"]) else P          # цена продавца без СПП
+    commission = pr["commission"] * S
+    acquiring = pr["acquiring"] * P
+    tax = pr["tax"] * P
+    ad = drr * P
+    defect = pr["defect"] * cost
+    fixed = pr["logistics"] + pr["storage"]
+    profit = S - commission - acquiring - tax - ad - defect - cost - fixed
+    return {"P": P, "S": S, "commission": commission, "acquiring": acquiring, "tax": tax,
+            "ad": ad, "defect": defect, "cost": cost, "fixed": fixed,
+            "profit": profit, "margin": (profit / S if S else 0.0)}
+
+
+def price_buyer_for_margin(cost, pr, m, drr):
+    """Цена покупателя P (с СПП), при которой маржа = m при данном ДРР. None — недостижимо."""
+    k = 1 - pr["commission"] - (pr["acquiring"] + pr["tax"] + drr) * (1 - pr["spp"])
+    fixedc = cost * (1 + pr["defect"]) + pr["logistics"] + pr["storage"]
+    denom = k - m
+    if denom <= 0:
+        return None
+    S = fixedc / denom
+    return S * (1 - pr["spp"])
+
+
+def price_segments(items, cost, pr, n=6):
+    """Ниша по ценовым сегментам + наша маржа/прибыль в каждом (фаза «выход»)."""
+    rows = [(num(it.get("final_price")), num(it.get("sales")), num(it.get("revenue")),
+             num(it.get("rating")), num(it.get("comments")))
+            for it in items if num(it.get("final_price")) > 0]
+    rows.sort(key=lambda x: x[0])
+    m = len(rows)
+    if m == 0:
+        return []
+    n = min(n, m)
+    total_rev = sum(r[2] for r in rows) or 1.0
+    segs = []
+    for i in range(n):
+        grp = rows[i * m // n:(i + 1) * m // n]
+        if not grp:
+            continue
+        prices = [g[0] for g in grp]
+        orders = [g[1] for g in grp]
+        cw = sum(g[4] for g in grp)
+        rat = (sum(g[3] * g[4] for g in grp) / cw) if cw else (sum(g[3] for g in grp) / len(grp))
+        rep = median(prices)
+        c = unit_calc(rep, cost, pr, pr["drr_steady"])
+        redeemed = median(orders) * pr["redemption"]
+        segs.append({"p_lo": min(prices), "p_hi": max(prices), "skus": len(grp),
+                     "rev_share": sum(g[2] for g in grp) / total_rev * 100,
+                     "median_orders": median(orders), "rating": rat, "rep_price": rep,
+                     "margin": c["margin"], "profit_unit": c["profit"],
+                     "proj_profit": c["profit"] * redeemed})
+    return segs
+
+
+def compute_economics(items, cost, pr):
+    """Всё для блока C и (позже) UNIT-калькулятора. cost — себестоимость (landed до склада WB)."""
+    d = pr["drr_steady"]
+    corridor = (price_buyer_for_margin(cost, pr, pr["m_min"], d),
+                price_buyer_for_margin(cost, pr, pr["m_max"], d))
+    # маржа в фазе запуска при ценах целевого коридора
+    launch_at = []
+    for P in corridor:
+        launch_at.append(unit_calc(P, cost, pr, pr["drr_launch"])["margin"] if P else None)
+    segs = price_segments(items, cost, pr)
+    good = [s for s in segs if s["margin"] >= pr["m_min"] and s["median_orders"] > 0]
+    return {"cost": cost, "pr": pr,
+            "breakeven": price_buyer_for_margin(cost, pr, 0.0, d),
+            "breakeven_launch": price_buyer_for_margin(cost, pr, 0.0, pr["drr_launch"]),
+            "corridor": corridor, "launch_margin_at_corridor": launch_at,
+            "stack": unit_calc(corridor[0] or median([num(it.get("final_price")) for it in items]),
+                               cost, pr, d),
+            "segments": segs, "good_segments": good}
+
+
 # ======================= сборка отчёта =======================
 def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
-                 pz, cb, colors, seas, review, mine, notes):
+                 pz, cb, colors, seas, review, mine, notes, econ=None):
     by_label = "продавцам" if args.by == "seller" else "брендам"
     ranked = sorted(agg.items(), key=lambda kv: kv[1]["rev"], reverse=True)
     top = ranked[:args.top]
@@ -416,13 +520,56 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                  f"| {fmt_int(avg_price)} ₽ | {v['items']} | {rating:.2f} | {fmt_money(v['lost'])} |")
     L.append("")
 
-    # --- C. Цена / привлекательная цена ---
-    if pz:
-        L += ["## C. Цена и «привлекательная цена»",
+    # --- C. Цена × юнит-экономика ---
+    if econ:
+        pr = econ["pr"]
+        cor = econ["corridor"]
+        cor_txt = (f"{fmt_int(cor[0])}–{fmt_int(cor[1])} ₽" if cor[0] and cor[1] else "недостижимо")
+        lm = econ["launch_margin_at_corridor"]
+        lm_txt = (f"{lm[0]*100:.0f}–{lm[1]*100:.0f}%" if lm[0] is not None and lm[1] is not None else "—")
+        L += [f"## C. Цена × юнит-экономика (себестоимость {fmt_int(econ['cost'])} ₽)",
+              f"- **Выгодный коридор цены (маржа {pr['m_min']*100:.0f}–{pr['m_max']*100:.0f}%, "
+              f"ДРР {pr['drr_steady']*100:.0f}%): {cor_txt}** — цена на витрине (с СПП).",
+              f"- Точка безубыточности: **{fmt_int(econ['breakeven'])} ₽** (ниже — минус на выходе).",
+              f"- В фазе запуска (ДРР {pr['drr_launch']*100:.0f}%) маржа в этом коридоре ≈ **{lm_txt}** "
+              f"(плановый инвест-период — «первые недели в ноль»).",
+              f"- Для справки, «зона объёма» (где крутится максимум выручки): "
+              f"**{fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽** ({pz['band_share']:.0f}% выручки) — "
+              f"это НЕ цель, там объём, но не маржа." if pz else "", ""]
+        # таблица сегментов
+        if econ["segments"]:
+            L += ["**Ценовые сегменты ниши × наша маржа** (фаза «выход»):", "",
+                  "| Цена (с СПП) | SKU | Выручка | Заказов/SKU | Рейтинг | Наша маржа | Прибыль/ед | Прогноз ₽/период* |",
+                  "|---|--:|--:|--:|--:|--:|--:|--:|"]
+            for s in econ["segments"]:
+                flag = "✅" if s["margin"] >= pr["m_min"] else ("⚠️" if s["margin"] >= 0 else "🔴")
+                L.append(f"| {fmt_int(s['p_lo'])}–{fmt_int(s['p_hi'])} | {s['skus']} | "
+                         f"{s['rev_share']:.0f}% | {fmt_int(s['median_orders'])} | {s['rating']:.2f} | "
+                         f"{flag} {s['margin']*100:.0f}% | {fmt_int(s['profit_unit'])} ₽ | "
+                         f"{fmt_int(s['proj_profit'])} ₽ |")
+            L.append("")
+        # вердикт
+        good = econ["good_segments"]
+        if good:
+            lo = min(s["p_lo"] for s in good)
+            hi = max(s["p_hi"] for s in good)
+            best = max(good, key=lambda s: s["proj_profit"])
+            L.append(f"> **Вердикт:** целиться в **{fmt_int(lo)}–{fmt_int(hi)} ₽** — тут маржа ≥ "
+                     f"{pr['m_min']*100:.0f}% и есть спрос. Максимум прогнозной прибыли — сегмент "
+                     f"**{fmt_int(best['p_lo'])}–{fmt_int(best['p_hi'])} ₽** "
+                     f"({fmt_int(best['proj_profit'])} ₽/период на карточку).")
+        else:
+            L.append(f"> **Вердикт:** ни один сегмент со спросом не даёт маржу ≥ {pr['m_min']*100:.0f}% "
+                     f"при себестоимости {fmt_int(econ['cost'])} ₽. Спрос сосредоточен ниже вашего порога. "
+                     f"Варианты: снизить себестоимость, добавить ценность/премиум-позиционирование, "
+                     f"или пересмотреть нишу.")
+        L += ["", "_*Прогноз = прибыль/ед × (заказы/SKU × выкуп "
+              f"{pr['redemption']*100:.0f}%). MPStats-«продажи» приняты за ЗАКАЗЫ; перепроверить на живых данных._", ""]
+    elif pz:
+        L += ["## C. Цена (без юнит-экономики)",
               f"- Ценовой коридор ниши (10–90 перцентиль): **{fmt_int(pz['lo'])}–{fmt_int(pz['hi'])} ₽**",
-              f"- Медиана по выручке: **{fmt_int(pz['wmedian'])} ₽** — цена, вокруг которой крутятся деньги",
-              f"- **Привлекательная цена (зона максимума выручки): {fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽** "
-              f"(**{pz['band_share']:.0f}%** выручки ниши). Цель по цене — в этот коридор (глава 19).", ""]
+              f"- Медиана по выручке (зона объёма): **{fmt_int(pz['wmedian'])} ₽**",
+              "- ⚠️ Задай себестоимость (`--cost <руб>`), чтобы посчитать выгодный ценовой коридор по марже.", ""]
 
     # --- D. Принадлежность (прокси по цвету) ---
     if colors:
@@ -490,11 +637,24 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                   f"цвет: {mine.get('color') or '—'} · ⭐{num(mine.get('rating')):.1f} "
                   f"({fmt_int(mine.get('comments'))} отз.) · фото {fmt_int(mine.get('picscount'))} · "
                   f"видео {'да' if truthy(mine.get('hasvideo')) else 'нет'}"]
-            # гэпы
-            if pz and my_price and not (pz["band"][0] <= my_price <= pz["band"][1]):
+            # маржа при текущей цене
+            if econ and my_price:
+                pr = econ["pr"]
+                u = unit_calc(my_price, econ["cost"], pr, pr["drr_steady"])
+                mm = u["margin"] * 100
+                L.append(f"- **Маржа при текущей цене: {mm:.0f}%** (прибыль {fmt_int(u['profit'])} ₽/ед, "
+                         f"цель {pr['m_min']*100:.0f}–{pr['m_max']*100:.0f}%; ДРР {pr['drr_steady']*100:.0f}%).")
+                if u["margin"] < pr["m_min"]:
+                    if u["profit"] < 0:
+                        gaps.append(f"Убыток при текущей цене ({fmt_int(u['profit'])} ₽/ед) — цена ниже "
+                                    f"безубыточности {fmt_int(econ['breakeven'])} ₽")
+                    else:
+                        gaps.append(f"Маржа {mm:.0f}% < цели {pr['m_min']*100:.0f}% — поднять цену к коридору "
+                                    f"{fmt_int(econ['corridor'][0])}–{fmt_int(econ['corridor'][1])} ₽ или снизить себестоимость")
+            elif pz and my_price and not (pz["band"][0] <= my_price <= pz["band"][1]):
                 where = "выше" if my_price > pz["band"][1] else "ниже"
-                gaps.append(f"Цена {where} зоны привлекательной цены ({fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽) "
-                            f"— пересмотреть/шагами 3–5% (главы 05/19)")
+                gaps.append(f"Цена {where} зоны объёма ({fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽) "
+                            f"— задай --cost для расчёта по марже")
             if cb and num(mine.get("picscount")) < med_pics:
                 gaps.append(f"Фото {fmt_int(mine.get('picscount'))} < медианы {fmt_int(med_pics)} — довести листинг")
             if cb and not truthy(mine.get("hasvideo")) and cb["metrics"]["hasvideo"]["share"] >= 40:
@@ -525,8 +685,12 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
         L.append("- Оцифрованных гэпов нет — см. ручной слой ниже.")
     else:
         L.append("- Не задан `--my-sku`: цели по цене/контенту берите из блоков C и E как бенчмарк.")
-    if pz:
-        L.append(f"- [ ] Цена-цель: коридор **{fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽** (привлекательная цена)")
+    if econ and econ["corridor"][0]:
+        L.append(f"- [ ] Цена-цель: **{fmt_int(econ['corridor'][0])}–{fmt_int(econ['corridor'][1])} ₽** "
+                 f"(маржа {econ['pr']['m_min']*100:.0f}–{econ['pr']['m_max']*100:.0f}%, не «зона объёма»)")
+    elif pz:
+        L.append(f"- [ ] Цена-цель: коридор **{fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽** "
+                 f"(зона объёма — задай --cost для маржинального коридора)")
     if cb:
         L.append(f"- [ ] Контент-цель: фото ≥ **{fmt_int(cb['metrics']['picscount']['median'])}**, "
                  f"видео {'обязательно' if cb['metrics']['hasvideo']['share']>=40 else 'желательно'}, "
@@ -617,6 +781,13 @@ a.pcard .go{font-size:.74rem;color:var(--accent);margin-top:auto;}
 .chip.ok{color:var(--good);border-color:var(--good);}
 .val-bad{color:var(--bad);font-weight:600;}
 .val-ok{color:var(--good);font-weight:600;}
+.val-warn{color:var(--warn);font-weight:600;}
+.verdict{margin-top:12px;padding:12px 15px;border-radius:10px;border:1px solid var(--accent);background:var(--soft);font-size:.9rem;}
+.verdict.bad{border-color:var(--bad);}
+.mrow td{border-left:3px solid transparent;}
+.mrow.ok td:first-child{border-left-color:var(--good);}
+.mrow.warn td:first-child{border-left-color:var(--warn);}
+.mrow.bad td:first-child{border-left-color:var(--bad);}
 .plan{display:flex;flex-direction:column;gap:20px;}
 .plan h3{font-size:.76rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 4px;display:flex;align-items:center;gap:8px;}
 .plan h3::before{content:"";width:18px;height:2px;background:var(--accent);border-radius:2px;}
@@ -658,7 +829,7 @@ JS_REPORT = """
 
 
 def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
-               pz, cb, colors, seas, review, mine, gaps, notes, embed=False):
+               pz, cb, colors, seas, review, mine, gaps, notes, econ=None, embed=False):
     title = args.query or (name_filter or path.split('/')[-1])
     by_label = "Продавец" if args.by == "seller" else "Бренд"
     top_share = sum(v["rev"] for _, v in top) / tot_rev * 100 if tot_rev else 0
@@ -705,18 +876,69 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
              '<th class="r">Рейтинг</th><th class="r">Упущено</th></tr></thead><tbody>'
              .format(args.top, by_label) + "".join(rows) + '</tbody></table></div></section>')
 
-    # C. price
-    if pz:
-        P.append('<section><h2>Цена и «привлекательная цена»</h2><div class="callouts">'
+    # C. price × unit-economics
+    if econ:
+        pr = econ["pr"]
+        cor = econ["corridor"]
+        lm = econ["launch_margin_at_corridor"]
+        cor_txt = f'{fmt_int(cor[0])}–{fmt_int(cor[1])} ₽' if cor[0] and cor[1] else "недостижимо"
+        lm_txt = f'{lm[0]*100:.0f}–{lm[1]*100:.0f}%' if lm[0] is not None and lm[1] is not None else "—"
+        vol = (f'{fmt_int(pz["band"][0])}–{fmt_int(pz["band"][1])} ₽' if pz else "—")
+        callouts = (
+            f'<div class="callout hl"><div class="k">Выгодный коридор · маржа '
+            f'{pr["m_min"]*100:.0f}–{pr["m_max"]*100:.0f}% (ДРР {pr["drr_steady"]*100:.0f}%)</div>'
+            f'<div class="b num">{cor_txt}</div><div class="s">цена на витрине (с СПП) · цель</div></div>'
+            f'<div class="callout"><div class="k">Точка безубыточности</div>'
+            f'<div class="b num">{fmt_int(econ["breakeven"])} ₽</div>'
+            f'<div class="s">ниже — минус на выходе</div></div>'
+            f'<div class="callout"><div class="k">Маржа в запуске (ДРР {pr["drr_launch"]*100:.0f}%)</div>'
+            f'<div class="b num">{lm_txt}</div><div class="s">инвест-период, «первые недели в ноль»</div></div>'
+            f'<div class="callout"><div class="k">Зона объёма (не цель)</div>'
+            f'<div class="b num">{vol}</div><div class="s">где выручка, но не маржа</div></div>')
+        # сегменты
+        seg_html = ""
+        if econ["segments"]:
+            trs = []
+            for s in econ["segments"]:
+                cls = "ok" if s["margin"] >= pr["m_min"] else ("warn" if s["margin"] >= 0 else "bad")
+                mcls = "val-ok" if cls == "ok" else ("val-warn" if cls == "warn" else "val-bad")
+                trs.append(
+                    f'<tr class="mrow {cls}"><td class="num">{fmt_int(s["p_lo"])}–{fmt_int(s["p_hi"])}</td>'
+                    f'<td class="r num">{s["skus"]}</td><td class="r num">{s["rev_share"]:.0f}%</td>'
+                    f'<td class="r num">{fmt_int(s["median_orders"])}</td><td class="r num">{s["rating"]:.2f}</td>'
+                    f'<td class="r num {mcls}">{s["margin"]*100:.0f}%</td>'
+                    f'<td class="r num">{fmt_int(s["profit_unit"])} ₽</td>'
+                    f'<td class="r num">{fmt_int(s["proj_profit"])} ₽</td></tr>')
+            seg_html = ('<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr>'
+                        '<th>Цена (с СПП)</th><th class="r">SKU</th><th class="r">Выручка</th>'
+                        '<th class="r">Заказов/SKU</th><th class="r">Рейтинг</th><th class="r">Маржа</th>'
+                        '<th class="r">Прибыль/ед</th><th class="r">Прогноз/период</th></tr></thead>'
+                        f'<tbody>{"".join(trs)}</tbody></table></div>')
+        # вердикт
+        good = econ["good_segments"]
+        if good:
+            lo = min(s["p_lo"] for s in good); hi = max(s["p_hi"] for s in good)
+            best = max(good, key=lambda s: s["proj_profit"])
+            verdict = (f'<div class="verdict"><b>Вердикт:</b> целиться в <b>{fmt_int(lo)}–{fmt_int(hi)} ₽</b> '
+                       f'— маржа ≥ {pr["m_min"]*100:.0f}% и есть спрос. Максимум прогнозной прибыли — сегмент '
+                       f'<b>{fmt_int(best["p_lo"])}–{fmt_int(best["p_hi"])} ₽</b> '
+                       f'({fmt_int(best["proj_profit"])} ₽/период на карточку).</div>')
+        else:
+            verdict = (f'<div class="verdict bad"><b>Вердикт:</b> ни один сегмент со спросом не даёт маржу '
+                       f'≥ {pr["m_min"]*100:.0f}% при себестоимости {fmt_int(econ["cost"])} ₽. Спрос ниже вашего '
+                       f'порога. Варианты: снизить себестоимость, добавить ценность/премиум или сменить нишу.</div>')
+        P.append(f'<section><h2>Цена × юнит-экономика (себестоимость {fmt_int(econ["cost"])} ₽)</h2>'
+                 f'<div class="callouts">{callouts}</div>{seg_html}{verdict}'
+                 f'<p class="meta">Прогноз = прибыль/ед × (заказы/SKU × выкуп {pr["redemption"]*100:.0f}%). '
+                 f'MPStats-«продажи» приняты за заказы — перепроверить на живых данных.</p></section>')
+    elif pz:
+        P.append('<section><h2>Цена</h2><div class="callouts">'
                  f'<div class="callout"><div class="k">Ценовой коридор (10–90 перцентиль)</div>'
                  f'<div class="b num">{fmt_int(pz["lo"])}–{fmt_int(pz["hi"])} ₽</div></div>'
-                 f'<div class="callout"><div class="k">Медиана по выручке</div>'
-                 f'<div class="b num">{fmt_int(pz["wmedian"])} ₽</div>'
-                 f'<div class="s">цена, вокруг которой крутятся деньги</div></div>'
-                 f'<div class="callout hl"><div class="k">Привлекательная цена (зона макс. выручки)</div>'
-                 f'<div class="b num">{fmt_int(pz["band"][0])}–{fmt_int(pz["band"][1])} ₽</div>'
-                 f'<div class="s">{pz["band_share"]:.0f}% выручки ниши · цель по цене</div></div>'
-                 '</div></section>')
+                 f'<div class="callout"><div class="k">Медиана по выручке (зона объёма)</div>'
+                 f'<div class="b num">{fmt_int(pz["wmedian"])} ₽</div></div></div>'
+                 '<p class="meta">⚠️ Задай себестоимость (--cost), чтобы посчитать выгодный ценовой коридор '
+                 'по марже.</p></section>')
 
     # D. colors
     if colors:
@@ -778,13 +1000,21 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
             facts = (f'Цена {fmt_int(mine.get("final_price"))} ₽ · цвет {esc(mine.get("color") or "—")} · '
                      f'⭐{num(mine.get("rating")):.1f} ({fmt_int(mine.get("comments"))} отз.) · '
                      f'фото {fmt_int(mine.get("picscount"))} · видео {"да" if truthy(mine.get("hasvideo")) else "нет"}')
+            marg = ""
+            if econ and num(mine.get("final_price")):
+                pr = econ["pr"]
+                u = unit_calc(num(mine.get("final_price")), econ["cost"], pr, pr["drr_steady"])
+                mcls = "val-ok" if u["margin"] >= pr["m_min"] else ("val-warn" if u["margin"] >= 0 else "val-bad")
+                marg = (f'<div class="facts" style="margin-top:6px">Маржа при текущей цене: '
+                        f'<span class="{mcls}">{u["margin"]*100:.0f}%</span> '
+                        f'(прибыль {fmt_int(u["profit"])} ₽/ед · цель {pr["m_min"]*100:.0f}–{pr["m_max"]*100:.0f}%)</div>')
             if gaps:
                 chips = "".join(f'<span class="chip bad">{esc(g.split(" —")[0].split(" (")[0])}</span>' for g in gaps)
             else:
                 chips = '<span class="chip ok">По метрикам на уровне ниши</span>'
             P.append('<section><h2>Ваша карточка против ниши</h2><div class="mycard">'
                      f'<div style="font-weight:600">{esc((mine.get("name") or "")[:80])}</div>'
-                     f'<div class="facts">{facts}</div><div class="chips">{chips}</div></div></section>')
+                     f'<div class="facts">{facts}</div>{marg}<div class="chips">{chips}</div></div></section>')
         else:
             P.append(f'<section><h2>Ваша карточка</h2><div class="mycard">'
                      f'<div class="facts">⚠️ SKU <b>{esc(args.my_sku)}</b> не найден в этом срезе — '
@@ -813,8 +1043,12 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
     elif args.my_sku and mine:
         groups.append(("Гэпы карточки", [("Оцифрованных гэпов нет — фокус на ручной слой", None)]))
     targets = []
-    if pz:
-        targets.append((f"Цена-цель: {fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽", "привлекательная цена"))
+    if econ and econ["corridor"][0]:
+        targets.append((f"Цена-цель: {fmt_int(econ['corridor'][0])}–{fmt_int(econ['corridor'][1])} ₽",
+                        f"маржа {econ['pr']['m_min']*100:.0f}–{econ['pr']['m_max']*100:.0f}%, не «зона объёма»"))
+    elif pz:
+        targets.append((f"Цена-цель: {fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽",
+                        "зона объёма — задай --cost для маржинального коридора"))
     if cb:
         vid = "обязательно" if cb["metrics"]["hasvideo"]["share"] >= 40 else "желательно"
         targets.append((f"Контент-цель: фото ≥ {fmt_int(cb['metrics']['picscount']['median'])}, "
@@ -889,23 +1123,24 @@ def _demo_inputs():
         d1 = "2025-06-04"; d2 = "2025-07-04"; my_sku = 777
     agg, tot = aggregate(items, "seller")
     path = "Женщинам/Блузки и рубашки/Рубашка"
+    econ = compute_economics(items, 536, econ_params())   # себестоимость 536 ₽ (демо)
     return dict(A=A, path=path, path_note="синтетика (демо)", nfilter="полос", items=items,
                 agg=agg, tot=tot, pz=price_zone(items), cb=content_benchmark(items, 20),
                 colors=color_distribution(items, 20), seas={"delta_pct": 14.0},
                 review=cards_for_review(items, agg, "seller", 6), mine=profile_sku(items, 777),
-                notes=["trends (демо)"])
+                econ=econ, notes=["trends (демо)"])
 
 
 def selftest(html_out=None):
     d = _demo_inputs()
     rep, top, gaps = build_report(d["A"], d["path"], d["path_note"], d["nfilter"], d["items"],
                                   len(d["items"]), d["agg"], d["tot"], d["pz"], d["cb"], d["colors"],
-                                  d["seas"], d["review"], d["mine"], d["notes"])
+                                  d["seas"], d["review"], d["mine"], d["notes"], d["econ"])
     print(rep)
     if html_out:
         html = build_html(d["A"], d["path"], d["path_note"], d["nfilter"], d["items"], d["agg"],
                           d["tot"], top, d["pz"], d["cb"], d["colors"], d["seas"], d["review"],
-                          d["mine"], gaps, d["notes"])
+                          d["mine"], gaps, d["notes"], d["econ"])
         open(html_out, "w", encoding="utf-8").write(html)
         print(f"[selftest] HTML → {html_out}", file=sys.stderr)
     print("\n[selftest] OK — секций собрано, гэпов:", len(gaps), file=sys.stderr)
@@ -929,6 +1164,21 @@ def main():
     ap.add_argument("--json-out", default=None, help="файл для JSON с агрегатами")
     ap.add_argument("--html-out", dest="html_out", default=None, help="файл для HTML-отчёта (кликабельный)")
     ap.add_argument("--selftest", action="store_true", help="прогон сборки отчёта на синтетике (без сети)")
+    # --- юнит-экономика (дефолты = подтверждённые пользователем цифры; себестоимость обязательна) ---
+    ap.add_argument("--cost", type=float, default=None,
+                    help="СЕБЕСТОИМОСТЬ единицы, ₽ (landed до склада WB) — спрашивать каждый раз")
+    ap.add_argument("--commission-pct", dest="commission_pct", type=float, default=35.7)
+    ap.add_argument("--spp-pct", dest="spp_pct", type=float, default=4.0)
+    ap.add_argument("--acquiring-pct", dest="acquiring_pct", type=float, default=4.7)
+    ap.add_argument("--tax-pct", dest="tax_pct", type=float, default=2.0)
+    ap.add_argument("--drr-launch-pct", dest="drr_launch_pct", type=float, default=30.0)
+    ap.add_argument("--drr-steady-pct", dest="drr_steady_pct", type=float, default=8.0)
+    ap.add_argument("--defect-pct", dest="defect_pct", type=float, default=2.5)
+    ap.add_argument("--redemption-pct", dest="redemption_pct", type=float, default=36.0)
+    ap.add_argument("--logistics", type=float, default=0.0, help="логистика ₽/ед (у нас 0)")
+    ap.add_argument("--storage", type=float, default=0.0, help="хранение ₽/ед (у нас 0)")
+    ap.add_argument("--target-margin-min", dest="tm_min", type=float, default=25.0)
+    ap.add_argument("--target-margin-max", dest="tm_max", type=float, default=30.0)
     args = ap.parse_args()
 
     if args.selftest:
@@ -991,8 +1241,21 @@ def main():
         except MpstatsError as e:
             notes.append(f"поиск своей карточки без фильтра ({e.code})")
 
+    # юнит-экономика — только если задана себестоимость
+    econ = None
+    if args.cost:
+        pr = econ_params(commission=args.commission_pct / 100, spp=args.spp_pct / 100,
+                         acquiring=args.acquiring_pct / 100, tax=args.tax_pct / 100,
+                         drr_launch=args.drr_launch_pct / 100, drr_steady=args.drr_steady_pct / 100,
+                         defect=args.defect_pct / 100, redemption=args.redemption_pct / 100,
+                         logistics=args.logistics, storage=args.storage,
+                         m_min=args.tm_min / 100, m_max=args.tm_max / 100)
+        econ = compute_economics(items, args.cost, pr)
+    else:
+        notes.append("юнит-экономика пропущена — не задан --cost")
+
     report, top, gaps = build_report(args, path, path_note, nfilter, items, total, agg,
-                                     tot_rev, pz, cb, colors, seas, review, mine, notes)
+                                     tot_rev, pz, cb, colors, seas, review, mine, notes, econ)
     if alts:
         report += "\n\n_Альтернативные категории (перезапуск с `--path`): " + \
                   "; ".join(f"`{a}`" for a in alts) + "._"
@@ -1002,7 +1265,7 @@ def main():
         open(args.out, "w", encoding="utf-8").write(report)
     if args.html_out:
         html = build_html(args, path, path_note, nfilter, items, agg, tot_rev, top,
-                          pz, cb, colors, seas, review, mine, gaps, notes)
+                          pz, cb, colors, seas, review, mine, gaps, notes, econ)
         open(args.html_out, "w", encoding="utf-8").write(html)
         print(f"[html] отчёт → {args.html_out}", file=sys.stderr)
     if args.json_out:
@@ -1014,6 +1277,7 @@ def main():
             "niche": {"skus": len(items), "players": len(agg), "total_revenue": tot_rev,
                       "seasonality_delta_pct": (seas or {}).get("delta_pct")},
             "price_zone": pz,
+            "economics": econ,
             "content_benchmark": cb,
             "colors": colors,
             "top": [{
