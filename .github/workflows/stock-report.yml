@@ -39,6 +39,18 @@ jobs:
           PUPPETEER_SKIP_DOWNLOAD: '1'
         run: npm ci
 
+      - name: Проверить, что токен MPSTATS доступен
+        env:
+          MPSTATS_TOKEN: ${{ secrets.MPSTATS_TOKEN }}
+        run: |
+          if [ -z "$MPSTATS_TOKEN" ]; then
+            echo "::error::Секрет MPSTATS_TOKEN пуст или не найден."
+            echo "Добавьте его: Settings → Secrets and variables → Actions →"
+            echo "вкладка Secrets → New repository secret, имя РОВНО: MPSTATS_TOKEN"
+            exit 1
+          fi
+          echo "Токен получен ✓ (длина ${#MPSTATS_TOKEN} символов, значение скрыто)"
+
       - name: Собрать отчёт
         env:
           MPSTATS_TOKEN: ${{ secrets.MPSTATS_TOKEN }}
