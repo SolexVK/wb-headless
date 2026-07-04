@@ -305,10 +305,11 @@ def wb_basket_card(nm):
     nm = int(nm)
     vol, part = nm // 100000, nm // 1000
     h0 = int(wb_basket_host(vol))
-    order = [f"{h0:02d}"] + [f"{h:02d}" for h in (h0 - 1, h0 + 1, h0 - 2, h0 + 2) if 1 <= h <= 40]
+    # правильный хост пробуем с ретраями (пережить 429), соседние — по разу
+    order = [(f"{h0:02d}", 3)] + [(f"{h:02d}", 1) for h in (h0 - 1, h0 + 1, h0 - 2, h0 + 2) if 1 <= h <= 40]
     res = None
-    for h in order:
-        t = _wb_curl(f"https://basket-{h}.wbbasket.ru/vol{vol}/part{part}/{nm}/info/ru/card.json", tries=1)
+    for h, tries in order:
+        t = _wb_curl(f"https://basket-{h}.wbbasket.ru/vol{vol}/part{part}/{nm}/info/ru/card.json", tries=tries)
         if t and t[:1] == "{":
             try:
                 d = json.loads(t)
@@ -347,6 +348,64 @@ def wb_characteristics(card):
     return out
 
 
+def enrich_cards(cards):
+    """Дотянуть по каждой карточке (по id) характеристики + слайды из WB. Best-effort, изменяет на месте."""
+    got = 0
+    for i, it in enumerate(cards):
+        if not it.get("id"):
+            continue
+        if i:
+            time.sleep(0.4)  # вежливость к CDN, чтобы не ловить 429
+        card = wb_basket_card(it["id"])
+        if card:
+            it["_chars"] = wb_characteristics(card)
+            it["_slides"] = wb_slide_urls(card)
+            it["_descr"] = (card.get("description") or "")[:400]
+            got += 1
+    return got
+
+
+import re as _re
+
+TAIL_GENERIC = {"для", "в", "и", "с", "на", "из", "по", "от", "до", "не", "the", "a"}
+TAIL_CATEGORY = {"рубашка", "рубашки", "рубашку", "блузка", "платье", "футболка", "джинсы",
+                 "женская", "женский", "женские", "мужская", "мужской", "детская", "детский", "унисекс"}
+
+
+def tail_words(cards, item, top_n=12):
+    """Теги смыслов = частотные слова из НАЗВАНИЙ топ-карточек, кроме категории/пола/связок."""
+    stop = set(TAIL_GENERIC) | set(TAIL_CATEGORY) | set((item or "").lower().split())
+    cnt = defaultdict(int)
+    for c in cards:
+        for w in _re.findall(r"[а-яёa-z0-9]+", (c.get("name") or "").lower()):
+            if len(w) >= 3 and w not in stop:
+                cnt[w] += 1
+    return sorted(cnt.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+
+
+def char_matrix(cards, max_rows=12, max_cols=5):
+    """Сравнение видимых характеристик топов: строки=характеристика, столбцы=карточки, +доминанта."""
+    from collections import Counter
+    per = []
+    name_freq = Counter()
+    for c in cards[:max_cols]:
+        d = {n: v for n, v in (c.get("_chars") or []) if n}
+        if not d:
+            continue
+        per.append(((c.get("name") or "—")[:22], d))
+        for n in d:
+            name_freq[n] += 1
+    if not per:
+        return None
+    rows = [n for n, _ in name_freq.most_common(max_rows)]
+    matrix = []
+    for n in rows:
+        vals = [d.get(n, "") for _, d in per]
+        dom = Counter([v for v in vals if v]).most_common(1)
+        matrix.append({"name": n, "values": vals, "dominant": dom[0][0] if dom else ""})
+    return {"cols": [lbl for lbl, _ in per], "rows": matrix}
+
+
 # ======================= утилиты чисел/форматов =======================
 def num(x):
     try:
@@ -380,6 +439,11 @@ def fmt_money(v):
 
 def fmt_int(v):
     return f"{num(v):,.0f}".replace(",", " ")
+
+
+def esc_md(s):
+    """Экранировать спецсимволы markdown-таблицы в ячейке."""
+    return str(s if s is not None else "").replace("|", "\\|").replace("\n", " ").strip()
 
 
 # ======================= аналитические блоки =======================
@@ -638,7 +702,7 @@ def compute_economics(items, cost, pr):
 
 # ======================= сборка отчёта =======================
 def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
-                 pz, cb, colors, seas, review, mine, notes, econ=None, kw=None):
+                 pz, cb, colors, seas, review, mine, notes, econ=None, kw=None, wbd=None):
     by_label = "продавцам" if args.by == "seller" else "брендам"
     ranked = sorted(agg.items(), key=lambda kv: kv[1]["rev"], reverse=True)
     top = ranked[:args.top]
@@ -796,6 +860,32 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                      f"({fmt_int(it.get('comments'))} отз.) · [карточка]({WB_CARD.format(sid)})")
         L.append("")
 
+    # --- F2. Готовые данные по топам (смыслы · листинг · характеристики) ---
+    if wbd:
+        L.append("## F2. Готовые данные по топам (смыслы · листинг · характеристики)")
+        if wbd.get("tails"):
+            tags = ", ".join(f"{w} ({n})" for w, n in wbd["tails"])
+            L += ["", f"**Смыслы — теги из хвостов запросов топов:** {tags}",
+                  "> Частотные слова из названий топ-карточек (кроме категории/пола) = смыслы, на которые "
+                  "они опираются. Частотные — выносить ВЫШЕ в листинге (глава 04)."]
+        if any(it.get("_slides") for it in review):
+            L += ["", "**Листинг топов — слайды (кликабельно):**"]
+            for it in review:
+                sl = it.get("_slides") or []
+                if not sl:
+                    continue
+                links = " · ".join(f"[{i+1}]({u})" for i, u in enumerate(sl))
+                L.append(f"- {(it.get('name') or '—')[:44]}: {links}")
+        cm = wbd.get("charmatrix")
+        if cm:
+            L += ["", "**Характеристики топов (заполнить как доминанта):**", "",
+                  "| Характеристика | " + " | ".join(esc_md(c) for c in cm["cols"]) + " | Доминанта |",
+                  "|---" * (len(cm["cols"]) + 2) + "|"]
+            for r in cm["rows"]:
+                vals = " | ".join(esc_md((v or "—")[:20]) for v in r["values"])
+                L.append(f"| {esc_md(r['name'])} | {vals} | **{esc_md((r['dominant'] or '—')[:20])}** |")
+        L.append("")
+
     # --- G. Разбор своей карточки ---
     gaps = []
     if args.my_sku:
@@ -874,16 +964,19 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                  f"видео {'обязательно' if cb['metrics']['hasvideo']['share']>=40 else 'желательно'}, "
                  f"рейтинг ≥ **{cb['metrics']['rating']['median']:.1f}**")
 
-    L += ["", "### Ручной слой (MPStats не отдаёт — сделать по методике)",
+    f2 = " ✅ данные в блоке F2" if wbd else ""
+    L += ["", "### Ручной слой",
+          f"- [ ] **Смыслы/листинг**{f2} — взять теги хвостов и слайды топов (блок F2), "
+          "перенести частотные смыслы выше в свой листинг (глава 04)",
+          f"- [ ] **Характеристики**{f2} — заполнить как доминанта топов (блок F2); "
+          "состав/конструктив 1-в-1 (главы 13/18)",
           "- [ ] **Принадлежность %** — Wildbox «топы поиска»: разложить товар на сегменты/подсегменты, "
           "проверить % присутствия признаков; < ~30% = вход в запрос закрыт (глава 13)",
-          "- [ ] **Смыслы/листинг** — скриншоты слайдов топ-карточек (блок F) в таблицу-линейку; "
-          "выделить теги смыслов из хвостов запросов, частотные — выше в листинге (глава 04)",
-          "- [ ] **Конверсии по запросам** — Gem Competition (до 5 карточек) или Keywords: где конкурент "
-          "сильнее в корзину/заказ → почему → повторить (глава 04)",
-          "- [ ] **Инфографика/полки** — метод доски/бота: кто чаще в полках = топ; скопировать "
-          "видимые характеристики 1-в-1 (глава 18)",
-          "- [ ] **Характеристики** — заполнить по максимуму категорий; состав/конструктив как у топа (главы 13/18)",
+          "- [ ] **Конверсии по запросам (ДЖЕМ)** — ДЖЕМ Competition (до 5 карточек): где конкурент "
+          "сильнее в корзину/заказ → зайти в его листинг → повторить смысл (глава 04). "
+          "Импорт выгрузки в отчёт — на след. шаге инструмента",
+          "- [ ] **Полки/доска** — метод главы 18: кто чаще всех в полках топов = супер-карточка; "
+          "брать её смыслы/инфографику. (авто-сбор похожих — планируется)",
           ""]
 
     # --- футер ---
@@ -960,6 +1053,15 @@ a.pcard .go{font-size:.74rem;color:var(--accent);margin-top:auto;}
 .val-bad{color:var(--bad);font-weight:600;}
 .val-ok{color:var(--good);font-weight:600;}
 .val-warn{color:var(--warn);font-weight:600;}
+.tags{display:flex;flex-wrap:wrap;gap:7px;margin:6px 0 4px;}
+.tag{font-size:.82rem;padding:4px 10px;border-radius:99px;background:var(--soft);border:1px solid var(--hair);}
+.tag b{color:var(--accent);}
+.listing{display:flex;flex-direction:column;gap:12px;margin-top:6px;}
+.lrow .cap{font-size:.82rem;color:var(--muted);margin-bottom:5px;}
+.slides{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;}
+.slides a{flex:none;}
+.slides img{height:120px;width:auto;border-radius:8px;border:1px solid var(--hair);display:block;}
+.slides .slink{display:flex;align-items:center;justify-content:center;height:120px;min-width:56px;border:1px solid var(--hair);border-radius:8px;color:var(--accent);text-decoration:none;font-size:.85rem;background:var(--panel);}
 .verdict{margin-top:12px;padding:12px 15px;border-radius:10px;border:1px solid var(--accent);background:var(--soft);font-size:.9rem;}
 .verdict.bad{border-color:var(--bad);}
 .mrow td{border-left:3px solid transparent;}
@@ -1014,7 +1116,7 @@ JS_REPORT = """
 
 
 def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
-               pz, cb, colors, seas, review, mine, gaps, notes, econ=None, kw=None, embed=False):
+               pz, cb, colors, seas, review, mine, gaps, notes, econ=None, kw=None, wbd=None, embed=False):
     title = args.query or (name_filter or path.split('/')[-1])
     by_label = "Продавец" if args.by == "seller" else "Бренд"
     top_share = sum(v["rev"] for _, v in top) / tot_rev * 100 if tot_rev else 0
@@ -1249,6 +1351,47 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                  'полок/доски (гл. 18).</p>'
                  f'<div class="cards">{"".join(cards)}</div></section>')
 
+    # F2. готовые данные по топам (смыслы / листинг / характеристики)
+    if wbd:
+        parts = ['<section><h2>Готовые данные по топам — смыслы · листинг · характеристики</h2>']
+        if wbd.get("tails"):
+            tags = "".join(f'<span class="tag">{esc(w)} <b>{n}</b></span>' for w, n in wbd["tails"])
+            parts.append('<p class="meta" style="margin-bottom:2px">Смыслы — теги из хвостов запросов '
+                         'топов (частотные выносить выше в листинге):</p>'
+                         f'<div class="tags">{tags}</div>')
+        if any(it.get("_slides") for it in review):
+            rows = []
+            for it in review:
+                sl = it.get("_slides") or []
+                if not sl:
+                    continue
+                if embed:  # в Artifact внешние картинки блокируются CSP → ссылки
+                    thumbs = "".join(f'<a class="slink" href="{esc(u)}" target="_blank" rel="noopener">{i+1}</a>'
+                                     for i, u in enumerate(sl))
+                else:      # в standalone HTML/PDF реальные слайды подгружаются
+                    thumbs = "".join(f'<a href="{esc(u)}" target="_blank" rel="noopener">'
+                                     f'<img src="{esc(u)}" loading="lazy" alt="слайд {i+1}"></a>'
+                                     for i, u in enumerate(sl))
+                rows.append(f'<div class="lrow"><div class="cap">{esc((it.get("name") or "—")[:60])}</div>'
+                            f'<div class="slides">{thumbs}</div></div>')
+            if rows:
+                parts.append('<h3 style="margin:16px 0 4px;font-family:Georgia,serif">Листинг топов (слайды)</h3>'
+                             f'<div class="listing">{"".join(rows)}</div>')
+        cm = wbd.get("charmatrix")
+        if cm:
+            head = '<th>Характеристика</th>' + "".join(f'<th>{esc(c)}</th>' for c in cm["cols"]) + '<th>Доминанта</th>'
+            trs = []
+            for r in cm["rows"]:
+                cells = "".join(f'<td>{esc((v or "—")[:22])}</td>' for v in r["values"])
+                trs.append(f'<tr><td><b>{esc(r["name"])}</b></td>{cells}'
+                           f'<td class="val-ok">{esc((r["dominant"] or "—")[:22])}</td></tr>')
+            parts.append('<h3 style="margin:16px 0 4px;font-family:Georgia,serif">Характеристики топов '
+                         '(заполнить как доминанта)</h3>'
+                         f'<div class="tbl-wrap"><table><thead><tr>{head}</tr></thead>'
+                         f'<tbody>{"".join(trs)}</tbody></table></div>')
+        parts.append('</section>')
+        P.append("".join(parts))
+
     # H. plan (interactive)
     groups = []
     if args.my_sku and gaps:
@@ -1268,12 +1411,13 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                         f"видео {vid}, рейтинг ≥ {cb['metrics']['rating']['median']:.1f}", None))
     if targets:
         groups.append(("Цели ниши", targets))
-    groups.append(("Ручной слой (по методике)", [
+    f2 = " ✅ данные в блоке F2" if wbd else ""
+    groups.append(("Ручной слой", [
+        ("Смыслы / листинг" + f2, "перенести частотные теги хвостов и удачные слайды топов (F2) в свой листинг (гл. 04)"),
+        ("Характеристики" + f2, "заполнить как доминанта топов (F2); состав/конструктив 1-в-1 (гл. 13/18)"),
         ("Принадлежность %", "Wildbox «топы поиска»: сегменты/подсегменты, % присутствия; <30% = вход закрыт (гл. 13)"),
-        ("Смыслы / листинг", "скриншоты слайдов топ-карточек в линейку; теги смыслов из хвостов запросов (гл. 04)"),
-        ("Конверсии по запросам", "Gem Competition (до 5 карт.) или Keywords: где конкурент сильнее в корзину/заказ (гл. 04)"),
-        ("Инфографика / полки", "метод доски/бота: кто чаще в полках = топ; видимые характеристики 1-в-1 (гл. 18)"),
-        ("Характеристики", "заполнить по максимуму категорий; состав/конструктив как у топа (гл. 13/18)"),
+        ("Конверсии по запросам (ДЖЕМ)", "ДЖЕМ Competition (до 5 карт.): где конкурент сильнее в корзину/заказ → повторить (гл. 04)"),
+        ("Полки / доска", "кто чаще всех в полках топов = супер-карточка → брать её смыслы (гл. 18)"),
     ]))
     idx = 0
     gblocks = []
@@ -1342,23 +1486,38 @@ def _demo_inputs():
                "price": 2792, "rating": 4.8, "feedbacks": 640, "pics": 11, "colors": ["голубой", "синий"]},
               {"id": 804478782, "name": "Летняя рубашка в полоску", "seller": "ИП Продавец 6",
                "price": 1312, "rating": 4.7, "feedbacks": 218, "pics": 18, "colors": ["голубой"]}]}
+    review = cards_for_review(items, agg, "seller", 6)
+    # синтетическое WB-обогащение (без сети): характеристики + слайды
+    demo_names = ["Рубашка оверсайз в полоску льняная", "Рубашка прозрачная летняя хлопковая",
+                  "Рубашка в полоску оверсайз", "Блузка полоска офисная", "Рубашка летняя лён", "Рубашка полоска"]
+    demo_chars = [[("Состав", "хлопок 100%"), ("Покрой", "оверсайз"), ("Вид застёжки", "пуговицы"),
+                   ("Тип карманов", "без карманов"), ("Фактура материала", "полупрозрачная")],
+                  [("Состав", "хлопок; лён"), ("Покрой", "оверсайз"), ("Вид застёжки", "пуговицы"),
+                   ("Тип карманов", "один карман"), ("Фактура материала", "плотная")]]
+    for i, it in enumerate(review):
+        it["name"] = demo_names[i % len(demo_names)]
+        it["_chars"] = demo_chars[i % len(demo_chars)]
+        it["_slides"] = [f"https://basket-15.wbbasket.ru/vol0/part0/{it['id']}/images/big/{j}.webp"
+                         for j in range(1, 6)]
+    pool = list(review) + [c for cs in kw.values() for c in cs]
+    wbd = {"tails": tail_words(pool, "рубашка"), "charmatrix": char_matrix(review)}
     return dict(A=A, path=path, path_note="синтетика (демо)", nfilter="полос", items=items,
                 agg=agg, tot=tot, pz=price_zone(items), cb=content_benchmark(items, 20),
                 colors=color_distribution(items, agg, "seller", 10), seas={"delta_pct": 14.0},
-                review=cards_for_review(items, agg, "seller", 6), mine=profile_sku(items, 777),
-                econ=econ, kw=kw, notes=["trends (демо)"])
+                review=review, mine=profile_sku(items, 777),
+                econ=econ, kw=kw, wbd=wbd, notes=["trends (демо)"])
 
 
 def selftest(html_out=None, pdf_out=None):
     d = _demo_inputs()
     rep, top, gaps = build_report(d["A"], d["path"], d["path_note"], d["nfilter"], d["items"],
                                   len(d["items"]), d["agg"], d["tot"], d["pz"], d["cb"], d["colors"],
-                                  d["seas"], d["review"], d["mine"], d["notes"], d["econ"], d["kw"])
+                                  d["seas"], d["review"], d["mine"], d["notes"], d["econ"], d["kw"], d["wbd"])
     print(rep)
     if html_out or pdf_out:
         html = build_html(d["A"], d["path"], d["path_note"], d["nfilter"], d["items"], d["agg"],
                           d["tot"], top, d["pz"], d["cb"], d["colors"], d["seas"], d["review"],
-                          d["mine"], gaps, d["notes"], d["econ"], d["kw"])
+                          d["mine"], gaps, d["notes"], d["econ"], d["kw"], d["wbd"])
         if html_out:
             open(html_out, "w", encoding="utf-8").write(html)
             print(f"[selftest] HTML → {html_out}", file=sys.stderr)
@@ -1388,6 +1547,7 @@ def main():
     ap.add_argument("--pdf-out", dest="pdf_out", default=None, help="файл для PDF-отчёта (кликабельные ссылки, через Chromium)")
     ap.add_argument("--keywords", default=None, help="ключевые запросы через запятую — искать конкурентов в выдаче WB")
     ap.add_argument("--kw-limit", dest="kw_limit", type=int, default=8, help="сколько карточек брать из выдачи на запрос")
+    ap.add_argument("--no-wb", dest="no_wb", action="store_true", help="не тянуть характеристики/слайды из WB (быстрее/офлайн)")
     ap.add_argument("--selftest", action="store_true", help="прогон сборки отчёта на синтетике (без сети)")
     # --- юнит-экономика (дефолты = подтверждённые пользователем цифры; себестоимость обязательна) ---
     ap.add_argument("--cost", type=float, default=None,
@@ -1487,8 +1647,20 @@ def main():
         if not any(kw.values()):
             notes.append("поиск WB по запросам недоступен (429/пусто)")
 
+    # Фаза 5: ручной слой → готовые данные (характеристики/слайды/смыслы из публичного API WB)
+    wbd = None
+    if not args.no_wb:
+        try:
+            got = enrich_cards(review)
+            pool = list(review) + [c for cs in (kw or {}).values() for c in cs]
+            wbd = {"tails": tail_words(pool, args.item), "charmatrix": char_matrix(review)}
+            if not got:
+                notes.append("WB-карточки топов не загрузились (429) — блок F2 частичный")
+        except Exception as e:
+            notes.append(f"WB-обогащение недоступно ({str(e)[:40]})")
+
     report, top, gaps = build_report(args, path, path_note, nfilter, items, total, agg,
-                                     tot_rev, pz, cb, colors, seas, review, mine, notes, econ, kw)
+                                     tot_rev, pz, cb, colors, seas, review, mine, notes, econ, kw, wbd)
     if alts:
         report += "\n\n_Альтернативные категории (перезапуск с `--path`): " + \
                   "; ".join(f"`{a}`" for a in alts) + "._"
@@ -1498,7 +1670,7 @@ def main():
         open(args.out, "w", encoding="utf-8").write(report)
     if args.html_out or args.pdf_out:
         html = build_html(args, path, path_note, nfilter, items, agg, tot_rev, top,
-                          pz, cb, colors, seas, review, mine, gaps, notes, econ, kw)
+                          pz, cb, colors, seas, review, mine, gaps, notes, econ, kw, wbd)
         if args.html_out:
             open(args.html_out, "w", encoding="utf-8").write(html)
             print(f"[html] отчёт → {args.html_out}", file=sys.stderr)
