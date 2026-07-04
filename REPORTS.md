@@ -32,7 +32,37 @@
 | `REPORT_SCHEDULE_ENABLED` | нет | `0` | `1` — включить встроенный ежедневный планировщик |
 | `REPORT_SCHEDULE_HOUR` | нет | `6` | Час запуска планировщика (UTC) |
 
-Список SKU лежит в `config/skus.json` (поле `skus`).
+Список товаров лежит в `config/skus.json` — связка **WB-артикула (SKU)** и
+**артикула продавца**:
+
+```json
+{
+  "items": [
+    { "wb": 535397255, "seller": "001 РМК-твид бордовый" }
+  ]
+}
+```
+
+### Выбор подмножества товаров (экономия лимита)
+
+Чтобы не опрашивать все 206 товаров (и не жечь суточный лимит MPSTATS),
+можно собрать отчёт только по нужным — через **фильтр**:
+
+- в **GitHub Actions**: поле **filter** в форме «Run workflow»;
+- в **CLI**: `REPORT_FILTER="..."` или 3-й аргумент;
+- по **HTTP**: параметр `&filter=...`.
+
+Правила фильтра (токены через запятую, регистр не важен):
+
+| Пример фильтра | Что выберет |
+|---|---|
+| *(пусто)* | все товары |
+| `РМП` | все, где в артикуле продавца встречается «РМП» |
+| `002_РМП_белый, 016 МС голубой` | два конкретных товара |
+| `535397255` | по числовому WB-артикулу (SKU) |
+
+Товар попадает в выборку, если **любой** токен совпал: числовой токен
+сверяется с WB-артикулом, текстовый — ищется внутри артикула продавца.
 
 ## Запуск
 
@@ -44,6 +74,10 @@ MPSTATS_TOKEN=xxxxx npm run report:stock
 
 # явный период
 MPSTATS_TOKEN=xxxxx node report-stock.js 2026-06-01 2026-06-30
+
+# только выбранные товары (период по умолчанию)
+MPSTATS_TOKEN=xxxxx REPORT_FILTER="РМП" npm run report:stock
+MPSTATS_TOKEN=xxxxx node report-stock.js "" "" "002_РМП_белый, 016 МС голубой"
 ```
 
 Результат — файлы `reports-output/stock-<d1>_<d2>.csv` и `.json` плюс сводка в консоль.
@@ -59,6 +93,10 @@ curl -H "x-api-key: $API_KEY" \
 # CSV-файл
 curl -H "x-api-key: $API_KEY" \
   "http://localhost:8080/reports/stock-availability?format=csv" -o stock.csv
+
+# только выбранные товары
+curl -H "x-api-key: $API_KEY" \
+  "http://localhost:8080/reports/stock-availability?format=csv&filter=РМП" -o stock.csv
 ```
 
 Без `d1`/`d2` берётся период = последние `REPORT_DAYS` дней.
@@ -83,6 +121,7 @@ REPORT_SCHEDULE_ENABLED=1 REPORT_SCHEDULE_HOUR=6 MPSTATS_TOKEN=xxxxx npm start
 
 | Поле | Описание |
 |---|---|
+| `seller` | Артикул продавца (человекочитаемый) |
 | `sku` | Артикул WB (nmId) |
 | `daysTotal` | Дней в периоде с данными |
 | `daysInStock` | Дней в наличии (остаток > 0) |
