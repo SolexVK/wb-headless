@@ -6,7 +6,7 @@ import path from 'path';
 import puppeteer from 'puppeteer';
 import { v4 as uuidv4 } from 'uuid';
 import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
-import { defaultPeriod, loadSkus, writeOutputs } from './report-stock.js';
+import { defaultPeriod, loadItems, selectItems, writeOutputs } from './report-stock.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -128,18 +128,20 @@ app.get('/debug-chrome', requireKey, (req, res) => {
 });
 
 // ---------- REPORT: наличие товара и упущенная выручка ----------
-// GET /reports/stock-availability?d1=YYYY-MM-DD&d2=YYYY-MM-DD&format=json|csv
+// GET /reports/stock-availability?d1=YYYY-MM-DD&d2=YYYY-MM-DD&format=json|csv&filter=РМП
 // Без d1/d2 берётся период = последние REPORT_DAYS (по умолчанию 30) дней.
+// filter — по артикулу продавца/WB, через запятую; пусто = все товары.
 app.get('/reports/stock-availability', requireKey, async (req, res) => {
   try {
     if (!process.env.MPSTATS_TOKEN) {
       return res.status(500).json({ error: 'mpstats_token_missing' });
     }
-    let { d1, d2, format } = req.query;
+    let { d1, d2, format, filter } = req.query;
     if (!d1 || !d2) ({ d1, d2 } = defaultPeriod(Number(process.env.REPORT_DAYS) || 30));
 
+    const items = selectItems(loadItems(), filter);
     const report = await buildStockAvailabilityReport({
-      skus: loadSkus(),
+      items,
       d1,
       d2,
       concurrency: Number(process.env.REPORT_CONCURRENCY) || 5,
@@ -304,7 +306,7 @@ function startReportScheduler() {
       const { d1, d2 } = defaultPeriod(Number(process.env.REPORT_DAYS) || 30);
       console.log(`[scheduler] строю отчёт по наличию за ${d1}…${d2}`);
       const report = await buildStockAvailabilityReport({
-        skus: loadSkus(),
+        items: selectItems(loadItems(), process.env.REPORT_FILTER),
         d1,
         d2,
         concurrency: Number(process.env.REPORT_CONCURRENCY) || 5,

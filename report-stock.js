@@ -27,26 +27,60 @@ export function defaultPeriod(days = 30) {
   return { d1: ymd(start), d2: ymd(end) };
 }
 
-export function loadSkus() {
+/**
+ * Загружает пары {wb, seller} из config/skus.json.
+ * Поддерживает и новый формат (items), и старый (skus — просто числа).
+ */
+export function loadItems() {
   const file = path.join(__dirname, 'config', 'skus.json');
   const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-  return parsed.skus || [];
+  if (Array.isArray(parsed.items)) return parsed.items;
+  return (parsed.skus || []).map((wb) => ({ wb, seller: '' }));
+}
+
+/**
+ * Выбирает подмножество товаров по строке-фильтру.
+ * Фильтр — список токенов через запятую. Товар попадает в выборку, если
+ * ЛЮБОЙ токен: совпал с WB-артикулом (если токен из цифр) ИЛИ содержится
+ * в артикуле продавца (без учёта регистра). Пустой фильтр = все товары.
+ *
+ * Примеры: "РМП"  |  "002_РМП_белый, 016 МС голубой"  |  "535397255"
+ */
+export function selectItems(items, filter) {
+  const tokens = String(filter || '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) return items;
+
+  const lc = (s) => String(s).toLowerCase();
+  return items.filter((it) =>
+    tokens.some((tok) => {
+      if (/^\d+$/.test(tok)) return String(it.wb) === tok; // чисто числовой = WB
+      return lc(it.seller).includes(lc(tok)); // иначе поиск по артикулу продавца
+    })
+  );
 }
 
 function fmt(n) {
   return new Intl.NumberFormat('ru-RU').format(Math.round(Number(n) || 0));
 }
 
-export async function runReport({ d1, d2, skus } = {}) {
+export async function runReport({ d1, d2, items, filter } = {}) {
   const period = d1 && d2 ? { d1, d2 } : defaultPeriod(Number(process.env.REPORT_DAYS) || 30);
-  const skuList = skus || loadSkus();
+  const all = items || loadItems();
+  const selected = selectItems(all, filter ?? process.env.REPORT_FILTER);
 
+  const filterNote = selected.length === all.length ? 'все' : `выбрано ${selected.length} из ${all.length}`;
   process.stderr.write(
-    `Отчёт по наличию: ${skuList.length} SKU, период ${period.d1} … ${period.d2}\n`
+    `Отчёт по наличию: ${selected.length} товаров (${filterNote}), период ${period.d1} … ${period.d2}\n`
   );
+  if (selected.length === 0) {
+    process.stderr.write('⚠ Фильтр не выбрал ни одного товара — проверьте значение фильтра.\n');
+  }
 
   const report = await buildStockAvailabilityReport({
-    skus: skuList,
+    items: selected,
     d1: period.d1,
     d2: period.d2,
     concurrency: Number(process.env.REPORT_CONCURRENCY) || 5,
@@ -96,8 +130,9 @@ function printSummary(report) {
   if (top.length) {
     console.log('\nТоп по упущенной выручке:');
     for (const r of top) {
+      const label = r.seller ? r.seller : r.sku;
       console.log(
-        `  ${r.sku}\t${r.daysOutOfStock} дн. без остатка\t≈ ${fmt(r.lostRevenue)} ₽`
+        `  ${label}\t${r.daysOutOfStock} дн. без остатка\t≈ ${fmt(r.lostRevenue)} ₽`
       );
     }
   }
@@ -114,9 +149,11 @@ function printSummary(report) {
 }
 
 // Запуск как самостоятельного скрипта.
+//   node report-stock.js [d1] [d2] [фильтр]
+//   node report-stock.js "" "" "РМП"        # только РМП за период по умолчанию
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [, , argD1, argD2] = process.argv;
-  runReport({ d1: argD1, d2: argD2 })
+  const [, , argD1, argD2, argFilter] = process.argv;
+  runReport({ d1: argD1 || undefined, d2: argD2 || undefined, filter: argFilter })
     .then((report) => {
       const { csvPath, jsonPath } = writeOutputs(report);
       printSummary(report);

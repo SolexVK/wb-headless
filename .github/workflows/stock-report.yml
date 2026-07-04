@@ -16,6 +16,10 @@ on:
         description: 'Дата конца (YYYY-MM-DD) — необязательно'
         required: false
         default: ''
+      filter:
+        description: 'Какие товары (по артикулу продавца/WB, через запятую). Пусто = ВСЕ. Пример: РМП  или  002_РМП_белый, 016 МС голубой'
+        required: false
+        default: ''
 
   # ▼▼▼ Чтобы отчёт собирался сам КАЖДЫЙ ДЕНЬ — уберите '#' на двух строках ниже.
   #     6:00 UTC = 9:00 по Москве. (min hour day month day-of-week)
@@ -55,6 +59,8 @@ jobs:
         env:
           MPSTATS_TOKEN: ${{ secrets.MPSTATS_TOKEN }}
           REPORT_DAYS: ${{ github.event.inputs.days }}
+          # Фильтр товаров передаём через env (безопасно для кириллицы/пробелов).
+          REPORT_FILTER: ${{ github.event.inputs.filter }}
           # Узкое место — дневная квота запросов MPSTATS, а не скорость,
           # поэтому не гоним лишнего; тайм-аут с запасом на медленные ответы.
           REPORT_CONCURRENCY: '5'
