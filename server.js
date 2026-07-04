@@ -6,7 +6,7 @@ import path from 'path';
 import puppeteer from 'puppeteer';
 import { v4 as uuidv4 } from 'uuid';
 import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
-import { defaultPeriod, loadItems, selectItems, writeOutputs } from './report-stock.js';
+import { defaultPeriod, loadItems, selectItems, selectByGroup, writeOutputs } from './report-stock.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -136,10 +136,14 @@ app.get('/reports/stock-availability', requireKey, async (req, res) => {
     if (!process.env.MPSTATS_TOKEN) {
       return res.status(500).json({ error: 'mpstats_token_missing' });
     }
-    let { d1, d2, format, filter } = req.query;
+    let { d1, d2, format, filter, group } = req.query;
     if (!d1 || !d2) ({ d1, d2 } = defaultPeriod(Number(process.env.REPORT_DAYS) || 30));
 
-    const items = selectItems(loadItems(), filter);
+    // Приоритет: точечный фильтр → группа → все.
+    const all = loadItems();
+    const items = filter && String(filter).trim()
+      ? selectItems(all, filter)
+      : selectByGroup(all, group);
     const report = await buildStockAvailabilityReport({
       items,
       d1,

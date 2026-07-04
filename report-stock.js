@@ -38,6 +38,35 @@ export function loadItems() {
   return (parsed.skus || []).map((wb) => ({ wb, seller: '' }));
 }
 
+/** Загружает группы (линейки) товаров: метка → список WB-артикулов. */
+export function loadGroups() {
+  const file = path.join(__dirname, 'config', 'groups.json');
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return parsed.groups || {};
+  } catch (_) {
+    return {};
+  }
+}
+
+const ALL_LABELS = new Set(['', 'все', 'all', 'всё']);
+
+/**
+ * Выбирает товары по группе (метке из выпадающего списка).
+ * «Все»/пусто → все товары. Неизвестная метка → все (с предупреждением).
+ */
+export function selectByGroup(items, group) {
+  const g = String(group || '').trim();
+  if (ALL_LABELS.has(g.toLowerCase())) return items;
+  const list = loadGroups()[g];
+  if (!list) {
+    process.stderr.write(`⚠ Неизвестная группа «${g}» — беру все товары.\n`);
+    return items;
+  }
+  const set = new Set(list.map(String));
+  return items.filter((it) => set.has(String(it.wb)));
+}
+
 /**
  * Выбирает подмножество товаров по строке-фильтру.
  * Фильтр — список токенов через запятую. Товар попадает в выборку, если
@@ -66,14 +95,23 @@ function fmt(n) {
   return new Intl.NumberFormat('ru-RU').format(Math.round(Number(n) || 0));
 }
 
-export async function runReport({ d1, d2, items, filter } = {}) {
+export async function runReport({ d1, d2, items, filter, group } = {}) {
   const period = d1 && d2 ? { d1, d2 } : defaultPeriod(Number(process.env.REPORT_DAYS) || 30);
   const all = items || loadItems();
-  const selected = selectItems(all, filter ?? process.env.REPORT_FILTER);
 
-  const filterNote = selected.length === all.length ? 'все' : `выбрано ${selected.length} из ${all.length}`;
+  // Приоритет: текстовый фильтр (для точечного выбора) → группа из
+  // выпадающего списка → все товары.
+  const f = filter ?? process.env.REPORT_FILTER;
+  const g = group ?? process.env.REPORT_GROUP;
+  const selected = f && String(f).trim() ? selectItems(all, f) : selectByGroup(all, g);
+
+  const how = f && String(f).trim()
+    ? `фильтр «${String(f).trim()}»`
+    : g && !ALL_LABELS.has(String(g).trim().toLowerCase())
+      ? `группа «${String(g).trim()}»`
+      : 'все';
   process.stderr.write(
-    `Отчёт по наличию: ${selected.length} товаров (${filterNote}), период ${period.d1} … ${period.d2}\n`
+    `Отчёт по наличию: ${selected.length} из ${all.length} товаров (${how}), период ${period.d1} … ${period.d2}\n`
   );
   if (selected.length === 0) {
     process.stderr.write('⚠ Фильтр не выбрал ни одного товара — проверьте значение фильтра.\n');
