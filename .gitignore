@@ -1,0 +1,5 @@
+node_modules/
+chrome/
+reports-output/
+.env
+*.log

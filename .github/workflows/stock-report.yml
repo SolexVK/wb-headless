@@ -1,0 +1,62 @@
+name: Отчёт — наличие и упущенная выручка
+
+# Запуск ТОЛЬКО вручную кнопкой «Run workflow» на вкладке Actions.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'За сколько последних дней считать (если не заданы точные даты)'
+        required: false
+        default: '30'
+      d1:
+        description: 'Дата начала (YYYY-MM-DD) — необязательно'
+        required: false
+        default: ''
+      d2:
+        description: 'Дата конца (YYYY-MM-DD) — необязательно'
+        required: false
+        default: ''
+
+  # ▼▼▼ Чтобы отчёт собирался сам КАЖДЫЙ ДЕНЬ — уберите '#' на двух строках ниже.
+  #     6:00 UTC = 9:00 по Москве. (min hour day month day-of-week)
+  # schedule:
+  #   - cron: '0 6 * * *'
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Забрать код из репозитория
+        uses: actions/checkout@v4
+
+      - name: Установить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Установить зависимости (без скачивания Chromium)
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: '1'
+        run: npm ci
+
+      - name: Собрать отчёт
+        env:
+          MPSTATS_TOKEN: ${{ secrets.MPSTATS_TOKEN }}
+          REPORT_DAYS: ${{ github.event.inputs.days }}
+        run: |
+          if [ -n "${{ github.event.inputs.d1 }}" ] && [ -n "${{ github.event.inputs.d2 }}" ]; then
+            echo "Период: ${{ github.event.inputs.d1 }} … ${{ github.event.inputs.d2 }}"
+            node report-stock.js "${{ github.event.inputs.d1 }}" "${{ github.event.inputs.d2 }}"
+          else
+            echo "Период: последние ${REPORT_DAYS} дней"
+            node report-stock.js
+          fi
+
+      - name: Приложить готовый отчёт (CSV + JSON) к запуску
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-report
+          path: reports-output/*
+          if-no-files-found: warn
+          retention-days: 90
