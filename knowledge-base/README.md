@@ -28,12 +28,16 @@
 | 08 | [08-instrumenty-i-servisy.md](08-instrumenty-i-servisy.md) | Инструменты и сервисы: Gem, Wildbox, MPStats, Радар, репрайсер, боты |
 | 09 | [09-podbor-tovara-supr-kartochka.md](09-podbor-tovara-supr-kartochka.md) | Подбор товара, «супер-карточка», цвет, выбор категории, метод «прошлое → будущее», таблица особенностей |
 | 10 | [10-ab-testy-polki-personalizaciya.md](10-ab-testy-polki-personalizaciya.md) | АБ-тестирование, полки, персонализированная выдача, выкуп, депонирование |
-| 11 | [11-seo-optimizaciya.md](11-seo-optimizaciya.md) | SEO: наименование, характеристики, категории, текст (LCA/EAT), сбор запросов, промпты |
+| 11 | [11-seo-optimizaciya.md](11-seo-optimizaciya.md) | SEO: наименование, характеристики, категории, текст (LCA/EAT), сбор запросов, промпты, полный цикл Wildbox |
+| 12 | [12-reklama-prodvizhenie.md](12-reklama-prodvizhenie.md) | Реклама/продвижение: СПП, золотые места, формула акций, АРК/АУК стратегия, идентификатор поисковой выдачи, ставки, выкупы vs раздачи |
+| 13 | [13-prinadlezhnost-zaprosa.md](13-prinadlezhnost-zaprosa.md) | Принадлежность запроса: % присутствия признака как порог входа, сегменты/подсегменты, цвет |
+| 14 | [14-podbor-nishi-wildbox.md](14-podbor-nishi-wildbox.md) | Подбор ниши через Wildbox: Оракул запросов, сезонность/демпинг, ценовые сегменты, нейро-образ товара |
+| 15 | [15-yunit-ekonomika-benchmarks.md](15-yunit-ekonomika-benchmarks.md) | Юнит-экономика и бенчмарки: поборы WB ~48%, чистая прибыль ~7%, оцифровка |
 | — | [sources.md](sources.md) | Соответствие «урок → темы», статус обработки |
 
 ## Статус
 
-- ✅ Обработано уроков: **11** (см. [sources.md](sources.md)).
+- ✅ Обработано уроков: **16** (см. [sources.md](sources.md)).
 - 🔜 Ожидаются новые уроки — база будет дополняться, нумерация тем сохраняется.
 
 ## Важные оговорки
