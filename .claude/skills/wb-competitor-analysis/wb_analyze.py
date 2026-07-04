@@ -348,20 +348,30 @@ def content_benchmark(items, k):
     return {"k": len(top), "metrics": metrics}
 
 
-def color_distribution(items, k, top_n=6):
-    """Принадлежность (прокси): доля ВЫРУЧКИ по цветам среди топ-k SKU."""
-    top = sorted(items, key=lambda it: num(it.get("revenue")), reverse=True)[:k]
+def color_distribution(items, agg, by, players_n, top_n=8):
+    """Реальная раскладка цветов по СКЛЕЙКАМ выбранных ТОП-игроков.
+
+    Берём все SKU (цветовые вариации) топ-N продавцов/брендов из блока B и агрегируем цвет по
+    ВЫРУЧКЕ. Возвращаем top_n цветов + сколько из топ-игроков предлагают каждый цвет (широта)."""
+    key = "seller" if by == "seller" else "brand"
+    top_names = {n for n, _ in sorted(agg.items(), key=lambda kv: kv[1]["rev"], reverse=True)[:players_n]}
     rev = defaultdict(float)
     cnt = defaultdict(int)
+    who = defaultdict(set)
     tot = 0.0
-    for it in top:
+    for it in items:
+        owner = (it.get(key) or "—").strip()
+        if owner not in top_names:
+            continue
         c = (it.get("color") or "—").strip() or "—"
         r = num(it.get("revenue"))
         rev[c] += r
         cnt[c] += 1
+        who[c].add(owner)
         tot += r
     ranked = sorted(rev.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
-    return [{"color": c, "rev_share": (r / tot * 100 if tot else 0), "skus": cnt[c]} for c, r in ranked]
+    return [{"color": c, "rev_share": (r / tot * 100 if tot else 0),
+             "skus": cnt[c], "players": len(who[c])} for c, r in ranked]
 
 
 def seasonality(trend):
@@ -607,12 +617,13 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
 
     # --- D. Принадлежность (прокси по цвету) ---
     if colors:
-        L += ["## D. Принадлежность — доминирующие цвета топа (прокси)",
-              "| Цвет | Доля выручки | SKU |", "|---|--:|--:|"]
+        L += [f"## D. Доминирующие цвета по склейкам ТОП-{args.top} (реальные продажи)",
+              "| Цвет | Доля выручки | SKU | У скольких топов |", "|---|--:|--:|--:|"]
         for c in colors:
-            L.append(f"| {c['color']} | {c['rev_share']:.0f}% | {c['skus']} |")
-        L += ["", "> Цвет — важнейший критерий принадлежности (глава 13). Полный %-анализ признаков "
-              "(капюшон/состав/размер и т.п.) — только через **Wildbox «топы поиска»**; см. блок H и шаблон.", ""]
+            L.append(f"| {c['color']} | {c['rev_share']:.0f}% | {c['skus']} | {c['players']} |")
+        L += ["", "> Считается по всем цветовым вариациям (склейкам) выбранных ТОП-игроков, взвешенно по "
+              "выручке. Цвет — важнейший критерий принадлежности (глава 13); «у скольких топов» = широта "
+              "цвета в нише. Полный %-анализ признаков (капюшон/состав/размер) — Wildbox «топы поиска».", ""]
 
     # --- E. Контент-бенчмарк ---
     if cb:
@@ -981,18 +992,20 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                  '<p class="meta">⚠️ Задай себестоимость (--cost), чтобы посчитать выгодный ценовой коридор '
                  'по марже.</p></section>')
 
-    # D. colors
+    # D. colors — по склейкам выбранных топов (реальные продажи)
     if colors:
         mx = max((c["rev_share"] for c in colors), default=1) or 1
         bars = "".join(
             f'<div class="bar-row"><span>{esc(c["color"])}</span>'
             f'<span class="bar"><span style="width:{c["rev_share"]/mx*100:.0f}%"></span></span>'
-            f'<span class="num" style="text-align:right">{c["rev_share"]:.0f}% · {c["skus"]}</span></div>'
+            f'<span class="num" style="text-align:right">{c["rev_share"]:.0f}% · {c["skus"]} SKU · '
+            f'{c["players"]}/{args.top} топ</span></div>'
             for c in colors)
-        P.append('<section><h2>Принадлежность — доминирующие цвета топа</h2>'
+        P.append(f'<section><h2>Доминирующие цвета по склейкам ТОП-{args.top} (реальные продажи)</h2>'
                  f'<div class="bars">{bars}</div>'
-                 '<p class="meta">Цвет — важнейший критерий принадлежности (гл. 13). Полный %-анализ '
-                 'признаков — через Wildbox «топы поиска» (см. план).</p></section>')
+                 '<p class="meta">По всем цветовым вариациям склеек выбранных топов, взвешенно по выручке. '
+                 '«N/топ» = у скольких топ-игроков есть цвет (широта). Полный %-анализ признаков — '
+                 'Wildbox «топы поиска» (см. план).</p></section>')
 
     # E. content benchmark (+ Ваше if mine)
     if cb:
@@ -1167,7 +1180,7 @@ def _demo_inputs():
     econ = compute_economics(items, 536, econ_params())   # себестоимость 536 ₽ (демо)
     return dict(A=A, path=path, path_note="синтетика (демо)", nfilter="полос", items=items,
                 agg=agg, tot=tot, pz=price_zone(items), cb=content_benchmark(items, 20),
-                colors=color_distribution(items, 20), seas={"delta_pct": 14.0},
+                colors=color_distribution(items, agg, "seller", 10), seas={"delta_pct": 14.0},
                 review=cards_for_review(items, agg, "seller", 6), mine=profile_sku(items, 777),
                 econ=econ, notes=["trends (демо)"])
 
@@ -1267,7 +1280,7 @@ def main():
     agg, tot_rev = aggregate(items, args.by)
     pz = price_zone(items)
     cb = content_benchmark(items, args.bench)
-    colors = color_distribution(items, args.bench)
+    colors = color_distribution(items, agg, args.by, args.top)
     review = cards_for_review(items, agg, args.by, args.cards)
 
     # сезонность — мягко (формат trends может отличаться)
