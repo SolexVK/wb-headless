@@ -1,0 +1,50 @@
+name: Обновление документации WB API (лимиты и методы)
+
+# Раз в неделю перечитывает страницы документации WB (docs/wb-api/pages.json)
+# и коммитит изменения, если лимиты/методы поменялись. Можно запустить и вручную.
+on:
+  workflow_dispatch:
+  schedule:
+    # Понедельник, 05:00 UTC (08:00 МСК). (min hour day month day-of-week)
+    - cron: '0 5 * * 1'
+
+# Нужно право коммитить обновлённые снимки обратно в репозиторий.
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Забрать код из репозитория
+        uses: actions/checkout@v4
+
+      - name: Установить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Установить зависимости (без Chromium от Puppeteer)
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: '1'
+        run: npm ci
+
+      - name: Установить браузер для Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Перечитать документацию WB
+        # В CI прямая сеть (без MITM-прокси), поэтому TLS-воркэраунд не включается.
+        run: node scripts/refresh-wb-docs.mjs
+
+      - name: Закоммитить изменения снимков (если есть)
+        run: |
+          if [ -n "$(git status --porcelain docs/wb-api)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add docs/wb-api
+            git commit -m "docs(wb-api): еженедельное обновление снимков документации"
+            git push
+            echo "Снимки обновлены и запушены."
+          else
+            echo "Изменений в документации нет."
+          fi
