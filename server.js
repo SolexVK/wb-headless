@@ -13,6 +13,10 @@ const API_KEY = process.env.API_KEY || 'supersecret';
 const PORT = process.env.PORT || 8080;
 const WB_AUTH_URL = 'https://seller-auth.wildberries.ru/ru/';
 
+// MPStats API: токен берём из окружения (.env), в код/git не хардкодим
+const MPSTATS_TOKEN = process.env.MPSTATS_TOKEN || '';
+const MPSTATS_BASE = (process.env.MPSTATS_BASE || 'https://mpstats.io/api').replace(/\/+$/, '');
+
 // ---------- helpers ----------
 function requireKey(req, res, next) {
   if ((req.headers['x-api-key'] || '') !== API_KEY) {
@@ -123,6 +127,45 @@ app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }
 app.get('/debug-chrome', requireKey, (req, res) => {
   const chromePath = findLocalChrome();
   res.json({ cwd: process.cwd(), chromePath: chromePath || null, exists: !!chromePath });
+});
+
+// ---------- MPStats proxy ----------
+// Универсальный шлюз: клиент дергает /mpstats/<путь MPStats>, сервер сам
+// подставляет заголовок X-Mpstats-TOKEN и проксирует запрос на MPSTATS_BASE.
+// Примеры:
+//   GET  /mpstats/wb/get/category?path=...&d1=2024-01-01&d2=2024-01-31
+//   POST /mpstats/wb/get/category            (JSON-тело уходит как есть)
+app.all('/mpstats/*', requireKey, async (req, res) => {
+  if (!MPSTATS_TOKEN) {
+    return res.status(500).json({
+      error: 'mpstats_token_missing',
+      detail: 'Не задан MPSTATS_TOKEN. Впишите токен в .env и перезапустите сервер.'
+    });
+  }
+
+  // всё после "/mpstats/" (включая query-строку) — как есть, без потери кодировки
+  const rest = req.originalUrl.replace(/^\/mpstats\/?/, '');
+  const target = `${MPSTATS_BASE}/${rest}`;
+
+  try {
+    const method = req.method.toUpperCase();
+    const headers = {
+      'X-Mpstats-TOKEN': MPSTATS_TOKEN,
+      'Accept': 'application/json'
+    };
+    let body;
+    if (method !== 'GET' && method !== 'HEAD' && req.body && Object.keys(req.body).length) {
+      headers['Content-Type'] = 'application/json';
+      body = JSON.stringify(req.body);
+    }
+
+    const upstream = await fetch(target, { method, headers, body });
+    const text = await upstream.text();
+    const ct = upstream.headers.get('content-type') || 'application/json';
+    return res.status(upstream.status).type(ct).send(text);
+  } catch (err) {
+    return res.status(502).json({ error: 'mpstats_request_failed', detail: String(err?.message || err) });
+  }
 });
 
 // ---------- START ----------

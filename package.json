@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "express": "^4.19.2",
-    "puppeteer": "^22.10.0",
+    "express": "^4.22.2",
+    "puppeteer": "^22.15.0",
     "uuid": "^9.0.1"
   },
   "scripts": {

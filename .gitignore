@@ -4,6 +4,7 @@
 
 # зависимости и артефакты
 node_modules/
+package-lock.json
 chrome/
 
 # логи
