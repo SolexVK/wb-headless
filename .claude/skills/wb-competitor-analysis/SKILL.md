@@ -73,6 +73,11 @@ python3 .claude/skills/wb-competitor-analysis/wb_analyze.py \
 затем покажи файл (SendUserFile с `display:"render"` или опубликуй Artifact-ом: для Artifact нужна
 embed-версия — вызови `build_html(..., embed=True)`, чтобы не было двойного `<html>`).
 
+**PDF-отчёт (кликабельный).** `--pdf-out FILE` рендерит standalone HTML в PDF через headless
+Chromium; ссылки на карточки WB остаются **кликабельными**. Нужен Chromium (ищется по env
+`CHROMIUM_BIN`, затем `/opt/pw-browsers/chromium`, `chromium`, `google-chrome`). Можно вместе с
+`--html-out` (HTML собирается один раз). Отдай пользователю через SendUserFile (`display:"attach"`).
+
 ## Что делает движок (разделы отчёта)
 - **A.** Ёмкость/концентрация + сезонность (тренд 2-й половины периода к 1-й).
 - **B.** ТОП-N конкурентов: выручка, доля, продажи, ср. цена, SKU, рейтинг, упущенная выручка.

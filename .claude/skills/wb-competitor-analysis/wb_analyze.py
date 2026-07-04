@@ -104,6 +104,40 @@ class MpstatsError(RuntimeError):
         super().__init__(f"MPStats API {code} на {path}: {message}")
 
 
+def find_chromium():
+    import shutil
+    cands = [os.environ.get("CHROMIUM_BIN"), "/opt/pw-browsers/chromium",
+             "chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "chrome"]
+    for c in cands:
+        if not c:
+            continue
+        p = c if (os.path.isabs(c) and os.path.exists(c)) else shutil.which(c)
+        if p:
+            return p
+    return None
+
+
+def html_to_pdf(html, pdf_path):
+    """Печать HTML в кликабельный PDF через headless Chromium (ссылки сохраняются)."""
+    chrome = find_chromium()
+    if not chrome:
+        raise RuntimeError("Chromium не найден. Укажи путь в env CHROMIUM_BIN — PDF не создан.")
+    with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as f:
+        f.write(html)
+        tmp = f.name
+    try:
+        cmd = [chrome, "--headless", "--no-sandbox", "--disable-gpu", "--no-pdf-header-footer",
+               f"--print-to-pdf={pdf_path}", "file://" + tmp]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if not (os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 1000):
+            raise RuntimeError("Chromium не отрендерил PDF: " + (r.stderr or "")[-200:])
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def die_api(e):
     """Понятно сообщить об ошибке MPStats и выйти."""
     hint = ""
@@ -800,6 +834,13 @@ a.pcard .go{font-size:.74rem;color:var(--accent);margin-top:auto;}
 .check .g{color:var(--muted);font-size:.82em;}
 footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--hair);color:var(--muted);font-size:.8rem;}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;}}
+@media print{
+  :root{--paper:#fff;--panel:#fff;--ink:#1a141a;--muted:#5c5058;--hair:#d8ccd2;--soft:#faf3f7;}
+  body{background:#fff;} .toggle{display:none;} .wca{max-width:none;padding:0;}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  section{break-inside:avoid;} .callout,.mycard,.tbl-wrap,a.pcard,.verdict,.plan>div{break-inside:avoid;}
+  tr:hover td{background:none;} a{color:var(--accent2);}
+}
 """
 
 JS_REPORT = """
@@ -1131,18 +1172,22 @@ def _demo_inputs():
                 econ=econ, notes=["trends (демо)"])
 
 
-def selftest(html_out=None):
+def selftest(html_out=None, pdf_out=None):
     d = _demo_inputs()
     rep, top, gaps = build_report(d["A"], d["path"], d["path_note"], d["nfilter"], d["items"],
                                   len(d["items"]), d["agg"], d["tot"], d["pz"], d["cb"], d["colors"],
                                   d["seas"], d["review"], d["mine"], d["notes"], d["econ"])
     print(rep)
-    if html_out:
+    if html_out or pdf_out:
         html = build_html(d["A"], d["path"], d["path_note"], d["nfilter"], d["items"], d["agg"],
                           d["tot"], top, d["pz"], d["cb"], d["colors"], d["seas"], d["review"],
                           d["mine"], gaps, d["notes"], d["econ"])
-        open(html_out, "w", encoding="utf-8").write(html)
-        print(f"[selftest] HTML → {html_out}", file=sys.stderr)
+        if html_out:
+            open(html_out, "w", encoding="utf-8").write(html)
+            print(f"[selftest] HTML → {html_out}", file=sys.stderr)
+        if pdf_out:
+            html_to_pdf(html, pdf_out)
+            print(f"[selftest] PDF → {pdf_out}", file=sys.stderr)
     print("\n[selftest] OK — секций собрано, гэпов:", len(gaps), file=sys.stderr)
 
 
@@ -1163,6 +1208,7 @@ def main():
     ap.add_argument("--out", default=None, help="файл для markdown-отчёта")
     ap.add_argument("--json-out", default=None, help="файл для JSON с агрегатами")
     ap.add_argument("--html-out", dest="html_out", default=None, help="файл для HTML-отчёта (кликабельный)")
+    ap.add_argument("--pdf-out", dest="pdf_out", default=None, help="файл для PDF-отчёта (кликабельные ссылки, через Chromium)")
     ap.add_argument("--selftest", action="store_true", help="прогон сборки отчёта на синтетике (без сети)")
     # --- юнит-экономика (дефолты = подтверждённые пользователем цифры; себестоимость обязательна) ---
     ap.add_argument("--cost", type=float, default=None,
@@ -1182,7 +1228,7 @@ def main():
     args = ap.parse_args()
 
     if args.selftest:
-        selftest(args.html_out)
+        selftest(args.html_out, args.pdf_out)
         return
 
     token = load_token()
@@ -1263,11 +1309,18 @@ def main():
     print(report)
     if args.out:
         open(args.out, "w", encoding="utf-8").write(report)
-    if args.html_out:
+    if args.html_out or args.pdf_out:
         html = build_html(args, path, path_note, nfilter, items, agg, tot_rev, top,
                           pz, cb, colors, seas, review, mine, gaps, notes, econ)
-        open(args.html_out, "w", encoding="utf-8").write(html)
-        print(f"[html] отчёт → {args.html_out}", file=sys.stderr)
+        if args.html_out:
+            open(args.html_out, "w", encoding="utf-8").write(html)
+            print(f"[html] отчёт → {args.html_out}", file=sys.stderr)
+        if args.pdf_out:
+            try:
+                html_to_pdf(html, args.pdf_out)
+                print(f"[pdf] отчёт → {args.pdf_out}", file=sys.stderr)
+            except Exception as e:
+                print(f"[pdf] не удалось: {e}", file=sys.stderr)
     if args.json_out:
         payload = {
             "query": {"query": args.query, "gender": args.gender, "item": args.item,
