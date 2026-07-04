@@ -1,0 +1,11 @@
+# Артефакты сборки PyInstaller
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.pyc
+
+# Локальный ffmpeg рядом с программой
+ffmpeg/
