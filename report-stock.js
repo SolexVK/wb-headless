@@ -51,7 +51,7 @@ export async function runReport({ d1, d2, skus } = {}) {
     d2: period.d2,
     concurrency: Number(process.env.REPORT_CONCURRENCY) || 5,
     onProgress: (done, total) => {
-      if (done % 25 === 0 || done === total) {
+      if (done % 10 === 0 || done === total) {
         process.stderr.write(`  обработано ${done}/${total}\n`);
       }
     },
