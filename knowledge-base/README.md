@@ -28,11 +28,12 @@
 | 08 | [08-instrumenty-i-servisy.md](08-instrumenty-i-servisy.md) | Инструменты и сервисы: Gem, Wildbox, MPStats, Радар, репрайсер, боты |
 | 09 | [09-podbor-tovara-supr-kartochka.md](09-podbor-tovara-supr-kartochka.md) | Подбор товара, «супер-карточка», цвет, выбор категории, метод «прошлое → будущее», таблица особенностей |
 | 10 | [10-ab-testy-polki-personalizaciya.md](10-ab-testy-polki-personalizaciya.md) | АБ-тестирование, полки, персонализированная выдача, выкуп, депонирование |
+| 11 | [11-seo-optimizaciya.md](11-seo-optimizaciya.md) | SEO: наименование, характеристики, категории, текст (LCA/EAT), сбор запросов, промпты |
 | — | [sources.md](sources.md) | Соответствие «урок → темы», статус обработки |
 
 ## Статус
 
-- ✅ Обработано уроков: **9** (см. [sources.md](sources.md)).
+- ✅ Обработано уроков: **11** (см. [sources.md](sources.md)).
 - 🔜 Ожидаются новые уроки — база будет дополняться, нумерация тем сохраняется.
 
 ## Важные оговорки
