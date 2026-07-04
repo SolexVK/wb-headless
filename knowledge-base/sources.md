@@ -2,7 +2,7 @@
 
 Сырые транскрибации хранятся в [`sources/`](sources/). Ниже — соответствие «урок → темы».
 
-## Обработанные уроки (5)
+## Обработанные уроки (9)
 
 | Файл источника | Тема урока | Куда разнесено |
 |----------------|-----------|----------------|
@@ -11,6 +11,10 @@
 | `sources/lesson-03-analiz-listinga-gem.txt` | Анализ листинга конкурентов, сегменты, Gem/Competition, Keywords, теги смыслов, ассоциированные конверсии, рич-контент | [04](04-konkurentnyy-analiz-metodika.md), [06](06-otzyvy-rich-content-konversii.md) |
 | `sources/lesson-04-dz-smysly-zaprosy.txt` | ДЗ: смыслы в запросах, Competition (наш + 4 конкурента) | [04](04-konkurentnyy-analiz-metodika.md) |
 | `sources/lesson-05-neyropostroyka-ai.txt` | Нейропостройка листинга: nano-banana, Gemini, Veo, Klink, апскейлер, GoLogin; какие базовые фото нужны; видео как ответы на вопросы | [07](07-proizvodstvo-kontenta-ai.md) |
+| `sources/lesson-06-podbor-tovara.txt` | Подбор товара, «супер-карточка», цвет/характеристики/категория, СПП-пороги, метод «прошлое → будущее», сезонность | [09](09-podbor-tovara-supr-kartochka.md), [05](05-cena-i-cenovaya-segmentaciya.md) |
+| `sources/lesson-07-dz-osobennosti-tovara.txt` | ДЗ №4: таблица особенностей товара (своя + 2 конкурента), одежда и товарка | [09](09-podbor-tovara-supr-kartochka.md) |
+| `sources/lesson-08-razbor-svarka-kombinezon.txt` | Живой разбор: сварка (ракурс, клеммы, депонирование, склейка) и детский комбинезон (неочевидные факторы, мембрана/альпалюкс) | [03](03-listing-infografika.md), [04](04-konkurentnyy-analiz-metodika.md), [06](06-otzyvy-rich-content-konversii.md), [10](10-ab-testy-polki-personalizaciya.md) |
+| `sources/lesson-09-razbor-trusy.txt` | Живой разбор: женские трусы (набор vs комплект, контур-модель, цветовая раскладка, АБ-тест, полки, персонализация) | [03](03-listing-infografika.md), [06](06-otzyvy-rich-content-konversii.md), [09](09-podbor-tovara-supr-kartochka.md), [10](10-ab-testy-polki-personalizaciya.md) |
 
 ## Заметки по качеству источника
 

@@ -26,11 +26,13 @@
 | 06 | [06-otzyvy-rich-content-konversii.md](06-otzyvy-rich-content-konversii.md) | Отзывы, rich-контент, ассоциированные конверсии, «покупают также» |
 | 07 | [07-proizvodstvo-kontenta-ai.md](07-proizvodstvo-kontenta-ai.md) | Производство контента через нейросети: nano-banana, Gemini, Veo, Klink, апскейлер, GoLogin |
 | 08 | [08-instrumenty-i-servisy.md](08-instrumenty-i-servisy.md) | Инструменты и сервисы: Gem, Wildbox, MPStats, Радар, репрайсер, боты |
+| 09 | [09-podbor-tovara-supr-kartochka.md](09-podbor-tovara-supr-kartochka.md) | Подбор товара, «супер-карточка», цвет, выбор категории, метод «прошлое → будущее», таблица особенностей |
+| 10 | [10-ab-testy-polki-personalizaciya.md](10-ab-testy-polki-personalizaciya.md) | АБ-тестирование, полки, персонализированная выдача, выкуп, депонирование |
 | — | [sources.md](sources.md) | Соответствие «урок → темы», статус обработки |
 
 ## Статус
 
-- ✅ Обработано уроков: **5** (см. [sources.md](sources.md)).
+- ✅ Обработано уроков: **9** (см. [sources.md](sources.md)).
 - 🔜 Ожидаются новые уроки — база будет дополняться, нумерация тем сохраняется.
 
 ## Важные оговорки
