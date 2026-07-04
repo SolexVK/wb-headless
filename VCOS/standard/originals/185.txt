@@ -1,0 +1,52 @@
+VCOS/
+│
+├── standard/
+│   │
+│   ├── 000-meta/
+│   │      Vision.md
+│   │      Principles.md
+│   │      Architecture-Invariants.md
+│   │
+│   ├── 100-ontology/
+│   │      CO-001-Core-Ontology.md
+│   │
+│   ├── 200-model/
+│   │      CM-001-Canonical-Model.md
+│   │
+│   ├── 300-algebra/
+│   │      CA-001-Core-Algebra.md
+│   │
+│   ├── 400-protocols/
+│   │      CP-001-Core-Protocols.md
+│   │
+│   ├── 500-rfc/
+│   │
+│   └── glossary/
+│
+├── hermes/
+│   │
+│   ├── runtime/
+│   ├── orchestrator/
+│   ├── transformers/
+│   ├── memory/
+│   ├── renderers/
+│   ├── knowledge/
+│   ├── agents/
+│   ├── sdk/
+│   └── tests/
+│
+├── domain-packs/
+│   │
+│   ├── film/
+│   ├── advertising/
+│   ├── photography/
+│   ├── infographic/
+│   ├── youtube/
+│   ├── presentation/
+│   └── ...
+│
+├── knowledge-packs/
+│
+├── examples/
+│
+└── docs/

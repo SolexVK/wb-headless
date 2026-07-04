@@ -1,0 +1,79 @@
+VCOS/
+│
+├── README.md
+│
+├── standard/
+│   │
+│   ├── 000-foundation/
+│   │   ├── Vision.md
+│   │   ├── Architecture-Invariants.md
+│   │   ├── Computational-Theory.md
+│   │   └── ADR/
+│   │       └── ADR-0001-Semantic-Graph.md
+│   │
+│   ├── 100-core-ontology/
+│   │   └── CO-001/
+│   │       ├── specification.md
+│   │       ├── review.md
+│   │       ├── changelog.md
+│   │       └── examples.md
+│   │
+│   ├── 200-canonical-model/
+│   │   └── CM-001/
+│   │       ├── specification.md
+│   │       ├── review.md
+│   │       ├── changelog.md
+│   │       ├── node-model.md
+│   │       ├── edge-model.md
+│   │       ├── graph-invariants.md
+│   │       ├── identity.md
+│   │       ├── versioning.md
+│   │       ├── metadata.md
+│   │       ├── persistence.md
+│   │       └── examples.md
+│   │
+│   ├── 300-core-algebra/
+│   │   └── CA-001/
+│   │       ├── specification.md
+│   │       ├── review.md
+│   │       ├── changelog.md
+│   │       └── examples.md
+│   │
+│   ├── 400-protocols/
+│   │   └── CP-001/
+│   │       ├── specification.md
+│   │       ├── review.md
+│   │       ├── changelog.md
+│   │       └── examples.md
+│   │
+│   └── glossary/
+│
+├── hermes/
+│   │
+│   ├── kernel/
+│   ├── orchestrator/
+│   ├── transformers/
+│   ├── runtime/
+│   ├── memory/
+│   ├── knowledge/
+│   ├── renderers/
+│   ├── interview/
+│   ├── reasoning/
+│   ├── adapters/
+│   ├── sdk/
+│   └── tests/
+│
+├── domain-packs/
+│   ├── film/
+│   ├── advertising/
+│   ├── photography/
+│   ├── infographic/
+│   ├── youtube/
+│   ├── ui/
+│   └── ...
+│
+├── knowledge-packs/
+│
+├── examples/
+│
+└── sandbox/

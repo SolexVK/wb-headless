@@ -1,0 +1,504 @@
+Хорошо, давай пойдем по твоему плану. Давай прям с первого пункта. Давай Спроектируем Scene Specification
+Отлично. Я бы даже сказал, что Scene Specification — это самый важный документ всего проекта. Если мы его правильно спроектируем, то потом и агенты, и память Hermes, и Prompt Renderer будут "нанизываться" на него как модули на единую шину данных.
+Но я хочу предложить одно архитектурное решение, которое, как мне кажется, принципиально повысит качество всей системы.
+________________________________________
+Предлагаю отказаться от "JSON как структуры данных"
+И перейти к концепции:
+Scene Specification = Canonical Scene Graph (CSG)
+То есть это не просто JSON с полями.
+Это каноническая модель сцены, которая является внутренним языком Prompt Architect.
+JSON будет лишь способом её сериализации.
+Например:
+Prompt
+      ↓
+Scene Discovery
+      ↓
+Canonical Scene Graph
+      ↓
+Visual Reasoner
+      ↓
+Canonical Scene Graph
+      ↓
+Renderer
+      ↓
+Prompt
+То есть CSG никогда не теряется.
+Все агенты работают исключительно с ним.
+________________________________________
+Какие требования должны быть к CSG
+Я бы заложил несколько принципов.
+1. Независимость от модели
+Внутренняя модель никогда не должна содержать вещей вроде
+--stylize 500
+или
+v7
+или
+CFG Scale
+Это уже забота Renderer.
+________________________________________
+2. Независимость от типа контента
+Одна и та же Scene должна описывать
+•	фотографию; 
+•	кино; 
+•	анимацию; 
+•	инфографику; 
+•	концепт-арт; 
+•	рекламу; 
+•	видео; 
+•	YouTube thumbnail. 
+________________________________________
+3. Не только описание
+Она должна содержать
+не только
+"что"
+но и
+"почему".
+Например
+Mood
+
+↓
+
+Anxiety
+
+↓
+
+VisualReason
+
+↓
+
+Long shadows
+Именно этим потом сможет пользоваться Visual Reasoner.
+________________________________________
+Я бы разделил Scene Specification на четыре уровня
+Не один JSON.
+А четыре слоя.
+Semantic Layer
+
+↓
+
+Narrative Layer
+
+↓
+
+Visual Layer
+
+↓
+
+Technical Layer
+Это очень похоже на архитектуру игровых движков.
+________________________________________
+Layer 1
+Semantic
+Самый верхний уровень.
+Он отвечает
+что пользователь хочет сказать.
+Например
+Intent
+
+Theme
+
+Emotion
+
+Message
+
+Target Audience
+
+Purpose
+
+Genre
+
+Story
+
+Conflict
+
+Symbolism
+Например
+Theme
+
+Hope after failure
+или
+Purpose
+
+Commercial advertisement
+________________________________________
+Layer 2
+Narrative
+Что происходит.
+Например
+Characters
+
+Objects
+
+Environment
+
+Actions
+
+Relationships
+
+Timeline
+
+Events
+
+Focus
+
+Hierarchy
+То есть
+не
+как выглядит,
+а
+что происходит.
+________________________________________
+Layer 3
+Visual
+Вот здесь начинается режиссура.
+Composition
+
+Camera
+
+Lighting
+
+Color
+
+Texture
+
+Materials
+
+Motion
+
+Perspective
+
+Lens
+
+Depth
+
+Atmosphere
+
+Weather
+
+Visual Style
+
+Film Language
+________________________________________
+Layer 4
+Technical
+Это уже
+не творчество.
+Aspect Ratio
+
+Output
+
+Video Duration
+
+FPS
+
+Resolution
+
+Generator
+
+Negative Prompt
+
+Render Settings
+
+Renderer Metadata
+________________________________________
+Теперь глубже
+Я бы сделал Scene Graph примерно таким.
+Scene
+│
+├── Metadata
+│
+├── Intent
+│
+├── Narrative
+│
+├── Characters
+│
+├── Objects
+│
+├── Environment
+│
+├── Composition
+│
+├── Camera
+│
+├── Lighting
+│
+├── Color
+│
+├── Materials
+│
+├── Motion
+│
+├── Style
+│
+├── Audio
+│
+├── Typography
+│
+├── Constraints
+│
+├── Technical
+│
+└── Renderer
+________________________________________
+Самое интересное
+Я бы вообще не делал плоский JSON.
+Например персонаж.
+Вместо
+{
+ "hair":"black"
+}
+делать
+Character
+
+↓
+
+Identity
+
+↓
+
+Appearance
+
+↓
+
+Wardrobe
+
+↓
+
+Pose
+
+↓
+
+Expression
+
+↓
+
+Movement
+
+↓
+
+Psychology
+
+↓
+
+Role
+
+↓
+
+Relationships
+То есть каждый Character —
+это самостоятельный объект.
+________________________________________
+То же самое Environment.
+Environment
+
+↓
+
+Location
+
+↓
+
+Architecture
+
+↓
+
+Nature
+
+↓
+
+Furniture
+
+↓
+
+Atmosphere
+
+↓
+
+Weather
+
+↓
+
+Time
+
+↓
+
+Lighting Interaction
+________________________________________
+Composition
+Отдельный объект.
+Composition
+
+↓
+
+Rule of Thirds
+
+↓
+
+Negative Space
+
+↓
+
+Visual Weight
+
+↓
+
+Leading Lines
+
+↓
+
+Balance
+
+↓
+
+Symmetry
+
+↓
+
+Blocking
+
+↓
+
+Focus
+
+↓
+
+Depth Layers
+________________________________________
+Camera
+Вообще отдельный мир.
+Camera
+
+↓
+
+Shot
+
+↓
+
+Lens
+
+↓
+
+Sensor
+
+↓
+
+Movement
+
+↓
+
+Height
+
+↓
+
+Angle
+
+↓
+
+POV
+
+↓
+
+DOF
+
+↓
+
+Focus
+
+↓
+
+Stabilization
+________________________________________
+Lighting
+Lighting
+
+↓
+
+Key
+
+↓
+
+Fill
+
+↓
+
+Rim
+
+↓
+
+Practical
+
+↓
+
+Bounce
+
+↓
+
+Volumetric
+
+↓
+
+Contrast
+
+↓
+
+Temperature
+
+↓
+
+Shadow Quality
+________________________________________
+Style
+Вот здесь начинается магия.
+Style
+
+↓
+
+Medium
+
+↓
+
+Era
+
+↓
+
+Art Direction
+
+↓
+
+Film Stock
+
+↓
+
+Influences
+
+↓
+
+Visual References
+
+↓
+
+Rendering Style
+________________________________________
+Почему это лучше
+Потому что Scene становится деревом объектов.
+А не JSON с полями.
+Любой агент может изменить только свою ветку.
+Например
+Visual Reasoner меняет только
+Lighting
+
+Composition
+
+Color
+И всё.
+Он не трогает Characters.
+________________________________________
+Что я предлагаю сделать
+Я предлагаю не пытаться сразу описать 200–300 полей. Это приведёт к громоздкой и трудноизменяемой схеме.
+Вместо этого предлагаю спроектировать CSG по принципу DDD (Domain-Driven Design):
+1.	Определить корневые сущности (Scene, Character, Environment, Camera, Lighting и т.д.). 
+2.	Для каждой сущности определить её ответственность. 
+3.	Только затем разработать детальную структуру каждого объекта. 
+Так мы получим не просто JSON-схему, а настоящую предметную модель. Она будет проще расширяться (например, добавить новый тип сущности Infographic или Storyboard), и каждый специализированный агент Hermes будет работать со своей частью графа, не нарушая остальную модель.
+Я бы начал именно с определения корневых сущностей и их границ ответственности. Это станет фундаментом всей системы, а уже на следующем шаге мы сможем детализировать каждую сущность до уровня конкретных полей и типов данных. Это, на мой взгляд, наиболее устойчивый путь к созданию специализированного агента Prompt Architect 3.0.
+
