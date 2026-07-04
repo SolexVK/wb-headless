@@ -93,6 +93,13 @@ function printSummary(report) {
   }
   if (report.errors.length) {
     console.log(`\n⚠ Ошибок при запросах: ${report.errors.length} (см. .json)`);
+    // Показываем несколько РАЗНЫХ текстов ошибок — этого хватает для диагноза.
+    const uniq = [...new Set(report.errors.map((e) => e.error))].slice(0, 3);
+    console.log('  Примеры ошибок:');
+    for (const msg of uniq) {
+      const sku = report.errors.find((e) => e.error === msg)?.sku;
+      console.log(`   • [${sku}] ${msg}`);
+    }
   }
 }
 
