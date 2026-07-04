@@ -75,6 +75,16 @@ function printSummary(report) {
   const t = report.totals;
   const top = report.rows.filter((r) => r.hasData && r.lostRevenue > 0).slice(0, 10);
 
+  if (report.dailyLimit) {
+    console.log('\n' + '═'.repeat(60));
+    console.log('⛔ ОСТАНОВЛЕНО: превышен дневной лимит запросов MPSTATS.');
+    console.log(`   Ответ MPSTATS: ${report.dailyLimit}`);
+    console.log(`   Обработать успели: ${report.totals.skuCount} из ${report.totals.skusRequested} SKU`);
+    console.log('   Что делать: подождать сброса лимита (обычно на след. сутки)');
+    console.log('   и запускать отчёт РЕЖЕ — 1 раз в день, а не многократно.');
+    console.log('═'.repeat(60));
+  }
+
   console.log('\n=== Наличие товара и упущенная выручка ===');
   console.log(`Период:            ${report.period.d1} … ${report.period.d2}`);
   console.log(`SKU с данными:      ${t.skuCount} из ${t.skusRequested}`);
@@ -111,6 +121,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       const { csvPath, jsonPath } = writeOutputs(report);
       printSummary(report);
       console.log(`\nФайлы:\n  ${csvPath}\n  ${jsonPath}`);
+      // Дневной лимит MPSTATS — помечаем запуск как неуспешный (красный ❌),
+      // но файлы с частичными данными всё равно сохранены и приложены.
+      if (report.dailyLimit) process.exit(2);
     })
     .catch((err) => {
       console.error('Ошибка отчёта:', err?.message || err);

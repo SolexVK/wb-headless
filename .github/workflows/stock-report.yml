@@ -55,9 +55,9 @@ jobs:
         env:
           MPSTATS_TOKEN: ${{ secrets.MPSTATS_TOKEN }}
           REPORT_DAYS: ${{ github.event.inputs.days }}
-          # MPSTATS отвечает медленно (~30с/запрос) — гоним больше запросов
-          # параллельно и даём запас по тайм-ауту, чтобы валидные ответы не рвались.
-          REPORT_CONCURRENCY: '10'
+          # Узкое место — дневная квота запросов MPSTATS, а не скорость,
+          # поэтому не гоним лишнего; тайм-аут с запасом на медленные ответы.
+          REPORT_CONCURRENCY: '5'
           MPSTATS_TIMEOUT_MS: '45000'
         run: |
           if [ -n "${{ github.event.inputs.d1 }}" ] && [ -n "${{ github.event.inputs.d2 }}" ]; then
