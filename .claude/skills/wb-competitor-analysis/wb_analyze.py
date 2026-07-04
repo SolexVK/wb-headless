@@ -25,7 +25,7 @@ MPSTATS_TOKEN или из .env (никогда не хардкодить).
   python3 wb_analyze.py --path "Женщинам/Блузки и рубашки/Рубашки" --my-sku 123456789
   python3 wb_analyze.py --selftest         # прогон сборки отчёта без сети (на синтетике)
 """
-import argparse, json, os, subprocess, sys, tempfile, urllib.parse
+import argparse, html as _html, json, os, subprocess, sys, tempfile, urllib.parse
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -554,17 +554,323 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
     return "\n".join(x for x in L if x is not None), top, gaps
 
 
+# ======================= HTML-отчёт (кликабельный, self-contained) =======================
+def esc(s):
+    return _html.escape("" if s is None else str(s))
+
+
+CSS_REPORT = """
+:root{--paper:#F5F0F1;--panel:#FDFAFB;--ink:#241C24;--muted:#7C6A75;--hair:#E7DBE1;
+--accent:#B21E68;--accent2:#8E1651;--soft:rgba(178,30,104,.07);
+--good:#3E7A55;--warn:#9A6A16;--bad:#B3402E;--shadow:rgba(40,20,35,.07);}
+@media (prefers-color-scheme:dark){:root{--paper:#161019;--panel:#1E1623;--ink:#ECE3EA;
+--muted:#A292A0;--hair:#352A39;--accent:#EA5DA0;--accent2:#F07FB6;--soft:rgba(234,93,160,.11);
+--good:#6FB98A;--warn:#D8A24B;--bad:#E0745F;--shadow:rgba(0,0,0,.28);}}
+:root[data-theme="light"]{--paper:#F5F0F1;--panel:#FDFAFB;--ink:#241C24;--muted:#7C6A75;--hair:#E7DBE1;--accent:#B21E68;--accent2:#8E1651;--soft:rgba(178,30,104,.07);--good:#3E7A55;--warn:#9A6A16;--bad:#B3402E;--shadow:rgba(40,20,35,.07);}
+:root[data-theme="dark"]{--paper:#161019;--panel:#1E1623;--ink:#ECE3EA;--muted:#A292A0;--hair:#352A39;--accent:#EA5DA0;--accent2:#F07FB6;--soft:rgba(234,93,160,.11);--good:#6FB98A;--warn:#D8A24B;--bad:#E0745F;--shadow:rgba(0,0,0,.28);}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.55;-webkit-font-smoothing:antialiased;}
+.wca{max-width:1080px;margin:0 auto;padding:clamp(18px,4vw,40px);}
+.num{font-variant-numeric:tabular-nums;}
+h1{font-family:Georgia,serif;font-size:clamp(1.55rem,4vw,2.3rem);line-height:1.1;margin:.15em 0 .1em;text-wrap:balance;}
+h2{font-family:Georgia,serif;font-size:clamp(1.12rem,2.6vw,1.35rem);margin:0 0 .55rem;}
+.eyebrow{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:0;}
+.meta{color:var(--muted);font-size:.88rem;margin:.3rem 0 0;}
+.meta code{background:var(--soft);padding:1px 6px;border-radius:5px;color:var(--ink);font-size:.85em;}
+header.top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;border-bottom:1px solid var(--hair);padding-bottom:16px;}
+.toggle{font:inherit;font-size:.78rem;color:var(--muted);background:var(--panel);border:1px solid var(--hair);border-radius:99px;padding:6px 12px;cursor:pointer;white-space:nowrap;}
+.toggle:hover{color:var(--accent);border-color:var(--accent);}
+section{margin-top:clamp(24px,4vw,38px);}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:12px;overflow:hidden;}
+.tile{background:var(--panel);padding:14px 16px;}
+.tile .v{font-family:Georgia,serif;font-size:clamp(1.25rem,3vw,1.65rem);line-height:1;}
+.tile .l{font-size:.71rem;color:var(--muted);margin-top:6px;}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--hair);border-radius:12px;}
+table{border-collapse:collapse;width:100%;font-size:.87rem;}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--hair);white-space:nowrap;}
+th{font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--panel);}
+tbody tr:last-child td{border-bottom:none;}
+td.r,th.r{text-align:right;}
+tr:hover td{background:var(--soft);}
+.rank{color:var(--accent);font-weight:700;}
+.callouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;}
+.callout{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:15px 16px;box-shadow:0 1px 2px var(--shadow);}
+.callout.hl{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
+.callout .k{font-size:.74rem;color:var(--muted);}
+.callout .b{font-family:Georgia,serif;font-size:1.3rem;margin-top:4px;}
+.callout .s{font-size:.76rem;color:var(--muted);margin-top:3px;}
+.bars{display:flex;flex-direction:column;gap:8px;}
+.bar-row{display:grid;grid-template-columns:110px 1fr 64px;gap:10px;align-items:center;font-size:.85rem;}
+.bar{height:12px;background:var(--soft);border-radius:6px;overflow:hidden;}
+.bar>span{display:block;height:100%;background:var(--accent);border-radius:6px;}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;}
+a.pcard{display:flex;flex-direction:column;gap:6px;background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:14px;text-decoration:none;color:inherit;box-shadow:0 1px 2px var(--shadow);transition:border-color .15s,transform .15s;}
+a.pcard:hover{border-color:var(--accent);transform:translateY(-2px);}
+a.pcard .nm{font-weight:600;font-size:.88rem;line-height:1.3;}
+a.pcard .st{font-size:.79rem;color:var(--muted);}
+a.pcard .go{font-size:.74rem;color:var(--accent);margin-top:auto;}
+.mycard{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:16px 18px;}
+.mycard .facts{font-size:.88rem;color:var(--muted);}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+.chip{font-size:.8rem;padding:5px 11px;border-radius:99px;border:1px solid var(--hair);}
+.chip.bad{color:var(--bad);border-color:var(--bad);}
+.chip.ok{color:var(--good);border-color:var(--good);}
+.val-bad{color:var(--bad);font-weight:600;}
+.val-ok{color:var(--good);font-weight:600;}
+.plan{display:flex;flex-direction:column;gap:20px;}
+.plan h3{font-size:.76rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 4px;display:flex;align-items:center;gap:8px;}
+.plan h3::before{content:"";width:18px;height:2px;background:var(--accent);border-radius:2px;}
+.check{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;}
+.check li{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:8px;}
+.check li:hover{background:var(--soft);}
+.check input{margin-top:2px;width:16px;height:16px;accent-color:var(--accent);flex:none;cursor:pointer;}
+.check label{font-size:.9rem;cursor:pointer;}
+.check label.done{text-decoration:line-through;color:var(--muted);}
+.check .g{color:var(--muted);font-size:.82em;}
+footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--hair);color:var(--muted);font-size:.8rem;}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;}}
+"""
+
+JS_REPORT = """
+(function(){
+  var host=document.querySelector('[data-report]'); if(!host) return;
+  try{
+    var K='wbca:'+host.getAttribute('data-report');
+    var s=JSON.parse(localStorage.getItem(K)||'{}');
+    host.querySelectorAll('.check input').forEach(function(b){
+      var lab=document.querySelector('label[for="'+b.id+'"]');
+      if(s[b.id]){b.checked=true; if(lab)lab.classList.add('done');}
+      b.addEventListener('change',function(){
+        s[b.id]=b.checked; localStorage.setItem(K,JSON.stringify(s));
+        if(lab)lab.classList.toggle('done',b.checked);
+      });
+    });
+  }catch(e){}
+  var t=document.getElementById('wcaTheme');
+  if(t)t.addEventListener('click',function(){
+    var r=document.documentElement;
+    var cur=r.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+    r.setAttribute('data-theme',cur==='dark'?'light':'dark');
+    t.textContent=cur==='dark'?'☀ Тема':'☾ Тема';
+  });
+})();
+"""
+
+
+def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
+               pz, cb, colors, seas, review, mine, gaps, notes, embed=False):
+    title = args.query or (name_filter or path.split('/')[-1])
+    by_label = "Продавец" if args.by == "seller" else "Бренд"
+    top_share = sum(v["rev"] for _, v in top) / tot_rev * 100 if tot_rev else 0
+    P = []
+
+    # header
+    toggle = "" if embed else '<button class="toggle" id="wcaTheme">☾ Тема</button>'
+    P.append('<header class="top"><div>'
+             '<p class="eyebrow">Конкурентный анализ · Wildberries</p>'
+             f'<h1>{esc(title)}</h1>'
+             f'<p class="meta">Ниша <code>{esc(path)}</code> · {esc(args.d1)}—{esc(args.d2)} '
+             f'({args.days} дн) · срез по {"продавцам" if args.by=="seller" else "брендам"}</p>'
+             f'</div>{toggle}</header>')
+
+    # A. summary tiles
+    tiles = [(fmt_int(len(items)), "SKU в срезе"),
+             (fmt_int(len(agg)), "продавцов" if args.by == "seller" else "брендов"),
+             (fmt_money(tot_rev), "выручка за период"),
+             (f"{top_share:.0f}%", f"доля ТОП-{args.top}")]
+    if seas:
+        d = seas["delta_pct"]
+        arrow = "↑" if d > 8 else "↓" if d < -8 else "→"
+        cls = "val-ok" if d > 8 else "val-bad" if d < -8 else ""
+        tiles.append((f'<span class="{cls}">{arrow} {d:+.0f}%</span>', "динамика спроса"))
+    P.append('<section><div class="tiles">' +
+             "".join(f'<div class="tile"><div class="v num">{v}</div><div class="l">{esc(l)}</div></div>'
+                     for v, l in tiles) + '</div></section>')
+
+    # B. top competitors
+    rows = []
+    for i, (name, v) in enumerate(top, 1):
+        avg_price = v["rev"] / v["sales"] if v["sales"] else 0
+        rating = v["rating_w"] / v["comments"] if v["comments"] else 0
+        share = v["rev"] / tot_rev * 100 if tot_rev else 0
+        rows.append(
+            f'<tr><td class="rank">{i}</td><td>{esc(name)}</td>'
+            f'<td class="r num">{fmt_money(v["rev"])}</td><td class="r num">{share:.1f}%</td>'
+            f'<td class="r num">{fmt_int(v["sales"])}</td><td class="r num">{fmt_int(avg_price)} ₽</td>'
+            f'<td class="r num">{v["items"]}</td><td class="r num">{rating:.2f}</td>'
+            f'<td class="r num">{fmt_money(v["lost"])}</td></tr>')
+    P.append('<section><h2>ТОП-{0} конкурентов</h2><div class="tbl-wrap"><table><thead><tr>'
+             '<th class="r">#</th><th>{1}</th><th class="r">Выручка</th><th class="r">Доля</th>'
+             '<th class="r">Продажи</th><th class="r">Ср. цена</th><th class="r">SKU</th>'
+             '<th class="r">Рейтинг</th><th class="r">Упущено</th></tr></thead><tbody>'
+             .format(args.top, by_label) + "".join(rows) + '</tbody></table></div></section>')
+
+    # C. price
+    if pz:
+        P.append('<section><h2>Цена и «привлекательная цена»</h2><div class="callouts">'
+                 f'<div class="callout"><div class="k">Ценовой коридор (10–90 перцентиль)</div>'
+                 f'<div class="b num">{fmt_int(pz["lo"])}–{fmt_int(pz["hi"])} ₽</div></div>'
+                 f'<div class="callout"><div class="k">Медиана по выручке</div>'
+                 f'<div class="b num">{fmt_int(pz["wmedian"])} ₽</div>'
+                 f'<div class="s">цена, вокруг которой крутятся деньги</div></div>'
+                 f'<div class="callout hl"><div class="k">Привлекательная цена (зона макс. выручки)</div>'
+                 f'<div class="b num">{fmt_int(pz["band"][0])}–{fmt_int(pz["band"][1])} ₽</div>'
+                 f'<div class="s">{pz["band_share"]:.0f}% выручки ниши · цель по цене</div></div>'
+                 '</div></section>')
+
+    # D. colors
+    if colors:
+        mx = max((c["rev_share"] for c in colors), default=1) or 1
+        bars = "".join(
+            f'<div class="bar-row"><span>{esc(c["color"])}</span>'
+            f'<span class="bar"><span style="width:{c["rev_share"]/mx*100:.0f}%"></span></span>'
+            f'<span class="num" style="text-align:right">{c["rev_share"]:.0f}% · {c["skus"]}</span></div>'
+            for c in colors)
+        P.append('<section><h2>Принадлежность — доминирующие цвета топа</h2>'
+                 f'<div class="bars">{bars}</div>'
+                 '<p class="meta">Цвет — важнейший критерий принадлежности (гл. 13). Полный %-анализ '
+                 'признаков — через Wildbox «топы поиска» (см. план).</p></section>')
+
+    # E. content benchmark (+ Ваше if mine)
+    if cb:
+        m = cb["metrics"]
+        dec = {"rating", "latest_negative_comments_percent"}
+        specs = [("picscount", "hi"), ("hasvideo", "bool"), ("has3d", "bool"),
+                 ("description_length", None), ("rating", "hi"), ("comments", "hi"),
+                 ("latest_negative_comments_percent", "lo"), ("search_words_count", "hi")]
+        head = '<th>Метрика</th><th class="r">Медиана топа</th><th>Лидер</th>'
+        if mine:
+            head += '<th class="r">Ваше</th>'
+        trs = []
+        for key, direction in specs:
+            d = m.get(key)
+            if not d:
+                continue
+            fmtv = (lambda x: f"{num(x):.1f}") if key in dec else (lambda x: fmt_int(x))
+            if "share" in d:
+                med = f'{d["share"]:.0f}%'
+                lead = "—"
+            else:
+                med = fmtv(d.get("median", 0))
+                ld = d.get("leader")
+                lead = f'{fmtv(ld[0])} · {esc(ld[1])}' if ld else "—"
+            cell = ""
+            if mine:
+                if d.get("share") is not None:  # bool metric
+                    yes = truthy(mine.get(key))
+                    good = yes if d["share"] >= 40 else True
+                    cell = f'<td class="r {"val-ok" if yes else ("val-bad" if not good else "")}">{"да" if yes else "нет"}</td>'
+                else:
+                    mv = num(mine.get(key))
+                    med_v = num(d.get("median", 0))
+                    bad = (direction == "hi" and mv < med_v) or (direction == "lo" and mv > med_v)
+                    cls = "val-bad" if bad else ("val-ok" if direction and mv else "")
+                    cell = f'<td class="r num {cls}">{fmtv(mv)}</td>'
+            trs.append(f'<tr><td>{esc(d.get("label", key))}</td><td class="r num">{med}</td>'
+                       f'<td class="num">{lead}</td>{cell}</tr>')
+        P.append(f'<section><h2>Контент-бенчмарк топа (по {cb["k"]} SKU)</h2>'
+                 f'<div class="tbl-wrap"><table><thead><tr>{head}</tr></thead>'
+                 f'<tbody>{"".join(trs)}</tbody></table></div></section>')
+
+    # G. my card
+    if args.my_sku:
+        if mine:
+            facts = (f'Цена {fmt_int(mine.get("final_price"))} ₽ · цвет {esc(mine.get("color") or "—")} · '
+                     f'⭐{num(mine.get("rating")):.1f} ({fmt_int(mine.get("comments"))} отз.) · '
+                     f'фото {fmt_int(mine.get("picscount"))} · видео {"да" if truthy(mine.get("hasvideo")) else "нет"}')
+            if gaps:
+                chips = "".join(f'<span class="chip bad">{esc(g.split(" —")[0].split(" (")[0])}</span>' for g in gaps)
+            else:
+                chips = '<span class="chip ok">По метрикам на уровне ниши</span>'
+            P.append('<section><h2>Ваша карточка против ниши</h2><div class="mycard">'
+                     f'<div style="font-weight:600">{esc((mine.get("name") or "")[:80])}</div>'
+                     f'<div class="facts">{facts}</div><div class="chips">{chips}</div></div></section>')
+        else:
+            P.append(f'<section><h2>Ваша карточка</h2><div class="mycard">'
+                     f'<div class="facts">⚠️ SKU <b>{esc(args.my_sku)}</b> не найден в этом срезе — '
+                     f'проверьте артикул/категорию (--path).</div></div></section>')
+
+    # F. review cards
+    if review:
+        cards = []
+        for it in review:
+            url = WB_CARD.format(it.get("id"))
+            cards.append(
+                f'<a class="pcard" href="{esc(url)}" target="_blank" rel="noopener">'
+                f'<div class="nm">{esc((it.get("name") or "—")[:70])}</div>'
+                f'<div class="st">{esc(it.get("brand") or "")} · {fmt_int(it.get("final_price"))} ₽ · '
+                f'⭐{num(it.get("rating")):.1f} ({fmt_int(it.get("comments"))})</div>'
+                f'<div class="go">Открыть на WB ↗</div></a>')
+        P.append('<section><h2>Карточки под ручной разбор</h2>'
+                 '<p class="meta">Скриншоты слайдов — в таблицу-линейку (гл. 04); инфографику — методом '
+                 'полок/доски (гл. 18).</p>'
+                 f'<div class="cards">{"".join(cards)}</div></section>')
+
+    # H. plan (interactive)
+    groups = []
+    if args.my_sku and gaps:
+        groups.append(("Гэпы карточки (MPStats)", [(g, None) for g in gaps]))
+    elif args.my_sku and mine:
+        groups.append(("Гэпы карточки", [("Оцифрованных гэпов нет — фокус на ручной слой", None)]))
+    targets = []
+    if pz:
+        targets.append((f"Цена-цель: {fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽", "привлекательная цена"))
+    if cb:
+        vid = "обязательно" if cb["metrics"]["hasvideo"]["share"] >= 40 else "желательно"
+        targets.append((f"Контент-цель: фото ≥ {fmt_int(cb['metrics']['picscount']['median'])}, "
+                        f"видео {vid}, рейтинг ≥ {cb['metrics']['rating']['median']:.1f}", None))
+    if targets:
+        groups.append(("Цели ниши", targets))
+    groups.append(("Ручной слой (по методике)", [
+        ("Принадлежность %", "Wildbox «топы поиска»: сегменты/подсегменты, % присутствия; <30% = вход закрыт (гл. 13)"),
+        ("Смыслы / листинг", "скриншоты слайдов топ-карточек в линейку; теги смыслов из хвостов запросов (гл. 04)"),
+        ("Конверсии по запросам", "Gem Competition (до 5 карт.) или Keywords: где конкурент сильнее в корзину/заказ (гл. 04)"),
+        ("Инфографика / полки", "метод доски/бота: кто чаще в полках = топ; видимые характеристики 1-в-1 (гл. 18)"),
+        ("Характеристики", "заполнить по максимуму категорий; состав/конструктив как у топа (гл. 13/18)"),
+    ]))
+    idx = 0
+    gblocks = []
+    for gt, gi in groups:
+        lis = []
+        for main_txt, hint in gi:
+            cid = f"wc{idx}"; idx += 1
+            hint_html = f' <span class="g">— {esc(hint)}</span>' if hint else ""
+            lis.append(f'<li><input type="checkbox" id="{cid}">'
+                       f'<label for="{cid}">{esc(main_txt)}{hint_html}</label></li>')
+        gblocks.append(f'<div><h3>{esc(gt)}</h3><ul class="check">{"".join(lis)}</ul></div>')
+    P.append(f'<section><h2>План доработки карточки</h2><div class="plan">{"".join(gblocks)}</div></section>')
+
+    # footer
+    note = ""
+    if notes:
+        note = " Недоступные срезы: " + esc("; ".join(notes)) + "."
+    P.append('<footer>Данные MPStats оценочные (восстановление по остаткам/выкупам) — для сравнения, '
+             'не как бухгалтерия. Конверсии по слайду, «покупают также», принадлежность % — не из MPStats. '
+             f'Путь категории {esc(path_note)}.{note}</footer>')
+
+    report_id = f"{path}|{args.d1}|{args.my_sku or '-'}"
+    inner = f'<div class="wca" data-report="{esc(report_id)}">' + "".join(P) + \
+            f'</div><script>{JS_REPORT}</script>'
+    if embed:
+        return f"<style>{CSS_REPORT}</style>" + inner
+    return ('<!doctype html><html lang="ru"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<title>Конкурентный анализ WB — {esc(title)}</title>'
+            f'<style>{CSS_REPORT}</style></head><body>{inner}</body></html>')
+
+
 # ======================= self-test (без сети) =======================
-def selftest():
+def _demo_inputs():
+    """Синтетические данные для проверки сборки отчётов без сети."""
     import random
     random.seed(7)
-    colors = ["чёрный", "белый", "синий", "красный", "бежевый"]
+    pal = ["чёрный", "белый", "синий", "красный", "бежевый"]
     items = []
     for i in range(120):
         rev = max(0, random.gauss(400000, 250000))
         items.append({
             "id": 1000000 + i, "name": f"Рубашка полоска {i}", "brand": f"Brand{i%12}",
-            "seller": f"ИП Продавец {i%18}", "color": random.choice(colors),
+            "seller": f"ИП Продавец {i%18}", "color": random.choice(pal),
             "final_price": random.choice([990, 1290, 1490, 1790, 2190, 2790]),
             "revenue": rev, "sales": rev / 1500, "rating": round(random.uniform(4.2, 5.0), 1),
             "comments": random.randint(0, 900), "picscount": random.randint(3, 12),
@@ -574,7 +880,7 @@ def selftest():
             "search_words_count": random.randint(20, 400), "lost_profit": rev * random.uniform(0, .3),
             "balance": random.randint(0, 3000),
         })
-    my = items[3]; my["id"] = 777; my["picscount"] = 4; my["hasvideo"] = False
+    my = dict(items[3]); my["id"] = 777; my["picscount"] = 4; my["hasvideo"] = False
     my["final_price"] = 3290; my["color"] = "фиолетовый"; my["comments"] = 12; my["rating"] = 4.3
     items.append(my)
 
@@ -582,13 +888,26 @@ def selftest():
         query = "рубашка женская в полоску"; by = "seller"; top = 10; days = 30
         d1 = "2025-06-04"; d2 = "2025-07-04"; my_sku = 777
     agg, tot = aggregate(items, "seller")
-    pz = price_zone(items); cb = content_benchmark(items, 20)
-    cold = color_distribution(items, 20); rev = cards_for_review(items, agg, "seller", 6)
-    mine = profile_sku(items, 777)
-    rep, _, gaps = build_report(A, "Женщинам/Блузки и рубашки/Рубашки", "синтетика",
-                                "полос", items, len(items), agg, tot, pz, cb, cold,
-                                {"delta_pct": 14.0}, rev, mine, ["trends (демо)"])
+    path = "Женщинам/Блузки и рубашки/Рубашка"
+    return dict(A=A, path=path, path_note="синтетика (демо)", nfilter="полос", items=items,
+                agg=agg, tot=tot, pz=price_zone(items), cb=content_benchmark(items, 20),
+                colors=color_distribution(items, 20), seas={"delta_pct": 14.0},
+                review=cards_for_review(items, agg, "seller", 6), mine=profile_sku(items, 777),
+                notes=["trends (демо)"])
+
+
+def selftest(html_out=None):
+    d = _demo_inputs()
+    rep, top, gaps = build_report(d["A"], d["path"], d["path_note"], d["nfilter"], d["items"],
+                                  len(d["items"]), d["agg"], d["tot"], d["pz"], d["cb"], d["colors"],
+                                  d["seas"], d["review"], d["mine"], d["notes"])
     print(rep)
+    if html_out:
+        html = build_html(d["A"], d["path"], d["path_note"], d["nfilter"], d["items"], d["agg"],
+                          d["tot"], top, d["pz"], d["cb"], d["colors"], d["seas"], d["review"],
+                          d["mine"], gaps, d["notes"])
+        open(html_out, "w", encoding="utf-8").write(html)
+        print(f"[selftest] HTML → {html_out}", file=sys.stderr)
     print("\n[selftest] OK — секций собрано, гэпов:", len(gaps), file=sys.stderr)
 
 
@@ -606,13 +925,14 @@ def main():
     ap.add_argument("--cards", type=int, default=6, help="сколько карточек вывести под ручной разбор")
     ap.add_argument("--days", type=int, default=30)
     ap.add_argument("--by", default="seller", choices=["seller", "brand"])
-    ap.add_argument("--out", default=None)
-    ap.add_argument("--json-out", default=None)
+    ap.add_argument("--out", default=None, help="файл для markdown-отчёта")
+    ap.add_argument("--json-out", default=None, help="файл для JSON с агрегатами")
+    ap.add_argument("--html-out", dest="html_out", default=None, help="файл для HTML-отчёта (кликабельный)")
     ap.add_argument("--selftest", action="store_true", help="прогон сборки отчёта на синтетике (без сети)")
     args = ap.parse_args()
 
     if args.selftest:
-        selftest()
+        selftest(args.html_out)
         return
 
     token = load_token()
@@ -680,6 +1000,11 @@ def main():
     print(report)
     if args.out:
         open(args.out, "w", encoding="utf-8").write(report)
+    if args.html_out:
+        html = build_html(args, path, path_note, nfilter, items, agg, tot_rev, top,
+                          pz, cb, colors, seas, review, mine, gaps, notes)
+        open(args.html_out, "w", encoding="utf-8").write(html)
+        print(f"[html] отчёт → {args.html_out}", file=sys.stderr)
     if args.json_out:
         payload = {
             "query": {"query": args.query, "gender": args.gender, "item": args.item,
