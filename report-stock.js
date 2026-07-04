@@ -51,7 +51,7 @@ export async function runReport({ d1, d2, skus } = {}) {
     d2: period.d2,
     concurrency: Number(process.env.REPORT_CONCURRENCY) || 5,
     onProgress: (done, total) => {
-      if (done % 25 === 0 || done === total) {
+      if (done % 10 === 0 || done === total) {
         process.stderr.write(`  обработано ${done}/${total}\n`);
       }
     },
@@ -93,6 +93,13 @@ function printSummary(report) {
   }
   if (report.errors.length) {
     console.log(`\n⚠ Ошибок при запросах: ${report.errors.length} (см. .json)`);
+    // Показываем несколько РАЗНЫХ текстов ошибок — этого хватает для диагноза.
+    const uniq = [...new Set(report.errors.map((e) => e.error))].slice(0, 3);
+    console.log('  Примеры ошибок:');
+    for (const msg of uniq) {
+      const sku = report.errors.find((e) => e.error === msg)?.sku;
+      console.log(`   • [${sku}] ${msg}`);
+    }
   }
 }
 
