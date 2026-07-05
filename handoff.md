@@ -25,27 +25,31 @@
   (метрики воронки по nmId: CTR, конв. в корзину/заказ, % выкупа, показы, заказы…).
   `runCardsComparison` сам пишет `*.json` рядом с `*.xlsx`.
 - Скилл `wb-cards-compare`.
-- **[1] ТОП-N по запросу (MPStats)** — `lib/wbTopKeywords.js` + `scripts/wb-top-keywords.mjs`
-  (`npm run top:keywords`). По ключевому запросу берёт поисковую выдачу WB из MPStats,
-  фильтрует («уточнения»: `min-revenue/min-rating/min-reviews/min-sales`, ценовой коридор,
-  `exclude-brands`, `sort`) и отдаёт контракт `top-rivals`. Флаг `--nmids-only` сцепляет
-  [1]→[2] пайпом в `wb-cards-compare`. Транспорт — `fetchSearchResults` в `lib/mpstats.js`.
-  Чистая логика (нормализация/фильтр/сортировка/топ-N) **проверена на фикстуре — зелено**.
+- **[1] ТОП-N по запросу (MPStats) — ГОТОВО, ПРОВЕРЕНО ЖИВЫМ ТОКЕНОМ** —
+  `lib/wbTopKeywords.js` + `scripts/wb-top-keywords.mjs` (`npm run top:keywords`).
+  По ключевому запросу берёт поисковую выдачу WB из MPStats, фильтрует («уточнения»:
+  `min-revenue/min-rating/min-reviews/min-sales`, ценовой коридор, `exclude-brands`,
+  `sort`) и отдаёт контракт `top-rivals`. Флаг `--nmids-only` сцепляет [1]→[2] пайпом
+  в `wb-cards-compare`. Транспорт — `fetchSearchResults` в `lib/mpstats.js`.
+  **Эндпоинт залочен**: `POST https://mpstats.io/api/analytics/v1/wb/search/items`
+  (новый versioned API, Laravel 422-валидация). Ключевое слово — query-параметр
+  **`path`** (обязателен), период — `d1`/`d2` (важно: `d2` строго РАНЬШЕ сегодня,
+  иначе 422 — дефолт ставит d2=вчера), тело — ag-grid `{startRow,endRow}`. Ответ —
+  `{total, data:[{position,id,...}]}`, где `id` = nmId. Маппинг полей в
+  `normalizeSearchRow` совпал (`id/name/brand/final_price/rating/comments/sales/
+  revenue/position`) — правок не потребовал. Старый `/wb/get/search` оказался
+  html-заглушкой (пустой 200) — тупик. Живой прогон: 99 шт. выдачи → фильтр → топ-N,
+  `--nmids-only` даёт чистый JSON-массив nmId. Всё зелено.
 
 ## Что дальше (следующий шаг)
-**Залочить эндпоинт MPStats живым токеном и прогнать сквозной тест [1].**
-- Токен: `MPSTATS_TOKEN` (заголовок `X-Mpstats-TOKEN`). Пользователь добавляет его в
-  переменные окружения среды Claude Code (то же место, где `Wildberries_API`) — подхватится
-  в НОВОЙ сессии. GitHub-секрет `secrets.MPSTATS_TOKEN` прочитать нельзя (write-only).
-- Путь запроса уже сужен пробой без токена: **`/wb/get/search`** (реальный `401 Authorization
-  Required` = маршрут есть; `/wb/get/search/results` давал `405`). Осталось с токеном:
-  подтвердить метод (GET/POST), имя query-параметра (`query` vs `path`) и маппинг полей
-  ответа на контракт (`nmId/name/brand/price/rating/reviews/sales/revenue/position` в
-  `normalizeSearchRow`). Всё вынесено в env: `MPSTATS_SEARCH_PATH`, `MPSTATS_SEARCH_QUERY_PARAM`.
-- Живой тест: `npm run top:keywords -- --query "платье женское" --top 10 --min-rating 4.5`.
-  Если поля/путь не совпали — поправить дефолты в `lib/mpstats.js` / `normalizeSearchRow`.
-- Затем: **[3] Конкурентный анализ** (данные `cards-compare.json` готовы) и оркестратор
-  `scripts/wb-pipeline.mjs` (сцепка [1]→[2]→[3]).
+Эндпоинт MPStats залочен и [1] проверен вживую (см. выше). Осталось два куска:
+- **[3] Конкурентный анализ** — на входе `cards-compare.json` (готов из [2]:
+  нормализованные метрики воронки по nmId — CTR, конв. в корзину/заказ, % выкупа,
+  показы, заказы). Сформировать сравнительный анализ «наш vs конкуренты»: где
+  проседаем по воронке, ценовое позиционирование, выводы/рекомендации. Отдать
+  JSON-контракт + человекочитаемый отчёт.
+- **Оркестратор** `scripts/wb-pipeline.mjs` — сцепка [1]→[2]→[3] одной командой
+  (запрос → топ-N конкурентов → сравнение карточек → конкурентный анализ).
 
 ## Важно про секреты (иначе кабинет не откроется)
 Куки/токен кабинета живут в `.secrets/` (gitignored) и **в новую сессию НЕ переносятся**.
@@ -71,6 +75,5 @@ npm run top:keywords -- --query "платье женское" --top 10   # [1] �
 NB: свежий контейнер — сначала `npm install` (иначе `cabinet:check` упадёт без playwright).
 
 ## Открытые вопросы (нужно решение пользователя)
-Оба закрыты: начинаем с **[1] ТОП-N**, источник конкурентов — **MPStats** (парсинг поисковой
-выдачи по запросу с фильтрацией). Актуальный блокер — не вопрос, а действие: добавить
-`MPSTATS_TOKEN` в переменные окружения среды (см. «Следующий шаг»).
+Блокеров нет. [1] ТОП-N готов и залочен (`MPSTATS_TOKEN` в среде подхватился, эндпоинт
+подтверждён живьём). Двигаемся к [3] Конкурентный анализ + оркестратор.
