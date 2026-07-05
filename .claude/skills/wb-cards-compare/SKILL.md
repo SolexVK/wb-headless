@@ -30,15 +30,22 @@ description: Построить отчёт «Сравнение карточек
 
 ```bash
 # DRY-RUN: добавить и показать «N из 5», лимит не тратится
-npm run cards:compare -- --our 167477208 --rivals 185854387,220692898,583508825
+npm run cards:compare -- --our 758196168 --rivals 176252338,168333315,297675127,757262495
 
-# Реальный запуск + выгрузка XLSX
-npm run cards:compare -- --our 167477208 --rivals 185854387,220692898 --submit --out reports-output/cmp.xlsx
+# Реальный запуск + автоматическая выгрузка XLSX (тратит 1 из лимита)
+npm run cards:compare -- --our 758196168 --rivals 176252338,168333315 --submit --out reports-output/cmp.xlsx
+
+# Пере-скачать УЖЕ готовое сравнение (в пределах 72 ч — БЕСПЛАТНО, лимит не тратится)
+npm run cards:compare -- --our 758196168 --export-existing --out reports-output/cmp.xlsx
 
 # Конкуренты из файла (вывод другого инструмента) или из stdin
-npm run cards:compare -- --our 167477208 --rivals-file rivals.json --submit
-getRivals | npm run cards:compare -- --our 167477208
+npm run cards:compare -- --our 758196168 --rivals-file rivals.json --submit
+getRivals | npm run cards:compare -- --our 758196168 --submit
 ```
+
+Выгрузка выполняется автоматически: «Создать Excel» → имя → «Сформировать» →
+панель «Загрузки» → скачать → развернуть ZIP (WB отдаёт .xlsx внутри ZIP) →
+чистый `.xlsx` в `--out`. Готовое сравнение живёт 72 ч и пере-скачивается бесплатно.
 
 ## Интеграция с другими инструментами (артикулы конкурентов)
 

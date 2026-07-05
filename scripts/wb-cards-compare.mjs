@@ -44,11 +44,14 @@ try {
     our: opt.our,
     rivals,
     submit: !!opt.submit,
+    exportExisting: !!opt['export-existing'],
     out: opt.out,
     headful: !!opt.headful,
     log,
   });
-  if (res.dryRun) {
+  if (res.exported) {
+    log(`\nПере-скачано готовое сравнение (лимит НЕ потрачен): ${res.out || '(файл не пойман)'}`);
+  } else if (res.dryRun) {
     log(`\nDRY-RUN: добавлено ${res.added.length}. Лимит НЕ потрачен. Скрин: ${res.screenshot}`);
     log('Проверь скрин и запусти снова с --submit для реального сравнения и выгрузки.');
   } else if (res.submitted) {
