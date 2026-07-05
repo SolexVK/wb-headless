@@ -79,9 +79,9 @@ const report = await competitiveAnalysis({ cardsCompare: cmp.data /*, + друг
 | Этап | Инструмент | Статус |
 |---|---|---|
 | [2] Сравнение карточек | `lib/wbCardsCompare.js` + парсер `wbCardsCompareParse.js` | ✅ готов, отдаёт `cards-compare.json` |
-| [1] ТОП-10 по запросу + фильтр | `lib/wbTopKeywords.js` + `scripts/wb-top-keywords.mjs` | 🟡 логика готова и проверена на фикстуре; осталось залочить эндпоинт MPSTATS живым токеном |
-| [3] Конкурентный анализ (блок воронки) | `lib/wbCompetitiveAnalysis.js` | ⏳ проектируется |
-| Оркестратор каскада | `scripts/wb-pipeline.mjs` | ⏳ проектируется |
+| [1] ТОП-10 по запросу + фильтр | `lib/wbTopKeywords.js` + `scripts/wb-top-keywords.mjs` | ✅ готов, эндпоинт MPStats залочен живым токеном (прогон end-to-end зелёный) |
+| [3] Конкурентный анализ (блок воронки) | `lib/wbCompetitiveAnalysis.js` + `scripts/wb-competitive-analysis.mjs` | ✅ готов, отдаёт `analysis.json` + `analysis.md` |
+| Оркестратор каскада | `scripts/wb-pipeline.mjs` | ✅ готов, сцепляет [1]→[2]→[3] в `reports-output/<run-id>/` |
 
 Правило: **наш артикул всегда спрашиваем у пользователя**; артикулы конкурентов
 приходят из этапа [1] или задаются вручную.
@@ -114,8 +114,53 @@ nmId из stdin) — так этапы [1] → [2] сцепляются без �
 `minReviews`, `minSales`, `priceMin`, `priceMax`, `excludeBrands`, `excludeNmIds`,
 `sortBy` (`position`|`revenue`|`sales`|`rating`).
 
-Доступ: `MPSTATS_TOKEN` (заголовок `X-Mpstats-TOKEN`). Путь запроса —
-`/wb/get/search` (подтверждён пробой без токена: реальный `401 Authorization
-Required`; `/wb/get/search/results` отдавал `405`). Метод и имя query-параметра
-финально фиксируются живым токеном; всё вынесено в env (`MPSTATS_SEARCH_PATH`,
-`MPSTATS_SEARCH_QUERY_PARAM`).
+Доступ: `MPSTATS_TOKEN` (заголовок `X-Mpstats-TOKEN`). **Эндпоинт залочен живым
+токеном:** `POST https://mpstats.io/api/analytics/v1/wb/search/items` (новый
+versioned API «Товары по поисковой фразе», Laravel 422-валидация). Ключевое слово —
+query-параметр **`path`** (обязателен); период `d1`/`d2` (важно: `d2` строго РАНЬШЕ
+сегодня, иначе 422 — дефолт ставит d2=вчера); тело — ag-grid `{startRow,endRow}`.
+Ответ — `{total, data:[{position,id,...}]}`, где `id` = nmId. Путь и имя параметра
+оставлены в env (`MPSTATS_SEARCH_PATH`, `MPSTATS_SEARCH_QUERY_PARAM`) на случай
+смены схемы. Старый `/wb/get/search` оказался html-заглушкой (пустой 200) — тупик.
+
+## Контракт данных «competitive-analysis» (этап [3])
+
+`lib/wbCompetitiveAnalysis.js` (`competitiveAnalysis({ cardsCompare })`) сравнивает
+нашу карточку с конкурентами и отдаёт:
+
+```jsonc
+{
+  "source": "wb-competitive-analysis",
+  "our": "758196168", "ourName": "...", "periods": {...}, "rivalsCount": 3,
+  "rivals": [ { "nmId","name","brand" } ],
+  "funnel": {
+    "stages": [ { "key":"ctrPct","label","unit","our","rivalsMedian","rivalsBest",
+                  "rivalsWorst","gapToMedianPct","percentile","status" } ],  // CTR→корзина→заказ→выкуп
+    "bottleneck": "cartConvPct"        // самый слабый этап vs конкуренты (или null)
+  },
+  "price": { "our","rivalsMedian",...,"tier":"premium|mid|budget" },
+  "quality": { "cardRating":{...}, "reviewRating":{...}, "reviewCount":{...} },
+  "searchPosition": { "our","rivalsMedian",...,"status" },   // меньше = лучше
+  "trend": [ { "key","label","current","previous","deltaPct" } ] | null,  // период-к-периоду
+  "findings": [ { "severity","area","message" } ],
+  "recommendations": [ "..." ]
+}
+```
+
+`status` каждого среза: `strong` (обходим ≥66% конкурентов) / `ok` / `weak` (≤34%).
+`formatReport(analysis)` рендерит это в markdown-отчёт. CLI:
+`node scripts/wb-competitive-analysis.mjs --in <cards-compare.json> [--json] [--out f]`.
+
+## Оркестратор каскада (`scripts/wb-pipeline.mjs`)
+
+Сцепляет всё одной командой; артефакты — в `reports-output/<run-id>/`
+(`top-rivals.json`, `cards-compare.*`, `analysis.json`, `analysis.md`):
+
+```bash
+# DRY-RUN: [1] + план [2], лимит не тратим (данных для [3] ещё нет)
+node scripts/wb-pipeline.mjs --query "платье женское" --our 758196168 --top 4 --min-rating 4.5
+# Полный каскад (тратит 1 из лимита «Сравнения карточек», нужна живая сессия кабинета)
+node scripts/wb-pipeline.mjs --query "платье женское" --our 758196168 --submit
+# [2 готовое]→[3]: переиспользовать ранее посчитанное сравнение бесплатно
+node scripts/wb-pipeline.mjs --our 758196168 --export-existing
+```

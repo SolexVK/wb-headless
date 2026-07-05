@@ -19,6 +19,8 @@
     "cabinet:check": "node scripts/wb-cabinet-check.mjs",
     "cards:compare": "node scripts/wb-cards-compare.mjs",
     "top:keywords": "node scripts/wb-top-keywords.mjs",
+    "analysis:competitive": "node scripts/wb-competitive-analysis.mjs",
+    "pipeline": "node scripts/wb-pipeline.mjs",
     "docs:fetch": "node scripts/fetch-wb-docs.mjs",
     "docs:limits": "node scripts/fetch-wb-docs.mjs https://dev.wildberries.ru/docs/openapi/api-information docs/wb-api/limits.md"
   },
