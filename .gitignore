@@ -3,3 +3,7 @@ chrome/
 reports-output/
 .env
 *.log
+
+# python
+__pycache__/
+*.pyc
