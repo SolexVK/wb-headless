@@ -3,3 +3,10 @@ chrome/
 reports-output/
 .env
 *.log
+
+# Секреты кабинета WB: куки сессии, скриншоты/дампы разведки — НИКОГДА в git.
+.secrets/
+*.cookies.json
+wb-cookies*.json
+cabinet-*.png
+cabinet-*.html
