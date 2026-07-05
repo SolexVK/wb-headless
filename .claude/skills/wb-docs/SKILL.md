@@ -56,6 +56,35 @@ node scripts/refresh-wb-docs.mjs
   запрет ретраев на 4xx, бэкофф на 5xx/сеть).
 - `.github/workflows/wb-docs-refresh.yml` — авто-обновление снимков раз в неделю.
 
+## Где лежит токен WB API и как его достать
+
+Токен — **персональный**, задан пользователем под именем **`Wildberries_API`**.
+Не хардкодить и не печатать значение. Доставать только через резолвер
+`lib/wbToken.js`, который ищет по очереди (первый непустой выигрывает):
+
+1. `process.env.WB_API_TOKEN`
+2. `process.env.Wildberries_API`
+3. `.env` в корне репозитория (ключи `WB_API_TOKEN` / `Wildberries_API`) —
+   парсится напрямую, т.к. Node сам `.env` не грузит.
+
+```bash
+npm run token:check          # откуда взят токен (маска, без значения)
+npm run token:check -- --ping # + проверить валидность через /ping
+```
+
+```js
+import { resolveWbToken } from './lib/wbToken.js';
+const { token, source } = resolveWbToken();   // source — напр. 'env:Wildberries_API'
+// WbClient делает это сам: new WbClient() уже подхватит токен из любого источника.
+```
+
+⚠️ **GitHub «Repository secrets» в интерактивную сессию/контейнер НЕ попадают** —
+они видны только внутри GitHub Actions и только при маппинге в workflow
+(`WB_API_TOKEN: ${{ secrets.Wildberries_API }}`). Чтобы токен был доступен в
+сессии, он должен прийти переменной окружения среды или файлом `.env`. Если
+`npm run token:check` говорит «НЕ найден» — попросить пользователя задать токен
+одним из способов выше (сам токен у меня взять неоткуда).
+
 ## Обязательное правило при работе с методом
 
 Перед использованием любого нового метода WB API **точечно прочитай его страницу**
