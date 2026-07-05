@@ -105,17 +105,20 @@ try {
   const payload = opt['nmids-only'] ? res.rivals.map((r) => r.nmId) : res;
   const out = JSON.stringify(payload, null, opt['nmids-only'] ? 0 : 2);
   if (opt.out) {
-    mkdirSync(dirname(opt.out), { recursive: true });
-    writeFileSync(opt.out, out);
-    log(`Записано: ${opt.out}`);
+    // --out без значения → авто-имя с фразой и датой; со значением → как задано.
+    const outPath = typeof opt.out === 'string' ? opt.out : reportPath(opt.query, 'json');
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, out);
+    log(`Записано: ${outPath}`);
   } else if (!opt.html || opt['nmids-only']) {
     // Если задан только --html, JSON в stdout не льём (чтобы не зашумлять).
     process.stdout.write(out + '\n');
   }
 
   // --html: самодостаточный HTML-отчёт (можно открыть в браузере).
+  // Имя файла содержит ключевую фразу и дату выдачи — чтобы легко искать потом.
   if (opt.html) {
-    const htmlPath = typeof opt.html === 'string' ? opt.html : 'reports-output/top-keywords.html';
+    const htmlPath = typeof opt.html === 'string' ? opt.html : reportPath(opt.query, 'html');
     // По умолчанию вшиваем фото карточек (data-URI) — без доп. запросов к MPStats,
     // только скачивание миниатюр с CDN WB. --no-images отключает (быстрее/легче).
     if (!opt['no-images']) {
@@ -137,3 +140,20 @@ try {
 }
 
 function clean(o) { for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k]; return o; }
+
+// Имя файла отчёта: reports-output/<фраза>_<дата>.<ext> — с датой выдачи, чтобы
+// потом легко искать. Фразу сохраняем кириллицей (читаемо), чистим только опасные
+// для ФС символы и пробелы.
+function reportPath(query, ext) {
+  const slug = String(query || 'top')
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^\p{L}\p{N}-]+/gu, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 60) || 'top';
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  const date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return `reports-output/${slug}_${date}.${ext}`;
+}
