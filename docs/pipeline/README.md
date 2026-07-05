@@ -88,31 +88,57 @@ const report = await competitiveAnalysis({ cardsCompare: cmp.data /*, + друг
 
 ## Контракт данных «top-rivals» (этап [1], источник — MPSTATS)
 
-`lib/wbTopKeywords.js` (`topByKeywords({ query, topN, filters, our })`) по
-ключевому запросу берёт поисковую выдачу WB из MPSTATS, фильтрует по «уточнениям»
-и отдаёт:
+`lib/wbTopKeywords.js` (`topByKeywords({ query, d1, d2, filters, our, topN })`)
+по ключевой фразе берёт ВСЮ выдачу WB из MPSTATS за период (с пагинацией) и
+прогоняет двухуровневую фильтрацию (см. ниже). Отдаёт:
 
 ```jsonc
 {
-  "query": "платье женское",
+  "query": "рубашка в полоску женская",
   "source": "mpstats",
-  "filters": { "minRating": 4.5, "minRevenue": 100000, "sortBy": "revenue",
-               "excludeNmIds": ["167477208"], "topN": 10 },
-  "fetched": 100,                          // сколько строк пришло из выдачи
+  "period": { "d1": "2026-06-04", "d2": "2026-07-04" },
+  "filters": { "deep": { "groups": [{"key":"крой","any":["прям","приталенн"]},
+                                     {"key":"воротник","any":["стойк"]}],
+                         "exclude": ["оверсайз","волан"] },
+               "priceMin": 800, "priceMax": 3000, "revenueFloor": 100000,
+               "exceptionRank": 20, "excludeNmIds": ["167477208"], "topN": 100 },
+  "total": 340,                            // всего в выдаче по фразе (MPSTATS)
+  "fetched": 340,                          // сколько строк разобрали
+  "pool": 190,                             // осталось после отсева выручки <revenueFloor
+  "exceptionRevenueThreshold": 3713347,    // порог выручки ТОП-N для «безхвостых»
   "rivals": [
-    { "nmId":"185854387", "name","brand","price","rating","reviews",
-      "sales","revenue","position" }
+    { "nmId":"185854387", "name","brand","price","avgSalePrice","rating","reviews",
+      "sales","revenue","lostProfit","position","matchType":"deep|exception|all" }
   ]
 }
 ```
 
 Массив `rivals` (точнее — `rivals.map(r => r.nmId)`, флаг CLI `--nmids-only`)
-пригоден для пайпа прямо в `scripts/wb-cards-compare.mjs` (он читает JSON-массив
-nmId из stdin) — так этапы [1] → [2] сцепляются без промежуточного клея.
+пригоден для пайпа прямо в `scripts/wb-cards-compare.mjs` — так этапы [1] → [2]
+сцепляются без промежуточного клея. `avgSalePrice` = **средняя цена продажи**
+(`final_price_average` = revenue/sales, проверено); `lostProfit` = упущенная
+выручка (`lost_profit`, показываем как доп. показатель, не фильтруем); `matchType`
+показывает, как карточка попала в выборку (полное совпадение / исключение).
 
-**Фильтры/«уточнения»** (`filters` / флаги CLI): `minRevenue`, `minRating`,
-`minReviews`, `minSales`, `priceMin`, `priceMax`, `excludeBrands`, `excludeNmIds`,
-`sortBy` (`position`|`revenue`|`sales`|`rating`).
+### Двухуровневая фильтрация [1]
+
+1. **Первичный отсев:** выручка за период `< revenueFloor` (по умолч. 100 000 ₽) → выкидываем.
+2. **«Глубокие» фильтры по словам в НАЗВАНИИ** — группы-признаки `deep.groups`
+   (`крой`, `воротник`, `манжеты`…): внутри группы ИЛИ, между группами И; плюс
+   общий `deep.exclude`. Матчинг — подстрока в нижнем регистре, поэтому ключи задаём
+   **стемами** (`прям`, `приталенн`, `стойк`) — морфология ловится сама.
+   - **Исключение для «безхвостых»:** карточка, не прошедшая группы, остаётся, если в
+     названии нет НИ ОДНОГО ключа групп (генерик, «нет хвостов») И нет слов из exclude,
+     И её выручка ≥ выручки `exceptionRank`-го (по умолч. ТОП-20) в пуле, И средняя цена
+     продажи в ценовом коридоре. Противоположные значения кладём в `exclude`, чтобы
+     «описанные, но не те» не проходили как безхвостые.
+3. **Метрические фильтры** (ко всем): `priceMin`/`priceMax` по средней цене продажи,
+   опц. `minRating`/`minReviews`/`minSales`.
+4. **Сортировка** по выручке (убыв.).
+5. **Отсечка `topN`** (10/100/500…) — ПОСЛЕДНИМ шагом, чтобы не потерять артикулы рано.
+
+**Период** задаётся пресетом (`--period 30` → последние 30 дней, d2=вчера) или явно
+(`--d1`/`--d2`). MPStats требует d2 строго раньше сегодня.
 
 Доступ: `MPSTATS_TOKEN` (заголовок `X-Mpstats-TOKEN`). **Эндпоинт залочен живым
 токеном:** `POST https://mpstats.io/api/analytics/v1/wb/search/items` (новый

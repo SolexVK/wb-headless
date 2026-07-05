@@ -1,73 +1,107 @@
-// scripts/wb-top-keywords.mjs — CLI инструмента [1] «ТОП-N по ключевому запросу».
-// Логика — в lib/wbTopKeywords.js (её же можно звать напрямую из оркестратора).
+// scripts/wb-top-keywords.mjs — CLI инструмента [1] «ТОП по ключевой фразе».
+// Логика — в lib/wbTopKeywords.js (её же зовёт оркестратор напрямую).
 //
-// По ключевому слову берём поисковую выдачу WB из MPSTATS, фильтруем по
-// «уточнениям» и печатаем топ-N конкурентов. Требует MPSTATS_TOKEN в окружении.
+// Конвейер: вся выдача WB по фразе за период (MPStats) → отсев выручки <100k →
+// «глубокие» фильтры по словам в названии (группы-признаки + исключения, + правило
+// «безхвостых» сильных артикулов) → метрические фильтры → сортировка по выручке →
+// топ-N последним шагом. Требует MPSTATS_TOKEN в окружении.
 //
-// Печать: контракт top-rivals (JSON) в stdout — можно писать в файл (--out) и/или
-// пайпить массив nmId дальше в «Сравнение карточек».
+// Параметры (обычно собираются в предполётном диалоге и передаются флагами):
+//   --query "рубашка в полоску женская"       ключевая фраза (обязательна)
+//   --period 30            | --d1 2026-06-01 --d2 2026-06-30   период метрик
+//   --top 100             топ-N (10/100/500…), применяется последним
+//   --group "крой=прямой,приталенн"           группа-признак (можно несколько раз)
+//   --group "воротник=стойка"
+//   --exclude "оверсайз,волан"                общий список слов-исключений
+//   --price-min 800 --price-max 3000          коридор по СРЕДНЕЙ ЦЕНЕ ПРОДАЖИ
+//   --revenue-floor 100000                    порог первичного отсева (дефолт 100000)
+//   --exception-rank 20                       «сопоставимо с ТОП-N» для безхвостых
+//   --min-rating 4.5 --min-reviews 50 --min-sales 100        доп. метрические пороги
+//   --our 167477208                           наш артикул — исключить из выдачи
+//   --max-rows 2000                           предохранитель на размер выборки
+//   --out reports-output/top.json | --nmids-only    вывод
 //
-//   MPSTATS_TOKEN=xxx node scripts/wb-top-keywords.mjs --query "платье женское" --top 10
-//   ... --min-revenue 100000 --min-rating 4.5 --price-min 800 --price-max 3000 --sort revenue
-//   ... --our 167477208 --out reports-output/top-rivals.json
 //   # сцепка каскада [1]→[2]:
-//   node scripts/wb-top-keywords.mjs --query "платье" --nmids-only | \
+//   node scripts/wb-top-keywords.mjs --query "платье" --top 4 --nmids-only | \
 //     node scripts/wb-cards-compare.mjs --our 167477208
 
 import { topByKeywords } from '../lib/wbTopKeywords.js';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-const args = process.argv.slice(2);
+// Парсер: одиночные --flag value и повторяемый --group.
+const argv = process.argv.slice(2);
 const opt = {};
-for (let i = 0; i < args.length; i++) {
-  if (args[i].startsWith('--')) {
-    const k = args[i].slice(2);
-    const n = args[i + 1];
-    if (n && !n.startsWith('--')) { opt[k] = n; i++; } else opt[k] = true;
-  }
+const groupsRaw = [];
+for (let i = 0; i < argv.length; i++) {
+  if (!argv[i].startsWith('--')) continue;
+  const k = argv[i].slice(2);
+  const n = argv[i + 1];
+  const val = n && !n.startsWith('--') ? (i++, n) : true;
+  if (k === 'group') groupsRaw.push(val);
+  else opt[k] = val;
 }
 const log = (...a) => process.stderr.write(a.join(' ') + '\n');
 const numOpt = (v) => (v == null ? undefined : Number(v));
+const listOpt = (v) => (v ? String(v).split(',').map((s) => s.trim()).filter(Boolean) : undefined);
 
 if (!opt.query) {
-  log('Не задан ключевой запрос. Пример:');
-  log('  MPSTATS_TOKEN=xxx node scripts/wb-top-keywords.mjs --query "платье женское" --top 10 --min-rating 4.5');
+  log('Не задана ключевая фраза. Пример:');
+  log('  MPSTATS_TOKEN=xxx node scripts/wb-top-keywords.mjs --query "рубашка в полоску женская" \\');
+  log('    --period 30 --top 100 --group "крой=прямой,приталенн" --group "воротник=стойка" \\');
+  log('    --exclude "оверсайз,волан" --price-min 800 --price-max 3000');
   process.exit(2);
 }
 
-const filters = {
-  minRevenue: numOpt(opt['min-revenue']),
+// Период: либо --d1/--d2, либо пресет --period N (дней; d2=вчера).
+let d1 = opt.d1;
+let d2 = opt.d2;
+if (!d1 && !d2 && opt.period) {
+  const days = Number(opt.period) || 30;
+  const day = 86400000;
+  const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+  d2 = iso(Date.now() - day);
+  d1 = iso(Date.now() - (days + 1) * day);
+}
+
+// Группы-признаки: "крой=прямой,приталенн" → { key:'крой', any:['прямой','приталенн'] }.
+const groups = groupsRaw
+  .map((g) => {
+    const [key, vals] = String(g).split('=');
+    return { key: (key || '').trim(), any: listOpt(vals) || [] };
+  })
+  .filter((g) => g.any.length);
+
+const filters = clean({
+  revenueFloor: numOpt(opt['revenue-floor']),
+  exceptionRank: numOpt(opt['exception-rank']),
+  priceMin: numOpt(opt['price-min']),
+  priceMax: numOpt(opt['price-max']),
   minRating: numOpt(opt['min-rating']),
   minReviews: numOpt(opt['min-reviews']),
   minSales: numOpt(opt['min-sales']),
-  priceMin: numOpt(opt['price-min']),
-  priceMax: numOpt(opt['price-max']),
-  excludeBrands: opt['exclude-brands']
-    ? String(opt['exclude-brands']).split(',').map((s) => s.trim()).filter(Boolean)
-    : undefined,
-  sortBy: opt.sort || 'position',
-};
-// Убираем неуказанные пороги, чтобы не отфильтровать всё нулями.
-for (const k of Object.keys(filters)) if (filters[k] === undefined) delete filters[k];
+  deep: (groups.length || opt.exclude) ? { groups, exclude: listOpt(opt.exclude) || [] } : undefined,
+});
 
 try {
   const res = await topByKeywords({
     query: opt.query,
-    topN: numOpt(opt.top) ?? 10,
+    d1,
+    d2,
     filters,
     our: opt.our,
-    d1: opt.d1,
-    d2: opt.d2,
-    limit: numOpt(opt.limit) ?? 100,
+    topN: numOpt(opt.top) ?? null,
+    maxRows: numOpt(opt['max-rows']),
   });
 
-  log(`Запрос: «${res.query}» — из выдачи ${res.fetched} шт., после фильтров топ-${res.rivals.length}.`);
+  const exCount = res.rivals.filter((r) => r.matchType === 'exception').length;
+  log(`Фраза: «${res.query}» | период ${res.period.d1}…${res.period.d2}`);
+  log(`Выдача: всего ${res.total}${res.capped ? ' (упёрлись в предохранитель)' : ''}, разобрано ${res.fetched}, после отсева <${res.filters.revenueFloor}₽ — ${res.pool}.`);
+  if (groups.length) log(`Порог «безхвостых» (ТОП-${filters.exceptionRank ?? 20} по выручке): ${res.exceptionRevenueThreshold}₽.`);
+  log(`Итог: ${res.rivals.length} шт.${exCount ? ` (из них по исключению «безхвостые»: ${exCount})` : ''}`);
 
-  // --nmids-only: печатаем голый JSON-массив nmId (для пайпа в wb-cards-compare).
-  const payload = opt['nmids-only']
-    ? res.rivals.map((r) => r.nmId)
-    : res;
+  // --nmids-only: голый JSON-массив nmId (для пайпа в wb-cards-compare).
+  const payload = opt['nmids-only'] ? res.rivals.map((r) => r.nmId) : res;
   const out = JSON.stringify(payload, null, opt['nmids-only'] ? 0 : 2);
 
   if (opt.out) {
@@ -84,3 +118,5 @@ try {
   }
   process.exit(1);
 }
+
+function clean(o) { for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k]; return o; }
