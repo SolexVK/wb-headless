@@ -55,12 +55,19 @@ on:
   # schedule:
   #   - cron: '0 6 * * *'
 
+# Нужно право записи: шаг ниже коммитит накопленную БД (data/wb.db) обратно в ветку.
+permissions:
+  contents: write
+
 jobs:
   report:
     runs-on: ubuntu-latest
     steps:
       - name: Забрать код из репозитория
         uses: actions/checkout@v4
+        with:
+          # Полная история нужна шагу, который коммитит БД обратно (git pull --rebase).
+          fetch-depth: 0
 
       - name: Установить Node.js
         uses: actions/setup-node@v4
@@ -113,3 +120,26 @@ jobs:
           path: reports-output/*
           if-no-files-found: warn
           retention-days: 90
+
+      # Раннер эфемерный: чтобы накопленные данные не пропали, коммитим
+      # обновлённый файл БД обратно в ветку. Дневные ряды и снимки отчётов
+      # так переживают запуски и доступны следующему.
+      - name: Сохранить накопленную БД (data/wb.db) в репозиторий
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/wb.db || true
+          if git diff --cached --quiet; then
+            echo "БД не изменилась — коммит не требуется."
+            exit 0
+          fi
+          git commit -m "chore(db): накопленные данные отчёта [skip ci]"
+          # Ветку могли обновить между checkout и push — при отказе обновляемся и повторяем.
+          for i in 1 2 3; do
+            if git push; then echo "БД запушена ✓"; exit 0; fi
+            echo "push не удался, обновляю ветку и повторяю ($i/3)…"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            sleep 2
+          done
+          echo "::warning::Не удалось запушить обновлённую БД после 3 попыток."

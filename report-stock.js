@@ -11,6 +11,15 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
+import {
+  openDb,
+  closeDb,
+  syncProducts,
+  syncGroups,
+  saveSkuDaily,
+  saveReport,
+  stats as dbStats,
+} from './lib/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -95,9 +104,25 @@ function fmt(n) {
   return new Intl.NumberFormat('ru-RU').format(Math.round(Number(n) || 0));
 }
 
-export async function runReport({ d1, d2, items, filter, group } = {}) {
+export async function runReport({ d1, d2, items, filter, group, persist = true } = {}) {
   const period = d1 && d2 ? { d1, d2 } : defaultPeriod(Number(process.env.REPORT_DAYS) || 30);
   const all = items || loadItems();
+
+  // БД: справочник + накопление дневного сырья + снимок отчёта.
+  // Отключается через persist:false или DB_DISABLE=1 (например, для дампов).
+  const useDb = persist && process.env.DB_DISABLE !== '1';
+  let db = null;
+  if (useDb) {
+    try {
+      db = openDb();
+      syncProducts(db, all);
+      syncGroups(db, loadGroups());
+    } catch (err) {
+      // БД не должна ломать отчёт — деградируем к режиму «только файлы».
+      process.stderr.write(`⚠ БД недоступна, продолжаю без неё: ${err?.message || err}\n`);
+      db = null;
+    }
+  }
 
   // Приоритет: текстовый фильтр (для точечного выбора) → группа из
   // выпадающего списка → все товары.
@@ -127,7 +152,24 @@ export async function runReport({ d1, d2, items, filter, group } = {}) {
         process.stderr.write(`  обработано ${done}/${total}\n`);
       }
     },
+    // Дневное сырьё пишем в БД по мере получения — накапливается между запусками.
+    onSkuDaily: db ? (sku, daily) => saveSkuDaily(db, sku, daily) : undefined,
   });
+
+  if (db) {
+    try {
+      const runId = saveReport(db, report);
+      const s = dbStats(db);
+      process.stderr.write(
+        `БД: сохранён снимок #${runId}; накоплено ${s.skuDailyRows} дневных строк по ${s.skuDailyDistinct} SKU` +
+          (s.skuDailyRange ? ` (${s.skuDailyRange.from} … ${s.skuDailyRange.to})` : '') + '\n'
+      );
+    } catch (err) {
+      process.stderr.write(`⚠ Не удалось сохранить в БД: ${err?.message || err}\n`);
+    } finally {
+      closeDb(db);
+    }
+  }
 
   return report;
 }

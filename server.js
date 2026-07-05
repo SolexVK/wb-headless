@@ -6,7 +6,8 @@ import path from 'path';
 import puppeteer from 'puppeteer';
 import { v4 as uuidv4 } from 'uuid';
 import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
-import { defaultPeriod, loadItems, selectItems, selectByGroup, writeOutputs } from './report-stock.js';
+import { defaultPeriod, loadItems, selectItems, selectByGroup, writeOutputs, runReport } from './report-stock.js';
+import { openDb, closeDb, stats as dbStats } from './lib/db.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -125,7 +126,17 @@ async function typeSlowInto(page, handle, text, delay = 60) {
 const sessions = new Map(); // sessionId -> { browser, page }
 
 // ---------- health & debug ----------
-app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
+app.get('/health', (req, res) => {
+  let db = null;
+  try {
+    db = openDb();
+    return res.json({ ok: true, uptime: process.uptime(), db: dbStats(db) });
+  } catch (err) {
+    return res.json({ ok: true, uptime: process.uptime(), db: { error: String(err?.message || err) } });
+  } finally {
+    if (db) closeDb(db);
+  }
+});
 app.get('/debug-chrome', requireKey, (req, res) => {
   const chromePath = findLocalChrome();
   res.json({ cwd: process.cwd(), chromePath: chromePath || null, exists: !!chromePath });
@@ -352,12 +363,8 @@ function startReportScheduler() {
     try {
       const { d1, d2 } = defaultPeriod(Number(process.env.REPORT_DAYS) || 30);
       console.log(`[scheduler] строю отчёт по наличию за ${d1}…${d2}`);
-      const report = await buildStockAvailabilityReport({
-        items: selectItems(loadItems(), process.env.REPORT_FILTER),
-        d1,
-        d2,
-        concurrency: Number(process.env.REPORT_CONCURRENCY) || 5,
-      });
+      // runReport сам применит REPORT_FILTER/REPORT_GROUP и запишет данные в БД.
+      const report = await runReport({ d1, d2 });
       const { csvPath } = writeOutputs(report);
       console.log(
         `[scheduler] готово: упущено ≈ ${report.totals.lostRevenue} ₽, файл ${csvPath}`

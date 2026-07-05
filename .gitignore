@@ -3,3 +3,8 @@ chrome/
 reports-output/
 .env
 *.log
+
+# Транзиентные журналы SQLite (сам data/wb.db коммитим, служебные файлы — нет)
+*.db-journal
+*.db-wal
+*.db-shm
