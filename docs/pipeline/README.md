@@ -79,9 +79,41 @@ const report = await competitiveAnalysis({ cardsCompare: cmp.data /*, + друг
 | Этап | Инструмент | Статус |
 |---|---|---|
 | [2] Сравнение карточек | `lib/wbCardsCompare.js` + парсер `wbCardsCompareParse.js` | ✅ готов, отдаёт `cards-compare.json` |
-| [1] ТОП-10 по запросу + фильтр | `lib/wbTopKeywords.js` | ⏳ проектируется |
+| [1] ТОП-10 по запросу + фильтр | `lib/wbTopKeywords.js` + `scripts/wb-top-keywords.mjs` | 🟡 логика готова и проверена на фикстуре; осталось залочить эндпоинт MPSTATS живым токеном |
 | [3] Конкурентный анализ (блок воронки) | `lib/wbCompetitiveAnalysis.js` | ⏳ проектируется |
 | Оркестратор каскада | `scripts/wb-pipeline.mjs` | ⏳ проектируется |
 
 Правило: **наш артикул всегда спрашиваем у пользователя**; артикулы конкурентов
 приходят из этапа [1] или задаются вручную.
+
+## Контракт данных «top-rivals» (этап [1], источник — MPSTATS)
+
+`lib/wbTopKeywords.js` (`topByKeywords({ query, topN, filters, our })`) по
+ключевому запросу берёт поисковую выдачу WB из MPSTATS, фильтрует по «уточнениям»
+и отдаёт:
+
+```jsonc
+{
+  "query": "платье женское",
+  "source": "mpstats",
+  "filters": { "minRating": 4.5, "minRevenue": 100000, "sortBy": "revenue",
+               "excludeNmIds": ["167477208"], "topN": 10 },
+  "fetched": 100,                          // сколько строк пришло из выдачи
+  "rivals": [
+    { "nmId":"185854387", "name","brand","price","rating","reviews",
+      "sales","revenue","position" }
+  ]
+}
+```
+
+Массив `rivals` (точнее — `rivals.map(r => r.nmId)`, флаг CLI `--nmids-only`)
+пригоден для пайпа прямо в `scripts/wb-cards-compare.mjs` (он читает JSON-массив
+nmId из stdin) — так этапы [1] → [2] сцепляются без промежуточного клея.
+
+**Фильтры/«уточнения»** (`filters` / флаги CLI): `minRevenue`, `minRating`,
+`minReviews`, `minSales`, `priceMin`, `priceMax`, `excludeBrands`, `excludeNmIds`,
+`sortBy` (`position`|`revenue`|`sales`|`rating`).
+
+Доступ: `MPSTATS_TOKEN` (заголовок `X-Mpstats-TOKEN`). Точная схема запроса
+поисковой выдачи вынесена в env (`MPSTATS_SEARCH_PATH`,
+`MPSTATS_SEARCH_QUERY_PARAM`) — фиксируется при первом живом вызове.
