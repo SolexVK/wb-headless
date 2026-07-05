@@ -1,7 +1,6 @@
 # Handoff — инструменты для Wildberries
 
-Ветка: **`claude/resume-qfogf2`** (продолжение `claude/wildberries-tools`, вся история перенесена).
-Продолжаем разработку инструментов здесь.
+Ветка: **`claude/wildberries-tools`**. Продолжаем разработку инструментов здесь.
 (Ветка `claude/wildberries-api-docs-bfnvun` — отдельная, там только правила WB API.)
 
 ## Цель
