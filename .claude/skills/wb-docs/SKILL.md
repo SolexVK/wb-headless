@@ -54,6 +54,10 @@ node scripts/refresh-wb-docs.mjs
 - `lib/wbClient.js` — клиент WB API, который **соблюдает лимиты** (token-bucket на
   категорию, чтение `X-Ratelimit-*`, ожидание по `X-Ratelimit-Retry` на 429,
   запрет ретраев на 4xx, бэкофф на 5xx/сеть).
+- `lib/wbJemReports.js` + `scripts/wb-jem-report.mjs` — отчёты **Джем** (Аналитика
+  продавца CSV): асинхронный цикл create → status → getFile (ZIP/CSV). Лимит
+  метода 3/мин, интервал 20с; макс. 20 отчётов/сутки; хранятся 48 ч. Статус
+  готовности — `SUCCESS`. CLI: `node scripts/wb-jem-report.mjs --list`.
 - `.github/workflows/wb-docs-refresh.yml` — авто-обновление снимков раз в неделю.
 
 ## Где лежит токен WB API и как его достать
