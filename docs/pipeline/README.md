@@ -114,6 +114,8 @@ nmId из stdin) — так этапы [1] → [2] сцепляются без �
 `minReviews`, `minSales`, `priceMin`, `priceMax`, `excludeBrands`, `excludeNmIds`,
 `sortBy` (`position`|`revenue`|`sales`|`rating`).
 
-Доступ: `MPSTATS_TOKEN` (заголовок `X-Mpstats-TOKEN`). Точная схема запроса
-поисковой выдачи вынесена в env (`MPSTATS_SEARCH_PATH`,
-`MPSTATS_SEARCH_QUERY_PARAM`) — фиксируется при первом живом вызове.
+Доступ: `MPSTATS_TOKEN` (заголовок `X-Mpstats-TOKEN`). Путь запроса —
+`/wb/get/search` (подтверждён пробой без токена: реальный `401 Authorization
+Required`; `/wb/get/search/results` отдавал `405`). Метод и имя query-параметра
+финально фиксируются живым токеном; всё вынесено в env (`MPSTATS_SEARCH_PATH`,
+`MPSTATS_SEARCH_QUERY_PARAM`).
