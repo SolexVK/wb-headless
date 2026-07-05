@@ -25,7 +25,7 @@
 //   node scripts/wb-top-keywords.mjs --query "платье" --top 4 --nmids-only | \
 //     node scripts/wb-cards-compare.mjs --our 167477208
 
-import { topByKeywords, formatHtml } from '../lib/wbTopKeywords.js';
+import { topByKeywords, formatHtml, embedThumbnails } from '../lib/wbTopKeywords.js';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -100,25 +100,33 @@ try {
   if (groups.length) log(`Порог «безхвостых» (ТОП-${filters.exceptionRank ?? 20} по выручке): ${res.exceptionRevenueThreshold}₽.`);
   log(`Итог: ${res.rivals.length} шт.${exCount ? ` (из них по исключению «безхвостые»: ${exCount})` : ''}`);
 
-  // --html: самодостаточный HTML-отчёт (можно открыть в браузере).
-  if (opt.html) {
-    const htmlPath = typeof opt.html === 'string' ? opt.html : 'reports-output/top-keywords.html';
-    mkdirSync(dirname(htmlPath), { recursive: true });
-    writeFileSync(htmlPath, formatHtml(res));
-    log(`HTML-отчёт: ${htmlPath}`);
-  }
-
+  // JSON-вывод пишем ДО вшивания фото — иначе base64 картинок раздует файл.
   // --nmids-only: голый JSON-массив nmId (для пайпа в wb-cards-compare).
   const payload = opt['nmids-only'] ? res.rivals.map((r) => r.nmId) : res;
   const out = JSON.stringify(payload, null, opt['nmids-only'] ? 0 : 2);
-
-  // Если задан только --html, JSON в stdout не льём (чтобы не зашумлять).
   if (opt.out) {
     mkdirSync(dirname(opt.out), { recursive: true });
     writeFileSync(opt.out, out);
     log(`Записано: ${opt.out}`);
   } else if (!opt.html || opt['nmids-only']) {
+    // Если задан только --html, JSON в stdout не льём (чтобы не зашумлять).
     process.stdout.write(out + '\n');
+  }
+
+  // --html: самодостаточный HTML-отчёт (можно открыть в браузере).
+  if (opt.html) {
+    const htmlPath = typeof opt.html === 'string' ? opt.html : 'reports-output/top-keywords.html';
+    // По умолчанию вшиваем фото карточек (data-URI) — без доп. запросов к MPStats,
+    // только скачивание миниатюр с CDN WB. --no-images отключает (быстрее/легче).
+    if (!opt['no-images']) {
+      log(`Скачиваю фото карточек (${res.rivals.length} шт.)…`);
+      await embedThumbnails(res.rivals);
+      const ok = res.rivals.filter((r) => r.thumbData).length;
+      log(`  вшито изображений: ${ok}/${res.rivals.length}`);
+    }
+    mkdirSync(dirname(htmlPath), { recursive: true });
+    writeFileSync(htmlPath, formatHtml(res));
+    log(`HTML-отчёт: ${htmlPath}`);
   }
 } catch (err) {
   log(`Ошибка: ${err?.message || err}`);
