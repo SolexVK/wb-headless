@@ -1327,7 +1327,7 @@ section{margin-top:clamp(24px,4vw,38px);}
 .tbl-wrap::-webkit-scrollbar-thumb{background:var(--muted);border-radius:6px;border:2px solid var(--panel);}
 .tbl-wrap::-webkit-scrollbar-track{background:var(--panel);border-radius:6px;}
 table{border-collapse:collapse;width:100%;font-size:.87rem;}
-.pic{width:52px;padding:5px 8px;} .bthumb{width:44px;height:58px;object-fit:cover;border-radius:6px;display:block;background:var(--soft);}
+.pic{width:52px;padding:5px 8px;} .bthumb{width:44px;height:58px;object-fit:cover;border-radius:6px;display:block;background:var(--soft);cursor:zoom-in;}
 .noimg{color:var(--muted);}
 th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--hair);white-space:nowrap;}
 th{font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--panel);}
@@ -1420,6 +1420,25 @@ JS_REPORT = """
     var cur=r.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
     r.setAttribute('data-theme',cur==='dark'?'light':'dark');
     t.textContent=cur==='dark'?'☀ Тема':'☾ Тема';
+  });
+  // hover-зум фото в блоке B: floating-превью в 2× (вне таблицы — не обрезается контейнером)
+  var zoom=document.createElement('img');
+  zoom.style.cssText='position:fixed;display:none;z-index:9999;border-radius:10px;'+
+    'box-shadow:0 14px 44px rgba(0,0,0,.45);border:2px solid #fff;pointer-events:none;background:#eee;';
+  document.body.appendChild(zoom);
+  function place(el){
+    var r=el.getBoundingClientRect(), w=r.width*2, h=r.height*2;
+    zoom.style.width=w+'px'; zoom.style.height=h+'px';
+    var left=r.right+10; if(left+w>innerWidth) left=r.left-w-10; if(left<4) left=4;
+    var top=r.top+r.height/2-h/2; if(top<4) top=4; if(top+h>innerHeight) top=innerHeight-h-4;
+    zoom.style.left=left+'px'; zoom.style.top=top+'px';
+  }
+  host.addEventListener('mouseover',function(e){
+    var el=e.target; if(!el.classList||!el.classList.contains('bthumb')) return;
+    zoom.src=el.currentSrc||el.src; place(el); zoom.style.display='block';
+  });
+  host.addEventListener('mouseout',function(e){
+    if(e.target.classList&&e.target.classList.contains('bthumb')) zoom.style.display='none';
   });
 })();
 """
