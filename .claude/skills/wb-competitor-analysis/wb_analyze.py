@@ -875,6 +875,55 @@ def compute_economics(items, cost, pr):
 
 
 # ======================= сборка отчёта =======================
+# ── имя ниши из ключевой фразы + человекочитаемый период ──
+MONTHS_RU = ["", "январь", "февраль", "март", "апрель", "май", "июнь",
+             "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+# ходовые предметы одежды: единственное → множественное (для имени ниши)
+PLURAL_ITEM = {
+    "рубашка": "рубашки", "блузка": "блузки", "платье": "платья", "футболка": "футболки",
+    "джинсы": "джинсы", "юбка": "юбки", "брюки": "брюки", "куртка": "куртки", "пальто": "пальто",
+    "свитер": "свитеры", "джемпер": "джемперы", "худи": "худи", "костюм": "костюмы", "шорты": "шорты",
+    "топ": "топы", "кофта": "кофты", "жакет": "жакеты", "кардиган": "кардиганы", "туника": "туники",
+    "комбинезон": "комбинезоны", "сарафан": "сарафаны", "лонгслив": "лонгсливы", "водолазка": "водолазки",
+    "ветровка": "ветровки", "бомбер": "бомберы", "толстовка": "толстовки", "жилет": "жилеты",
+}
+GENDER_LABEL = [("женск", "женские"), ("мужск", "мужские"), ("детск", "детские"), ("унисекс", "унисекс")]
+
+
+def derive_niche(query):
+    """Имя ниши из ключевой фразы: предмет во мн.ч. + пол («рубашка женская в полоску»
+    → «Рубашки женские»). Эвристика; переопределяется флагом --niche."""
+    toks = _re.findall(r"[а-яёa-z0-9]+", str(query or "").lower())
+    head = None
+    for t in toks:
+        for k, v in PLURAL_ITEM.items():
+            if t[:5] == k[:5]:
+                head = v
+                break
+        if head:
+            break
+    gender = next((lab for stem, lab in GENDER_LABEL if any(stem in t for t in toks)), "")
+    if not head:
+        head = toks[0] if toks else str(query or "ниша")
+    name = (head + (" " + gender if gender else "")).strip()
+    return name[:1].upper() + name[1:]
+
+
+def derive_period_label(d1, d2):
+    """Человекочитаемый период: полный календарный месяц → «август 2025 года»;
+    иначе → «за последние N дней» / «за последний год»."""
+    try:
+        a, b = date.fromisoformat(str(d1)), date.fromisoformat(str(d2))
+    except (ValueError, TypeError):
+        return f"{d1} — {d2}"
+    if a.day == 1 and (b + timedelta(days=1)).day == 1 and (a.year, a.month) == (b.year, b.month):
+        return f"{MONTHS_RU[a.month]} {a.year} года"
+    span = (b - a).days + 1
+    if span >= 350:
+        return "за последний год"
+    return f"за последние {span} дней"
+
+
 def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                  pz, cb, colors, seas, review, mine, notes, econ=None, kw=None, wbd=None, funnel=None):
     by_label = "продавцам" if args.by == "seller" else "брендам"
@@ -884,23 +933,28 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
     L = []
 
     # --- шапка ---
-    title = args.query or (name_filter or path.split('/')[-1])
-    L += [f"# Конкурентный анализ WB — {title}", "",
-          f"**Ниша:** `{path}`  ",
+    niche = getattr(args, "niche_name", None) or derive_niche(args.query or path)
+    plabel = getattr(args, "period_label_str", None) or derive_period_label(args.d1, args.d2)
+    phrase = args.query or name_filter or path
+    L += [f"# Конкурентный анализ WB — {niche}", "",
+          f"**Ниша:** {niche}  ",
+          f"**Ключевая фраза:** «{phrase}»  ",
           (f"**Фильтр (принт/паттерн):** название содержит «{name_filter}»  " if name_filter else ""),
-          f"**Период:** {args.d1} — {args.d2} ({args.days} дн) · **срез:** ТОП-{args.top} по {by_label}", ""]
+          f"**Период:** {plabel} · **срез:** ТОП-{args.top} по {by_label}", ""]
 
     # --- A. Ёмкость / концентрация / сезонность ---
     conc = ("высокая концентрация — вход тесный" if top_share >= 60
             else "ниша раздроблена — есть вход" if top_share < 40 else "умеренная концентрация")
     L += ["## A. Ёмкость и концентрация",
-          f"- SKU в срезе: **{fmt_int(len(items))}** · {'продавцов' if args.by=='seller' else 'брендов'}: **{fmt_int(len(agg))}**",
-          f"- Суммарная выручка: **{fmt_money(tot_rev)}** за период",
-          f"- Доля ТОП-{args.top}: **{top_share:.1f}%** ({conc})"]
+          f"- Артикулов в срезе (после фильтров): **{fmt_int(len(items))}** · "
+          f"{'продавцов' if args.by=='seller' else 'брендов'}: **{fmt_int(len(agg))}**",
+          f"- Совокупная выручка среза за период: **{fmt_money(tot_rev)}**",
+          f"- Доля ТОП-{args.top} в выручке среза: **{top_share:.1f}%** ({conc})"]
     if seas:
         d = seas["delta_pct"]
         arrow = "растёт ↑" if d > 8 else "падает ↓" if d < -8 else "стабильна →"
-        L.append(f"- Динамика спроса в периоде: **{arrow}** ({d:+.0f}% 2-я половина к 1-й) — учитывать сезон")
+        L.append(f"- Динамика спроса (выручка 2-й половины периода к 1-й): **{arrow}** ({d:+.0f}%) "
+                 f"— сезонный тренд ниши")
     L.append("")
 
     # --- B. ТОП конкурентов ---
@@ -1341,7 +1395,10 @@ JS_REPORT = """
 def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                pz, cb, colors, seas, review, mine, gaps, notes, econ=None, kw=None, wbd=None,
                funnel=None, embed=False):
-    title = args.query or (name_filter or path.split('/')[-1])
+    niche = getattr(args, "niche_name", None) or derive_niche(args.query or path)
+    plabel = getattr(args, "period_label_str", None) or derive_period_label(args.d1, args.d2)
+    phrase = args.query or name_filter or path
+    title = niche
     by_label = "Продавец" if args.by == "seller" else "Бренд"
     top_share = sum(v["rev"] for _, v in top) / tot_rev * 100 if tot_rev else 0
     P = []
@@ -1350,21 +1407,21 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
     toggle = "" if embed else '<button class="toggle" id="wcaTheme">☾ Тема</button>'
     P.append('<header class="top"><div>'
              '<p class="eyebrow">Конкурентный анализ · Wildberries</p>'
-             f'<h1>{esc(title)}</h1>'
-             f'<p class="meta">Ниша <code>{esc(path)}</code> · {esc(args.d1)}—{esc(args.d2)} '
-             f'({args.days} дн) · срез по {"продавцам" if args.by=="seller" else "брендам"}</p>'
+             f'<h1>{esc(niche)}</h1>'
+             f'<p class="meta">Ключевая фраза «{esc(phrase)}» · {esc(plabel)} '
+             f'· срез по {"продавцам" if args.by=="seller" else "брендам"}</p>'
              f'</div>{toggle}</header>')
 
     # A. summary tiles
-    tiles = [(fmt_int(len(items)), "SKU в срезе"),
+    tiles = [(fmt_int(len(items)), "артикулов в срезе"),
              (fmt_int(len(agg)), "продавцов" if args.by == "seller" else "брендов"),
-             (fmt_money(tot_rev), "выручка за период"),
-             (f"{top_share:.0f}%", f"доля ТОП-{args.top}")]
+             (fmt_money(tot_rev), "выручка среза за период"),
+             (f"{top_share:.0f}%", f"доля ТОП-{args.top} в выручке")]
     if seas:
         d = seas["delta_pct"]
         arrow = "↑" if d > 8 else "↓" if d < -8 else "→"
         cls = "val-ok" if d > 8 else "val-bad" if d < -8 else ""
-        tiles.append((f'<span class="{cls}">{arrow} {d:+.0f}%</span>', "динамика спроса"))
+        tiles.append((f'<span class="{cls}">{arrow} {d:+.0f}%</span>', "динамика спроса (2я/1я)"))
     P.append('<section><div class="tiles">' +
              "".join(f'<div class="tile"><div class="v num">{v}</div><div class="l">{esc(l)}</div></div>'
                      for v, l in tiles) + '</div></section>')
@@ -1814,7 +1871,10 @@ def main():
     ap.add_argument("--item", default="рубашка")
     ap.add_argument("--pattern", default=None)
     ap.add_argument("--path", default=None, help="явный путь категории MPStats")
-    ap.add_argument("--query", default=None, help="фраза ниши для шапки отчёта")
+    ap.add_argument("--query", default=None, help="ключевая фраза (для шапки отчёта)")
+    ap.add_argument("--niche", default=None, help="имя ниши для шапки (напр. «Рубашки женские»); по умолчанию выводится из фразы")
+    ap.add_argument("--period-label", dest="period_label", default=None,
+                    help="человекочитаемый период (напр. «за последние 30 дней», «август 2025 года»); по умолчанию из дат")
     ap.add_argument("--my-sku", dest="my_sku", default=None, help="ваш артикул WB для гэп-анализа")
     ap.add_argument("--top", type=int, default=10)
     ap.add_argument("--bench", type=int, default=20, help="сколько топ-SKU брать в контент-бенчмарк")
@@ -1991,6 +2051,10 @@ def main():
         except Exception as e:
             notes.append(f"WB-обогащение недоступно ({str(e)[:40]})")
 
+    # имя ниши и человекочитаемый период для шапки (флаги переопределяют авто-вывод)
+    args.niche_name = args.niche or derive_niche(args.query or path)
+    args.period_label_str = args.period_label or derive_period_label(args.d1, args.d2)
+
     report, top, gaps = build_report(args, path, path_note, nfilter, items, total, agg,
                                      tot_rev, pz, cb, colors, seas, review, mine, notes, econ, kw, wbd, funnel)
     if alts:
@@ -2014,7 +2078,8 @@ def main():
                 print(f"[pdf] не удалось: {e}", file=sys.stderr)
     if args.json_out:
         payload = {
-            "query": {"query": args.query, "gender": args.gender, "item": args.item,
+            "query": {"query": args.query, "niche": args.niche_name,
+                      "period_label": args.period_label_str, "gender": args.gender, "item": args.item,
                       "pattern": args.pattern, "path": path, "name_filter": nfilter,
                       "d1": args.d1, "d2": args.d2, "by": args.by, "top": args.top,
                       "my_sku": args.my_sku},

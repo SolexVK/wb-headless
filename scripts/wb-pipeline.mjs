@@ -65,7 +65,13 @@ if (!d1 && !d2 && opt.period) {
   const day = 86400000;
   const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
   d2 = iso(Date.now() - day);
-  d1 = iso(Date.now() - (days + 1) * day);
+  d1 = iso(Date.now() - days * day);
+}
+// человекочитаемая подпись периода для шапки отчёта (движок иначе выведет из дат)
+let periodLabel = opt['period-label'];
+if (!periodLabel && opt.period) {
+  const n = Number(opt.period) || 30;
+  periodLabel = n >= 350 ? 'за последний год' : `за последние ${n} дней`;
 }
 
 // «глубокие» фильтры [1]: группы-признаки (ИЛИ) + exclude-гейт + метрики
@@ -162,6 +168,8 @@ try {
     '--html-out', `${dir}/analysis.html`,
     '--pdf-out', `${dir}/analysis.pdf`,
   ];
+  if (opt.niche) engineArgs.push('--niche', String(opt.niche));
+  if (periodLabel) engineArgs.push('--period-label', periodLabel);
   if (opt.cost != null) engineArgs.push('--cost', String(numOpt(opt.cost)));
   else log('    ⚠️ без --cost блок C (юнит-экономика/заработок) будет пропущен.');
   if (seasDelta != null) engineArgs.push('--seasonality-delta', String(seasDelta));
