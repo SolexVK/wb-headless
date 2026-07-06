@@ -438,6 +438,13 @@ def num(x):
         return 0.0
 
 
+def sale_price_of(it):
+    """Средняя ЦЕНА ПРОДАЖИ карточки (= revenue/sales, что реально платит покупатель):
+    поле sale_price (каскад) / final_price_average (категория MPStats) / final_price (fallback)."""
+    return (num(it.get("sale_price")) or num(it.get("final_price_average"))
+            or num(it.get("final_price")))
+
+
 def truthy(x):
     if isinstance(x, str):
         return x.strip().lower() not in ("", "0", "false", "нет", "no")
@@ -500,8 +507,8 @@ def aggregate(items, by):
 def price_zone(items):
     """«Привлекательная цена» = ценовой диапазон, собирающий максимум ВЫРУЧКИ.
     Возвращает медиану цены (по выручке), коридор и топ-ведро."""
-    pr = [(num(it.get("final_price")), num(it.get("revenue"))) for it in items
-          if num(it.get("final_price")) > 0]
+    pr = [(sale_price_of(it), num(it.get("revenue"))) for it in items
+          if sale_price_of(it) > 0]
     if not pr:
         return None
     prices = sorted(p for p, _ in pr)
@@ -680,7 +687,9 @@ def load_items_json(pathfile):
             "name": r.get("name"), "brand": r.get("brand"),
             "seller": r.get("brand"),        # у [1] нет продавца — владельца берём по бренду
             "color": r.get("color"),
-            "final_price": price, "revenue": num(r.get("revenue")), "sales": num(r.get("sales")),
+            "final_price": price,                              # витринная (текущая) цена
+            "sale_price": num(r.get("avgSalePrice")) or price,  # средняя ЦЕНА ПРОДАЖИ (revenue/sales)
+            "revenue": num(r.get("revenue")), "sales": num(r.get("sales")),
             "rating": num(r.get("rating")), "comments": num(r.get("reviews")),
             "lost_profit": num(r.get("lostProfit")), "_thumb": r.get("thumb"),
             # picscount/hasvideo/description_length дозаполняются enrich_content по nmId
@@ -830,11 +839,15 @@ def price_buyer_for_margin(cost, pr, m, drr):
     return S * (1 - pr["spp"])
 
 
-def price_segments(items, cost, pr, n=6):
-    """Ниша по ценовым сегментам + наша маржа/прибыль в каждом (фаза «выход»)."""
-    rows = [(num(it.get("final_price")), num(it.get("sales")), num(it.get("revenue")),
+def price_segments(items, cost, pr, n=6, sample=100):
+    """Ценовые сегменты ниши + наша маржа/прибыль (фаза «выход»).
+    Выборка — топ-`sample` по выручке; цена — средняя ЦЕНА ПРОДАЖИ (не витринная);
+    сегменты — равные по числу артикулов (квантильные), по возрастанию цены продажи;
+    внутри каждого — медиана заказов и медиана цены продажи, по ним считаем маржу."""
+    pool = sorted(items, key=lambda it: num(it.get("revenue")), reverse=True)[:sample]
+    rows = [(sale_price_of(it), num(it.get("sales")), num(it.get("revenue")),
              num(it.get("rating")), num(it.get("comments")))
-            for it in items if num(it.get("final_price")) > 0]
+            for it in pool if sale_price_of(it) > 0]
     rows.sort(key=lambda x: x[0])
     m = len(rows)
     if m == 0:
@@ -846,14 +859,14 @@ def price_segments(items, cost, pr, n=6):
         grp = rows[i * m // n:(i + 1) * m // n]
         if not grp:
             continue
-        prices = [g[0] for g in grp]
+        gp = [g[0] for g in grp]
         orders = [g[1] for g in grp]
         cw = sum(g[4] for g in grp)
         rat = (sum(g[3] * g[4] for g in grp) / cw) if cw else (sum(g[3] for g in grp) / len(grp))
-        rep = median(prices)
+        rep = median(gp)                       # медианная цена продажи сегмента
         c = unit_calc(rep, cost, pr, pr["drr_steady"])
         redeemed = median(orders) * pr["redemption"]
-        segs.append({"p_lo": min(prices), "p_hi": max(prices), "skus": len(grp),
+        segs.append({"p_lo": min(gp), "p_hi": max(gp), "skus": len(grp),
                      "rev_share": sum(g[2] for g in grp) / total_rev * 100,
                      "median_orders": median(orders), "rating": rat, "rep_price": rep,
                      "margin": c["margin"], "profit_unit": c["profit"],
@@ -871,7 +884,8 @@ def compute_economics(items, cost, pr):
     for P in corridor:
         launch_at.append(unit_calc(P, cost, pr, pr["drr_launch"])["margin"] if P else None)
     segs = price_segments(items, cost, pr)
-    good = [s for s in segs if s["margin"] >= pr["m_min"] and s["median_orders"] > 0]
+    # целевые сегменты: маржа ≥ порога, есть спрос и НЕ одиночный выброс (≥2 артикулов)
+    good = [s for s in segs if s["margin"] >= pr["m_min"] and s["median_orders"] > 0 and s["skus"] >= 2]
     # заработок за период в целевом сегменте: берём прибыльный сегмент с макс. прогнозом
     best = max(good, key=lambda s: s["proj_profit"]) if good else None
     target_earnings = None
@@ -886,7 +900,7 @@ def compute_economics(items, cost, pr):
             "breakeven": price_buyer_for_margin(cost, pr, 0.0, d),
             "breakeven_launch": price_buyer_for_margin(cost, pr, 0.0, pr["drr_launch"]),
             "corridor": corridor, "launch_margin_at_corridor": launch_at,
-            "stack": unit_calc(corridor[0] or median([num(it.get("final_price")) for it in items]),
+            "stack": unit_calc(corridor[0] or median([sale_price_of(it) for it in items]),
                                cost, pr, d),
             "segments": segs, "good_segments": good, "target_earnings": target_earnings}
 
@@ -1036,17 +1050,18 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
               f"- Для справки, «зона объёма» (где крутится максимум выручки): "
               f"**{fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽** ({pz['band_share']:.0f}% выручки) — "
               f"это НЕ цель, там объём, но не маржа." if pz else "", ""]
-        # таблица сегментов
+        # таблица характерных ценовых сегментов (по цене продажи)
         if econ["segments"]:
-            L += ["**Ценовые сегменты ниши × наша маржа** (фаза «выход»):", "",
-                  "| Цена (с СПП) | SKU | Выручка | Заказов/SKU | Рейтинг | Наша маржа | Прибыль/ед | Прогноз ₽/период* |",
-                  "|---|--:|--:|--:|--:|--:|--:|--:|"]
+            L += ["**Характерные ценовые сегменты (по цене продажи) × наша маржа** (фаза «выход»):", "",
+                  "| Сегмент, цена продажи ₽ | Медиана цены | Артикулов | Выручка | Заказов/SKU (медиана) "
+                  "| Рейтинг | Наша маржа | Прибыль/ед | Прогноз ₽/период* |",
+                  "|---|--:|--:|--:|--:|--:|--:|--:|--:|"]
             for s in econ["segments"]:
                 flag = "✅" if s["margin"] >= pr["m_min"] else ("⚠️" if s["margin"] >= 0 else "🔴")
-                L.append(f"| {fmt_int(s['p_lo'])}–{fmt_int(s['p_hi'])} | {s['skus']} | "
-                         f"{s['rev_share']:.0f}% | {fmt_int(s['median_orders'])} | {s['rating']:.2f} | "
-                         f"{flag} {s['margin']*100:.0f}% | {fmt_int(s['profit_unit'])} ₽ | "
-                         f"{fmt_int(s['proj_profit'])} ₽ |")
+                L.append(f"| {fmt_int(s['p_lo'])}–{fmt_int(s['p_hi'])} | {fmt_int(s['rep_price'])} ₽ "
+                         f"| {s['skus']} | {s['rev_share']:.0f}% | {fmt_int(s['median_orders'])} "
+                         f"| {s['rating']:.2f} | {flag} {s['margin']*100:.0f}% | {fmt_int(s['profit_unit'])} ₽ "
+                         f"| {fmt_int(s['proj_profit'])} ₽ |")
             L.append("")
         # вердикт
         good = econ["good_segments"]
@@ -1578,15 +1593,17 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                 mcls = "val-ok" if cls == "ok" else ("val-warn" if cls == "warn" else "val-bad")
                 trs.append(
                     f'<tr class="mrow {cls}"><td class="num">{fmt_int(s["p_lo"])}–{fmt_int(s["p_hi"])}</td>'
+                    f'<td class="r num">{fmt_int(s["rep_price"])} ₽</td>'
                     f'<td class="r num">{s["skus"]}</td><td class="r num">{s["rev_share"]:.0f}%</td>'
                     f'<td class="r num">{fmt_int(s["median_orders"])}</td><td class="r num">{s["rating"]:.2f}</td>'
                     f'<td class="r num {mcls}">{s["margin"]*100:.0f}%</td>'
                     f'<td class="r num">{fmt_int(s["profit_unit"])} ₽</td>'
                     f'<td class="r num">{fmt_int(s["proj_profit"])} ₽</td></tr>')
             seg_html = ('<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr>'
-                        '<th>Цена (с СПП)</th><th class="r">SKU</th><th class="r">Выручка</th>'
-                        '<th class="r">Заказов/SKU</th><th class="r">Рейтинг</th><th class="r">Маржа</th>'
-                        '<th class="r">Прибыль/ед</th><th class="r">Прогноз/период</th></tr></thead>'
+                        '<th>Сегмент, цена продажи ₽</th><th class="r">Медиана</th><th class="r">Артикулов</th>'
+                        '<th class="r">Выручка</th><th class="r">Заказов/SKU</th><th class="r">Рейтинг</th>'
+                        '<th class="r">Маржа</th><th class="r">Прибыль/ед</th>'
+                        '<th class="r">Прогноз/период</th></tr></thead>'
                         f'<tbody>{"".join(trs)}</tbody></table></div>')
         # вердикт
         good = econ["good_segments"]
