@@ -59,20 +59,20 @@
 
 Инструменты — это функции с чётким входом/выходом, поэтому оркестрация — обычный JS:
 
-```js
-import { topByKeywords } from './lib/wbTopKeywords.js';        // [2] (будущий)
-import { runCardsComparison } from './lib/wbCardsCompare.js';  // [2] (готов)
-import { competitiveAnalysis } from './lib/wbCompetitiveAnalysis.js'; // [3] (будущий)
+Проще всего — оркестратор `scripts/wb-pipeline.mjs` (две фазы, ручной выбор конкурентов):
 
-const our = await askUser('наш артикул');                 // наш артикул — всегда у пользователя
-const { rivals } = await topByKeywords({ query, topN: 10, filters });
-const cmp = await runCardsComparison({ our, rivals: rivals.slice(0,4), submit: true });
-// cmp.data — уже разобранный контракт cards-compare (или cmp.json — путь к файлу)
-const report = await competitiveAnalysis({ cardsCompare: cmp.data /*, + другие источники */ });
+```bash
+# Фаза 1 — [1] ТОП по фразе + сезонность + таблица-пикер:
+npm run pipeline -- --query "рубашка женская в полоску" --period 30 --top 20 --group "крой=оверс,прям"
+# Фаза 2 — [2] Сравнение карточек + [3] Конкурентный анализ (наш артикул и выбор — от пользователя):
+npm run pipeline -- --run-id <id> --our 841324733 --rivals 297675127,494807116 --cost 536 --submit
 ```
 
-Файловая конвенция (для запуска по шагам и переиспользования артефактов):
-`reports-output/<run-id>/<stage>.json` — каждый этап читает предыдущий JSON.
+Под капотом: [1] `lib/wbTopKeywords.js` → `top-rivals.json`; [2] `lib/wbCardsCompare.js` →
+`cards-compare.json`; [3] Python-движок `.claude/skills/wb-competitor-analysis/wb_analyze.py`
+в каскадном режиме (`--items-json top-rivals.json --funnel-json cards-compare.json`).
+
+Файловая конвенция: `reports-output/<run-id>/<stage>.json` — каждый этап читает предыдущий JSON.
 
 ## Статус
 
@@ -80,8 +80,8 @@ const report = await competitiveAnalysis({ cardsCompare: cmp.data /*, + друг
 |---|---|---|
 | [2] Сравнение карточек | `lib/wbCardsCompare.js` + парсер `wbCardsCompareParse.js` | ✅ готов, отдаёт `cards-compare.json` |
 | [1] ТОП-10 по запросу + фильтр | `lib/wbTopKeywords.js` + `scripts/wb-top-keywords.mjs` | ✅ готов, эндпоинт MPStats залочен живым токеном (прогон end-to-end зелёный) |
-| [3] Конкурентный анализ (блок воронки) | `lib/wbCompetitiveAnalysis.js` + `scripts/wb-competitive-analysis.mjs` | ✅ готов, отдаёт `analysis.json` + `analysis.md` |
-| Оркестратор каскада | `scripts/wb-pipeline.mjs` | ✅ готов, сцепляет [1]→[2]→[3] в `reports-output/<run-id>/` |
+| [3] Конкурентный анализ | Python-движок `.claude/skills/wb-competitor-analysis/wb_analyze.py` (каскадный режим `--items-json`/`--funnel-json`) | ✅ готов, отдаёт `analysis.md/html/pdf/json` (блоки A–H + воронка) |
+| Оркестратор каскада | `scripts/wb-pipeline.mjs` | ✅ готов, сцепляет [1]→(ручной выбор)→[2]→[3] в `reports-output/<run-id>/` |
 
 Правило: **наш артикул всегда спрашиваем у пользователя**; артикулы конкурентов
 приходят из этапа [1] или задаются вручную.
@@ -161,44 +161,34 @@ query-параметр **`path`** (обязателен); период `d1`/`d2`
 оставлены в env (`MPSTATS_SEARCH_PATH`, `MPSTATS_SEARCH_QUERY_PARAM`) на случай
 смены схемы. Старый `/wb/get/search` оказался html-заглушкой (пустой 200) — тупик.
 
-## Контракт данных «competitive-analysis» (этап [3])
+## Отчёт этапа [3] «Конкурентный анализ» (Python-движок)
 
-`lib/wbCompetitiveAnalysis.js` (`competitiveAnalysis({ cardsCompare })`) сравнивает
-нашу карточку с конкурентами и отдаёт:
+Движок `.claude/skills/wb-competitor-analysis/wb_analyze.py` в **каскадном режиме**
+(`--items-json` = ниша из [1], `--funnel-json` = воронка из [2]) строит многоблочный
+отчёт (markdown + HTML + PDF + JSON). Блоки: **A** ёмкость/концентрация/сезонность ·
+**B** ТОП-конкуренты · **C** юнит-экономика + заработок за период (при `--cost`) ·
+**D** доминирующие цвета (до 10) · **E** контент-бенчмарк (по 20 SKU, контент добран по
+nmId из card.json WB) · **F/F2** карточки под разбор + смыслы/слайды/характеристики
+(разные бренды) · **G** наша карточка vs ниша (из воронки [2]) · **G2** сравнение
+карточек — воронка наш vs конкуренты + планка · **H** план доработки (гэпы карточки +
+вороночные цели CTR/корзина/заказ/показы + чек-лист ручного слоя).
 
-```jsonc
-{
-  "source": "wb-competitive-analysis",
-  "our": "758196168", "ourName": "...", "periods": {...}, "rivalsCount": 3,
-  "rivals": [ { "nmId","name","brand" } ],
-  "funnel": {
-    "stages": [ { "key":"ctrPct","label","unit","our","rivalsMedian","rivalsBest",
-                  "rivalsWorst","gapToMedianPct","percentile","status" } ],  // CTR→корзина→заказ→выкуп
-    "bottleneck": "cartConvPct"        // самый слабый этап vs конкуренты (или null)
-  },
-  "price": { "our","rivalsMedian",...,"tier":"premium|mid|budget" },
-  "quality": { "cardRating":{...}, "reviewRating":{...}, "reviewCount":{...} },
-  "searchPosition": { "our","rivalsMedian",...,"status" },   // меньше = лучше
-  "trend": [ { "key","label","current","previous","deltaPct" } ] | null,  // период-к-периоду
-  "findings": [ { "severity","area","message" } ],
-  "recommendations": [ "..." ]
-}
-```
-
-`status` каждого среза: `strong` (обходим ≥66% конкурентов) / `ok` / `weak` (≤34%).
-`formatReport(analysis)` рендерит это в markdown-отчёт. CLI:
-`node scripts/wb-competitive-analysis.mjs --in <cards-compare.json> [--json] [--out f]`.
+`analysis.json` несёт: `query, niche(+seasonality_delta_pct), economics(+target_earnings),
+content_benchmark, colors, top[], review_cards, my_card, funnel(rows/planka/mine), gaps, notes`.
+Ключевой контракт-вход [3] — `top-rivals.json` (из [1]) и `cards-compare.json` (из [2]).
+Подробности флагов и метода — в скилле `wb-competitor-analysis` и его `references/`.
 
 ## Оркестратор каскада (`scripts/wb-pipeline.mjs`)
 
-Сцепляет всё одной командой; артефакты — в `reports-output/<run-id>/`
-(`top-rivals.json`, `cards-compare.*`, `analysis.json`, `analysis.md`):
+Две фазы с **ручным выбором конкурентов**; артефакты — в `reports-output/<run-id>/`
+(`top-rivals.json`, `cards-compare.*`, `analysis.md/html/pdf/json`):
 
 ```bash
-# DRY-RUN: [1] + план [2], лимит не тратим (данных для [3] ещё нет)
-node scripts/wb-pipeline.mjs --query "платье женское" --our 758196168 --top 4 --min-rating 4.5
-# Полный каскад (тратит 1 из лимита «Сравнения карточек», нужна живая сессия кабинета)
-node scripts/wb-pipeline.mjs --query "платье женское" --our 758196168 --submit
-# [2 готовое]→[3]: переиспользовать ранее посчитанное сравнение бесплатно
-node scripts/wb-pipeline.mjs --our 758196168 --export-existing
+# Фаза 1 — DISCOVERY: [1] ТОП по фразе + сезонность + таблица-пикер, сохраняет top-rivals.json
+npm run pipeline -- --query "рубашка женская в полоску" --period 30 --top 20 \
+  --group "крой=оверс,прям" --exclude "притал,стойк" --price-min 1800
+# → выбираешь 2–4 nmId, спрашиваешь наш артикул и себестоимость
+# Фаза 2 — ANALYSIS: [2] Сравнение карточек (--submit тратит 1 лимит) → [3] Конкурентный анализ
+npm run pipeline -- --run-id <id> --our 841324733 --rivals 297675127,494807116,435980977 --cost 536 --submit
+# --export-existing вместо --submit — переиспользовать готовое сравнение [2] бесплатно
 ```
