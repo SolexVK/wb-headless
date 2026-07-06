@@ -1427,7 +1427,7 @@ JS_REPORT = """
     'box-shadow:0 14px 44px rgba(0,0,0,.45);border:2px solid #fff;pointer-events:none;background:#eee;';
   document.body.appendChild(zoom);
   function place(el){
-    var r=el.getBoundingClientRect(), w=r.width*2, h=r.height*2;
+    var r=el.getBoundingClientRect(), w=r.width*4, h=r.height*4;
     zoom.style.width=w+'px'; zoom.style.height=h+'px';
     var left=r.right+10; if(left+w>innerWidth) left=r.left-w-10; if(left<4) left=4;
     var top=r.top+r.height/2-h/2; if(top<4) top=4; if(top+h>innerHeight) top=innerHeight-h-4;
