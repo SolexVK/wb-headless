@@ -22,7 +22,8 @@
     "analysis:competitive": "node scripts/wb-competitive-analysis.mjs",
     "pipeline": "node scripts/wb-pipeline.mjs",
     "docs:fetch": "node scripts/fetch-wb-docs.mjs",
-    "docs:limits": "node scripts/fetch-wb-docs.mjs https://dev.wildberries.ru/docs/openapi/api-information docs/wb-api/limits.md"
+    "docs:limits": "node scripts/fetch-wb-docs.mjs https://dev.wildberries.ru/docs/openapi/api-information docs/wb-api/limits.md",
+    "sales:by-keyword": "node scripts/wb-brand-keyword-sales.mjs"
   },
   "engines": {
     "node": ">=18"

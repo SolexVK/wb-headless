@@ -17,6 +17,13 @@
   залочен, двухуровневая фильтрация согласована с пользователем и проверена на двух
   ассортиментах («муслиновая» → 48, «в полоску» → 56). HTML-отчёт с фото+цветом,
   авто-имя файла `<фраза>_<дата>.html`.
+- **Скилл «Анализ своих товаров по ключевым запросам» — ГОТОВ** (standalone, не часть
+  каскада). `.claude/skills/wb-brand-keyword-sales/` + `lib/wbBrandKeywordSales.js`,
+  `lib/wbSales.js` (WB Statistics /sales, лимит 1/мин, дедуп по **saleID** не srid),
+  `lib/htmlToPdf.js` (Chromium executablePath). `npm run sales:by-keyword`. По фразам
+  берёт наши карточки из выдачи (MPStats) → тянет ФАКТИЧЕСКИЕ выкупы из кабинета →
+  PDF по фразе×периоду (штуки + сумма finishedPrice, возвраты отдельно). Проверен на
+  AIDEMIKO/Aizek «муслиновая рубашка».
 - **[2] Сравнение карточек — ГОТОВ** (кабинет WB, headless-браузер). `lib/wbCardsCompare.js`
   + скилл `wb-cards-compare`. DRY-RUN / `--submit` (тратит 1 лимит) / `--export-existing`
   (бесплатно). Экстрактор XLSX→JSON: `lib/wbCardsCompareParse.js` (контракт cards-compare).
