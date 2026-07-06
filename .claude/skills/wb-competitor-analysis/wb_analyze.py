@@ -294,6 +294,10 @@ def wb_basket_host(vol):
     for a, b, h in BASKET_RANGES:
         if a <= vol <= b:
             return h
+    # новые (высокие) vol за пределами таблицы — экстраполируем ~250 vol на хост
+    # (точный хост уточняется перебором соседей ±N в wb_basket_card)
+    if vol > 5189:
+        return str(28 + (vol - 5190) // 250)
     return '28'
 
 
@@ -305,8 +309,10 @@ def wb_basket_card(nm):
     nm = int(nm)
     vol, part = nm // 100000, nm // 1000
     h0 = int(wb_basket_host(vol))
-    # правильный хост пробуем с ретраями (пережить 429), соседние — по разу
-    order = [(f"{h0:02d}", 3)] + [(f"{h:02d}", 1) for h in (h0 - 1, h0 + 1, h0 - 2, h0 + 2) if 1 <= h <= 40]
+    # правильный хост пробуем с ретраями (пережить 429), соседние — по разу.
+    # Для новых (высоких) vol экстраполяция может промахнуться → шире соседи и выше потолок.
+    order = [(f"{h0:02d}", 3)] + [(f"{h:02d}", 1)
+                                  for h in (h0 - 1, h0 + 1, h0 - 2, h0 + 2, h0 - 3, h0 + 3) if 1 <= h <= 60]
     res = None
     for h, tries in order:
         t = _wb_curl(f"https://basket-{h}.wbbasket.ru/vol{vol}/part{part}/{nm}/info/ru/card.json", tries=tries)
@@ -503,26 +509,36 @@ def price_zone(items):
 
 
 def content_benchmark(items, k):
-    """Медиана и лидер по контент/качественным метрикам среди топ-k SKU по выручке."""
+    """Медиана и лидер по контент/качественным метрикам среди топ-k SKU по выручке.
+    Метрики без данных (ни у одной карточки поля нет) пропускаются — важно для каскадного
+    режима, где часть контент-полей добирается по nmId, а часть недоступна."""
     top = sorted(items, key=lambda it: num(it.get("revenue")), reverse=True)[:k]
     if not top:
         return None
+    def has(f):
+        return any(it.get(f) is not None for it in top)
     def col(f):
         return [num(it.get(f)) for it in top]
     def leader(f):
         best = max(top, key=lambda it: num(it.get(f)))
         return num(best.get(f)), (best.get("name") or "")[:40], best.get("id")
-    metrics = {
-        "final_price": {"label": "Цена, ₽", "median": median(col("final_price"))},
-        "picscount":   {"label": "Фото, шт", "median": median(col("picscount")), "leader": leader("picscount")},
-        "hasvideo":    {"label": "С видео, %", "share": 100 * sum(truthy(it.get("hasvideo")) for it in top) / len(top)},
-        "has3d":       {"label": "С 3D, %", "share": 100 * sum(truthy(it.get("has3d")) for it in top) / len(top)},
-        "description_length": {"label": "Длина описания", "median": median(col("description_length"))},
-        "rating":      {"label": "Рейтинг", "median": median(col("rating")), "leader": leader("rating")},
-        "comments":    {"label": "Отзывов, шт", "median": median(col("comments")), "leader": leader("comments")},
-        "latest_negative_comments_percent": {"label": "Негатив, %", "median": median(col("latest_negative_comments_percent"))},
-        "search_words_count": {"label": "SEO-слов", "median": median(col("search_words_count")), "leader": leader("search_words_count")},
-    }
+    metrics = {"final_price": {"label": "Цена, ₽", "median": median(col("final_price"))}}
+    if has("picscount"):
+        metrics["picscount"] = {"label": "Фото, шт", "median": median(col("picscount")), "leader": leader("picscount")}
+    if has("hasvideo"):
+        metrics["hasvideo"] = {"label": "С видео, %", "share": 100 * sum(truthy(it.get("hasvideo")) for it in top) / len(top)}
+    if has("has3d"):
+        metrics["has3d"] = {"label": "С 3D, %", "share": 100 * sum(truthy(it.get("has3d")) for it in top) / len(top)}
+    if has("description_length"):
+        metrics["description_length"] = {"label": "Длина описания", "median": median(col("description_length"))}
+    if has("rating"):
+        metrics["rating"] = {"label": "Рейтинг", "median": median(col("rating")), "leader": leader("rating")}
+    if has("comments"):
+        metrics["comments"] = {"label": "Отзывов, шт", "median": median(col("comments")), "leader": leader("comments")}
+    if has("latest_negative_comments_percent"):
+        metrics["latest_negative_comments_percent"] = {"label": "Негатив, %", "median": median(col("latest_negative_comments_percent"))}
+    if has("search_words_count"):
+        metrics["search_words_count"] = {"label": "SEO-слов", "median": median(col("search_words_count")), "leader": leader("search_words_count")}
     return {"k": len(top), "metrics": metrics}
 
 
@@ -594,6 +610,118 @@ def profile_sku(items, sku):
         if str(it.get("id")) == str(sku):
             return it
     return None
+
+
+# ======================= каскадный вход ([1] ТОП по фразе + [2] воронка) =======================
+def load_items_json(pathfile):
+    """Читает отчёт инструмента [1] (ТОП по фразе, wb-top-keywords) и маппит его в форму item
+    движка. Возвращает (items, meta). meta = {query, d1, d2, total, seasonality_delta}."""
+    with open(pathfile, encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, list):          # на случай голого массива rivals
+        rivals, meta = data, {}
+    else:
+        rivals = data.get("rivals") or data.get("items") or []
+        meta = data
+    items = []
+    for r in rivals:
+        price = num(r.get("price")) or num(r.get("avgSalePrice"))
+        items.append({
+            "id": str(r.get("nmId") or r.get("id") or ""),
+            "name": r.get("name"), "brand": r.get("brand"),
+            "seller": r.get("brand"),        # у [1] нет продавца — владельца берём по бренду
+            "color": r.get("color"),
+            "final_price": price, "revenue": num(r.get("revenue")), "sales": num(r.get("sales")),
+            "rating": num(r.get("rating")), "comments": num(r.get("reviews")),
+            "lost_profit": num(r.get("lostProfit")), "_thumb": r.get("thumb"),
+            # picscount/hasvideo/description_length дозаполняются enrich_content по nmId
+        })
+    period = meta.get("period") or {}
+    seas = (meta.get("_meta") or {}).get("seasonality") or meta.get("seasonality") or {}
+    return items, {
+        "query": meta.get("query"), "d1": period.get("d1"), "d2": period.get("d2"),
+        "total": meta.get("total"),
+        "seasonality_delta": seas.get("delta_pct") if isinstance(seas, dict) else None,
+    }
+
+
+def enrich_content(items, n):
+    """Дозаполняет контентные поля топ-n item-ов из card.json WB (picscount, hasvideo,
+    description_length) + характеристики/слайды. Best-effort, изменяет на месте. Счётчик успехов."""
+    top = sorted(items, key=lambda it: num(it.get("revenue")), reverse=True)[:n]
+    got = 0
+    for i, it in enumerate(top):
+        if not it.get("id"):
+            continue
+        if i:
+            time.sleep(0.4)  # вежливость к CDN
+        card = wb_basket_card(it["id"])
+        if not card:
+            continue
+        media = card.get("media") or {}
+        photos = media.get("photo_count") or len(media.get("photos") or [])
+        it["picscount"] = photos or None
+        it["hasvideo"] = 1 if media.get("has_video") else 0
+        it["description_length"] = len(card.get("description") or "")
+        it["_chars"] = wb_characteristics(card)
+        it["_slides"] = wb_slide_urls(card)
+        it["_descr"] = (card.get("description") or "")[:400]
+        got += 1
+    return got
+
+
+FUNNEL_LABELS = {"ctr": "CTR (клик по показу)", "cart": "Конв. в корзину",
+                 "order": "Конв. в заказ", "buyout": "Выкуп"}
+
+
+def load_funnel_json(pathfile):
+    """Читает отчёт инструмента [2] (Сравнение карточек, wb-cards-compare) → воронка наш vs
+    конкуренты. Возвращает dict: строки, планка (медиана конкурентов), наша карточка (для блока G)."""
+    with open(pathfile, encoding="utf-8") as f:
+        data = json.load(f)
+    rows, rivals, our = [], [], None
+    for a in (data.get("articles") or []):
+        cur = a.get("current") or {}
+        row = {
+            "nm": str(a.get("nmId") or ""), "name": a.get("name") or "", "is_our": bool(a.get("isOur")),
+            "showings": num(cur.get("showings")), "ctr": num(cur.get("ctrPct")),
+            "cart": num(cur.get("cartConvPct")), "order": num(cur.get("orderConvPct")),
+            "buyout": num(cur.get("buyoutPct")), "position": num(cur.get("avgSearchPosition")),
+            "price": num(cur.get("medianPrice")),
+            "rating": num(cur.get("reviewRating")) or num(cur.get("cardRating")),
+            "reviews": num(cur.get("reviewCount")),
+        }
+        rows.append(row)
+        (rivals if not row["is_our"] else []).append(row)
+        if row["is_our"]:
+            our = row
+    def med(key):
+        vals = [r[key] for r in rivals if r.get(key)]
+        return median(vals) if vals else 0
+    planka = {k: med(k) for k in ("ctr", "cart", "order", "buyout", "showings", "position")}
+    mine = None
+    if our:
+        mine = {"id": our["nm"], "name": our["name"], "final_price": our["price"], "color": None,
+                "rating": our["rating"], "comments": our["reviews"], "_funnel": our}
+    return {"rows": rows, "our": our, "rivals": rivals, "planka": planka,
+            "mine": mine, "periods": data.get("periods")}
+
+
+def funnel_gaps(our, planka):
+    """Гэпы воронки: где наша конверсия/видимость ниже медианы конкурентов → цель дотянуть."""
+    if not our:
+        return []
+    out = []
+    for key in ("ctr", "cart", "order", "buyout"):
+        mine_v, plan_v = our.get(key, 0), planka.get(key, 0)
+        if plan_v and mine_v < plan_v:
+            out.append(f"{FUNNEL_LABELS[key]}: {mine_v:.0f}% < медианы ниши {plan_v:.0f}% — цель ≥ {plan_v:.0f}%")
+    if planka.get("showings") and our.get("showings", 0) < planka["showings"]:
+        pos_txt = (f" (позиция {fmt_int(our.get('position'))} → цель ≤ {fmt_int(planka.get('position'))})"
+                   if our.get("position") and planka.get("position") else "")
+        out.append(f"Показов {fmt_int(our['showings'])} < медианы ниши {fmt_int(planka['showings'])} "
+                   f"— поднять видимость{pos_txt}")
+    return out
 
 
 # ======================= юнит-экономика (ядро, база под UNIT-калькулятор) =======================
@@ -691,18 +819,28 @@ def compute_economics(items, cost, pr):
         launch_at.append(unit_calc(P, cost, pr, pr["drr_launch"])["margin"] if P else None)
     segs = price_segments(items, cost, pr)
     good = [s for s in segs if s["margin"] >= pr["m_min"] and s["median_orders"] > 0]
+    # заработок за период в целевом сегменте: берём прибыльный сегмент с макс. прогнозом
+    best = max(good, key=lambda s: s["proj_profit"]) if good else None
+    target_earnings = None
+    if best:
+        redeemed = best["median_orders"] * pr["redemption"]
+        target_earnings = {
+            "p_lo": best["p_lo"], "p_hi": best["p_hi"], "median_orders": best["median_orders"],
+            "redeemed_units": redeemed, "profit_unit": best["profit_unit"],
+            "proj_profit": best["proj_profit"], "proj_revenue": best["rep_price"] * redeemed,
+        }
     return {"cost": cost, "pr": pr,
             "breakeven": price_buyer_for_margin(cost, pr, 0.0, d),
             "breakeven_launch": price_buyer_for_margin(cost, pr, 0.0, pr["drr_launch"]),
             "corridor": corridor, "launch_margin_at_corridor": launch_at,
             "stack": unit_calc(corridor[0] or median([num(it.get("final_price")) for it in items]),
                                cost, pr, d),
-            "segments": segs, "good_segments": good}
+            "segments": segs, "good_segments": good, "target_earnings": target_earnings}
 
 
 # ======================= сборка отчёта =======================
 def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
-                 pz, cb, colors, seas, review, mine, notes, econ=None, kw=None, wbd=None):
+                 pz, cb, colors, seas, review, mine, notes, econ=None, kw=None, wbd=None, funnel=None):
     by_label = "продавцам" if args.by == "seller" else "брендам"
     ranked = sorted(agg.items(), key=lambda kv: kv[1]["rev"], reverse=True)
     top = ranked[:args.top]
@@ -804,6 +942,12 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                      f"при себестоимости {fmt_int(econ['cost'])} ₽. Спрос сосредоточен ниже вашего порога. "
                      f"Варианты: снизить себестоимость, добавить ценность/премиум-позиционирование, "
                      f"или пересмотреть нишу.")
+        te = econ.get("target_earnings")
+        if te:
+            L.append(f"- **Потенциальный заработок в целевом сегменте {fmt_int(te['p_lo'])}–{fmt_int(te['p_hi'])} ₽:** "
+                     f"≈ **{fmt_money(te['proj_profit'])} прибыли за период** на карточку "
+                     f"(при ~{fmt_int(te['median_orders'])} заказах → выкуп {pr['redemption']*100:.0f}% ≈ "
+                     f"{fmt_int(te['redeemed_units'])} шт; выручка ≈ {fmt_money(te['proj_revenue'])}).")
         L += ["", "_*Прогноз = прибыль/ед × (заказы/SKU × выкуп "
               f"{pr['redemption']*100:.0f}%). MPStats-«продажи» приняты за ЗАКАЗЫ; перепроверить на живых данных._", ""]
     elif pz:
@@ -895,16 +1039,18 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                      f"или задайте `--path` вручную. Гэп-анализ пропущен.")
         else:
             med_price = pz["wmedian"] if pz else 0
-            med_pics = cb["metrics"]["picscount"]["median"] if cb else 0
-            med_rating = cb["metrics"]["rating"]["median"] if cb else 0
-            med_comments = cb["metrics"]["comments"]["median"] if cb else 0
-            med_words = cb["metrics"].get("search_words_count", {}).get("median", 0) if cb else 0
+            cbm = cb["metrics"] if cb else {}
+            med_pics = cbm.get("picscount", {}).get("median", 0)
+            med_rating = cbm.get("rating", {}).get("median", 0)
+            med_comments = cbm.get("comments", {}).get("median", 0)
+            med_words = cbm.get("search_words_count", {}).get("median", 0)
             my_price = num(mine.get("final_price"))
+            pics_txt = fmt_int(mine.get("picscount")) if mine.get("picscount") is not None else "н/д"
+            vid_txt = ("да" if truthy(mine.get("hasvideo")) else "нет") if mine.get("hasvideo") is not None else "н/д"
             L += [f"- Название: {(mine.get('name') or '')[:70]}",
                   f"- Цена: **{fmt_int(my_price)} ₽** (медиана ниши {fmt_int(med_price)} ₽) · "
                   f"цвет: {mine.get('color') or '—'} · ⭐{num(mine.get('rating')):.1f} "
-                  f"({fmt_int(mine.get('comments'))} отз.) · фото {fmt_int(mine.get('picscount'))} · "
-                  f"видео {'да' if truthy(mine.get('hasvideo')) else 'нет'}"]
+                  f"({fmt_int(mine.get('comments'))} отз.) · фото {pics_txt} · видео {vid_txt}"]
             # маржа при текущей цене
             if econ and my_price:
                 pr = econ["pr"]
@@ -923,13 +1069,15 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                 where = "выше" if my_price > pz["band"][1] else "ниже"
                 gaps.append(f"Цена {where} зоны объёма ({fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽) "
                             f"— задай --cost для расчёта по марже")
-            if cb and num(mine.get("picscount")) < med_pics:
+            if med_pics and mine.get("picscount") is not None and num(mine.get("picscount")) < med_pics:
                 gaps.append(f"Фото {fmt_int(mine.get('picscount'))} < медианы {fmt_int(med_pics)} — довести листинг")
-            if cb and not truthy(mine.get("hasvideo")) and cb["metrics"]["hasvideo"]["share"] >= 40:
-                gaps.append(f"Нет видео, а у {cb['metrics']['hasvideo']['share']:.0f}% топа оно есть — добавить")
-            if cb and num(mine.get("rating")) and num(mine.get("rating")) < med_rating:
+            hv_share = cbm.get("hasvideo", {}).get("share")
+            if (hv_share is not None and mine.get("hasvideo") is not None
+                    and not truthy(mine.get("hasvideo")) and hv_share >= 40):
+                gaps.append(f"Нет видео, а у {hv_share:.0f}% топа оно есть — добавить")
+            if med_rating and num(mine.get("rating")) and num(mine.get("rating")) < med_rating:
                 gaps.append(f"Рейтинг {num(mine.get('rating')):.1f} < медианы {med_rating:.1f} — работать с отзывами/качеством")
-            if cb and num(mine.get("comments")) < med_comments:
+            if med_comments and num(mine.get("comments")) < med_comments:
                 gaps.append(f"Отзывов {fmt_int(mine.get('comments'))} < медианы {fmt_int(med_comments)} — набирать (глава 06)")
             if cb and med_words and num(mine.get("search_words_count")) < med_words:
                 gaps.append(f"SEO-слов {fmt_int(mine.get('search_words_count'))} < медианы {fmt_int(med_words)} — расширить ядро (глава 11)")
@@ -943,9 +1091,27 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                 L.append("- ✅ По оцифрованным метрикам карточка на уровне ниши — фокус на визуал/смыслы (блок H).")
         L.append("")
 
+    # --- G2. Сравнение карточек (воронка Шага 2) — перед планом ---
+    if funnel and funnel.get("rows"):
+        pk = funnel["planka"]
+        L += ["## G2. Сравнение карточек — воронка (наш vs конкуренты)", "",
+              "| Карточка | Показы | CTR | В корзину | В заказ | Выкуп | Позиция |",
+              "|---|--:|--:|--:|--:|--:|--:|"]
+        for r in funnel["rows"]:
+            mark = " ⬅ наш" if r["is_our"] else ""
+            nm = (r["name"] or r["nm"])[:32]
+            L.append(f"| {nm}{mark} | {fmt_int(r['showings'])} | {r['ctr']:.0f}% | {r['cart']:.0f}% "
+                     f"| {r['order']:.0f}% | {r['buyout']:.0f}% | {fmt_int(r['position'])} |")
+        L.append(f"| **Медиана конкурентов (планка)** | {fmt_int(pk['showings'])} | {pk['ctr']:.0f}% "
+                 f"| {pk['cart']:.0f}% | {pk['order']:.0f}% | {pk['buyout']:.0f}% | {fmt_int(pk['position'])} |")
+        L += ["", "> Планка = медиана конкурентов по этапу. Цель — быть не ниже планки на каждом шаге "
+              "воронки. Данные из кабинета WB (Сравнение карточек, инструмент [2]).", ""]
+        # вороночные гэпы → в план (подраздел «Гэпы карточки»)
+        gaps.extend(funnel_gaps(funnel.get("our"), pk))
+
     # --- H. План доработки ---
     L += ["## H. План доработки карточки", "",
-          "### Автоматически выявленные гэпы (данные MPStats)"]
+          "### Гэпы карточки (метрики ниши + воронка [2])"]
     if args.my_sku and gaps:
         for g in gaps:
             L.append(f"- [ ] {g}")
@@ -960,9 +1126,16 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
         L.append(f"- [ ] Цена-цель: коридор **{fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽** "
                  f"(зона объёма — задай --cost для маржинального коридора)")
     if cb:
-        L.append(f"- [ ] Контент-цель: фото ≥ **{fmt_int(cb['metrics']['picscount']['median'])}**, "
-                 f"видео {'обязательно' if cb['metrics']['hasvideo']['share']>=40 else 'желательно'}, "
-                 f"рейтинг ≥ **{cb['metrics']['rating']['median']:.1f}**")
+        cbm2 = cb["metrics"]
+        parts = []
+        if cbm2.get("picscount"):
+            parts.append(f"фото ≥ **{fmt_int(cbm2['picscount']['median'])}**")
+        if cbm2.get("hasvideo") is not None and "hasvideo" in cbm2:
+            parts.append(f"видео {'обязательно' if cbm2['hasvideo']['share'] >= 40 else 'желательно'}")
+        if cbm2.get("rating"):
+            parts.append(f"рейтинг ≥ **{cbm2['rating']['median']:.1f}**")
+        if parts:
+            L.append("- [ ] Контент-цель: " + ", ".join(parts))
 
     f2 = " ✅ данные в блоке F2" if wbd else ""
     L += ["", "### Ручной слой",
@@ -1116,7 +1289,8 @@ JS_REPORT = """
 
 
 def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
-               pz, cb, colors, seas, review, mine, gaps, notes, econ=None, kw=None, wbd=None, embed=False):
+               pz, cb, colors, seas, review, mine, gaps, notes, econ=None, kw=None, wbd=None,
+               funnel=None, embed=False):
     title = args.query or (name_filter or path.split('/')[-1])
     by_label = "Продавец" if args.by == "seller" else "Бренд"
     top_share = sum(v["rev"] for _, v in top) / tot_rev * 100 if tot_rev else 0
@@ -1208,6 +1382,13 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
             f'<div class="b num">{lm_txt}</div><div class="s">инвест-период, «первые недели в ноль»</div></div>'
             f'<div class="callout"><div class="k">Зона объёма (не цель)</div>'
             f'<div class="b num">{vol}</div><div class="s">где выручка, но не маржа</div></div>')
+        te = econ.get("target_earnings")
+        if te:
+            callouts += (f'<div class="callout hl"><div class="k">Заработок в целевом сегменте '
+                         f'{fmt_int(te["p_lo"])}–{fmt_int(te["p_hi"])} ₽</div>'
+                         f'<div class="b num">{fmt_money(te["proj_profit"])}/период</div>'
+                         f'<div class="s">≈{fmt_int(te["median_orders"])} заказов · выручка ≈ '
+                         f'{fmt_money(te["proj_revenue"])}</div></div>')
         # сегменты
         seg_html = ""
         if econ["segments"]:
@@ -1297,6 +1478,8 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                     yes = truthy(mine.get(key))
                     good = yes if d["share"] >= 40 else True
                     cell = f'<td class="r {"val-ok" if yes else ("val-bad" if not good else "")}">{"да" if yes else "нет"}</td>'
+                elif mine.get(key) is None:
+                    cell = '<td class="r num">н/д</td>'
                 else:
                     mv = num(mine.get(key))
                     med_v = num(d.get("median", 0))
@@ -1312,9 +1495,11 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
     # G. my card
     if args.my_sku:
         if mine:
+            pics_t = fmt_int(mine.get("picscount")) if mine.get("picscount") is not None else "н/д"
+            vid_t = ("да" if truthy(mine.get("hasvideo")) else "нет") if mine.get("hasvideo") is not None else "н/д"
             facts = (f'Цена {fmt_int(mine.get("final_price"))} ₽ · цвет {esc(mine.get("color") or "—")} · '
                      f'⭐{num(mine.get("rating")):.1f} ({fmt_int(mine.get("comments"))} отз.) · '
-                     f'фото {fmt_int(mine.get("picscount"))} · видео {"да" if truthy(mine.get("hasvideo")) else "нет"}')
+                     f'фото {pics_t} · видео {vid_t}')
             marg = ""
             if econ and num(mine.get("final_price")):
                 pr = econ["pr"]
@@ -1392,10 +1577,39 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
         parts.append('</section>')
         P.append("".join(parts))
 
+    # G2. funnel comparison (Step 2) — перед планом
+    if funnel and funnel.get("rows"):
+        pk = funnel["planka"]
+        def fcell(v, plan, is_our):
+            cls = "val-bad" if (is_our and plan and v < plan) else ""
+            return f'<td class="r num {cls}">{v:.0f}%</td>'
+        trs = []
+        for r in funnel["rows"]:
+            rowcls = ' class="mrow ok"' if r["is_our"] else ""
+            mark = " ⬅ наш" if r["is_our"] else ""
+            trs.append(f'<tr{rowcls}><td>{esc((r["name"] or r["nm"])[:44])}{mark}</td>'
+                       f'<td class="r num">{fmt_int(r["showings"])}</td>'
+                       f'{fcell(r["ctr"], pk["ctr"], r["is_our"])}{fcell(r["cart"], pk["cart"], r["is_our"])}'
+                       f'{fcell(r["order"], pk["order"], r["is_our"])}{fcell(r["buyout"], pk["buyout"], r["is_our"])}'
+                       f'<td class="r num">{fmt_int(r["position"])}</td></tr>')
+        trs.append(f'<tr class="mrow"><td><b>Медиана конкурентов (планка)</b></td>'
+                   f'<td class="r num">{fmt_int(pk["showings"])}</td>'
+                   f'<td class="r num">{pk["ctr"]:.0f}%</td><td class="r num">{pk["cart"]:.0f}%</td>'
+                   f'<td class="r num">{pk["order"]:.0f}%</td><td class="r num">{pk["buyout"]:.0f}%</td>'
+                   f'<td class="r num">{fmt_int(pk["position"])}</td></tr>')
+        P.append('<section><h2>Сравнение карточек — воронка (наш vs конкуренты)</h2>'
+                 '<div class="tbl-wrap"><table><thead><tr><th>Карточка</th><th class="r">Показы</th>'
+                 '<th class="r">CTR</th><th class="r">В корзину</th><th class="r">В заказ</th>'
+                 '<th class="r">Выкуп</th><th class="r">Позиция</th></tr></thead>'
+                 f'<tbody>{"".join(trs)}</tbody></table></div>'
+                 '<p class="meta">Планка = медиана конкурентов по этапу; красным — где наша карточка ниже '
+                 'планки. Цель — быть не ниже планки на каждом шаге. Данные из кабинета WB (Сравнение карточек, [2]).'
+                 '</p></section>')
+
     # H. plan (interactive)
     groups = []
     if args.my_sku and gaps:
-        groups.append(("Гэпы карточки (MPStats)", [(g, None) for g in gaps]))
+        groups.append(("Гэпы карточки (метрики ниши + воронка [2])", [(g, None) for g in gaps]))
     elif args.my_sku and mine:
         groups.append(("Гэпы карточки", [("Оцифрованных гэпов нет — фокус на ручной слой", None)]))
     targets = []
@@ -1406,9 +1620,16 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
         targets.append((f"Цена-цель: {fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽",
                         "зона объёма — задай --cost для маржинального коридора"))
     if cb:
-        vid = "обязательно" if cb["metrics"]["hasvideo"]["share"] >= 40 else "желательно"
-        targets.append((f"Контент-цель: фото ≥ {fmt_int(cb['metrics']['picscount']['median'])}, "
-                        f"видео {vid}, рейтинг ≥ {cb['metrics']['rating']['median']:.1f}", None))
+        cbm2 = cb["metrics"]
+        ct = []
+        if cbm2.get("picscount"):
+            ct.append(f"фото ≥ {fmt_int(cbm2['picscount']['median'])}")
+        if "hasvideo" in cbm2:
+            ct.append("видео " + ("обязательно" if cbm2["hasvideo"]["share"] >= 40 else "желательно"))
+        if cbm2.get("rating"):
+            ct.append(f"рейтинг ≥ {cbm2['rating']['median']:.1f}")
+        if ct:
+            targets.append(("Контент-цель: " + ", ".join(ct), None))
     if targets:
         groups.append(("Цели ниши", targets))
     f2 = " ✅ данные в блоке F2" if wbd else ""
@@ -1545,6 +1766,13 @@ def main():
     ap.add_argument("--json-out", default=None, help="файл для JSON с агрегатами")
     ap.add_argument("--html-out", dest="html_out", default=None, help="файл для HTML-отчёта (кликабельный)")
     ap.add_argument("--pdf-out", dest="pdf_out", default=None, help="файл для PDF-отчёта (кликабельные ссылки, через Chromium)")
+    # --- каскадный вход [1]→[2]→[3] ---
+    ap.add_argument("--items-json", dest="items_json", default=None,
+                    help="отчёт инструмента [1] (ТОП по фразе, wb-top-keywords) — источник ниши вместо MPStats-категории")
+    ap.add_argument("--funnel-json", dest="funnel_json", default=None,
+                    help="отчёт инструмента [2] (Сравнение карточек) — воронка наш vs конкуренты (блок G/воронка/цели)")
+    ap.add_argument("--seasonality-delta", dest="seas_delta", type=float, default=None,
+                    help="сезонность (Δ%% 2-я половина периода к 1-й), если посчитана оркестратором из ряда MPStats")
     ap.add_argument("--keywords", default=None, help="ключевые запросы через запятую — искать конкурентов в выдаче WB")
     ap.add_argument("--kw-limit", dest="kw_limit", type=int, default=8, help="сколько карточек брать из выдачи на запрос")
     ap.add_argument("--no-wb", dest="no_wb", action="store_true", help="не тянуть характеристики/слайды из WB (быстрее/офлайн)")
@@ -1570,61 +1798,106 @@ def main():
         selftest(args.html_out, args.pdf_out)
         return
 
-    token = load_token()
-    if not token:
-        print("ОШИБКА: не найден MPSTATS_TOKEN (env или .env).", file=sys.stderr)
-        sys.exit(2)
-
     today = date.today()
     args.d2 = today.isoformat()
     args.d1 = (today - timedelta(days=args.days)).isoformat()
 
-    try:
-        cats = get_categories(token)
-    except MpstatsError as e:
-        die_api(e)
-    path, path_note, alts = resolve_path(cats, args.gender, args.item, args.path)
-    if not path:
-        print(f"ОШИБКА: {path_note}", file=sys.stderr)
-        sys.exit(3)
-    print(f"[path] выбрано: {path}  ({path_note})", file=sys.stderr)
-    for a in alts:
-        print(f"[path] альтернатива: {a}", file=sys.stderr)
-
-    nfilter, _ = pattern_stem(args.pattern)
-    try:
-        items, total = fetch_items(token, path, args.d1, args.d2, nfilter)
-    except MpstatsError as e:
-        die_api(e)
-    if not items:
-        print(f"Пусто: по нише '{path}' с фильтром '{nfilter}' за период {args.d1}—{args.d2} "
-              f"данных нет. Проверьте: (1) путь категории (--path), (2) период (за будущие даты "
-              f"MPStats пусто), (3) слишком узкий фильтр принта.", file=sys.stderr)
-        sys.exit(4)
-
     notes = []
+    alts = []
+    token = None
+    seas = None
+    # ── источник ниши: каскад ([1] items-json) ИЛИ MPStats-категория ──
+    if args.items_json:
+        items, imeta = load_items_json(args.items_json)
+        if not items:
+            print(f"Пусто: в отчёте [1] '{args.items_json}' нет карточек.", file=sys.stderr)
+            sys.exit(4)
+        path = args.query or imeta.get("query") or "каскад [1]"
+        path_note = "из инструмента [1] (ТОП по фразе)"
+        nfilter = None
+        args.by = "brand"                        # у [1] нет продавца — владельца берём по бренду
+        total = imeta.get("total") or len(items)
+        if imeta.get("d1"):
+            args.d1, args.d2 = imeta["d1"], imeta["d2"]
+        # контент (фото/видео/описание/слайды/характеристики) — по nmId из публичного API WB
+        if not args.no_wb:
+            try:
+                enrich_content(items, args.bench)
+            except Exception as e:
+                notes.append(f"WB-обогащение контента недоступно ({str(e)[:40]})")
+        # сезонность: Δ% из ряда MPStats — посчитана оркестратором (CLI-флаг или _meta отчёта [1])
+        sd = args.seas_delta if args.seas_delta is not None else imeta.get("seasonality_delta")
+        if sd is not None:
+            seas = {"delta_pct": sd}
+        else:
+            notes.append("сезонность не передана (--seasonality-delta / _meta.seasonality)")
+    else:
+        token = load_token()
+        if not token:
+            print("ОШИБКА: не найден MPSTATS_TOKEN (env или .env).", file=sys.stderr)
+            sys.exit(2)
+        try:
+            cats = get_categories(token)
+        except MpstatsError as e:
+            die_api(e)
+        path, path_note, alts = resolve_path(cats, args.gender, args.item, args.path)
+        if not path:
+            print(f"ОШИБКА: {path_note}", file=sys.stderr)
+            sys.exit(3)
+        print(f"[path] выбрано: {path}  ({path_note})", file=sys.stderr)
+        for a in alts:
+            print(f"[path] альтернатива: {a}", file=sys.stderr)
+        nfilter, _ = pattern_stem(args.pattern)
+        try:
+            items, total = fetch_items(token, path, args.d1, args.d2, nfilter)
+        except MpstatsError as e:
+            die_api(e)
+        if not items:
+            print(f"Пусто: по нише '{path}' с фильтром '{nfilter}' за период {args.d1}—{args.d2} "
+                  f"данных нет. Проверьте: (1) путь категории (--path), (2) период (за будущие даты "
+                  f"MPStats пусто), (3) слишком узкий фильтр принта.", file=sys.stderr)
+            sys.exit(4)
+
     agg, tot_rev = aggregate(items, args.by)
     pz = price_zone(items)
     cb = content_benchmark(items, args.bench)
-    colors = color_distribution(items, agg, args.by, args.top)
+    colors = color_distribution(items, agg, args.by, args.top, top_n=10)
     review = cards_for_review(items, agg, args.by, args.cards)
 
-    # сезонность — мягко (формат trends может отличаться)
-    seas = None
-    trend, err = try_json("GET", "wb/get/category/trends", token, params={"path": path, "d1": args.d1, "d2": args.d2})
-    if err:
-        notes.append(f"trends ({err.split(':')[0]})")
-    else:
-        seas = seasonality(trend)
+    # сезонность в категорийном режиме — из ряда MPStats category/trends
+    if not args.items_json:
+        trend, err = try_json("GET", "wb/get/category/trends", token, params={"path": path, "d1": args.d1, "d2": args.d2})
+        if err:
+            notes.append(f"trends ({err.split(':')[0]})")
+        else:
+            seas = seasonality(trend)
 
-    # своя карточка — сначала в текущем срезе, затем во всей категории без фильтра
-    mine = profile_sku(items, args.my_sku) if args.my_sku else None
-    if args.my_sku and not mine and nfilter:
+    # ── воронка [2] (funnel-json): наша карточка + планка конкурентов ──
+    funnel = None
+    if args.funnel_json:
         try:
-            wide, _ = fetch_items(token, path, args.d1, args.d2, None)
-            mine = profile_sku(wide, args.my_sku)
-        except MpstatsError as e:
-            notes.append(f"поиск своей карточки без фильтра ({e.code})")
+            funnel = load_funnel_json(args.funnel_json)
+            if funnel.get("our") and not args.my_sku:
+                args.my_sku = funnel["our"]["nm"]      # включает блок G и план по нашей карточке
+        except Exception as e:
+            notes.append(f"воронка [2] не прочитана ({str(e)[:40]})")
+
+    # своя карточка (mine): из воронки [2] → иначе из среза ниши
+    if funnel and funnel.get("mine"):
+        mine = dict(funnel["mine"])
+        if not args.no_wb and mine.get("id"):
+            try:
+                enrich_content([mine], 1)              # фото/видео/описание нашей карточки по nmId
+            except Exception:
+                pass
+    else:
+        mine = profile_sku(items, args.my_sku) if args.my_sku else None
+        if args.my_sku and not mine and not args.items_json and nfilter:
+            try:
+                wide, _ = fetch_items(token, path, args.d1, args.d2, None)
+                mine = profile_sku(wide, args.my_sku)
+            except MpstatsError as e:
+                notes.append(f"поиск своей карточки без фильтра ({e.code})")
 
     # юнит-экономика — только если задана себестоимость
     econ = None
@@ -1660,7 +1933,7 @@ def main():
             notes.append(f"WB-обогащение недоступно ({str(e)[:40]})")
 
     report, top, gaps = build_report(args, path, path_note, nfilter, items, total, agg,
-                                     tot_rev, pz, cb, colors, seas, review, mine, notes, econ, kw, wbd)
+                                     tot_rev, pz, cb, colors, seas, review, mine, notes, econ, kw, wbd, funnel)
     if alts:
         report += "\n\n_Альтернативные категории (перезапуск с `--path`): " + \
                   "; ".join(f"`{a}`" for a in alts) + "._"
@@ -1670,7 +1943,7 @@ def main():
         open(args.out, "w", encoding="utf-8").write(report)
     if args.html_out or args.pdf_out:
         html = build_html(args, path, path_note, nfilter, items, agg, tot_rev, top,
-                          pz, cb, colors, seas, review, mine, gaps, notes, econ, kw, wbd)
+                          pz, cb, colors, seas, review, mine, gaps, notes, econ, kw, wbd, funnel)
         if args.html_out:
             open(args.html_out, "w", encoding="utf-8").write(html)
             print(f"[html] отчёт → {args.html_out}", file=sys.stderr)
@@ -1702,6 +1975,7 @@ def main():
             "keyword_competitors": kw,
             "review_cards": [{k: it.get(k) for k in FIELDS_KEEP} for it in review],
             "my_card": ({k: mine.get(k) for k in FIELDS_KEEP} if mine else None),
+            "funnel": funnel,
             "gaps": gaps,
             "notes": notes,
         }
