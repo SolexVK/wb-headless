@@ -97,9 +97,11 @@ try {
     log(`[1] переиспользую ${topPath} (${top.rivals?.length || 0} карточек, фраза «${top.query}»).`);
   } else {
     log(`[1] ТОП по фразе «${opt.query}» (MPStats)…`);
+    // Тянем весь пул (до ~100) — нужен блоку D «Доминирующие цвета» (выборка). Пикер и
+    // блок B показывают top-N (по умолчанию 20); анализ цветов/экономики идёт по всему пулу.
     top = await topByKeywords({
       query: opt.query, d1, d2, filters, our: opt.our,
-      topN: numOpt(opt.top) ?? 20, maxRows: numOpt(opt['max-rows']),
+      topN: numOpt(opt.pool) ?? 100, maxRows: numOpt(opt['max-rows']),
     });
     // сезонность: Δ% выручки 2-й половины периода к 1-й (два агрегата MPStats)
     const seas = await computeSeasonality(top.query, top.period.d1, top.period.d2);
@@ -114,9 +116,10 @@ try {
     process.exit(1);
   }
 
-  // ── Фаза 1: показать пикер и остановиться ──
+  // ── Фаза 1: показать пикер (top-N для выбора) и остановиться ──
   if (!analysisPhase) {
-    process.stdout.write(formatPickTable(top) + '\n');
+    const pickN = numOpt(opt.top) ?? 20;
+    process.stdout.write(formatPickTable({ ...top, rivals: top.rivals.slice(0, pickN) }) + '\n');
     log(`\nRun-id: ${runId}`);
     log('Фаза 2 (после выбора конкурентов): назови 2–4 nmId и наш артикул —');
     log(`  node scripts/wb-pipeline.mjs --run-id ${runId} --our <НАШ> --rivals <nmId,…> --cost <себест> --submit`);

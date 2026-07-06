@@ -398,7 +398,8 @@ def char_matrix(cards, max_rows=12, max_cols=5):
         d = {n: v for n, v in (c.get("_chars") or []) if n}
         if not d:
             continue
-        per.append(((c.get("name") or "—")[:22], d))
+        # колонку подписываем БРЕНДОМ (нагляднее, что доминанта — по разным брендам)
+        per.append(((c.get("brand") or c.get("name") or "—")[:22], d))
         for n in d:
             name_freq[n] += 1
     if not per:
@@ -542,30 +543,61 @@ def content_benchmark(items, k):
     return {"k": len(top), "metrics": metrics}
 
 
-def color_distribution(items, agg, by, players_n, top_n=8):
-    """Реальная раскладка цветов по СКЛЕЙКАМ выбранных ТОП-игроков.
+# Схлопывание цвета-склейки к БАЗОВОМУ цвету. Правила — по первому вхождению подстроки
+# (порядок важен: специфичные семейства раньше общих). Товар относим к базовому цвету по
+# ПЕРВОМУ токену склейки (напр. «небесно-голубой, синий» → голубой).
+BASE_COLOR_RULES = [
+    ("бирюз", "бирюзовый"),
+    ("голуб", "голубой"), ("васил", "голубой"), ("небесн", "голубой"),
+    ("индиго", "синий"), ("джинс", "синий"), ("син", "синий"),
+    ("молочн", "белый"), ("белоснеж", "белый"), ("бел", "белый"),
+    ("телесн", "бежевый"), ("песочн", "бежевый"), ("крем", "бежевый"),
+    ("кофейн", "бежевый"), ("капучин", "бежевый"), ("беж", "бежевый"),
+    ("чёрн", "чёрный"), ("черн", "чёрный"),
+    ("графит", "серый"), ("серебр", "серый"), ("сер", "серый"),
+    ("мятн", "зелёный"), ("олив", "зелёный"), ("хаки", "зелёный"), ("изумруд", "зелёный"),
+    ("фисташ", "зелёный"), ("салат", "зелёный"), ("зелён", "зелёный"), ("зелен", "зелёный"),
+    ("бордов", "красный"), ("винн", "красный"), ("алый", "красный"), ("красн", "красный"),
+    ("персик", "розовый"), ("пудр", "розовый"), ("фукси", "розовый"),
+    ("коралл", "розовый"), ("малин", "розовый"), ("розов", "розовый"),
+    ("горчич", "жёлтый"), ("лимон", "жёлтый"), ("жёлт", "жёлтый"), ("желт", "жёлтый"),
+    ("терракот", "оранжевый"), ("оранж", "оранжевый"),
+    ("шоколад", "коричневый"), ("коричн", "коричневый"),
+    ("лаванд", "фиолетовый"), ("сирен", "фиолетовый"), ("лилов", "фиолетовый"),
+    ("пурпур", "фиолетовый"), ("фиолет", "фиолетовый"),
+    ("мультиколор", "мультиколор"), ("разноцвет", "мультиколор"),
+]
 
-    Берём все SKU (цветовые вариации) топ-N продавцов/брендов из блока B и агрегируем цвет по
-    ВЫРУЧКЕ. Возвращаем top_n цветов + сколько из топ-игроков предлагают каждый цвет (широта)."""
-    key = "seller" if by == "seller" else "brand"
-    top_names = {n for n, _ in sorted(agg.items(), key=lambda kv: kv[1]["rev"], reverse=True)[:players_n]}
+
+def base_color(raw):
+    """Первый токен склейки → базовый цвет по BASE_COLOR_RULES; неизвестный — как есть."""
+    tok = str(raw or "").replace("/", ",").split(",")[0].strip().lower()
+    if not tok:
+        return None
+    for sub, base in BASE_COLOR_RULES:
+        if sub in tok:
+            return base
+    return tok
+
+
+def color_distribution(items, top_n=10):
+    """Раскладка выборки по БАЗОВЫМ цветам: по каждому цвету — совокупная выручка, доля
+    относительно всех цветов и число артикулов. Цвет-склейку схлопываем к базовому по
+    первому токену (напр. «голубой, синий» → голубой)."""
     rev = defaultdict(float)
     cnt = defaultdict(int)
-    who = defaultdict(set)
     tot = 0.0
     for it in items:
-        owner = (it.get(key) or "—").strip()
-        if owner not in top_names:
+        c = base_color(it.get("color"))
+        if not c:
             continue
-        c = (it.get("color") or "—").strip() or "—"
         r = num(it.get("revenue"))
         rev[c] += r
         cnt[c] += 1
-        who[c].add(owner)
         tot += r
     ranked = sorted(rev.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
     return [{"color": c, "rev_share": (r / tot * 100 if tot else 0),
-             "skus": cnt[c], "players": len(who[c])} for c, r in ranked]
+             "skus": cnt[c], "revenue": r} for c, r in ranked]
 
 
 def seasonality(trend):
@@ -708,19 +740,23 @@ def load_funnel_json(pathfile):
 
 
 def funnel_gaps(our, planka):
-    """Гэпы воронки: где наша конверсия/видимость ниже медианы конкурентов → цель дотянуть."""
+    """Гэпы воронки: где наша конверсия/видимость ниже планки (медианы конкурентов) → цель
+    дотянуть. В тексте — отставание в п.п. (конверсии) и в абсолюте/% (показы)."""
     if not our:
         return []
     out = []
     for key in ("ctr", "cart", "order", "buyout"):
         mine_v, plan_v = our.get(key, 0), planka.get(key, 0)
-        if plan_v and mine_v < plan_v:
-            out.append(f"{FUNNEL_LABELS[key]}: {mine_v:.0f}% < медианы ниши {plan_v:.0f}% — цель ≥ {plan_v:.0f}%")
+        if plan_v and (plan_v - mine_v) >= 1:      # порог 1 п.п. — не шумим на равных
+            out.append(f"{FUNNEL_LABELS[key]}: {mine_v:.0f}% < планки {plan_v:.0f}% "
+                       f"(−{round(plan_v - mine_v)} п.п.) — цель ≥ {plan_v:.0f}%")
     if planka.get("showings") and our.get("showings", 0) < planka["showings"]:
-        pos_txt = (f" (позиция {fmt_int(our.get('position'))} → цель ≤ {fmt_int(planka.get('position'))})"
+        gap = planka["showings"] - our["showings"]
+        pct = gap / planka["showings"] * 100 if planka["showings"] else 0
+        pos_txt = (f"; позиция {fmt_int(our.get('position'))} → цель ≤ {fmt_int(planka.get('position'))}"
                    if our.get("position") and planka.get("position") else "")
-        out.append(f"Показов {fmt_int(our['showings'])} < медианы ниши {fmt_int(planka['showings'])} "
-                   f"— поднять видимость{pos_txt}")
+        out.append(f"Показов {fmt_int(our['showings'])} < планки {fmt_int(planka['showings'])} "
+                   f"(−{fmt_int(gap)}, −{pct:.0f}%) — поднять видимость{pos_txt}")
     return out
 
 
@@ -958,13 +994,14 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
 
     # --- D. Принадлежность (прокси по цвету) ---
     if colors:
-        L += [f"## D. Доминирующие цвета по склейкам ТОП-{args.top} (реальные продажи)",
-              "| Цвет | Доля выручки | SKU | У скольких топов |", "|---|--:|--:|--:|"]
+        L += [f"## D. Доминирующие цвета (базовые, по выборке {fmt_int(len(items))} артикулов)",
+              "| Цвет | Доля выручки | Артикулов | Совокупная выручка ₽ |", "|---|--:|--:|--:|"]
         for c in colors:
-            L.append(f"| {c['color']} | {c['rev_share']:.0f}% | {c['skus']} | {c['players']} |")
-        L += ["", "> Считается по всем цветовым вариациям (склейкам) выбранных ТОП-игроков, взвешенно по "
-              "выручке. Цвет — важнейший критерий принадлежности (глава 13); «у скольких топов» = широта "
-              "цвета в нише. Полный %-анализ признаков (капюшон/состав/размер) — Wildbox «топы поиска».", ""]
+            L.append(f"| {c['color']} | {c['rev_share']:.0f}% | {c['skus']} | {fmt_money(c['revenue'])} |")
+        L += ["", "> Цвет-склейка схлопнута к БАЗОВОМУ цвету (по первому токену: «голубой, синий» → "
+              "голубой), доля — от совокупной выручки всех цветов выборки. Цвет — важнейший критерий "
+              "принадлежности (глава 13). Полный %-анализ признаков (капюшон/состав/размер) — Wildbox "
+              "«топы поиска».", ""]
 
     # --- E. Контент-бенчмарк ---
     if cb:
@@ -1104,6 +1141,13 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                      f"| {r['order']:.0f}% | {r['buyout']:.0f}% | {fmt_int(r['position'])} |")
         L.append(f"| **Медиана конкурентов (планка)** | {fmt_int(pk['showings'])} | {pk['ctr']:.0f}% "
                  f"| {pk['cart']:.0f}% | {pk['order']:.0f}% | {pk['buyout']:.0f}% | {fmt_int(pk['position'])} |")
+        o = funnel.get("our")
+        if o:
+            pp = lambda k: f"{round(o[k] - pk[k]):+d}"
+            sp = ((o["showings"] - pk["showings"]) / pk["showings"] * 100) if pk.get("showings") else 0
+            L += ["", f"**Отставание нашей карточки от планки (Δ):** CTR {pp('ctr')} п.п. · "
+                  f"корзина {pp('cart')} п.п. · заказ {pp('order')} п.п. · выкуп {pp('buyout')} п.п. · "
+                  f"показы {fmt_int(o['showings'] - pk['showings'])} ({sp:+.0f}%)"]
         L += ["", "> Планка = медиана конкурентов по этапу. Цель — быть не ниже планки на каждом шаге "
               "воронки. Данные из кабинета WB (Сравнение карточек, инструмент [2]).", ""]
         # вороночные гэпы → в план (подраздел «Гэпы карточки»)
@@ -1434,20 +1478,20 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                  '<p class="meta">⚠️ Задай себестоимость (--cost), чтобы посчитать выгодный ценовой коридор '
                  'по марже.</p></section>')
 
-    # D. colors — по склейкам выбранных топов (реальные продажи)
+    # D. colors — базовые цвета по выборке (доля выручки / артикулы / совокупная выручка)
     if colors:
         mx = max((c["rev_share"] for c in colors), default=1) or 1
         bars = "".join(
             f'<div class="bar-row"><span>{esc(c["color"])}</span>'
             f'<span class="bar"><span style="width:{c["rev_share"]/mx*100:.0f}%"></span></span>'
-            f'<span class="num" style="text-align:right">{c["rev_share"]:.0f}% · {c["skus"]} SKU · '
-            f'{c["players"]}/{args.top} топ</span></div>'
+            f'<span class="num" style="text-align:right">{c["rev_share"]:.0f}% · {c["skus"]} арт. · '
+            f'{fmt_money(c["revenue"])}</span></div>'
             for c in colors)
-        P.append(f'<section><h2>Доминирующие цвета по склейкам ТОП-{args.top} (реальные продажи)</h2>'
+        P.append(f'<section><h2>Доминирующие цвета (базовые, по выборке {fmt_int(len(items))} артикулов)</h2>'
                  f'<div class="bars">{bars}</div>'
-                 '<p class="meta">По всем цветовым вариациям склеек выбранных топов, взвешенно по выручке. '
-                 '«N/топ» = у скольких топ-игроков есть цвет (широта). Полный %-анализ признаков — '
-                 'Wildbox «топы поиска» (см. план).</p></section>')
+                 '<p class="meta">Цвет-склейка схлопнута к базовому цвету (по первому токену), доля — от '
+                 'совокупной выручки всех цветов выборки; справа — число артикулов и совокупная выручка. '
+                 'Полный %-анализ признаков — Wildbox «топы поиска» (см. план).</p></section>')
 
     # E. content benchmark (+ Ваше if mine)
     if cb:
@@ -1597,11 +1641,20 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                    f'<td class="r num">{pk["ctr"]:.0f}%</td><td class="r num">{pk["cart"]:.0f}%</td>'
                    f'<td class="r num">{pk["order"]:.0f}%</td><td class="r num">{pk["buyout"]:.0f}%</td>'
                    f'<td class="r num">{fmt_int(pk["position"])}</td></tr>')
+        o = funnel.get("our")
+        delta_html = ""
+        if o:
+            pp = lambda k: f"{round(o[k] - pk[k]):+d}"
+            sp = ((o["showings"] - pk["showings"]) / pk["showings"] * 100) if pk.get("showings") else 0
+            delta_html = (f'<p class="facts" style="margin-top:8px"><b>Отставание от планки (Δ):</b> '
+                          f'CTR {pp("ctr")} п.п. · корзина {pp("cart")} п.п. · заказ {pp("order")} п.п. · '
+                          f'выкуп {pp("buyout")} п.п. · показы {fmt_int(o["showings"] - pk["showings"])} '
+                          f'({sp:+.0f}%)</p>')
         P.append('<section><h2>Сравнение карточек — воронка (наш vs конкуренты)</h2>'
                  '<div class="tbl-wrap"><table><thead><tr><th>Карточка</th><th class="r">Показы</th>'
                  '<th class="r">CTR</th><th class="r">В корзину</th><th class="r">В заказ</th>'
                  '<th class="r">Выкуп</th><th class="r">Позиция</th></tr></thead>'
-                 f'<tbody>{"".join(trs)}</tbody></table></div>'
+                 f'<tbody>{"".join(trs)}</tbody></table></div>{delta_html}'
                  '<p class="meta">Планка = медиана конкурентов по этапу; красным — где наша карточка ниже '
                  'планки. Цель — быть не ниже планки на каждом шаге. Данные из кабинета WB (Сравнение карточек, [2]).'
                  '</p></section>')
@@ -1724,7 +1777,7 @@ def _demo_inputs():
     wbd = {"tails": tail_words(pool, "рубашка"), "charmatrix": char_matrix(review)}
     return dict(A=A, path=path, path_note="синтетика (демо)", nfilter="полос", items=items,
                 agg=agg, tot=tot, pz=price_zone(items), cb=content_benchmark(items, 20),
-                colors=color_distribution(items, agg, "seller", 10), seas={"delta_pct": 14.0},
+                colors=color_distribution(items, top_n=10), seas={"delta_pct": 14.0},
                 review=review, mine=profile_sku(items, 777),
                 econ=econ, kw=kw, wbd=wbd, notes=["trends (демо)"])
 
@@ -1861,7 +1914,7 @@ def main():
     agg, tot_rev = aggregate(items, args.by)
     pz = price_zone(items)
     cb = content_benchmark(items, args.bench)
-    colors = color_distribution(items, agg, args.by, args.top, top_n=10)
+    colors = color_distribution(items, top_n=10)
     review = cards_for_review(items, agg, args.by, args.cards)
 
     # сезонность в категорийном режиме — из ряда MPStats category/trends
