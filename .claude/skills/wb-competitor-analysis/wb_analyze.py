@@ -1338,6 +1338,8 @@ tr:hover td{background:var(--soft);}
 .callouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;}
 .callout{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:15px 16px;box-shadow:0 1px 2px var(--shadow);}
 .callout.hl{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
+.callout.good{border-color:var(--good);box-shadow:0 0 0 1px var(--good) inset;}
+.callout.good .k{color:var(--good);font-weight:700;} .callout.good .b{color:var(--good);font-weight:700;}
 .callout .k{font-size:.74rem;color:var(--muted);}
 .callout .b{font-family:Georgia,serif;font-size:1.3rem;margin-top:4px;}
 .callout .s{font-size:.76rem;color:var(--muted);margin-top:3px;}
@@ -1550,7 +1552,7 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
         lm_txt = f'{lm[0]*100:.0f}–{lm[1]*100:.0f}%' if lm[0] is not None and lm[1] is not None else "—"
         vol = (f'{fmt_int(pz["band"][0])}–{fmt_int(pz["band"][1])} ₽' if pz else "—")
         callouts = (
-            f'<div class="callout hl"><div class="k">Выгодный коридор · маржа '
+            f'<div class="callout hl good"><div class="k">Выгодный коридор · маржа '
             f'{pr["m_min"]*100:.0f}–{pr["m_max"]*100:.0f}% (ДРР {pr["drr_steady"]*100:.0f}%)</div>'
             f'<div class="b num">{cor_txt}</div><div class="s">цена на витрине (с СПП) · цель</div></div>'
             f'<div class="callout"><div class="k">Точка безубыточности</div>'
