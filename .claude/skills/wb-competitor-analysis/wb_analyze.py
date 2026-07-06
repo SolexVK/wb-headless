@@ -1237,7 +1237,10 @@ section{margin-top:clamp(24px,4vw,38px);}
 .tile{background:var(--panel);padding:14px 16px;}
 .tile .v{font-family:Georgia,serif;font-size:clamp(1.25rem,3vw,1.65rem);line-height:1;}
 .tile .l{font-size:.71rem;color:var(--muted);margin-top:6px;}
-.tbl-wrap{overflow-x:auto;border:1px solid var(--hair);border-radius:12px;}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--hair);border-radius:12px;scrollbar-width:thin;scrollbar-color:var(--muted) transparent;}
+.tbl-wrap::-webkit-scrollbar{height:11px;}
+.tbl-wrap::-webkit-scrollbar-thumb{background:var(--muted);border-radius:6px;border:2px solid var(--panel);}
+.tbl-wrap::-webkit-scrollbar-track{background:var(--panel);border-radius:6px;}
 table{border-collapse:collapse;width:100%;font-size:.87rem;}
 th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--hair);white-space:nowrap;}
 th{font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--panel);}
@@ -1298,11 +1301,14 @@ a.pcard .go{font-size:.74rem;color:var(--accent);margin-top:auto;}
 footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--hair);color:var(--muted);font-size:.8rem;}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;}}
 @media print{
+  @page{size:A4 landscape;margin:11mm;}
   :root{--paper:#fff;--panel:#fff;--ink:#1a141a;--muted:#5c5058;--hair:#d8ccd2;--soft:#faf3f7;}
   body{background:#fff;} .toggle{display:none;} .wca{max-width:none;padding:0;}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   section{break-inside:avoid;} .callout,.mycard,.tbl-wrap,a.pcard,.verdict,.plan>div{break-inside:avoid;}
   tr:hover td{background:none;} a{color:var(--accent2);}
+  /* в PDF прокрутки нет — широкие таблицы не обрезаем, а переносим текст и вписываем */
+  .tbl-wrap{overflow:visible;} table{font-size:.76rem;} th,td{white-space:normal;}
 }
 """
 
