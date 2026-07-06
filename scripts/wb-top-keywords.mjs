@@ -20,12 +20,16 @@
 //   --our 167477208                           наш артикул — исключить из выдачи
 //   --max-rows 2000                           предохранитель на размер выборки
 //   --out reports-output/top.json | --nmids-only    вывод
+//   --pick                нумерованная таблица-пикер в stdout (шаг выбора [1]→[2])
 //
-//   # сцепка каскада [1]→[2]:
-//   node scripts/wb-top-keywords.mjs --query "платье" --top 4 --nmids-only | \
-//     node scripts/wb-cards-compare.mjs --our 167477208
+//   # сцепка каскада [1]→[2] — РУЧНОЙ выбор (по умолчанию):
+//   node scripts/wb-top-keywords.mjs --query "платье" --top 20 --pick   # смотрим таблицу
+//   # → называем нужные nmId и запускаем [2]:
+//   node scripts/wb-cards-compare.mjs --our 167477208 --rivals <nmId,nmId,…>
+//
+//   # (авто-топ-K без выбора, если явно нужен): --nmids-only | wb-cards-compare
 
-import { topByKeywords, formatHtml, embedThumbnails } from '../lib/wbTopKeywords.js';
+import { topByKeywords, formatHtml, formatPickTable, embedThumbnails } from '../lib/wbTopKeywords.js';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -110,8 +114,12 @@ try {
     mkdirSync(dirname(outPath), { recursive: true });
     writeFileSync(outPath, out);
     log(`Записано: ${outPath}`);
-  } else if (!opt.html || opt['nmids-only']) {
-    // Если задан только --html, JSON в stdout не льём (чтобы не зашумлять).
+  }
+  // stdout: приоритет у --pick (таблица ручного выбора конкурентов для [2]); иначе
+  // JSON, если его не подавляет --out/--html (чтобы не зашумлять) или это --nmids-only.
+  if (opt.pick) {
+    process.stdout.write(formatPickTable(res) + '\n');
+  } else if (!opt.out && (!opt.html || opt['nmids-only'])) {
     process.stdout.write(out + '\n');
   }
 
