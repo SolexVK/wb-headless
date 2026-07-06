@@ -10,3 +10,7 @@ reports-output/
 wb-cookies*.json
 cabinet-*.png
 cabinet-*.html
+
+# Python
+__pycache__/
+*.pyc
