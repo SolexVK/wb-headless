@@ -339,6 +339,23 @@ def wb_slide_urls(card, limit=5):
             for i in range(1, min(int(n or limit), limit) + 1)]
 
 
+def first_slide_url(item):
+    """URL первого слайда карточки: из уже обогащённого _slides, иначе строим по nmId
+    (хост basket экстраполируется по vol — best-effort, может промахнуться на новых vol)."""
+    sl = item.get("_slides")
+    if sl:
+        return sl[0]
+    nm = item.get("id")
+    if not nm:
+        return None
+    try:
+        nm = int(nm)
+    except (TypeError, ValueError):
+        return None
+    vol, part, h = nm // 100000, nm // 1000, int(wb_basket_host(nm // 100000))
+    return f"https://basket-{h:02d}.wbbasket.ru/vol{vol}/part{part}/{nm}/images/big/1.webp"
+
+
 def wb_characteristics(card):
     """Плоский список видимых характеристик [(name,value)] из card.json."""
     if not card:
@@ -928,7 +945,7 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                  pz, cb, colors, seas, review, mine, notes, econ=None, kw=None, wbd=None, funnel=None):
     by_label = "продавцам" if args.by == "seller" else "брендам"
     ranked = sorted(agg.items(), key=lambda kv: kv[1]["rev"], reverse=True)
-    top = ranked[:args.top]
+    top = ranked[:10]                       # в отчёт выводим ТОП-10 (расчёты — по всему срезу)
     top_share = sum(v["rev"] for _, v in top) / tot_rev * 100 if tot_rev else 0
     L = []
 
@@ -940,7 +957,7 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
           f"**Ниша:** {niche}  ",
           f"**Ключевая фраза:** «{phrase}»  ",
           (f"**Фильтр (принт/паттерн):** название содержит «{name_filter}»  " if name_filter else ""),
-          f"**Период:** {plabel} · **срез:** ТОП-{args.top} по {by_label}", ""]
+          f"**Период:** {plabel} · **срез:** {fmt_int(len(items))} артикулов по {by_label}", ""]
 
     # --- A. Ёмкость / концентрация / сезонность ---
     conc = ("высокая концентрация — вход тесный" if top_share >= 60
@@ -949,7 +966,7 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
           f"- Артикулов в срезе (после фильтров): **{fmt_int(len(items))}** · "
           f"{'продавцов' if args.by=='seller' else 'брендов'}: **{fmt_int(len(agg))}**",
           f"- Совокупная выручка среза за период: **{fmt_money(tot_rev)}**",
-          f"- Доля ТОП-{args.top} в выручке среза: **{top_share:.1f}%** ({conc})"]
+          f"- Доля ТОП-{len(top)} в выручке среза: **{top_share:.1f}%** ({conc})"]
     if seas:
         d = seas["delta_pct"]
         arrow = "растёт ↑" if d > 8 else "падает ↓" if d < -8 else "стабильна →"
@@ -957,17 +974,31 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                  f"— сезонный тренд ниши")
     L.append("")
 
-    # --- B. ТОП конкурентов ---
-    L += [f"## B. ТОП-{args.top} конкурентов (деньги)", "",
-          "| # | " + ("Продавец" if args.by == "seller" else "Бренд") +
-          " | Выручка | Доля | Продажи | Ср. цена | SKU | Рейтинг | Упущено |",
-          "|---|---|--:|:--:|--:|--:|--:|--:|--:|"]
+    # --- B. ТОП-10 конкурентов (расчёты по всему срезу, в таблице — ТОП-10) ---
+    owner_col = "Продавец" if args.by == "seller" else "Бренд"
+    L += [f"## B. ТОП-{len(top)} конкурентов (деньги)", "",
+          f"| # | Фото | Артикул | {owner_col} | Выручка | Доля | Продажи | Ср. цена | SKU | Рейтинг | Упущено |",
+          "|---|---|---|---|--:|:--:|--:|--:|--:|--:|--:|"]
+    prices = []
     for i, (name, v) in enumerate(top, 1):
+        it = v.get("top_item") or {}
+        nm = it.get("id")
         avg_price = v["rev"] / v["sales"] if v["sales"] else 0
+        prices.append(avg_price)
         rating = v["rating_w"] / v["comments"] if v["comments"] else 0
         share = v["rev"] / tot_rev * 100 if tot_rev else 0
-        L.append(f"| {i} | **{name}** | {fmt_money(v['rev'])} | {share:.1f}% | {fmt_int(v['sales'])} "
-                 f"| {fmt_int(avg_price)} ₽ | {v['items']} | {rating:.2f} | {fmt_money(v['lost'])} |")
+        photo = first_slide_url(it)
+        photo_md = f"[🖼]({photo})" if photo else "—"
+        art_md = f"[{esc_md(str(nm))}]({WB_CARD.format(nm)})" if nm else "—"
+        L.append(f"| {i} | {photo_md} | {art_md} | **{name}** | {fmt_money(v['rev'])} | {share:.1f}% "
+                 f"| {fmt_int(v['sales'])} | {fmt_int(avg_price)} ₽ | {v['items']} | {rating:.2f} "
+                 f"| {fmt_money(v['lost'])} |")
+    # строка медиан по ТОП-10 (выручка · продажи · ср. цена)
+    med_rev = median([v["rev"] for _, v in top])
+    med_sales = median([v["sales"] for _, v in top])
+    med_price = median([p for p in prices if p])
+    L.append(f"| | | | **Медиана ТОП-{len(top)}** | **{fmt_money(med_rev)}** | | **{fmt_int(med_sales)}** "
+             f"| **{fmt_int(med_price)} ₽** | | | |")
     L.append("")
 
     # --- B2. Конкуренты по ключевым запросам (выдача WB) ---
@@ -1296,6 +1327,8 @@ section{margin-top:clamp(24px,4vw,38px);}
 .tbl-wrap::-webkit-scrollbar-thumb{background:var(--muted);border-radius:6px;border:2px solid var(--panel);}
 .tbl-wrap::-webkit-scrollbar-track{background:var(--panel);border-radius:6px;}
 table{border-collapse:collapse;width:100%;font-size:.87rem;}
+.pic{width:52px;padding:5px 8px;} .bthumb{width:44px;height:58px;object-fit:cover;border-radius:6px;display:block;background:var(--soft);}
+.noimg{color:var(--muted);}
 th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--hair);white-space:nowrap;}
 th{font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--panel);}
 tbody tr:last-child td{border-bottom:none;}
@@ -1416,7 +1449,7 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
     tiles = [(fmt_int(len(items)), "артикулов в срезе"),
              (fmt_int(len(agg)), "продавцов" if args.by == "seller" else "брендов"),
              (fmt_money(tot_rev), "выручка среза за период"),
-             (f"{top_share:.0f}%", f"доля ТОП-{args.top} в выручке")]
+             (f"{top_share:.0f}%", f"доля ТОП-{len(top)} в выручке")]
     if seas:
         d = seas["delta_pct"]
         arrow = "↑" if d > 8 else "↓" if d < -8 else "→"
@@ -1426,23 +1459,42 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
              "".join(f'<div class="tile"><div class="v num">{v}</div><div class="l">{esc(l)}</div></div>'
                      for v, l in tiles) + '</div></section>')
 
-    # B. top competitors
+    # B. top competitors — ТОП-10 (фото первого слайда + артикул со ссылкой)
     rows = []
+    prices = []
     for i, (name, v) in enumerate(top, 1):
+        it = v.get("top_item") or {}
+        nm = it.get("id")
         avg_price = v["rev"] / v["sales"] if v["sales"] else 0
+        prices.append(avg_price)
         rating = v["rating_w"] / v["comments"] if v["comments"] else 0
         share = v["rev"] / tot_rev * 100 if tot_rev else 0
+        url = WB_CARD.format(nm) if nm else "#"
+        photo = first_slide_url(it)
+        pic = (f'<a href="{esc(url)}" target="_blank" rel="noopener"><img class="bthumb" src="{esc(photo)}" '
+               f'loading="lazy" alt=""></a>') if photo else '<span class="noimg">—</span>'
+        art = (f'<a href="{esc(url)}" target="_blank" rel="noopener">{esc(nm)}</a>') if nm else "—"
         rows.append(
-            f'<tr><td class="rank">{i}</td><td>{esc(name)}</td>'
+            f'<tr><td class="rank">{i}</td><td class="pic">{pic}</td><td class="num">{art}</td>'
+            f'<td>{esc(name)}</td>'
             f'<td class="r num">{fmt_money(v["rev"])}</td><td class="r num">{share:.1f}%</td>'
             f'<td class="r num">{fmt_int(v["sales"])}</td><td class="r num">{fmt_int(avg_price)} ₽</td>'
             f'<td class="r num">{v["items"]}</td><td class="r num">{rating:.2f}</td>'
             f'<td class="r num">{fmt_money(v["lost"])}</td></tr>')
-    P.append('<section><h2>ТОП-{0} конкурентов</h2><div class="tbl-wrap"><table><thead><tr>'
-             '<th class="r">#</th><th>{1}</th><th class="r">Выручка</th><th class="r">Доля</th>'
+    med_rev = median([v["rev"] for _, v in top])
+    med_sales = median([v["sales"] for _, v in top])
+    med_price = median([p for p in prices if p])
+    rows.append(
+        f'<tr class="mrow"><td></td><td></td><td></td><td><b>Медиана ТОП-{len(top)}</b></td>'
+        f'<td class="r num"><b>{fmt_money(med_rev)}</b></td><td></td>'
+        f'<td class="r num"><b>{fmt_int(med_sales)}</b></td>'
+        f'<td class="r num"><b>{fmt_int(med_price)} ₽</b></td><td></td><td></td><td></td></tr>')
+    P.append(f'<section><h2>ТОП-{len(top)} конкурентов</h2><div class="tbl-wrap"><table><thead><tr>'
+             f'<th class="r">#</th><th>Фото</th><th>Артикул</th><th>{by_label}</th>'
+             '<th class="r">Выручка</th><th class="r">Доля</th>'
              '<th class="r">Продажи</th><th class="r">Ср. цена</th><th class="r">SKU</th>'
              '<th class="r">Рейтинг</th><th class="r">Упущено</th></tr></thead><tbody>'
-             .format(args.top, by_label) + "".join(rows) + '</tbody></table></div></section>')
+             + "".join(rows) + '</tbody></table></div></section>')
 
     # B2. keyword competitors (WB search)
     if kw:
@@ -1982,6 +2034,16 @@ def main():
     cb = content_benchmark(items, args.bench)
     colors = color_distribution(items, top_n=10)
     review = cards_for_review(items, agg, args.by, args.cards)
+
+    # фото первого слайда для флагманов ТОП-10 (блок B) — дообогащаем, если не попали в топ-bench
+    if not args.no_wb:
+        flagships = [v["top_item"] for _, v in sorted(agg.items(), key=lambda kv: kv[1]["rev"], reverse=True)[:10]
+                     if v.get("top_item") and not (v["top_item"].get("_slides"))]
+        if flagships:
+            try:
+                enrich_content(flagships, len(flagships))
+            except Exception:
+                pass
 
     # сезонность в категорийном режиме — из ряда MPStats category/trends
     if not args.items_json:
