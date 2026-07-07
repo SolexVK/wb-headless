@@ -179,6 +179,8 @@ function buildHtml(brand, query, a30, a90, meta) {
   h2{ font-size:19px; margin:26px 0 6px; }
   h3{ font-size:14px; margin:20px 0 8px; text-transform:uppercase; letter-spacing:.04em; color:#666; }
   .sub{ color:#777; margin-bottom:18px; }
+  .phrase{ font-size:1.25em; font-weight:800; color:#c026d3; }
+  @media (prefers-color-scheme: dark){ .phrase{ color:#e879f9; } }
   .muted{ color:#888; font-weight:400; }
   .brand{ background:transparent; border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin:22px 0; }
   .brand h2 .q{ color:#888; font-size:15px; font-weight:400; }
@@ -217,7 +219,8 @@ function buildHtml(brand, query, a30, a90, meta) {
     h1{ font-size:17px; margin:0 0 2px; }
     .sub{ font-size:10px; margin-bottom:8px; }
     h3{ font-size:10px; margin:8px 0 4px; }
-    .period-tag{ font-size:10px; margin:2px 0; padding:2px 9px; }
+    .period-tag{ display:block; margin:0 0 8px; padding:6px 12px; font-size:11px;
+      color:#fff!important; background:#1f6f3f; border-radius:6px; letter-spacing:.06em; }
     /* убираем большие разрывы */
     .ov{ padding:8px 10px; }
     .ov-h{ margin-bottom:7px; font-size:10.5px; }
@@ -235,15 +238,20 @@ function buildHtml(brand, query, a30, a90, meta) {
     .period{ break-inside:auto; }
     thead{ display:table-header-group; }  /* шапка повторяется при переносе таблицы */
     a{ color:#111; }
+    /* Явный разрыв между периодами: 90 дней — с новой страницы */
+    .divider{ display:none; }
+    .p2{ break-before:page; page-break-before:always; }
   }
 </style></head><body>
 <h1>${esc(brand)} — доля продаж от всего рынка</h1>
-<div class="sub">Поисковая фраза: «${esc(query)}» · источник: <b>MPStats</b> · метод «Товары по поисковой фразе» · сформировано ${esc(meta.date)}</div>
+<div class="sub">Поисковая фраза: <span class="phrase">«${esc(query)}»</span> · источник: <b>MPStats</b> · метод «Товары по поисковой фразе» · сформировано ${esc(meta.date)}</div>
 <div class="period-tag">Период 1 · 30 дней</div>
 ${periodBlock(a30)}
 <hr class="divider">
+<div class="p2">
 <div class="period-tag">Период 2 · 90 дней</div>
 ${periodBlock(a90)}
+</div>
 <div class="foot">
   <b>Методика.</b> «Весь рынок» = вся поисковая выдача Wildberries по указанной фразе за период (MPStats
   отдаёт до ~100 карточек на фразу — это верхняя граница метода, топ-500 недостижим). Доля бренда =
