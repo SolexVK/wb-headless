@@ -765,6 +765,7 @@ def load_funnel_json(pathfile):
             "cart": num(cur.get("cartConvPct")), "order": num(cur.get("orderConvPct")),
             "buyout": num(cur.get("buyoutPct")), "position": num(cur.get("avgSearchPosition")),
             "price": num(cur.get("medianPrice")),
+            "orders": num(cur.get("orders")), "buyouts": num(cur.get("buyouts")),  # сырые штуки
             "rating": num(cur.get("reviewRating")) or num(cur.get("cardRating")),
             "reviews": num(cur.get("reviewCount")),
         }
@@ -778,8 +779,12 @@ def load_funnel_json(pathfile):
     planka = {k: med(k) for k in ("ctr", "cart", "order", "buyout", "showings", "position")}
     mine = None
     if our:
-        mine = {"id": our["nm"], "name": our["name"], "final_price": our["price"], "color": None,
-                "rating": our["rating"], "comments": our["reviews"], "_funnel": our}
+        # заказы/выручка нашей карточки — из уже выгруженного отчёта [2] (без новых запросов)
+        mine = {"id": our["nm"], "name": our["name"], "final_price": our["price"],
+                "sale_price": our["price"], "color": None,
+                "rating": our["rating"], "comments": our["reviews"],
+                "sales": our["orders"], "revenue": our["orders"] * our["price"],
+                "title_len": len(our["name"] or ""), "_funnel": our}
     return {"rows": rows, "our": our, "rivals": rivals, "planka": planka,
             "mine": mine, "periods": data.get("periods")}
 
@@ -2167,6 +2172,7 @@ def main():
                 enrich_content([mine], 1)              # фото/видео/описание нашей карточки по nmId
             except Exception:
                 pass
+        mine["chars"] = len(mine.get("_chars") or [])  # число характеристик (из card.json)
     else:
         mine = profile_sku(items, args.my_sku) if args.my_sku else None
         if args.my_sku and not mine and not args.items_json and nfilter:
