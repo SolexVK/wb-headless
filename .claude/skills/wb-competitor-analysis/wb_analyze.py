@@ -1202,8 +1202,8 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                   "| Характеристика | " + " | ".join(esc_md(c) for c in cm["cols"]) + " | Доминанта |",
                   "|---" * (len(cm["cols"]) + 2) + "|"]
             for r in cm["rows"]:
-                vals = " | ".join(esc_md((v or "—")[:20]) for v in r["values"])
-                L.append(f"| {esc_md(r['name'])} | {vals} | **{esc_md((r['dominant'] or '—')[:20])}** |")
+                vals = " | ".join(esc_md(v or "—") for v in r["values"])   # полный текст, без обрезки
+                L.append(f"| {esc_md(r['name'])} | {vals} | **{esc_md(r['dominant'] or '—')}** |")
         L.append("")
 
     # --- G. Разбор своей карточки ---
@@ -1388,6 +1388,8 @@ th{font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--mu
 tbody tr:last-child td{border-bottom:none;}
 td.r,th.r{text-align:right;}
 table.seg th,table.seg td{text-align:center;vertical-align:middle;}
+table.chars th,table.chars td{white-space:normal;font-size:.76rem;vertical-align:top;line-height:1.25;}
+table.chars .dom{position:sticky;right:0;background:rgba(80,162,110,.18);color:var(--good);font-weight:700;box-shadow:-8px 0 10px -8px var(--shadow);}
 tr:hover td{background:var(--soft);}
 .rank{color:var(--accent);font-weight:700;}
 .callouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;}
@@ -1824,15 +1826,16 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                          f'<div class="tags">{tags}</div>')
         cm = wbd.get("charmatrix")
         if cm:
-            head = '<th>Характеристика</th>' + "".join(f'<th>{esc(c)}</th>' for c in cm["cols"]) + '<th>Доминанта</th>'
+            head = ('<th>Характеристика</th>' + "".join(f'<th>{esc(c)}</th>' for c in cm["cols"])
+                    + '<th class="dom">Доминанта</th>')
             trs = []
             for r in cm["rows"]:
-                cells = "".join(f'<td>{esc((v or "—")[:22])}</td>' for v in r["values"])
+                cells = "".join(f'<td>{esc(v or "—")}</td>' for v in r["values"])  # полный текст, без обрезки
                 trs.append(f'<tr><td><b>{esc(r["name"])}</b></td>{cells}'
-                           f'<td class="val-ok">{esc((r["dominant"] or "—")[:22])}</td></tr>')
+                           f'<td class="dom">{esc(r["dominant"] or "—")}</td></tr>')
             parts.append('<h3 style="margin:16px 0 4px;font-family:Georgia,serif">Характеристики топов '
                          '(заполнить как доминанта)</h3>'
-                         f'<div class="tbl-wrap"><table><thead><tr>{head}</tr></thead>'
+                         f'<div class="tbl-wrap"><table class="chars"><thead><tr>{head}</tr></thead>'
                          f'<tbody>{"".join(trs)}</tbody></table></div>')
         parts.append('</section>')
         P.append("".join(parts))
