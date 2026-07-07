@@ -382,7 +382,7 @@ def enrich_cards(cards):
         card = wb_basket_card(it["id"])
         if card:
             it["_chars"] = wb_characteristics(card)
-            it["_slides"] = wb_slide_urls(card)
+            it["_slides"] = wb_slide_urls(card, limit=10)
             it["_descr"] = (card.get("description") or "")[:400]
             got += 1
     return got
@@ -741,7 +741,7 @@ def enrich_content(items, n):
         it["hasvideo"] = 1 if media.get("has_video") else 0
         it["description_length"] = len(card.get("description") or "")
         it["_chars"] = wb_characteristics(card)
-        it["_slides"] = wb_slide_urls(card)
+        it["_slides"] = wb_slide_urls(card, limit=10)
         it["_descr"] = (card.get("description") or "")[:400]
         got += 1
     return got
@@ -1170,34 +1170,32 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
             L.append(f"🔑 **Смыслы для названия** (частотные слова топа, по убыванию): {tags}")
             L.append("")
 
-    # --- F. Карточки под ручной разбор ---
-    if review:
-        L += ["## F. Карточки под ручной разбор (листинг/смыслы/полки)",
-              "Скриншоты слайдов этих карточек — в таблицу-линейку (глава 04, ДЗ №2); "
-              "инфографику — через метод полок/доски (глава 18).", ""]
+    # --- F. Листинг топов (слайды) — первые 10 слайдов каждого топа с шапкой ---
+    if review and any(it.get("_slides") for it in review):
+        L += ["## F. Листинг топов (слайды)",
+              "Первые 10 слайдов карточек топ-брендов — для ручного разбора листинга/инфографики "
+              "(глава 04). Смотри порядок и смыслы на первых слайдах.", ""]
         for it in review:
-            sid = it.get("id")
-            L.append(f"- **{(it.get('name') or '—')[:60]}** — {it.get('brand') or ''} · "
-                     f"{fmt_int(it.get('final_price'))} ₽ · ⭐{num(it.get('rating')):.1f} "
-                     f"({fmt_int(it.get('comments'))} отз.) · [карточка]({WB_CARD.format(sid)})")
-        L.append("")
+            sl = (it.get("_slides") or [])[:10]
+            if not sl:
+                continue
+            url = WB_CARD.format(it.get("id"))
+            links = " · ".join(f"[{i+1}]({u})" for i, u in enumerate(sl))
+            L.append(f"**[{esc_md(it.get('brand') or '—')}]({url})** · ср. цена продажи "
+                     f"{fmt_int(sale_price_of(it))} ₽ · ⭐{num(it.get('rating')):.1f} · "
+                     f"выручка {fmt_money(it.get('revenue'))}  ")
+            L.append(f"{esc_md((it.get('name') or '—'))}  ")
+            L.append(f"слайды: {links}")
+            L.append("")
 
-    # --- F2. Готовые данные по топам (смыслы · листинг · характеристики) ---
+    # --- F2. Готовые данные по топам (смыслы · характеристики) ---
     if wbd:
-        L.append("## F2. Готовые данные по топам (смыслы · листинг · характеристики)")
+        L.append("## F2. Готовые данные по топам (смыслы · характеристики)")
         if wbd.get("tails"):
             tags = ", ".join(f"{w} ({n})" for w, n in wbd["tails"])
             L += ["", f"**Смыслы — теги из хвостов запросов топов:** {tags}",
                   "> Частотные слова из названий топ-карточек (кроме категории/пола) = смыслы, на которые "
                   "они опираются. Частотные — выносить ВЫШЕ в листинге (глава 04)."]
-        if any(it.get("_slides") for it in review):
-            L += ["", "**Листинг топов — слайды (кликабельно):**"]
-            for it in review:
-                sl = it.get("_slides") or []
-                if not sl:
-                    continue
-                links = " · ".join(f"[{i+1}]({u})" for i, u in enumerate(sl))
-                L.append(f"- {(it.get('name') or '—')[:44]}: {links}")
         cm = wbd.get("charmatrix")
         if cm:
             L += ["", "**Характеристики топов (заполнить как доминанта):**", "",
@@ -1428,10 +1426,15 @@ a.pcard .go{font-size:.74rem;color:var(--accent);margin-top:auto;}
 .tags{display:flex;flex-wrap:wrap;gap:7px;margin:6px 0 4px;}
 .tag{font-size:.82rem;padding:4px 10px;border-radius:99px;background:var(--soft);border:1px solid var(--hair);}
 .tag b{color:var(--accent);}
-.listing{display:flex;flex-direction:column;gap:12px;margin-top:6px;}
+.listing{display:flex;flex-direction:column;gap:18px;margin-top:6px;}
 .lrow .cap{font-size:.82rem;color:var(--muted);margin-bottom:5px;}
+.lcard .lhead{font-size:.9rem;}
+.lcard .lhead a{color:var(--accent);text-decoration:none;}
+.lcard .lname{font-size:.82rem;color:var(--muted);margin:2px 0 7px;}
 .slides{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;}
 .slides a{flex:none;}
+.slide{display:flex;flex-direction:column;align-items:center;gap:3px;flex:none;}
+.slide figcaption{font-size:.72rem;color:var(--muted);}
 .slides img{height:120px;width:auto;border-radius:8px;border:1px solid var(--hair);display:block;}
 .slides .slink{display:flex;align-items:center;justify-content:center;height:120px;min-width:56px;border:1px solid var(--hair);border-radius:8px;color:var(--accent);text-decoration:none;font-size:.85rem;background:var(--panel);}
 .verdict{margin-top:12px;padding:12px 15px;border-radius:10px;border:1px solid var(--accent);background:var(--soft);font-size:.9rem;}
@@ -1784,48 +1787,41 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                      f'<div class="facts">⚠️ SKU <b>{esc(args.my_sku)}</b> не найден в этом срезе — '
                      f'проверьте артикул/категорию (--path).</div></div></section>')
 
-    # F. review cards
-    if review:
-        cards = []
+    # F. Листинг топов (слайды) — первые 10 слайдов с шапкой каждого топа (ВЫШЕ «Готовых данных»)
+    if review and any(it.get("_slides") for it in review):
+        lcards = []
         for it in review:
+            sl = (it.get("_slides") or [])[:10]
+            if not sl:
+                continue
             url = WB_CARD.format(it.get("id"))
-            cards.append(
-                f'<a class="pcard" href="{esc(url)}" target="_blank" rel="noopener">'
-                f'<div class="nm">{esc((it.get("name") or "—")[:70])}</div>'
-                f'<div class="st">{esc(it.get("brand") or "")} · {fmt_int(it.get("final_price"))} ₽ · '
-                f'⭐{num(it.get("rating")):.1f} ({fmt_int(it.get("comments"))})</div>'
-                f'<div class="go">Открыть на WB ↗</div></a>')
-        P.append('<section><h2>Карточки под ручной разбор</h2>'
-                 '<p class="meta">Скриншоты слайдов — в таблицу-линейку (гл. 04); инфографику — методом '
-                 'полок/доски (гл. 18).</p>'
-                 f'<div class="cards">{"".join(cards)}</div></section>')
+            if embed:  # в Artifact внешние картинки блокируются CSP → номера-ссылки
+                thumbs = "".join(f'<figure class="slide"><a class="slink" href="{esc(u)}" target="_blank" '
+                                 f'rel="noopener">{i+1}</a></figure>' for i, u in enumerate(sl))
+            else:
+                thumbs = "".join(f'<figure class="slide"><a href="{esc(u)}" target="_blank" rel="noopener">'
+                                 f'<img src="{esc(u)}" loading="lazy" alt="{i+1}"></a>'
+                                 f'<figcaption>{i+1}</figcaption></figure>' for i, u in enumerate(sl))
+            lcards.append(
+                f'<div class="lcard"><div class="lhead">'
+                f'<a href="{esc(url)}" target="_blank" rel="noopener"><b>{esc(it.get("brand") or "—")}</b></a>'
+                f' · ср. цена продажи {fmt_int(sale_price_of(it))} ₽ · ⭐{num(it.get("rating")):.1f}'
+                f' · выручка {fmt_money(it.get("revenue"))}</div>'
+                f'<div class="lname">{esc(it.get("name") or "—")}</div>'
+                f'<div class="slides">{thumbs}</div></div>')
+        P.append('<section><h2>Листинг топов (слайды)</h2>'
+                 '<p class="meta">Первые 10 слайдов карточек топ-брендов — для ручного разбора листинга '
+                 'и инфографики (гл. 04). Под каждым слайдом — его номер в листинге.</p>'
+                 f'<div class="listing">{"".join(lcards)}</div></section>')
 
-    # F2. готовые данные по топам (смыслы / листинг / характеристики)
+    # F2. готовые данные по топам (смыслы · характеристики)
     if wbd:
-        parts = ['<section><h2>Готовые данные по топам — смыслы · листинг · характеристики</h2>']
+        parts = ['<section><h2>Готовые данные по топам — смыслы · характеристики</h2>']
         if wbd.get("tails"):
             tags = "".join(f'<span class="tag">{esc(w)} <b>{n}</b></span>' for w, n in wbd["tails"])
             parts.append('<p class="meta" style="margin-bottom:2px">Смыслы — теги из хвостов запросов '
                          'топов (частотные выносить выше в листинге):</p>'
                          f'<div class="tags">{tags}</div>')
-        if any(it.get("_slides") for it in review):
-            rows = []
-            for it in review:
-                sl = it.get("_slides") or []
-                if not sl:
-                    continue
-                if embed:  # в Artifact внешние картинки блокируются CSP → ссылки
-                    thumbs = "".join(f'<a class="slink" href="{esc(u)}" target="_blank" rel="noopener">{i+1}</a>'
-                                     for i, u in enumerate(sl))
-                else:      # в standalone HTML/PDF реальные слайды подгружаются
-                    thumbs = "".join(f'<a href="{esc(u)}" target="_blank" rel="noopener">'
-                                     f'<img src="{esc(u)}" loading="lazy" alt="слайд {i+1}"></a>'
-                                     for i, u in enumerate(sl))
-                rows.append(f'<div class="lrow"><div class="cap">{esc((it.get("name") or "—")[:60])}</div>'
-                            f'<div class="slides">{thumbs}</div></div>')
-            if rows:
-                parts.append('<h3 style="margin:16px 0 4px;font-family:Georgia,serif">Листинг топов (слайды)</h3>'
-                             f'<div class="listing">{"".join(rows)}</div>')
         cm = wbd.get("charmatrix")
         if cm:
             head = '<th>Характеристика</th>' + "".join(f'<th>{esc(c)}</th>' for c in cm["cols"]) + '<th>Доминанта</th>'
