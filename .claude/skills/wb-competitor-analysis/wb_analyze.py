@@ -760,7 +760,8 @@ def load_funnel_json(pathfile):
     for a in (data.get("articles") or []):
         cur = a.get("current") or {}
         row = {
-            "nm": str(a.get("nmId") or ""), "name": a.get("name") or "", "is_our": bool(a.get("isOur")),
+            "nm": str(a.get("nmId") or ""), "name": a.get("name") or "", "brand": a.get("brand") or "",
+            "is_our": bool(a.get("isOur")),
             "showings": num(cur.get("showings")), "ctr": num(cur.get("ctrPct")),
             "cart": num(cur.get("cartConvPct")), "order": num(cur.get("orderConvPct")),
             "buyout": num(cur.get("buyoutPct")), "position": num(cur.get("avgSearchPosition")),
@@ -1271,14 +1272,15 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
     if funnel and funnel.get("rows"):
         pk = funnel["planka"]
         L += ["## G2. Сравнение карточек — воронка (наш vs конкуренты)", "",
-              "| Карточка | Показы | CTR | В корзину | В заказ | Выкуп | Позиция |",
-              "|---|--:|--:|--:|--:|--:|--:|"]
+              "| Артикул | Бренд | Показы | CTR | В корзину | В заказ | Выкуп | Позиция |",
+              "|---|---|--:|--:|--:|--:|--:|--:|"]
         for r in funnel["rows"]:
             mark = " ⬅ наш" if r["is_our"] else ""
-            nm = (r["name"] or r["nm"])[:32]
-            L.append(f"| {nm}{mark} | {fmt_int(r['showings'])} | {r['ctr']:.0f}% | {r['cart']:.0f}% "
-                     f"| {r['order']:.0f}% | {r['buyout']:.0f}% | {fmt_int(r['position'])} |")
-        L.append(f"| **Медиана конкурентов (планка)** | {fmt_int(pk['showings'])} | {pk['ctr']:.0f}% "
+            art = f"[{r['nm']}]({WB_CARD.format(r['nm'])})"
+            L.append(f"| {art}{mark} | {esc_md(r.get('brand') or '—')} | {fmt_int(r['showings'])} "
+                     f"| {r['ctr']:.0f}% | {r['cart']:.0f}% | {r['order']:.0f}% | {r['buyout']:.0f}% "
+                     f"| {fmt_int(r['position'])} |")
+        L.append(f"| **Медиана конкурентов (планка)** | | {fmt_int(pk['showings'])} | {pk['ctr']:.0f}% "
                  f"| {pk['cart']:.0f}% | {pk['order']:.0f}% | {pk['buyout']:.0f}% | {fmt_int(pk['position'])} |")
         o = funnel.get("our")
         if o:
@@ -1441,6 +1443,7 @@ a.pcard .go{font-size:.74rem;color:var(--accent);margin-top:auto;}
 .slides .slink{display:flex;align-items:center;justify-content:center;height:120px;min-width:56px;border:1px solid var(--hair);border-radius:8px;color:var(--accent);text-decoration:none;font-size:.85rem;background:var(--panel);}
 .verdict{margin-top:12px;padding:12px 15px;border-radius:10px;border:1px solid var(--accent);background:var(--soft);font-size:.9rem;}
 .verdict.bad{border-color:var(--bad);}
+.delta-lag{margin-top:10px;padding:9px 13px;border-radius:9px;background:rgba(179,64,46,.13);border:1px solid rgba(179,64,46,.28);color:var(--bad);font-size:.86rem;}
 .mrow td{border-left:3px solid transparent;}
 .mrow.ok td:first-child{border-left-color:var(--good);}
 .mrow.warn td:first-child{border-left-color:var(--warn);}
@@ -1849,13 +1852,19 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
         trs = []
         for r in funnel["rows"]:
             rowcls = ' class="mrow ok"' if r["is_our"] else ""
-            mark = " ⬅ наш" if r["is_our"] else ""
-            trs.append(f'<tr{rowcls}><td>{esc((r["name"] or r["nm"])[:44])}{mark}</td>'
+            mark = ' <span class="chip ok" style="padding:0 6px">наш</span>' if r["is_our"] else ""
+            url = WB_CARD.format(r["nm"])
+            photo = r.get("photo")
+            pic = (f'<a href="{esc(url)}" target="_blank" rel="noopener"><img class="bthumb" src="{esc(photo)}" '
+                   f'loading="lazy" alt=""></a>') if photo else '<span class="noimg">—</span>'
+            art = f'<a href="{esc(url)}" target="_blank" rel="noopener">{esc(r["nm"])}</a>{mark}'
+            trs.append(f'<tr{rowcls}><td class="pic">{pic}</td><td class="num">{art}</td>'
+                       f'<td>{esc(r.get("brand") or "—")}</td>'
                        f'<td class="r num">{fmt_int(r["showings"])}</td>'
                        f'{fcell(r["ctr"], pk["ctr"], r["is_our"])}{fcell(r["cart"], pk["cart"], r["is_our"])}'
                        f'{fcell(r["order"], pk["order"], r["is_our"])}{fcell(r["buyout"], pk["buyout"], r["is_our"])}'
                        f'<td class="r num">{fmt_int(r["position"])}</td></tr>')
-        trs.append(f'<tr class="mrow"><td><b>Медиана конкурентов (планка)</b></td>'
+        trs.append(f'<tr class="mrow"><td></td><td></td><td><b>Медиана конкурентов (планка)</b></td>'
                    f'<td class="r num">{fmt_int(pk["showings"])}</td>'
                    f'<td class="r num">{pk["ctr"]:.0f}%</td><td class="r num">{pk["cart"]:.0f}%</td>'
                    f'<td class="r num">{pk["order"]:.0f}%</td><td class="r num">{pk["buyout"]:.0f}%</td>'
@@ -1865,12 +1874,13 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
         if o:
             pp = lambda k: f"{round(o[k] - pk[k]):+d}"
             sp = ((o["showings"] - pk["showings"]) / pk["showings"] * 100) if pk.get("showings") else 0
-            delta_html = (f'<p class="facts" style="margin-top:8px"><b>Отставание от планки (Δ):</b> '
+            delta_html = (f'<p class="delta-lag"><b>Отставание от планки (Δ):</b> '
                           f'CTR {pp("ctr")} п.п. · корзина {pp("cart")} п.п. · заказ {pp("order")} п.п. · '
                           f'выкуп {pp("buyout")} п.п. · показы {fmt_int(o["showings"] - pk["showings"])} '
                           f'({sp:+.0f}%)</p>')
         P.append('<section><h2>Сравнение карточек — воронка (наш vs конкуренты)</h2>'
-                 '<div class="tbl-wrap"><table><thead><tr><th>Карточка</th><th class="r">Показы</th>'
+                 '<div class="tbl-wrap"><table><thead><tr><th>Фото</th><th>Артикул</th><th>Бренд</th>'
+                 '<th class="r">Показы</th>'
                  '<th class="r">CTR</th><th class="r">В корзину</th><th class="r">В заказ</th>'
                  '<th class="r">Выкуп</th><th class="r">Позиция</th></tr></thead>'
                  f'<tbody>{"".join(trs)}</tbody></table></div>{delta_html}'
@@ -2167,6 +2177,15 @@ def main():
             funnel = load_funnel_json(args.funnel_json)
             if funnel.get("our") and not args.my_sku:
                 args.my_sku = funnel["our"]["nm"]      # включает блок G и план по нашей карточке
+            # фото первого слайда каждой карточки воронки (basket WB, не кабинет)
+            if not args.no_wb:
+                for row in funnel.get("rows", []):
+                    try:
+                        card = wb_basket_card(row["nm"])
+                        sl = wb_slide_urls(card, limit=1) if card else []
+                        row["photo"] = sl[0] if sl else first_slide_url({"id": row["nm"]})
+                    except Exception:
+                        row["photo"] = None
         except Exception as e:
             notes.append(f"воронка [2] не прочитана ({str(e)[:40]})")
 
