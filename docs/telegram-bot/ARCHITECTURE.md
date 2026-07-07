@@ -364,7 +364,11 @@ idle
    `user_settings`, `source_cache`, `report_files`, `card_variants`, `skill_runs`,
    `skill_artifacts`) + хелперы (кэш с дедупом/свежестью, BLOB-файлы, склейка, прогоны,
    реюз, артефакты) написаны и покрыты дым-тестом. Боевая `data/wb.db` — на `user_version=2`.
-2. **Реестр + первый манифест** — `wb-top-keywords` (форма + mid-flow пикер + 3 формата).
+2. ✅ **Реестр + первый манифест.** `bot/core/registry.js` (загрузка/валидация
+   манифестов + помощники формы: `menuItems`/`formPlan`/`missingRequired`/`withDefaults`) и
+   `bot/skills/wb-top-keywords.manifest.js` (форма с обяз./advanced полями и `showIf`,
+   mid-flow пикер, `buildArgv`, ключ кэша `mpstats.search`, 3 формата). Покрыто дым-тестом
+   (19 проверок). Конвенция манифеста — `bot/README.md`.
 3. **Каркас бота** (grammY): меню из реестра, FSM, персист состояния, очередь+воркеры.
 4. **Executor** (cli) + Cache/Dedup поверх `source_cache`.
 5. **Renderer** + 3 шаблона для первого скилла (HTML/PDF/XLSX).
