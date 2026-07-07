@@ -34,6 +34,12 @@ function cmdStats(db) {
   );
   console.log(`Снимков отчётов:       ${s.reportRuns}`);
   console.log(`Выгрузок инструментов: ${s.toolExports}`);
+  console.log('--- слой бота (v2) ---');
+  console.log(`Пользователей:         ${s.users}`);
+  console.log(`Кэш вытяжек:           ${s.sourceCache}`);
+  console.log(`Файлов отчётов (BLOB): ${s.reportFiles}`);
+  console.log(`Склеек (варианты):     ${s.cardVariants}`);
+  console.log(`Прогонов скиллов:      ${s.skillRuns}`);
 }
 
 function cmdSync(db) {
