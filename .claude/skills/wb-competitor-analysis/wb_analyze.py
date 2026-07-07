@@ -1589,6 +1589,7 @@ footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--hair);color:v
   /* компактно под A4: срезаем крупные вертикальные отступы */
   section{margin-top:9px;break-inside:auto;}
   section:first-child{margin-top:0;}
+  section.pgbreak{break-before:page;margin-top:0;}
   h1{margin:0 0 5px;} h2{font-size:1.0rem;margin:0 0 4px;} h3{margin:7px 0 3px;}
   .meta{margin:2px 0 3px;font-size:.72rem;line-height:1.25;}
   .callout,.mycard,.verdict{margin:6px 0;padding:8px 10px;}
@@ -1840,7 +1841,7 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
             f'</div>'
             for c in colors)
         base = f' (по базе MPStats: {fmt_int(color_n)} артикулов)' if color_n else ''
-        P.append(f'<section><h2>Доминирующие цвета (базовые){base}</h2>'
+        P.append(f'<section class="pgbreak"><h2>Доминирующие цвета (базовые){base}</h2>'
                  f'<div class="cdist">{rows}</div>'
                  '<p class="meta">Цвет-склейка схлопнута к базовому цвету; по ВСЕЙ выдаче MPStats по '
                  'фразе. Слева — цвет; диаграмма — доля; справа — доля · число артикулов · сумма заказов '
@@ -1920,7 +1921,7 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                 chips = "".join(f'<span class="chip bad">{esc(g.split(" —")[0].split(" (")[0])}</span>' for g in gaps)
             else:
                 chips = '<span class="chip ok">По метрикам на уровне ниши</span>'
-            P.append('<section><h2>Ваша карточка против ниши</h2><div class="mycard">'
+            P.append('<section class="pgbreak"><h2>Ваша карточка против ниши</h2><div class="mycard">'
                      f'<div style="font-weight:600">{esc((mine.get("name") or "")[:80])}</div>'
                      f'<div class="facts">{facts}</div>{marg}<div class="chips">{chips}</div></div></section>')
         else:
