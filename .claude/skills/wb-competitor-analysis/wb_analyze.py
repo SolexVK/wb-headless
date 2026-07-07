@@ -1431,7 +1431,7 @@ a.pcard .go{font-size:.74rem;color:var(--accent);margin-top:auto;}
 .lcard .lhead{font-size:.9rem;}
 .lcard .lhead a{color:var(--accent);text-decoration:none;}
 .lcard .lname{font-size:.82rem;color:var(--muted);margin:2px 0 7px;}
-.slides{display:flex;flex-wrap:wrap;gap:6px;padding-bottom:4px;}
+.slides{display:flex;flex-wrap:wrap;gap:2px;padding-bottom:4px;}
 .slides a{flex:none;}
 .slide{display:flex;flex-direction:column;align-items:center;gap:3px;flex:none;}
 .slide figcaption{font-size:.72rem;color:var(--muted);}
