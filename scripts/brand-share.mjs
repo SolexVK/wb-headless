@@ -131,34 +131,29 @@ function brandTopTable(a) {
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function brandBlock(brand, query, a30, a90) {
-  return `<section class="brand">
-    <h2>${esc(brand)} <span class="q">· «${esc(query)}»</span></h2>
+// Полный блок за один период: общая инфо → ТОП рынка → артикулы бренда.
+function periodBlock(a) {
+  return `<section class="period">
+    <h3>Общая информация по бренду — ${a.days} дней</h3>
+    ${overviewCard(a)}
 
-    <h3>Общая информация по бренду</h3>
-    <div class="ov-row">${overviewCard(a30)}${overviewCard(a90)}</div>
+    <h3>ТОП рынка по фразе — ${a.days} дней <span class="muted">(строки бренда подсвечены)</span></h3>
+    ${marketTopTable(a)}
 
-    <h3>ТОП рынка по фразе — 30 дней <span class="muted">(строки бренда подсвечены)</span></h3>
-    ${marketTopTable(a30)}
-    <h3>ТОП рынка по фразе — 90 дней</h3>
-    ${marketTopTable(a90)}
-
-    <h3>Артикулы бренда с наибольшими продажами — 30 дней</h3>
-    ${brandTopTable(a30)}
-    <h3>Артикулы бренда с наибольшими продажами — 90 дней</h3>
-    ${brandTopTable(a90)}
+    <h3>Артикулы бренда с наибольшими продажами — ${a.days} дней</h3>
+    ${brandTopTable(a)}
   </section>`;
 }
 
-function buildHtml(blocks, meta) {
+function buildHtml(brand, query, a30, a90, meta) {
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Доля рынка по брендам · MPStats</title>
+<title>${esc(brand)} · доля рынка · MPStats</title>
 <style>
   :root{ color-scheme: light dark; --line:rgba(128,128,128,.22); }
   *{ box-sizing:border-box; }
   body{ font:14px/1.55 -apple-system,Segoe UI,Roboto,sans-serif; margin:0; padding:28px; background:#f6f7f9; color:#1a1a1a; }
-  @media (prefers-color-scheme: dark){ body{ background:#141414; color:#e8e8e8 } .ov,.tag{ background:#1e1e1e!important } th{ background:#242424!important } tr.mine td{ background:#1d2a1f!important } .brand{ border-color:#2a2a2a } }
+  @media (prefers-color-scheme: dark){ body{ background:#141414; color:#e8e8e8 } .ov{ background:#1e1e1e!important } th{ background:#242424!important } tr.mine td{ background:#123d1e!important } .brand{ border-color:#2a2a2a } }
   h1{ font-size:22px; margin:0 0 2px; }
   h2{ font-size:19px; margin:26px 0 6px; }
   h3{ font-size:14px; margin:20px 0 8px; text-transform:uppercase; letter-spacing:.04em; color:#666; }
@@ -185,14 +180,21 @@ function buildHtml(blocks, meta) {
   td.num{ text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
   td.money{ font-weight:600; }
   td.name{ max-width:340px; }
-  tr.mine td{ background:#eafaef; }
-  .tag{ display:inline-block; padding:0 7px; border-radius:9px; font-size:10px; font-weight:700; background:#e6f4ea; color:#1f6f3f; vertical-align:middle; }
+  tr.mine td{ background:#bfe6c9; font-weight:600; }
+  .tag{ display:inline-block; padding:0 7px; border-radius:9px; font-size:10px; font-weight:700; background:#cbeed4; color:#155c31; vertical-align:middle; }
+  .divider{ border:0; height:4px; background:linear-gradient(90deg,#1f6f3f,#5fd08a); border-radius:3px; margin:34px 0 26px; width:100%; }
+  .period-tag{ display:inline-block; font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#1f6f3f; background:#eafaef; padding:3px 12px; border-radius:20px; margin:0 0 4px; }
+  @media (prefers-color-scheme: dark){ .period-tag{ background:#173322; color:#7bdca0 } }
   a{ color:#2563eb; text-decoration:none; } a:hover{ text-decoration:underline; }
   .foot{ color:#999; font-size:12px; margin-top:26px; border-top:1px solid var(--line); padding-top:12px; }
 </style></head><body>
-<h1>Доля продаж от всего рынка по брендам</h1>
-<div class="sub">Источник: <b>MPStats</b> · метод «Товары по поисковой фразе» · сформировано ${esc(meta.date)}</div>
-${blocks.join('\n')}
+<h1>${esc(brand)} — доля продаж от всего рынка</h1>
+<div class="sub">Поисковая фраза: «${esc(query)}» · источник: <b>MPStats</b> · метод «Товары по поисковой фразе» · сформировано ${esc(meta.date)}</div>
+<div class="period-tag">Период 1 · 30 дней</div>
+${periodBlock(a30)}
+<hr class="divider">
+<div class="period-tag">Период 2 · 90 дней</div>
+${periodBlock(a90)}
 <div class="foot">
   <b>Методика.</b> «Весь рынок» = вся поисковая выдача Wildberries по указанной фразе за период (MPStats
   отдаёт до ~100 карточек на фразу — это верхняя граница метода, топ-500 недостижим). Доля бренда =
@@ -209,25 +211,20 @@ const targets = [
   { brand: 'AIZEK', query: 'Рубашка муслиновая мужская' },
 ];
 
-const blocks = [];
-const summary = [];
+const outDir = process.argv[2] || 'reports-output';
+const slug = (b) => b.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
 for (const t of targets) {
   process.stderr.write(`→ ${t.brand} / «${t.query}» …\n`);
   const a30 = await analyze(t.query, t.brand, 30);
   const a90 = await analyze(t.query, t.brand, 90);
-  blocks.push(brandBlock(t.brand, t.query, a30, a90));
-  summary.push({ brand: t.brand, query: t.query, a30, a90 });
-}
+  const html = buildHtml(t.brand, t.query, a30, a90, { date: iso(Date.now()) });
+  const out = `${outDir}/brand-share-${slug(t.brand)}.html`;
+  writeFileSync(out, html);
+  process.stderr.write(`  ✓ ${out}\n`);
 
-const html = buildHtml(blocks, { date: iso(Date.now()) });
-const out = process.argv[2] || 'reports-output/brand-market-share.html';
-writeFileSync(out, html);
-process.stderr.write(`\n✓ HTML: ${out}\n`);
-
-// Короткая сводка в stdout (для чата).
-for (const s of summary) {
-  console.log(`\n### ${s.brand} · «${s.query}»`);
-  for (const a of [s.a30, s.a90]) {
+  console.log(`\n### ${t.brand} · «${t.query}» → ${out}`);
+  for (const a of [a30, a90]) {
     console.log(`  ${a.days}d: доля ${pct(a.shareSales)} шт / ${pct(a.shareRev)} выручка · ` +
       `бренд ${rub(a.brandSales)} шт, ${rub(a.brandRev)} ₽ · ${a.brandCount} карт. · ранг #${a.rankBySales}/${a.totalBrands} · ` +
       `рынок ${rub(a.marketSales)} шт / ${rub(a.marketRev)} ₽`);
