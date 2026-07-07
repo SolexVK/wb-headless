@@ -430,6 +430,55 @@ def char_matrix(cards, max_rows=12, max_cols=5):
     return {"cols": [lbl for lbl, _ in per], "rows": matrix}
 
 
+# ── Принадлежность признаков: распределение значений характеристик по топу (прокси Wildbox) ──
+BELONG_STOP = {"для", "или", "при", "без", "под", "над", "или", "как", "все", "нет", "есть",
+               "россия", "китай", "россии", "оао", "ооо", "если", "также", "более", "менее",
+               "очень", "того", "либо", "него", "нее", "они", "это", "тип", "вид"}
+# признаки-неразличители (не выносим в принадлежность)
+BELONG_SKIP = {"пол", "рост модели на фото", "размер на модели", "страна производства",
+               "страна-изготовитель", "комплектация"}
+
+
+def belonging(cards, top_n=9):
+    """Принадлежность признаков ниши: по характеристикам топ-карточек (_chars) считаем, у какой
+    доли карточек встречается тот или иной токен значения каждого признака. Признаки/значения с
+    долей ≥30% — «обязательные» (порог принадлежности, гл. 13). Прокси к Wildbox «топы поиска»."""
+    from collections import defaultdict, Counter
+    have = [c for c in cards if c.get("_chars")]
+    n = len(have)
+    if n < 3:
+        return []
+    char_cards = defaultdict(int)       # признак → у скольких карточек присутствует
+    char_tokens = defaultdict(Counter)  # признак → счётчик токенов (по карточкам, не по повторам)
+    for c in have:
+        d = defaultdict(list)
+        for name, value in (c.get("_chars") or []):
+            if name and name.strip().lower() not in BELONG_SKIP:
+                d[name.strip()].append(value)
+        for name, values in d.items():
+            char_cards[name] += 1
+            # стемы слов из самого названия признака — их эхо в значении не информативно
+            name_stems = {w[:5] for w in _re.findall(r"[а-яёa-z]+", name.lower()) if len(w) >= 4}
+            toks = set()
+            for v in values:
+                for t in _re.findall(r"[а-яёa-z]+", str(v).lower()):
+                    if len(t) >= 3 and t not in BELONG_STOP and t[:5] not in name_stems:
+                        toks.add(t)
+            for t in toks:
+                char_tokens[name][t] += 1
+    out = []
+    for name, cnt in char_cards.items():
+        if cnt < n * 0.3:               # редкий признак (мало у кого заполнен) — пропускаем
+            continue
+        toks = [(t, k / n) for t, k in char_tokens[name].most_common(5) if k / n >= 0.15]
+        if not toks:
+            continue
+        out.append({"char": name, "coverage": cnt / n, "tokens": toks,
+                    "required": [t for t, s in toks if s >= 0.30]})
+    out.sort(key=lambda b: -b["tokens"][0][1])   # по доле топ-значения
+    return out[:top_n]
+
+
 # ======================= утилиты чисел/форматов =======================
 def num(x):
     try:
@@ -982,7 +1031,7 @@ def derive_period_label(d1, d2):
 
 def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                  pz, cb, colors, seas, review, mine, notes, econ=None, kw=None, wbd=None, funnel=None,
-                 color_n=None):
+                 color_n=None, belong=None):
     by_label = "продавцам" if args.by == "seller" else "брендам"
     ranked = sorted(agg.items(), key=lambda kv: kv[1]["rev"], reverse=True)
     top = ranked[:10]                       # в отчёт выводим ТОП-10 (расчёты — по всему срезу)
@@ -1207,6 +1256,21 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
                 L.append(f"| {esc_md(r['name'])} | {vals} | **{esc_md(r['dominant'] or '—')}** |")
         L.append("")
 
+    # --- F3. Принадлежность признаков топа (авто, прокси Wildbox) ---
+    if belong:
+        L += ["## F3. Принадлежность признаков топа (что обязательно на карточке)", "",
+              "> Разложение товара на признаки/сегменты по характеристикам топ-карточек: у какой доли "
+              "топа встречается значение признака. **≥ 30% = обязателен** (без него вход в запрос закрыт, "
+              "глава 13); ниже — опционально. Считается автоматически по `card.json` (прокси к Wildbox "
+              "«топы поиска», без кабинета).", "",
+              "| Признак | Заполнен у топа | Топ-значения (доля топа) | Обязательные ≥30% |",
+              "|---|--:|---|---|"]
+        for b in belong:
+            toks = ", ".join(f"{esc_md(t)} ({s*100:.0f}%)" for t, s in b["tokens"])
+            req = ", ".join(f"**{esc_md(t)}**" for t in b["required"]) or "—"
+            L.append(f"| {esc_md(b['char'])} | {b['coverage']*100:.0f}% | {toks} | {req} |")
+        L.append("")
+
     # --- G. Разбор своей карточки ---
     gaps = []
     if args.my_sku:
@@ -1328,10 +1392,10 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
           "перенести частотные смыслы выше в свой листинг (глава 04)",
           f"- [ ] **Характеристики**{f2} — заполнить как доминанта топов (блок F2); "
           "состав/конструктив 1-в-1 (главы 13/18)",
-          "- [ ] **Принадлежность %** — Wildbox «топы поиска»: разложить товар на сегменты/подсегменты, "
-          "проверить % присутствия признаков; < ~30% = вход в запрос закрыт (глава 13)",
-          "- [ ] **Полки/доска** — метод главы 18: кто чаще всех в полках топов = супер-карточка; "
-          "брать её смыслы/инфографику. (авто-сбор похожих — планируется)",
+          "- [ ] **Принадлежность %**"
+          + (" ✅ авто-расчёт в блоке F3" if belong else "")
+          + " — проставить на своей карточке все признаки с долей ≥30% из блока F3 "
+          "(обязательные — иначе вход в запрос закрыт, глава 13); опциональные подтянуть по возможности",
           ""]
 
     # --- футер ---
@@ -1389,6 +1453,12 @@ td.r,th.r{text-align:right;}
 table.seg th,table.seg td{text-align:center;vertical-align:middle;}
 table.chars th,table.chars td{white-space:normal;font-size:.76rem;vertical-align:top;line-height:1.25;}
 table.chars .dom{position:sticky;right:0;background:rgba(80,162,110,.18);color:var(--good);font-weight:700;box-shadow:-8px 0 10px -8px var(--shadow);}
+table.belong th,table.belong td{white-space:normal;vertical-align:top;line-height:1.3;}
+table.belong .bname{font-weight:700;}
+table.belong .breq{color:var(--good);}
+.btok{display:inline-block;font-size:.8rem;padding:2px 8px;margin:2px 3px 2px 0;border-radius:99px;background:var(--soft);border:1px solid var(--hair);}
+.btok.req{background:rgba(80,162,110,.18);border-color:var(--good);color:var(--good);}
+.muted{color:var(--muted);}
 tr:hover td{background:var(--soft);}
 .rank{color:var(--accent);font-weight:700;}
 .callouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;}
@@ -1516,7 +1586,7 @@ JS_REPORT = """
 
 def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                pz, cb, colors, seas, review, mine, gaps, notes, econ=None, kw=None, wbd=None,
-               funnel=None, color_n=None, embed=False):
+               funnel=None, color_n=None, embed=False, belong=None):
     niche = getattr(args, "niche_name", None) or derive_niche(args.query or path)
     plabel = getattr(args, "period_label_str", None) or derive_period_label(args.d1, args.d2)
     phrase = args.query or name_filter or path
@@ -1840,6 +1910,28 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
         parts.append('</section>')
         P.append("".join(parts))
 
+    # F3. принадлежность признаков топа (авто, прокси Wildbox)
+    if belong:
+        rows = []
+        for b in belong:
+            toks = "".join(
+                f'<span class="btok{" req" if s >= 0.30 else ""}">{esc(t)} '
+                f'<b>{s*100:.0f}%</b></span>' for t, s in b["tokens"])
+            req = ", ".join(f'<b>{esc(t)}</b>' for t in b["required"]) or '<span class="muted">—</span>'
+            rows.append(f'<tr><td class="bname">{esc(b["char"])}</td>'
+                        f'<td class="num r">{b["coverage"]*100:.0f}%</td>'
+                        f'<td>{toks}</td><td class="breq">{req}</td></tr>')
+        P.append(
+            '<section><h2>Принадлежность признаков топа — что обязательно на карточке</h2>'
+            '<p class="meta">Разложение на признаки/сегменты по характеристикам топ-карточек: '
+            'у какой доли топа встречается значение признака. '
+            '<b>≥ 30% = обязателен</b> (без него вход в запрос закрыт, гл. 13); ниже — опционально. '
+            'Авто-расчёт по <code>card.json</code> (прокси к Wildbox «топы поиска», без кабинета).</p>'
+            '<div class="tbl-wrap"><table class="belong"><thead><tr>'
+            '<th>Признак</th><th>Заполнен<br>у топа</th><th>Топ-значения (доля топа)</th>'
+            '<th>Обязательные ≥30%</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div></section>')
+
     # G2. funnel comparison (Step 2) — перед планом
     if funnel and funnel.get("rows"):
         pk = funnel["planka"]
@@ -1915,8 +2007,8 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
     groups.append(("Ручные задачи (по методике — то, что не даёт авто-анализ)", [
         ("Смыслы / листинг" + f2, "перенести частотные теги хвостов и удачные слайды топов (F2) в свой листинг (гл. 04)"),
         ("Характеристики" + f2, "заполнить как доминанта топов (F2); состав/конструктив 1-в-1 (гл. 13/18)"),
-        ("Принадлежность %", "Wildbox «топы поиска»: сегменты/подсегменты, % присутствия; <30% = вход закрыт (гл. 13)"),
-        ("Полки / доска", "кто чаще всех в полках топов = супер-карточка → брать её смыслы (гл. 18)"),
+        ("Принадлежность %" + (" ✅ авто-расчёт в блоке F3" if belong else ""),
+         "проставить все признаки с долей ≥30% из F3 (обязательные — иначе вход закрыт, гл. 13); опциональные — по возможности"),
     ]))
     idx = 0
     gblocks = []
@@ -2226,11 +2318,15 @@ def main():
 
     # Фаза 5: ручной слой → готовые данные (характеристики/слайды/смыслы из публичного API WB)
     wbd = None
+    belong = []
     if not args.no_wb:
         try:
             got = enrich_cards(review)
             pool = list(review) + [c for cs in (kw or {}).values() for c in cs]
             wbd = {"tails": tail_words(pool, args.item), "charmatrix": char_matrix(review)}
+            # принадлежность признаков — по обогащённым карточкам топа (top-bench + review)
+            belong_cards = [it for it in items if it.get("_chars")] or review
+            belong = belonging(belong_cards)
             if not got:
                 notes.append("WB-карточки топов не загрузились (429) — блок F2 частичный")
         except Exception as e:
@@ -2243,7 +2339,7 @@ def main():
     color_n = len(color_pool or items)
     report, top, gaps = build_report(args, path, path_note, nfilter, items, total, agg,
                                      tot_rev, pz, cb, colors, seas, review, mine, notes, econ, kw, wbd,
-                                     funnel, color_n=color_n)
+                                     funnel, color_n=color_n, belong=belong)
     if alts:
         report += "\n\n_Альтернативные категории (перезапуск с `--path`): " + \
                   "; ".join(f"`{a}`" for a in alts) + "._"
@@ -2254,7 +2350,7 @@ def main():
     if args.html_out or args.pdf_out:
         html = build_html(args, path, path_note, nfilter, items, agg, tot_rev, top,
                           pz, cb, colors, seas, review, mine, gaps, notes, econ, kw, wbd, funnel,
-                          color_n=color_n)
+                          color_n=color_n, belong=belong)
         if args.html_out:
             open(args.html_out, "w", encoding="utf-8").write(html)
             print(f"[html] отчёт → {args.html_out}", file=sys.stderr)
