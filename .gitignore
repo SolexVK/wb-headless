@@ -19,3 +19,6 @@ __pycache__/
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Рантайм-БД бота (сессии/прогоны) — НЕ коммитим
+data/wb-runtime.db
