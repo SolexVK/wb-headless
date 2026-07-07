@@ -576,9 +576,9 @@ def content_benchmark(items, k):
         metrics["title_len"] = {"label": "Длина названия, симв", "median": median(title_lens),
                                 "leader": (title_lens[bi], top[bi].get("id"))}
     if has("sales"):
-        metrics["sales"] = {"label": "Заказов (медиана)", "median": median(col("sales")), "leader": leader("sales")}
+        metrics["sales"] = {"label": "Заказов, шт", "median": median(col("sales")), "leader": leader("sales")}
     if has("revenue"):
-        metrics["revenue"] = {"label": "Выручка (медиана)", "median": median(col("revenue")), "leader": leader("revenue")}
+        metrics["revenue"] = {"label": "Выручка по заказам, ₽", "median": median(col("revenue")), "leader": leader("revenue")}
     return {"k": len(top), "metrics": metrics}
 
 
@@ -1161,6 +1161,9 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
             if key in m:
                 L.append(row(key))
         L.append("")
+        L.append("> «Заказов» и «Выручка по заказам» — на ОДНОЙ базе у топа и у вашей карточки: "
+                 "заказы (штуки) и заказы × цена продажи (валовая стоимость заказов, БЕЗ вычета расходов "
+                 "ВБ и без учёта выкупа). Это НЕ прибыль. Данные топа — MPStats; ваши — из отчёта [2].")
         # рекомендация смысл-слов в название (по частоте в топе) — из хвостов запросов (F2)
         if wbd and wbd.get("tails"):
             tags = ", ".join(w for w, _n in wbd["tails"][:12])
@@ -1740,11 +1743,15 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                     cell = f'<td class="r num {cls}">{fmtv(mv)}</td>'
             trs.append(f'<tr><td>{esc(d.get("label", key))}</td><td class="r num">{med}</td>'
                        f'<td class="r num">{lead}</td>{cell}</tr>')
+        basis = ('<p class="meta">«Заказов» и «Выручка по заказам» — на одной базе у топа и у вашей '
+                 'карточки: заказы (шт) и заказы × цена продажи (валовая стоимость заказов, БЕЗ вычета '
+                 'расходов ВБ и без учёта выкупа) — это не прибыль. Топ — MPStats; ваше — из отчёта [2].</p>')
         smysl = ""
         if wbd and wbd.get("tails"):
             tags = ", ".join(esc(w) for w, _n in wbd["tails"][:12])
             smysl = (f'<p class="meta">🔑 <b>Смыслы для названия</b> (частотные слова топа, по убыванию): '
                      f'{tags}</p>')
+        smysl = basis + smysl
         P.append(f'<section><h2>Контент-бенчмарк топа (по {cb["k"]} SKU)</h2>'
                  f'<div class="tbl-wrap"><table><thead><tr>{head}</tr></thead>'
                  f'<tbody>{"".join(trs)}</tbody></table></div>{smysl}</section>')
