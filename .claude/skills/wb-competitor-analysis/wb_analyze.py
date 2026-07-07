@@ -605,23 +605,23 @@ def base_color(raw):
 
 
 def color_distribution(items, top_n=10):
-    """Раскладка выборки по БАЗОВЫМ цветам: по каждому цвету — совокупная сумма ЗАКАЗОВ
-    (MPStats даёт заказы, не выкупы), доля по заказам и число артикулов. Цвет-склейку
+    """Раскладка выборки по БАЗОВЫМ цветам: по каждому цвету — СУММА ЗАКАЗОВ В РУБЛЯХ
+    (= выручка, заказы×цена), доля по этой сумме и число артикулов. Цвет-склейку
     схлопываем к базовому по первому токену (напр. «голубой, синий» → голубой)."""
-    orders = defaultdict(float)
+    rev = defaultdict(float)
     cnt = defaultdict(int)
     tot = 0.0
     for it in items:
         c = base_color(it.get("color"))
         if not c:
             continue
-        o = num(it.get("sales"))
-        orders[c] += o
+        r = num(it.get("revenue"))
+        rev[c] += r
         cnt[c] += 1
-        tot += o
-    ranked = sorted(orders.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
-    return [{"color": c, "share": (o / tot * 100 if tot else 0),
-             "skus": cnt[c], "orders": o} for c, o in ranked]
+        tot += r
+    ranked = sorted(rev.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+    return [{"color": c, "share": (r / tot * 100 if tot else 0),
+             "skus": cnt[c], "revenue": r} for c, r in ranked]
 
 
 def seasonality(trend):
@@ -1105,13 +1105,13 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
     if colors:
         base = f" (по базе MPStats: {fmt_int(color_n)} артикулов)" if color_n else ""
         L += [f"## D. Доминирующие цвета (базовые){base}",
-              "| Цвет | Доля заказов | Артикулов | Заказов (сумма) |", "|---|--:|--:|--:|"]
+              "| Цвет | Доля | Артикулов | Сумма заказов ₽ |", "|---|--:|--:|--:|"]
         for c in colors:
-            L.append(f"| {c['color']} | {c['share']:.0f}% | {c['skus']} | {fmt_int(c['orders'])} |")
+            L.append(f"| {c['color']} | {c['share']:.0f}% | {c['skus']} | {fmt_money(c['revenue'])} |")
         L += ["", "> Цвет-склейка схлопнута к БАЗОВОМУ цвету (по первому токену: «голубой, синий» → "
               "голубой). Считаем по ВСЕЙ выдаче MPStats по фразе (не только по срезу): доля — от суммы "
-              "заказов всех цветов; «заказов» = заказы MPStats (не выкупы). Цвет — важнейший критерий "
-              "принадлежности (глава 13). Полный %-анализ признаков — Wildbox «топы поиска».", ""]
+              "заказов в рублях всех цветов; сумма заказов ₽ = выручка (заказы × цена) по MPStats. Цвет — "
+              "важнейший критерий принадлежности (глава 13). Полный %-анализ признаков — Wildbox «топы поиска».", ""]
 
     # --- E. Контент-бенчмарк ---
     if cb:
@@ -1374,8 +1374,8 @@ tr:hover td{background:var(--soft);}
 .bar{height:12px;background:var(--soft);border-radius:6px;overflow:hidden;}
 .bar>span{display:block;height:100%;background:var(--accent);border-radius:6px;}
 .cdist{display:flex;flex-direction:column;gap:7px;max-width:760px;}
-.crow{display:grid;grid-template-columns:30% 50% 20%;gap:12px;align-items:center;font-size:.82rem;}
-.cmeta{color:var(--muted);white-space:nowrap;}
+.crow{display:grid;grid-template-columns:20% 50% 30%;gap:12px;align-items:center;font-size:.82rem;}
+.cmeta{color:var(--muted);white-space:nowrap;text-align:right;}
 .cbar{height:10px;background:var(--soft);border-radius:5px;overflow:hidden;}
 .cbar>span{display:block;height:100%;background:var(--accent);border-radius:5px;}
 .cname{font-weight:600;}
@@ -1659,16 +1659,17 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
         mx = max((c["share"] for c in colors), default=1) or 1
         rows = "".join(
             f'<div class="crow">'
-            f'<div class="cmeta">{c["share"]:.0f}% · {c["skus"]} арт · {fmt_int(c["orders"])} заказов</div>'
+            f'<div class="cname">{esc(c["color"])}</div>'
             f'<div class="cbar"><span style="width:{c["share"]/mx*100:.0f}%"></span></div>'
-            f'<div class="cname">{esc(c["color"])}</div></div>'
+            f'<div class="cmeta">{c["share"]:.0f}% · {c["skus"]} арт · {fmt_money(c["revenue"])}</div>'
+            f'</div>'
             for c in colors)
         base = f' (по базе MPStats: {fmt_int(color_n)} артикулов)' if color_n else ''
         P.append(f'<section><h2>Доминирующие цвета (базовые){base}</h2>'
                  f'<div class="cdist">{rows}</div>'
                  '<p class="meta">Цвет-склейка схлопнута к базовому цвету; по ВСЕЙ выдаче MPStats по '
-                 'фразе. Слева — доля заказов · число артикулов · сумма заказов (MPStats даёт заказы, '
-                 'не выкупы); диаграмма — доля заказов; справа — цвет.</p></section>')
+                 'фразе. Слева — цвет; диаграмма — доля; справа — доля · число артикулов · сумма заказов '
+                 'в рублях (= выручка, заказы × цена).</p></section>')
 
     # E. content benchmark (+ Ваше if mine)
     if cb:
