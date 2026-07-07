@@ -1433,7 +1433,7 @@ a.pcard .go{font-size:.74rem;color:var(--accent);margin-top:auto;}
 .lcard .lname{font-size:.82rem;color:var(--muted);margin:2px 0 7px;}
 .slides{display:flex;flex-wrap:wrap;gap:2px;padding-bottom:4px;}
 .slides a{flex:none;}
-.slide{display:flex;flex-direction:column;align-items:center;gap:3px;flex:none;}
+.slide{display:flex;flex-direction:column;align-items:center;gap:3px;flex:none;margin:0;}
 .slide figcaption{font-size:.72rem;color:var(--muted);}
 .slides img{height:120px;width:auto;border-radius:8px;border:1px solid var(--hair);display:block;}
 .slides .slink{display:flex;align-items:center;justify-content:center;height:120px;min-width:56px;border:1px solid var(--hair);border-radius:8px;color:var(--accent);text-decoration:none;font-size:.85rem;background:var(--panel);}
