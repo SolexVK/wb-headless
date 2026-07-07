@@ -77,12 +77,12 @@ async function analyze(query, brand, days) {
   const brandRankRev = [...byBrand.values()].sort((a, b) => b.revenue - a.revenue);
   const rankByRev = brandRankRev.findIndex((b) => b.brand.toUpperCase().includes(brand.toUpperCase())) + 1;
 
-  const brandItems = items.filter((r) => hasBrand(r, brand)).sort((a, b) => b.sales - a.sales);
+  const brandItems = items.filter((r) => hasBrand(r, brand)).sort((a, b) => b.revenue - a.revenue);
   const brandSales = brandItems.reduce((s, r) => s + r.sales, 0);
   const brandRev = brandItems.reduce((s, r) => s + r.revenue, 0);
   const brandAvgPrice = brandSales ? brandRev / brandSales : 0;
 
-  const marketTop = [...items].sort((a, b) => b.sales - a.sales).slice(0, 10);
+  const marketTop = [...items].sort((a, b) => b.revenue - a.revenue).slice(0, 10);
 
   return {
     query, brand, days, period: p, total, marketCount,
@@ -145,10 +145,10 @@ function brandTopTable(a) {
       <td class="num money">${rub(r.sales)}</td>
       <td class="num money">${rub(r.revenue)}</td>
       <td class="num">${rub(r.price)}</td>
-      <td class="num">${a.marketSales ? pct(100 * r.sales / a.marketSales) : '—'}</td>
+      <td class="num">${a.marketRev ? pct(100 * r.revenue / a.marketRev) : '—'}</td>
     </tr>`).join('\n');
   return `<table><thead><tr>
-      <th>#</th><th>Артикул</th><th>Название</th><th>Цвет</th><th>Продажи, шт</th><th>Выручка ₽</th><th>Ср. цена</th><th>Доля рынка</th>
+      <th>#</th><th>Артикул</th><th>Название</th><th>Цвет</th><th>Продажи, шт</th><th>Выручка ₽</th><th>Ср. цена</th><th>Доля рынка (выручка)</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
