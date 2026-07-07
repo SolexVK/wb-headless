@@ -546,7 +546,7 @@ def content_benchmark(items, k):
         return [num(it.get(f)) for it in top]
     def leader(f):
         best = max(top, key=lambda it: num(it.get(f)))
-        return num(best.get(f)), (best.get("name") or "")[:40], best.get("id")
+        return num(best.get(f)), best.get("id")   # (значение, nmId) — без названия карточки
     metrics = {"final_price": {"label": "Цена, ₽", "median": median(col("final_price"))}}
     if has("picscount"):
         metrics["picscount"] = {"label": "Фото, шт", "median": median(col("picscount")), "leader": leader("picscount")}
@@ -1131,7 +1131,8 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
             else:
                 med = numf(key, d.get("median", 0))
                 ld = d.get("leader")
-                lead = f"{numf(key, ld[0])} · {ld[1]}" if ld else "—"
+                lead = (f"{numf(key, ld[0])} · [{ld[1]}]({WB_CARD.format(ld[1])})"
+                        if ld and ld[1] else (numf(key, ld[0]) if ld else "—"))
             return f"| {d.get('label', key)} | {med} | {lead} |"
         for key in ("picscount", "hasvideo", "has3d", "description_length",
                     "rating", "comments", "latest_negative_comments_percent", "search_words_count"):
@@ -1693,7 +1694,8 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
             else:
                 med = fmtv(d.get("median", 0))
                 ld = d.get("leader")
-                lead = f'{fmtv(ld[0])} · {esc(ld[1])}' if ld else "—"
+                lead = (f'{fmtv(ld[0])} · <a href="{esc(WB_CARD.format(ld[1]))}" target="_blank" '
+                        f'rel="noopener">{esc(ld[1])}</a>' if ld and ld[1] else (fmtv(ld[0]) if ld else "—"))
             cell = ""
             if mine:
                 if d.get("share") is not None:  # bool metric
