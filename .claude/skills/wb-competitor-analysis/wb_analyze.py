@@ -865,11 +865,11 @@ def price_segments(items, cost, pr, n=6, sample=100):
         rat = (sum(g[3] * g[4] for g in grp) / cw) if cw else (sum(g[3] for g in grp) / len(grp))
         rep = median(gp)                       # медианная цена продажи сегмента
         c = unit_calc(rep, cost, pr, pr["drr_steady"])
-        redeemed = median(orders) * pr["redemption"]
+        redeemed = median(orders) * pr["redemption"]   # выкупы = заказы × выкуп%
         segs.append({"p_lo": min(gp), "p_hi": max(gp), "skus": len(grp),
                      "rev_share": sum(g[2] for g in grp) / total_rev * 100,
-                     "median_orders": median(orders), "rating": rat, "rep_price": rep,
-                     "margin": c["margin"], "profit_unit": c["profit"],
+                     "median_orders": median(orders), "redeemed": redeemed, "rating": rat,
+                     "rep_price": rep, "margin": c["margin"], "profit_unit": c["profit"],
                      "proj_profit": c["profit"] * redeemed})
     return segs
 
@@ -1041,25 +1041,35 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
         cor_txt = (f"{fmt_int(cor[0])}–{fmt_int(cor[1])} ₽" if cor[0] and cor[1] else "недостижимо")
         lm = econ["launch_margin_at_corridor"]
         lm_txt = (f"{lm[0]*100:.0f}–{lm[1]*100:.0f}%" if lm[0] is not None and lm[1] is not None else "—")
-        L += [f"## C. Цена × юнит-экономика (себестоимость {fmt_int(econ['cost'])} ₽)",
+        red_pct = pr['redemption'] * 100
+        L += [f"## C. Цена × юнит-экономика (себестоимость {fmt_int(econ['cost'])} ₽ · выкуп {red_pct:.0f}%)",
               f"- **Выгодный коридор цены (маржа {pr['m_min']*100:.0f}–{pr['m_max']*100:.0f}%, "
-              f"ДРР {pr['drr_steady']*100:.0f}%): {cor_txt}** — цена на витрине (с СПП).",
-              f"- Точка безубыточности: **{fmt_int(econ['breakeven'])} ₽** (ниже — минус на выходе).",
+              f"ДРР {pr['drr_steady']*100:.0f}%): {cor_txt}** — цена на витрине (с СПП)."]
+        te = econ.get("target_earnings")
+        if te:
+            L.append(f"- **Операционная прибыль в целевом сегменте {fmt_int(te['p_lo'])}–{fmt_int(te['p_hi'])} ₽:** "
+                     f"≈ **{fmt_money(te['proj_profit'])} опер. прибыли за период** на карточку "
+                     f"(≈ {fmt_int(te['redeemed_units'])} выкупов; выручка ≈ {fmt_money(te['proj_revenue'])}).")
+        L += [f"- **Точка безубыточности: {fmt_int(econ['breakeven'])} ₽** — цена, при которой все расходы "
+              f"(комиссия, эквайринг, налог, реклама, брак, себестоимость) покрываются в ноль; продавать "
+              f"ниже расчётной цены — убыток.",
               f"- В фазе запуска (ДРР {pr['drr_launch']*100:.0f}%) маржа в этом коридоре ≈ **{lm_txt}** "
-              f"(плановый инвест-период — «первые недели в ноль»).",
-              f"- Для справки, «зона объёма» (где крутится максимум выручки): "
-              f"**{fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽** ({pz['band_share']:.0f}% выручки) — "
-              f"это НЕ цель, там объём, но не маржа." if pz else "", ""]
+              f"(плановый инвест-период — «первые недели в ноль»)."]
+        if pz:
+            L.append(f"- Для справки, «зона объёма» (где крутится максимум выручки): "
+                     f"**{fmt_int(pz['band'][0])}–{fmt_int(pz['band'][1])} ₽** ({pz['band_share']:.0f}% выручки) — "
+                     f"это НЕ цель, там объём, но не маржа.")
+        L.append("")
         # таблица характерных ценовых сегментов (по цене продажи)
         if econ["segments"]:
-            L += ["**Характерные ценовые сегменты (по цене продажи) × наша маржа** (фаза «выход»):", "",
-                  "| Сегмент, цена продажи ₽ | Медиана цены | Артикулов | Выручка | Заказов/SKU (медиана) "
-                  "| Рейтинг | Наша маржа | Прибыль/ед | Прогноз ₽/период* |",
+            L += ["**Характерные ценовые сегменты (по цене продажи) × наша экономика** (фаза «выход»):", "",
+                  "| Сегмент, цена продажи ₽ | Медиан. цена | Артикулов | Доля выручки сегмента | Выкупов/SKU "
+                  "| Рейтинг | Маржинальность | Опер. прибыль/SKU | Прогноз опер. прибыль/SKU (период)* |",
                   "|---|--:|--:|--:|--:|--:|--:|--:|--:|"]
             for s in econ["segments"]:
                 flag = "✅" if s["margin"] >= pr["m_min"] else ("⚠️" if s["margin"] >= 0 else "🔴")
                 L.append(f"| {fmt_int(s['p_lo'])}–{fmt_int(s['p_hi'])} | {fmt_int(s['rep_price'])} ₽ "
-                         f"| {s['skus']} | {s['rev_share']:.0f}% | {fmt_int(s['median_orders'])} "
+                         f"| {s['skus']} | {s['rev_share']:.0f}% | {fmt_int(s['redeemed'])} "
                          f"| {s['rating']:.2f} | {flag} {s['margin']*100:.0f}% | {fmt_int(s['profit_unit'])} ₽ "
                          f"| {fmt_int(s['proj_profit'])} ₽ |")
             L.append("")
@@ -1069,23 +1079,17 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
             lo = min(s["p_lo"] for s in good)
             hi = max(s["p_hi"] for s in good)
             best = max(good, key=lambda s: s["proj_profit"])
-            L.append(f"> **Вердикт:** целиться в **{fmt_int(lo)}–{fmt_int(hi)} ₽** — тут маржа ≥ "
-                     f"{pr['m_min']*100:.0f}% и есть спрос. Максимум прогнозной прибыли — сегмент "
+            L.append(f"> **Вердикт:** целиться в **{fmt_int(lo)}–{fmt_int(hi)} ₽** — тут маржинальность ≥ "
+                     f"{pr['m_min']*100:.0f}% и есть спрос. Максимум прогнозной опер. прибыли — сегмент "
                      f"**{fmt_int(best['p_lo'])}–{fmt_int(best['p_hi'])} ₽** "
                      f"({fmt_int(best['proj_profit'])} ₽/период на карточку).")
         else:
-            L.append(f"> **Вердикт:** ни один сегмент со спросом не даёт маржу ≥ {pr['m_min']*100:.0f}% "
+            L.append(f"> **Вердикт:** ни один сегмент со спросом не даёт маржинальность ≥ {pr['m_min']*100:.0f}% "
                      f"при себестоимости {fmt_int(econ['cost'])} ₽. Спрос сосредоточен ниже вашего порога. "
                      f"Варианты: снизить себестоимость, добавить ценность/премиум-позиционирование, "
                      f"или пересмотреть нишу.")
-        te = econ.get("target_earnings")
-        if te:
-            L.append(f"- **Потенциальный заработок в целевом сегменте {fmt_int(te['p_lo'])}–{fmt_int(te['p_hi'])} ₽:** "
-                     f"≈ **{fmt_money(te['proj_profit'])} прибыли за период** на карточку "
-                     f"(при ~{fmt_int(te['median_orders'])} заказах → выкуп {pr['redemption']*100:.0f}% ≈ "
-                     f"{fmt_int(te['redeemed_units'])} шт; выручка ≈ {fmt_money(te['proj_revenue'])}).")
-        L += ["", "_*Прогноз = прибыль/ед × (заказы/SKU × выкуп "
-              f"{pr['redemption']*100:.0f}%). MPStats-«продажи» приняты за ЗАКАЗЫ; перепроверить на живых данных._", ""]
+        L += ["", "_*Прогноз опер. прибыли = опер. прибыль/SKU × выкупы/SKU (= заказы × выкуп "
+              f"{red_pct:.0f}%). MPStats-«продажи» приняты за ЗАКАЗЫ; перепроверить на живых данных._", ""]
     elif pz:
         L += ["## C. Цена (без юнит-экономики)",
               f"- Ценовой коридор ниши (10–90 перцентиль): **{fmt_int(pz['lo'])}–{fmt_int(pz['hi'])} ₽**",
@@ -1345,7 +1349,7 @@ table{border-collapse:collapse;width:100%;font-size:.87rem;}
 .pic{width:52px;padding:5px 8px;} .bthumb{width:44px;height:58px;object-fit:cover;border-radius:6px;display:block;background:var(--soft);cursor:zoom-in;}
 .noimg{color:var(--muted);}
 th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--hair);white-space:nowrap;}
-th{font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--panel);}
+th{font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--panel);white-space:normal;vertical-align:bottom;line-height:1.2;}
 tbody tr:last-child td{border-bottom:none;}
 td.r,th.r{text-align:right;}
 tr:hover td{background:var(--soft);}
@@ -1566,24 +1570,27 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
         cor_txt = f'{fmt_int(cor[0])}–{fmt_int(cor[1])} ₽' if cor[0] and cor[1] else "недостижимо"
         lm_txt = f'{lm[0]*100:.0f}–{lm[1]*100:.0f}%' if lm[0] is not None and lm[1] is not None else "—"
         vol = (f'{fmt_int(pz["band"][0])}–{fmt_int(pz["band"][1])} ₽' if pz else "—")
+        red_pct = pr["redemption"] * 100
+        # мини-блоки в порядке: коридор → опер. прибыль в целевом → безубыточность → запуск → объём
         callouts = (
             f'<div class="callout hl good"><div class="k">Выгодный коридор · маржа '
             f'{pr["m_min"]*100:.0f}–{pr["m_max"]*100:.0f}% (ДРР {pr["drr_steady"]*100:.0f}%)</div>'
-            f'<div class="b num">{cor_txt}</div><div class="s">цена на витрине (с СПП) · цель</div></div>'
+            f'<div class="b num">{cor_txt}</div><div class="s">цена на витрине (с СПП) · цель</div></div>')
+        te = econ.get("target_earnings")
+        if te:
+            callouts += (f'<div class="callout hl"><div class="k">Операционная прибыль в целевом сегменте '
+                         f'{fmt_int(te["p_lo"])}–{fmt_int(te["p_hi"])} ₽</div>'
+                         f'<div class="b num">{fmt_money(te["proj_profit"])}/период</div>'
+                         f'<div class="s">≈{fmt_int(te["redeemed_units"])} выкупов · выручка ≈ '
+                         f'{fmt_money(te["proj_revenue"])}</div></div>')
+        callouts += (
             f'<div class="callout"><div class="k">Точка безубыточности</div>'
             f'<div class="b num">{fmt_int(econ["breakeven"])} ₽</div>'
-            f'<div class="s">ниже — минус на выходе</div></div>'
+            f'<div class="s">цена, где все расходы в ноль; продавать ниже — убыток</div></div>'
             f'<div class="callout"><div class="k">Маржа в запуске (ДРР {pr["drr_launch"]*100:.0f}%)</div>'
             f'<div class="b num">{lm_txt}</div><div class="s">инвест-период, «первые недели в ноль»</div></div>'
             f'<div class="callout"><div class="k">Зона объёма (не цель)</div>'
             f'<div class="b num">{vol}</div><div class="s">где выручка, но не маржа</div></div>')
-        te = econ.get("target_earnings")
-        if te:
-            callouts += (f'<div class="callout hl"><div class="k">Заработок в целевом сегменте '
-                         f'{fmt_int(te["p_lo"])}–{fmt_int(te["p_hi"])} ₽</div>'
-                         f'<div class="b num">{fmt_money(te["proj_profit"])}/период</div>'
-                         f'<div class="s">≈{fmt_int(te["median_orders"])} заказов · выручка ≈ '
-                         f'{fmt_money(te["proj_revenue"])}</div></div>')
         # сегменты
         seg_html = ""
         if econ["segments"]:
@@ -1595,15 +1602,16 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                     f'<tr class="mrow {cls}"><td class="num">{fmt_int(s["p_lo"])}–{fmt_int(s["p_hi"])}</td>'
                     f'<td class="r num">{fmt_int(s["rep_price"])} ₽</td>'
                     f'<td class="r num">{s["skus"]}</td><td class="r num">{s["rev_share"]:.0f}%</td>'
-                    f'<td class="r num">{fmt_int(s["median_orders"])}</td><td class="r num">{s["rating"]:.2f}</td>'
+                    f'<td class="r num">{fmt_int(s["redeemed"])}</td><td class="r num">{s["rating"]:.2f}</td>'
                     f'<td class="r num {mcls}">{s["margin"]*100:.0f}%</td>'
                     f'<td class="r num">{fmt_int(s["profit_unit"])} ₽</td>'
                     f'<td class="r num">{fmt_int(s["proj_profit"])} ₽</td></tr>')
             seg_html = ('<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr>'
-                        '<th>Сегмент, цена продажи ₽</th><th class="r">Медиана</th><th class="r">Артикулов</th>'
-                        '<th class="r">Выручка</th><th class="r">Заказов/SKU</th><th class="r">Рейтинг</th>'
-                        '<th class="r">Маржа</th><th class="r">Прибыль/ед</th>'
-                        '<th class="r">Прогноз/период</th></tr></thead>'
+                        '<th>Сегмент, цена продажи ₽</th><th class="r">Медиан.<br>цена</th>'
+                        '<th class="r">Артикулов</th><th class="r">Доля выручки<br>сегмента</th>'
+                        '<th class="r">Выкупов/SKU</th><th class="r">Рейтинг</th>'
+                        '<th class="r">Маржиналь-<br>ность</th><th class="r">Опер.<br>прибыль/SKU</th>'
+                        '<th class="r">Прогноз опер.<br>прибыль/SKU (период)</th></tr></thead>'
                         f'<tbody>{"".join(trs)}</tbody></table></div>')
         # вердикт
         good = econ["good_segments"]
@@ -1611,17 +1619,20 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
             lo = min(s["p_lo"] for s in good); hi = max(s["p_hi"] for s in good)
             best = max(good, key=lambda s: s["proj_profit"])
             verdict = (f'<div class="verdict"><b>Вердикт:</b> целиться в <b>{fmt_int(lo)}–{fmt_int(hi)} ₽</b> '
-                       f'— маржа ≥ {pr["m_min"]*100:.0f}% и есть спрос. Максимум прогнозной прибыли — сегмент '
-                       f'<b>{fmt_int(best["p_lo"])}–{fmt_int(best["p_hi"])} ₽</b> '
+                       f'— маржинальность ≥ {pr["m_min"]*100:.0f}% и есть спрос. Максимум прогнозной опер. '
+                       f'прибыли — сегмент <b>{fmt_int(best["p_lo"])}–{fmt_int(best["p_hi"])} ₽</b> '
                        f'({fmt_int(best["proj_profit"])} ₽/период на карточку).</div>')
         else:
-            verdict = (f'<div class="verdict bad"><b>Вердикт:</b> ни один сегмент со спросом не даёт маржу '
-                       f'≥ {pr["m_min"]*100:.0f}% при себестоимости {fmt_int(econ["cost"])} ₽. Спрос ниже вашего '
-                       f'порога. Варианты: снизить себестоимость, добавить ценность/премиум или сменить нишу.</div>')
-        P.append(f'<section><h2>Цена × юнит-экономика (себестоимость {fmt_int(econ["cost"])} ₽)</h2>'
+            verdict = (f'<div class="verdict bad"><b>Вердикт:</b> ни один сегмент со спросом не даёт '
+                       f'маржинальность ≥ {pr["m_min"]*100:.0f}% при себестоимости {fmt_int(econ["cost"])} ₽. '
+                       f'Спрос ниже вашего порога. Варианты: снизить себестоимость, добавить ценность/премиум '
+                       f'или сменить нишу.</div>')
+        P.append(f'<section><h2>Цена × юнит-экономика (себестоимость {fmt_int(econ["cost"])} ₽ · '
+                 f'выкуп {red_pct:.0f}%)</h2>'
                  f'<div class="callouts">{callouts}</div>{seg_html}{verdict}'
-                 f'<p class="meta">Прогноз = прибыль/ед × (заказы/SKU × выкуп {pr["redemption"]*100:.0f}%). '
-                 f'MPStats-«продажи» приняты за заказы — перепроверить на живых данных.</p></section>')
+                 f'<p class="meta">Прогноз опер. прибыли = опер. прибыль/SKU × выкупы/SKU '
+                 f'(= заказы × выкуп {red_pct:.0f}%). MPStats-«продажи» приняты за заказы — '
+                 f'перепроверить на живых данных.</p></section>')
     elif pz:
         P.append('<section><h2>Цена</h2><div class="callouts">'
                  f'<div class="callout"><div class="k">Ценовой коридор (10–90 перцентиль)</div>'
