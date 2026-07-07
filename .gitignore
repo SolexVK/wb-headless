@@ -14,3 +14,8 @@ cabinet-*.html
 # Python
 __pycache__/
 *.pyc
+
+# SQLite: сам data/wb.db коммитим (git-commit модель), служебные журналы — нет.
+*.db-journal
+*.db-wal
+*.db-shm

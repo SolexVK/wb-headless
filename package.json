@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
+    "better-sqlite3": "^11.10.0",
     "express": "^4.19.2",
     "puppeteer": "^22.10.0",
     "uuid": "^9.0.1",
@@ -23,7 +24,10 @@
     "pipeline": "node scripts/wb-pipeline.mjs",
     "docs:fetch": "node scripts/fetch-wb-docs.mjs",
     "docs:limits": "node scripts/fetch-wb-docs.mjs https://dev.wildberries.ru/docs/openapi/api-information docs/wb-api/limits.md",
-    "sales:by-keyword": "node scripts/wb-brand-keyword-sales.mjs"
+    "sales:by-keyword": "node scripts/wb-brand-keyword-sales.mjs",
+    "db": "node db-cli.js",
+    "db:stats": "node db-cli.js stats",
+    "db:sync": "node db-cli.js sync"
   },
   "engines": {
     "node": ">=18"
