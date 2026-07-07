@@ -605,23 +605,23 @@ def base_color(raw):
 
 
 def color_distribution(items, top_n=10):
-    """Раскладка выборки по БАЗОВЫМ цветам: по каждому цвету — совокупная выручка, доля
-    относительно всех цветов и число артикулов. Цвет-склейку схлопываем к базовому по
-    первому токену (напр. «голубой, синий» → голубой)."""
-    rev = defaultdict(float)
+    """Раскладка выборки по БАЗОВЫМ цветам: по каждому цвету — совокупная сумма ЗАКАЗОВ
+    (MPStats даёт заказы, не выкупы), доля по заказам и число артикулов. Цвет-склейку
+    схлопываем к базовому по первому токену (напр. «голубой, синий» → голубой)."""
+    orders = defaultdict(float)
     cnt = defaultdict(int)
     tot = 0.0
     for it in items:
         c = base_color(it.get("color"))
         if not c:
             continue
-        r = num(it.get("revenue"))
-        rev[c] += r
+        o = num(it.get("sales"))
+        orders[c] += o
         cnt[c] += 1
-        tot += r
-    ranked = sorted(rev.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
-    return [{"color": c, "rev_share": (r / tot * 100 if tot else 0),
-             "skus": cnt[c], "revenue": r} for c, r in ranked]
+        tot += o
+    ranked = sorted(orders.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+    return [{"color": c, "share": (o / tot * 100 if tot else 0),
+             "skus": cnt[c], "orders": o} for c, o in ranked]
 
 
 def seasonality(trend):
@@ -694,11 +694,15 @@ def load_items_json(pathfile):
             "lost_profit": num(r.get("lostProfit")), "_thumb": r.get("thumb"),
             # picscount/hasvideo/description_length дозаполняются enrich_content по nmId
         })
+    # вся база из MPStats (до deep-фильтров) — для блока «Доминирующие цвета»
+    all_items = [{"id": str(a.get("nmId") or ""), "color": a.get("color"),
+                  "sales": num(a.get("sales")), "revenue": num(a.get("revenue")),
+                  "brand": a.get("brand")} for a in (meta.get("allItems") or [])]
     period = meta.get("period") or {}
     seas = (meta.get("_meta") or {}).get("seasonality") or meta.get("seasonality") or {}
     return items, {
         "query": meta.get("query"), "d1": period.get("d1"), "d2": period.get("d2"),
-        "total": meta.get("total"),
+        "total": meta.get("total"), "all_items": all_items,
         "seasonality_delta": seas.get("delta_pct") if isinstance(seas, dict) else None,
     }
 
@@ -956,7 +960,8 @@ def derive_period_label(d1, d2):
 
 
 def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
-                 pz, cb, colors, seas, review, mine, notes, econ=None, kw=None, wbd=None, funnel=None):
+                 pz, cb, colors, seas, review, mine, notes, econ=None, kw=None, wbd=None, funnel=None,
+                 color_n=None):
     by_label = "продавцам" if args.by == "seller" else "брендам"
     ranked = sorted(agg.items(), key=lambda kv: kv[1]["rev"], reverse=True)
     top = ranked[:10]                       # в отчёт выводим ТОП-10 (расчёты — по всему срезу)
@@ -1098,14 +1103,15 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
 
     # --- D. Принадлежность (прокси по цвету) ---
     if colors:
-        L += [f"## D. Доминирующие цвета (базовые, по выборке {fmt_int(len(items))} артикулов)",
-              "| Цвет | Доля выручки | Артикулов | Совокупная выручка ₽ |", "|---|--:|--:|--:|"]
+        base = f" (по базе MPStats: {fmt_int(color_n)} артикулов)" if color_n else ""
+        L += [f"## D. Доминирующие цвета (базовые){base}",
+              "| Цвет | Доля заказов | Артикулов | Заказов (сумма) |", "|---|--:|--:|--:|"]
         for c in colors:
-            L.append(f"| {c['color']} | {c['rev_share']:.0f}% | {c['skus']} | {fmt_money(c['revenue'])} |")
+            L.append(f"| {c['color']} | {c['share']:.0f}% | {c['skus']} | {fmt_int(c['orders'])} |")
         L += ["", "> Цвет-склейка схлопнута к БАЗОВОМУ цвету (по первому токену: «голубой, синий» → "
-              "голубой), доля — от совокупной выручки всех цветов выборки. Цвет — важнейший критерий "
-              "принадлежности (глава 13). Полный %-анализ признаков (капюшон/состав/размер) — Wildbox "
-              "«топы поиска».", ""]
+              "голубой). Считаем по ВСЕЙ выдаче MPStats по фразе (не только по срезу): доля — от суммы "
+              "заказов всех цветов; «заказов» = заказы MPStats (не выкупы). Цвет — важнейший критерий "
+              "принадлежности (глава 13). Полный %-анализ признаков — Wildbox «топы поиска».", ""]
 
     # --- E. Контент-бенчмарк ---
     if cb:
@@ -1367,6 +1373,12 @@ tr:hover td{background:var(--soft);}
 .bar-row{display:grid;grid-template-columns:110px 1fr 64px;gap:10px;align-items:center;font-size:.85rem;}
 .bar{height:12px;background:var(--soft);border-radius:6px;overflow:hidden;}
 .bar>span{display:block;height:100%;background:var(--accent);border-radius:6px;}
+.cdist{display:flex;flex-direction:column;gap:7px;max-width:760px;}
+.crow{display:grid;grid-template-columns:30% 50% 20%;gap:12px;align-items:center;font-size:.82rem;}
+.cmeta{color:var(--muted);white-space:nowrap;}
+.cbar{height:10px;background:var(--soft);border-radius:5px;overflow:hidden;}
+.cbar>span{display:block;height:100%;background:var(--accent);border-radius:5px;}
+.cname{font-weight:600;}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;}
 a.pcard{display:flex;flex-direction:column;gap:6px;background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:14px;text-decoration:none;color:inherit;box-shadow:0 1px 2px var(--shadow);transition:border-color .15s,transform .15s;}
 a.pcard:hover{border-color:var(--accent);transform:translateY(-2px);}
@@ -1468,7 +1480,7 @@ JS_REPORT = """
 
 def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                pz, cb, colors, seas, review, mine, gaps, notes, econ=None, kw=None, wbd=None,
-               funnel=None, embed=False):
+               funnel=None, color_n=None, embed=False):
     niche = getattr(args, "niche_name", None) or derive_niche(args.query or path)
     plabel = getattr(args, "period_label_str", None) or derive_period_label(args.d1, args.d2)
     phrase = args.query or name_filter or path
@@ -1642,20 +1654,21 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                  '<p class="meta">⚠️ Задай себестоимость (--cost), чтобы посчитать выгодный ценовой коридор '
                  'по марже.</p></section>')
 
-    # D. colors — базовые цвета по выборке (доля выручки / артикулы / совокупная выручка)
+    # D. colors — базовые цвета по всей базе MPStats. Ряд: [метрики 30%][диаграмма 50%][цвет 20%]
     if colors:
-        mx = max((c["rev_share"] for c in colors), default=1) or 1
-        bars = "".join(
-            f'<div class="bar-row"><span>{esc(c["color"])}</span>'
-            f'<span class="bar"><span style="width:{c["rev_share"]/mx*100:.0f}%"></span></span>'
-            f'<span class="num" style="text-align:right">{c["rev_share"]:.0f}% · {c["skus"]} арт. · '
-            f'{fmt_money(c["revenue"])}</span></div>'
+        mx = max((c["share"] for c in colors), default=1) or 1
+        rows = "".join(
+            f'<div class="crow">'
+            f'<div class="cmeta">{c["share"]:.0f}% · {c["skus"]} арт · {fmt_int(c["orders"])} заказов</div>'
+            f'<div class="cbar"><span style="width:{c["share"]/mx*100:.0f}%"></span></div>'
+            f'<div class="cname">{esc(c["color"])}</div></div>'
             for c in colors)
-        P.append(f'<section><h2>Доминирующие цвета (базовые, по выборке {fmt_int(len(items))} артикулов)</h2>'
-                 f'<div class="bars">{bars}</div>'
-                 '<p class="meta">Цвет-склейка схлопнута к базовому цвету (по первому токену), доля — от '
-                 'совокупной выручки всех цветов выборки; справа — число артикулов и совокупная выручка. '
-                 'Полный %-анализ признаков — Wildbox «топы поиска» (см. план).</p></section>')
+        base = f' (по базе MPStats: {fmt_int(color_n)} артикулов)' if color_n else ''
+        P.append(f'<section><h2>Доминирующие цвета (базовые){base}</h2>'
+                 f'<div class="cdist">{rows}</div>'
+                 '<p class="meta">Цвет-склейка схлопнута к базовому цвету; по ВСЕЙ выдаче MPStats по '
+                 'фразе. Слева — доля заказов · число артикулов · сумма заказов (MPStats даёт заказы, '
+                 'не выкупы); диаграмма — доля заказов; справа — цвет.</p></section>')
 
     # E. content benchmark (+ Ваше if mine)
     if cb:
@@ -2026,12 +2039,15 @@ def main():
     alts = []
     token = None
     seas = None
+    color_pool = None
     # ── источник ниши: каскад ([1] items-json) ИЛИ MPStats-категория ──
     if args.items_json:
         items, imeta = load_items_json(args.items_json)
         if not items:
             print(f"Пусто: в отчёте [1] '{args.items_json}' нет карточек.", file=sys.stderr)
             sys.exit(4)
+        # для блока «Цвета» — вся база MPStats (до deep-фильтров), иначе — текущий срез
+        color_pool = imeta.get("all_items") or items
         path = args.query or imeta.get("query") or "каскад [1]"
         path_note = "из инструмента [1] (ТОП по фразе)"
         nfilter = None
@@ -2081,7 +2097,7 @@ def main():
     agg, tot_rev = aggregate(items, args.by)
     pz = price_zone(items)
     cb = content_benchmark(items, args.bench)
-    colors = color_distribution(items, top_n=10)
+    colors = color_distribution(color_pool or items, top_n=10)
     review = cards_for_review(items, agg, args.by, args.cards)
 
     # фото первого слайда для флагманов ТОП-10 (блок B) — дообогащаем, если не попали в топ-bench
@@ -2166,8 +2182,10 @@ def main():
     args.niche_name = args.niche or derive_niche(args.query or path)
     args.period_label_str = args.period_label or derive_period_label(args.d1, args.d2)
 
+    color_n = len(color_pool or items)
     report, top, gaps = build_report(args, path, path_note, nfilter, items, total, agg,
-                                     tot_rev, pz, cb, colors, seas, review, mine, notes, econ, kw, wbd, funnel)
+                                     tot_rev, pz, cb, colors, seas, review, mine, notes, econ, kw, wbd,
+                                     funnel, color_n=color_n)
     if alts:
         report += "\n\n_Альтернативные категории (перезапуск с `--path`): " + \
                   "; ".join(f"`{a}`" for a in alts) + "._"
@@ -2177,7 +2195,8 @@ def main():
         open(args.out, "w", encoding="utf-8").write(report)
     if args.html_out or args.pdf_out:
         html = build_html(args, path, path_note, nfilter, items, agg, tot_rev, top,
-                          pz, cb, colors, seas, review, mine, gaps, notes, econ, kw, wbd, funnel)
+                          pz, cb, colors, seas, review, mine, gaps, notes, econ, kw, wbd, funnel,
+                          color_n=color_n)
         if args.html_out:
             open(args.html_out, "w", encoding="utf-8").write(html)
             print(f"[html] отчёт → {args.html_out}", file=sys.stderr)
