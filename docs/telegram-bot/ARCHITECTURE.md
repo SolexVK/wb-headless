@@ -370,6 +370,14 @@ idle
    mid-flow пикер, `buildArgv`, ключ кэша `mpstats.search`, 3 формата). Покрыто дым-тестом
    (19 проверок). Конвенция манифеста — `bot/README.md`.
 3. **Каркас бота** (grammY): меню из реестра, FSM, персист состояния, очередь+воркеры.
+   - 3a ✅ **Сбор формы + подтверждение.** `bot/index.js` (grammY), `bot/core/fsm.js`
+     (чистая логика диалога: collect → advanced_offer → advanced_menu → confirm, с
+     валидацией ввода и авто-переходами), `bot/core/keyboards.js`, `bot/core/session-store.js`
+     (персист диалога в `bot_sessions`, миграция v3). На «Запустить» показывается собранная
+     CLI-команда. Дым-тесты FSM/реестра (42 проверки) зелёные; бот поднимается и опрашивает
+     Telegram (@solexvk_wb_tools_bot). Токен — в `.env` (вне git).
+   - 3b ⏳ Очередь + воркеры + реальное выполнение первого скилла через CLI.
+   - 3c ⏳ Mid-flow пикер конкурентов + выбор формата + выдача.
 4. **Executor** (cli) + Cache/Dedup поверх `source_cache`.
 5. **Renderer** + 3 шаблона для первого скилла (HTML/PDF/XLSX).
 6. Подключение остальных скиллов манифестами (`cards-compare` с правилом 72 ч → `brand-sales`

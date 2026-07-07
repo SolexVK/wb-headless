@@ -132,11 +132,15 @@ export function missingRequired(manifest, params = {}) {
     .map((f) => f.key);
 }
 
-/** Применяет дефолты манифеста к params (не перезатирая заданное). */
+/**
+ * Применяет дефолты манифеста к params (не перезатирая заданное).
+ * Обязательные поля НЕ пред-заполняются — их всегда спрашиваем у пользователя;
+ * дефолты нужны только для необязательных/дополнительных (напр. images=да).
+ */
 export function withDefaults(manifest, params = {}) {
   const out = { ...params };
   for (const f of manifest.fields) {
-    if (f.default !== undefined && isEmpty(out[f.key])) out[f.key] = f.default;
+    if (!f.required && f.default !== undefined && isEmpty(out[f.key])) out[f.key] = f.default;
   }
   return out;
 }
