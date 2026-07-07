@@ -117,16 +117,64 @@ def find_chromium():
     return None
 
 
+def inline_images(html):
+    """Вшить внешние картинки (basket CDN) в HTML как data:URI — чтобы в PDF они были ВСЕГДА
+    видны, не завися от сетевых таймаутов Chromium при печати. Грузим по разу на URL, параллельно."""
+    import base64
+    from concurrent.futures import ThreadPoolExecutor
+    urls = sorted(set(_re.findall(r'src="(https://[^"]+)"', html)))
+    if not urls:
+        return html
+
+    def _get(url):
+        try:
+            r = subprocess.run(["curl", "-sS", "-m", "25", "--compressed",
+                                "-H", f"User-Agent: {WB_UA}", "-o", "-", url],
+                               capture_output=True, timeout=30)
+            if r.returncode == 0 and r.stdout and len(r.stdout) > 200:
+                return r.stdout
+        except Exception:
+            pass
+        return None
+
+    def fetch(u):
+        # для печати берём компактный вариант basket (c246x328) вместо big — PDF не «раздувается»;
+        # экранный HTML остаётся на big. Если компактного нет — падаем на исходный URL.
+        small = _re.sub(r"/images/(big|c\d+x\d+)/", "/images/c246x328/", u)
+        raw = _get(small) or (_get(u) if small != u else None)
+        if not raw:
+            return u, None
+        mime = "image/webp" if raw[:4] == b"RIFF" else "image/jpeg"
+        if raw[:3] == b"\x89PN":
+            mime = "image/png"
+        return u, f"data:{mime};base64," + base64.b64encode(raw).decode()
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        got = dict(ex.map(fetch, urls))
+    n_ok = 0
+    for u, data in got.items():
+        if data:
+            html = html.replace(f'src="{u}"', f'src="{data}"')
+            n_ok += 1
+    print(f"[pdf] картинок вшито: {n_ok}/{len(urls)}", file=sys.stderr)
+    return html
+
+
 def html_to_pdf(html, pdf_path):
     """Печать HTML в кликабельный PDF через headless Chromium (ссылки сохраняются)."""
     chrome = find_chromium()
     if not chrome:
         raise RuntimeError("Chromium не найден. Укажи путь в env CHROMIUM_BIN — PDF не создан.")
+    # для печати грузим все картинки сразу (lazy оставляем только для экранного HTML)
+    # и вшиваем их в data:URI, чтобы ни одна не «пропала» из-за сетевого таймаута печати
+    html_print = inline_images(html.replace(' loading="lazy"', ""))
     with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as f:
-        f.write(html)
+        f.write(html_print)
         tmp = f.name
     try:
-        cmd = [chrome, "--headless", "--no-sandbox", "--disable-gpu", "--no-pdf-header-footer",
+        # картинки уже вшиты data:URI → сеть не ждём; compositor-stages — дождаться полной отрисовки
+        cmd = [chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--no-pdf-header-footer",
+               "--virtual-time-budget=6000", "--run-all-compositor-stages-before-draw",
                f"--print-to-pdf={pdf_path}", "file://" + tmp]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if not (os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 1000):
@@ -1522,20 +1570,41 @@ a.pcard .go{font-size:.74rem;color:var(--accent);margin-top:auto;}
 .check li{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:8px;}
 .check li:hover{background:var(--soft);}
 .check input{margin-top:2px;width:16px;height:16px;accent-color:var(--accent);flex:none;cursor:pointer;}
-.check label{font-size:.9rem;cursor:pointer;}
+.check label{font-size:.9rem;cursor:pointer;flex:1;}
 .check label.done{text-decoration:line-through;color:var(--muted);}
 .check .g{color:var(--muted);font-size:.82em;}
+.check .jump{flex:none;align-self:flex-start;margin-top:1px;font-size:.72rem;font-weight:700;
+  text-decoration:none;padding:1px 8px;border-radius:99px;white-space:nowrap;
+  background:rgba(80,162,110,.16);border:1px solid var(--good);color:var(--good);}
+.check .jump:hover{background:rgba(80,162,110,.28);}
+:target{scroll-margin-top:12px;animation:flashtgt 1.4s ease-out;}
+@keyframes flashtgt{0%{background:rgba(80,162,110,.22);}100%{background:transparent;}}
 footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--hair);color:var(--muted);font-size:.8rem;}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;}}
 @media print{
-  @page{size:A4 landscape;margin:11mm;}
+  @page{size:A4 landscape;margin:8mm;}
   :root{--paper:#fff;--panel:#fff;--ink:#1a141a;--muted:#5c5058;--hair:#d8ccd2;--soft:#faf3f7;}
-  body{background:#fff;} .toggle{display:none;} .wca{max-width:none;padding:0;}
+  html,body{background:#fff;} .toggle{display:none;} .wca{max-width:none;padding:0;}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-  section{break-inside:avoid;} .callout,.mycard,.tbl-wrap,a.pcard,.verdict,.plan>div{break-inside:avoid;}
+  /* компактно под A4: срезаем крупные вертикальные отступы */
+  section{margin-top:9px;break-inside:auto;}
+  section:first-child{margin-top:0;}
+  h1{margin:0 0 5px;} h2{font-size:1.0rem;margin:0 0 4px;} h3{margin:7px 0 3px;}
+  .meta{margin:2px 0 3px;font-size:.72rem;line-height:1.25;}
+  .callout,.mycard,.verdict{margin:6px 0;padding:8px 10px;}
+  .plan{gap:9px;} .check li{padding:3px 6px;} .tags{gap:5px;margin:4px 0 2px;}
+  .listing{gap:9px;}
+  /* секции рвутся по границам «атомов» — не оставляем крупных пустот */
+  .callout,.mycard,.verdict,a.pcard,.lcard,.crow,figure.slide{break-inside:avoid;}
+  tr,img{break-inside:avoid;} thead{display:table-header-group;}
   tr:hover td{background:none;} a{color:var(--accent2);}
   /* в PDF прокрутки нет — широкие таблицы не обрезаем, а переносим текст и вписываем */
-  .tbl-wrap{overflow:visible;} table{font-size:.76rem;} th,td{white-space:normal;}
+  .tbl-wrap{overflow:visible;border-radius:0;} table{font-size:.72rem;} th,td{white-space:normal;padding:5px 8px;}
+  .pic{padding:3px 6px;} .bthumb{width:34px;height:45px;}
+  .plan>div{break-inside:avoid;}
+  footer{margin-top:12px;padding-top:8px;font-size:.7rem;break-before:avoid;}
+  /* картинки видимы и целиком: не растягиваем сверх страницы */
+  .slides img{height:100px;} img{max-height:150mm;}
 }
 """
 
@@ -1881,14 +1950,14 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                 f' · выручка {fmt_money(it.get("revenue"))}</div>'
                 f'<div class="lname">{esc(it.get("name") or "—")}</div>'
                 f'<div class="slides">{thumbs}</div></div>')
-        P.append('<section><h2>Листинг топов (слайды)</h2>'
+        P.append('<section id="blk-listing"><h2>Листинг топов (слайды)</h2>'
                  '<p class="meta">Первые 10 слайдов карточек топ-брендов — для ручного разбора листинга '
                  'и инфографики (гл. 04). Под каждым слайдом — его номер в листинге.</p>'
                  f'<div class="listing">{"".join(lcards)}</div></section>')
 
     # F2. готовые данные по топам (смыслы · характеристики)
     if wbd:
-        parts = ['<section><h2>Готовые данные по топам — смыслы · характеристики</h2>']
+        parts = ['<section id="blk-f2"><h2>Готовые данные по топам — смыслы · характеристики</h2>']
         if wbd.get("tails"):
             tags = "".join(f'<span class="tag">{esc(w)} <b>{n}</b></span>' for w, n in wbd["tails"])
             parts.append('<p class="meta" style="margin-bottom:2px">Смыслы — теги из хвостов запросов '
@@ -1922,7 +1991,7 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                         f'<td class="num r">{b["coverage"]*100:.0f}%</td>'
                         f'<td>{toks}</td><td class="breq">{req}</td></tr>')
         P.append(
-            '<section><h2>Принадлежность признаков топа — что обязательно на карточке</h2>'
+            '<section id="blk-f3"><h2>Принадлежность признаков топа — что обязательно на карточке</h2>'
             '<p class="meta">Разложение на признаки/сегменты по характеристикам топ-карточек: '
             'у какой доли топа встречается значение признака. '
             '<b>≥ 30% = обязателен</b> (без него вход в запрос закрыт, гл. 13); ниже — опционально. '
@@ -2003,22 +2072,30 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
             targets.append(("Контент-цель: " + ", ".join(ct), None))
     if targets:
         groups.append(("Цели ниши", targets))
-    f2 = " ✅ данные в блоке F2" if wbd else ""
+    # якорь ✅ = (id секции, подпись) — рендерится кликабельным чипом, ведущим к авто-данным
+    a_listing = ("blk-listing", "листинг топов") if any('id="blk-listing"' in p for p in P) else None
+    a_f2 = ("blk-f2", "F2") if wbd else None
+    a_f3 = ("blk-f3", "F3") if belong else None
     groups.append(("Ручные задачи (по методике — то, что не даёт авто-анализ)", [
-        ("Смыслы / листинг" + f2, "перенести частотные теги хвостов и удачные слайды топов (F2) в свой листинг (гл. 04)"),
-        ("Характеристики" + f2, "заполнить как доминанта топов (F2); состав/конструктив 1-в-1 (гл. 13/18)"),
-        ("Принадлежность %" + (" ✅ авто-расчёт в блоке F3" if belong else ""),
-         "проставить все признаки с долей ≥30% из F3 (обязательные — иначе вход закрыт, гл. 13); опциональные — по возможности"),
+        ("Смыслы / листинг", "перенести частотные теги хвостов и удачные слайды топов в свой листинг (гл. 04)",
+         [a for a in (a_f2, a_listing) if a]),
+        ("Характеристики", "заполнить как доминанта топов; состав/конструктив 1-в-1 (гл. 13/18)",
+         [a_f2] if a_f2 else []),
+        ("Принадлежность %", "проставить все признаки с долей ≥30% (обязательные — иначе вход закрыт, гл. 13); "
+         "опциональные — по возможности", [a_f3] if a_f3 else []),
     ]))
     idx = 0
     gblocks = []
     for gt, gi in groups:
         lis = []
-        for main_txt, hint in gi:
+        for item in gi:
+            main_txt, hint = item[0], item[1]
+            anchors = item[2] if len(item) > 2 else []
             cid = f"wc{idx}"; idx += 1
+            jumps = "".join(f'<a class="jump" href="#{aid}">✅&nbsp;{esc(lbl)}</a>' for aid, lbl in anchors)
             hint_html = f' <span class="g">— {esc(hint)}</span>' if hint else ""
             lis.append(f'<li><input type="checkbox" id="{cid}">'
-                       f'<label for="{cid}">{esc(main_txt)}{hint_html}</label></li>')
+                       f'<label for="{cid}">{esc(main_txt)}{hint_html}</label>{jumps}</li>')
         gblocks.append(f'<div><h3>{esc(gt)}</h3><ul class="check">{"".join(lis)}</ul></div>')
     P.append(f'<section><h2>План доработки карточки</h2><div class="plan">{"".join(gblocks)}</div></section>')
 
