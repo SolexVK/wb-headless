@@ -564,6 +564,21 @@ def content_benchmark(items, k):
         metrics["latest_negative_comments_percent"] = {"label": "Негатив, %", "median": median(col("latest_negative_comments_percent"))}
     if has("search_words_count"):
         metrics["search_words_count"] = {"label": "SEO-слов", "median": median(col("search_words_count")), "leader": leader("search_words_count")}
+    # производные контентные метрики (из card.json + [1])
+    chars_counts = [len(it.get("_chars") or []) for it in top]
+    if any(chars_counts):
+        bi = max(range(len(top)), key=lambda i: chars_counts[i])
+        metrics["chars"] = {"label": "Характеристик, шт", "median": median(chars_counts),
+                            "leader": (chars_counts[bi], top[bi].get("id"))}
+    title_lens = [len(it.get("name") or "") for it in top]
+    if any(title_lens):
+        bi = max(range(len(top)), key=lambda i: title_lens[i])
+        metrics["title_len"] = {"label": "Длина названия, симв", "median": median(title_lens),
+                                "leader": (title_lens[bi], top[bi].get("id"))}
+    if has("sales"):
+        metrics["sales"] = {"label": "Заказов (медиана)", "median": median(col("sales")), "leader": leader("sales")}
+    if has("revenue"):
+        metrics["revenue"] = {"label": "Выручка (медиана)", "median": median(col("revenue")), "leader": leader("revenue")}
     return {"k": len(top), "metrics": metrics}
 
 
@@ -1121,6 +1136,8 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
         dec = {"rating", "latest_negative_comments_percent"}  # метрики с десятыми
 
         def numf(key, v):
+            if key == "revenue":
+                return fmt_money(v)
             return f"{num(v):.1f}" if key in dec else fmt_int(v)
 
         def row(key):
@@ -1131,14 +1148,19 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
             else:
                 med = numf(key, d.get("median", 0))
                 ld = d.get("leader")
-                lead = (f"{numf(key, ld[0])} · [{ld[1]}]({WB_CARD.format(ld[1])})"
-                        if ld and ld[1] else (numf(key, ld[0]) if ld else "—"))
+                lead = numf(key, ld[0]) if ld else "—"   # только значение, без карточки
             return f"| {d.get('label', key)} | {med} | {lead} |"
-        for key in ("picscount", "hasvideo", "has3d", "description_length",
-                    "rating", "comments", "latest_negative_comments_percent", "search_words_count"):
+        for key in ("picscount", "hasvideo", "has3d", "description_length", "chars", "title_len",
+                    "rating", "comments", "sales", "revenue",
+                    "latest_negative_comments_percent", "search_words_count"):
             if key in m:
                 L.append(row(key))
         L.append("")
+        # рекомендация смысл-слов в название (по частоте в топе) — из хвостов запросов (F2)
+        if wbd and wbd.get("tails"):
+            tags = ", ".join(w for w, _n in wbd["tails"][:12])
+            L.append(f"🔑 **Смыслы для названия** (частотные слова топа, по убыванию): {tags}")
+            L.append("")
 
     # --- F. Карточки под ручной разбор ---
     if review:
@@ -1677,9 +1699,10 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
         m = cb["metrics"]
         dec = {"rating", "latest_negative_comments_percent"}
         specs = [("picscount", "hi"), ("hasvideo", "bool"), ("has3d", "bool"),
-                 ("description_length", None), ("rating", "hi"), ("comments", "hi"),
+                 ("description_length", None), ("chars", "hi"), ("title_len", "hi"),
+                 ("rating", "hi"), ("comments", "hi"), ("sales", "hi"), ("revenue", "hi"),
                  ("latest_negative_comments_percent", "lo"), ("search_words_count", "hi")]
-        head = '<th>Метрика</th><th class="r">Медиана топа</th><th>Лидер</th>'
+        head = '<th>Метрика</th><th class="r">Медиана топа</th><th class="r">Лидер</th>'
         if mine:
             head += '<th class="r">Ваше</th>'
         trs = []
@@ -1687,15 +1710,15 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
             d = m.get(key)
             if not d:
                 continue
-            fmtv = (lambda x: f"{num(x):.1f}") if key in dec else (lambda x: fmt_int(x))
+            fmtv = ((lambda x: fmt_money(x)) if key == "revenue"
+                    else (lambda x: f"{num(x):.1f}") if key in dec else (lambda x: fmt_int(x)))
             if "share" in d:
                 med = f'{d["share"]:.0f}%'
                 lead = "—"
             else:
                 med = fmtv(d.get("median", 0))
                 ld = d.get("leader")
-                lead = (f'{fmtv(ld[0])} · <a href="{esc(WB_CARD.format(ld[1]))}" target="_blank" '
-                        f'rel="noopener">{esc(ld[1])}</a>' if ld and ld[1] else (fmtv(ld[0]) if ld else "—"))
+                lead = fmtv(ld[0]) if ld else "—"        # только значение, без карточки
             cell = ""
             if mine:
                 if d.get("share") is not None:  # bool metric
@@ -1711,10 +1734,15 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                     cls = "val-bad" if bad else ("val-ok" if direction and mv else "")
                     cell = f'<td class="r num {cls}">{fmtv(mv)}</td>'
             trs.append(f'<tr><td>{esc(d.get("label", key))}</td><td class="r num">{med}</td>'
-                       f'<td class="num">{lead}</td>{cell}</tr>')
+                       f'<td class="r num">{lead}</td>{cell}</tr>')
+        smysl = ""
+        if wbd and wbd.get("tails"):
+            tags = ", ".join(esc(w) for w, _n in wbd["tails"][:12])
+            smysl = (f'<p class="meta">🔑 <b>Смыслы для названия</b> (частотные слова топа, по убыванию): '
+                     f'{tags}</p>')
         P.append(f'<section><h2>Контент-бенчмарк топа (по {cb["k"]} SKU)</h2>'
                  f'<div class="tbl-wrap"><table><thead><tr>{head}</tr></thead>'
-                 f'<tbody>{"".join(trs)}</tbody></table></div></section>')
+                 f'<tbody>{"".join(trs)}</tbody></table></div>{smysl}</section>')
 
     # G. my card
     if args.my_sku:
