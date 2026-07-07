@@ -1049,7 +1049,7 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
         if te:
             L.append(f"- **Операционная прибыль в целевом сегменте {fmt_int(te['p_lo'])}–{fmt_int(te['p_hi'])} ₽:** "
                      f"≈ **{fmt_money(te['proj_profit'])} опер. прибыли за период** на карточку "
-                     f"(≈ {fmt_int(te['redeemed_units'])} выкупов; выручка ≈ {fmt_money(te['proj_revenue'])}).")
+                     f"(≈ {fmt_int(te['redeemed_units'])} выкупов).")
         L += [f"- **Точка безубыточности: {fmt_int(econ['breakeven'])} ₽** — цена, при которой все расходы "
               f"(комиссия, эквайринг, налог, реклама, брак, себестоимость) покрываются в ноль; продавать "
               f"ниже расчётной цены — убыток.",
@@ -1352,6 +1352,7 @@ th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--hair);white
 th{font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--panel);white-space:normal;vertical-align:bottom;line-height:1.2;}
 tbody tr:last-child td{border-bottom:none;}
 td.r,th.r{text-align:right;}
+table.seg th,table.seg td{text-align:center;vertical-align:middle;}
 tr:hover td{background:var(--soft);}
 .rank{color:var(--accent);font-weight:700;}
 .callouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;}
@@ -1581,8 +1582,7 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
             callouts += (f'<div class="callout hl"><div class="k">Операционная прибыль в целевом сегменте '
                          f'{fmt_int(te["p_lo"])}–{fmt_int(te["p_hi"])} ₽</div>'
                          f'<div class="b num">{fmt_money(te["proj_profit"])}/период</div>'
-                         f'<div class="s">≈{fmt_int(te["redeemed_units"])} выкупов · выручка ≈ '
-                         f'{fmt_money(te["proj_revenue"])}</div></div>')
+                         f'<div class="s">≈ {fmt_int(te["redeemed_units"])} выкупов</div></div>')
         callouts += (
             f'<div class="callout"><div class="k">Точка безубыточности</div>'
             f'<div class="b num">{fmt_int(econ["breakeven"])} ₽</div>'
@@ -1606,12 +1606,12 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                     f'<td class="r num {mcls}">{s["margin"]*100:.0f}%</td>'
                     f'<td class="r num">{fmt_int(s["profit_unit"])} ₽</td>'
                     f'<td class="r num">{fmt_int(s["proj_profit"])} ₽</td></tr>')
-            seg_html = ('<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr>'
-                        '<th>Сегмент, цена продажи ₽</th><th class="r">Медиан.<br>цена</th>'
-                        '<th class="r">Артикулов</th><th class="r">Доля выручки<br>сегмента</th>'
-                        '<th class="r">Выкупов/SKU</th><th class="r">Рейтинг</th>'
-                        '<th class="r">Маржиналь-<br>ность</th><th class="r">Опер.<br>прибыль/SKU</th>'
-                        '<th class="r">Прогноз опер.<br>прибыль/SKU (период)</th></tr></thead>'
+            seg_html = ('<div class="tbl-wrap" style="margin-top:14px"><table class="seg"><thead><tr>'
+                        '<th>Сегмент,<br>цена продажи ₽</th><th>Медиан.<br>цена</th>'
+                        '<th>Артикулов</th><th>Доля выручки<br>сегмента</th>'
+                        '<th>Выкупов/SKU</th><th>Рейтинг</th>'
+                        '<th>Маржиналь-<br>ность</th><th>Опер.<br>прибыль/SKU</th>'
+                        '<th>Прогноз опер.<br>прибыль/SKU (период)</th></tr></thead>'
                         f'<tbody>{"".join(trs)}</tbody></table></div>')
         # вердикт
         good = econ["good_segments"]
