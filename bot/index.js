@@ -4,12 +4,21 @@
 // подтверждение. Выполнение скилла подключается следующим этапом — сейчас на
 // «Запустить» бот показывает собранную CLI-команду (доказательство маппинга).
 
-import { Bot, session, GrammyError, HttpError } from 'grammy';
-import { openDb } from '../lib/db.js';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { Bot, InputFile, session, GrammyError, HttpError } from 'grammy';
+import { openDb, createRun, updateRun, finishRun } from '../lib/db.js';
 import { loadRegistry, menuItems } from './core/registry.js';
 import { sqliteStorage } from './core/session-store.js';
+import { Queue } from './core/queue.js';
+import { runCli, tail } from './core/executor.js';
 import * as fsm from './core/fsm.js';
 import * as kb from './core/keyboards.js';
+
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const RUNS_DIR = path.join(ROOT, 'reports-output', 'runs');
+fs.mkdirSync(RUNS_DIR, { recursive: true });
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
@@ -28,6 +37,9 @@ const admins = new Set(
 const isAdmin = (ctx) => admins.has(String(ctx.from?.id));
 
 const bot = new Bot(token);
+const queue = new Queue({ concurrency: 2 });
+const fmt = (n) => new Intl.NumberFormat('ru-RU').format(Math.round(Number(n) || 0));
+
 bot.use(
   session({
     initial: () => ({ flow: null }),
@@ -86,6 +98,62 @@ async function showMenu(ctx) {
     parse_mode: 'HTML',
     reply_markup: kb.menuKeyboard(items),
   });
+}
+
+// ─────────────── выполнение (очередь + выдача) ───────────────
+
+/** Ставит прогон скилла в очередь: CLI-шаг → результат в чат владельца. */
+function enqueueRun({ manifest, runId, chatId, params }) {
+  const step = (manifest.steps || []).find((s) => s.executor === 'cli' && typeof s.buildArgv === 'function');
+  const outJson = path.join(RUNS_DIR, `run-${runId}.json`);
+  const argv = step.buildArgv(params, { outJson });
+  queue.enqueue(
+    async () => {
+      updateRun(db, runId, { status: 'running', startedAt: new Date().toISOString() });
+      const res = await runCli({ npmScript: manifest.npmScript, argv, cwd: ROOT, outJson });
+      if (!res.ok) {
+        const msg = tail(res.stderr || res.stdout || `код ${res.code}`, 500);
+        finishRun(db, runId, { error: msg });
+        await bot.api
+          .sendMessage(chatId, `❌ Задача #${runId}: не удалось выполнить.\n<code>${esc(msg)}</code>`, {
+            parse_mode: 'HTML',
+          })
+          .catch(() => {});
+        return;
+      }
+      finishRun(db, runId, { result: res.data });
+      await deliverResult({ manifest, runId, chatId, data: res.data, outJson }).catch(async (e) => {
+        await bot.api
+          .sendMessage(chatId, `⚠️ Задача #${runId} выполнена, но выдача не удалась: ${esc(e.message)}`)
+          .catch(() => {});
+      });
+    },
+    { lane: manifest.cache?.source || manifest.id }
+  );
+}
+
+/** Выдаёт результат в чат: текстовая сводка + JSON-контракт файлом. */
+async function deliverResult({ manifest, runId, chatId, data, outJson }) {
+  const rivals = Array.isArray(data?.rivals) ? data.rivals : [];
+  const per = data?.period ? `${data.period.d1}…${data.period.d2}` : '';
+  const head =
+    `✅ <b>#${runId} · ${esc(manifest.title)}</b>\n` +
+    `Фраза: «${esc(data?.query || '')}»${per ? ` · период ${esc(per)}` : ''}\n` +
+    `Найдено конкурентов: <b>${rivals.length}</b>${data?.total ? ` (из выдачи ${data.total})` : ''}`;
+  const lines = rivals.slice(0, 15).map((r, i) => {
+    const name = String(r.name || '').slice(0, 70);
+    return (
+      `${i + 1}. <code>${esc(r.nmId)}</code> · ${esc(r.brand || '—')} — ${fmt(r.price)}₽ · выручка ${fmt(r.revenue)}₽\n` +
+      `   <i>${esc(name)}</i>`
+    );
+  });
+  const more = rivals.length > 15 ? `\n\n… ещё ${rivals.length - 15}. Полный список — в файле.` : '';
+  await bot.api.sendMessage(chatId, `${head}\n\n${lines.join('\n')}${more}`, { parse_mode: 'HTML' });
+  if (fs.existsSync(outJson)) {
+    await bot.api.sendDocument(chatId, new InputFile(outJson, `top-rivals-${runId}.json`), {
+      caption: 'JSON-контракт (top-rivals) — источник для «Сравнения карточек».',
+    });
+  }
 }
 
 // ─────────────── команды ───────────────
@@ -173,16 +241,23 @@ bot.on('callback_query:data', async (ctx) => {
       await ctx.answerCallbackQuery();
       return showScreen(ctx, manifest, flow);
     }
-    // run — этап 3a: показываем собранную команду (выполнение — следующий этап)
-    const step = (manifest.steps || []).find((s) => s.executor === 'cli' && typeof s.buildArgv === 'function');
-    const argv = step ? step.buildArgv(flow.params, { outJson: '<out.json>' }) : [];
-    const cmd = `npm run ${manifest.npmScript} -- ${argv.map(shellQuote).join(' ')}`;
+    // run — этап 3b: реальное выполнение через очередь
+    const params = { ...flow.params };
+    const chatId = ctx.chat.id;
     ctx.session.flow = null;
-    await ctx.answerCallbackQuery({ text: 'Принято' });
-    return ctx.reply(
-      `✅ Параметры собраны. На этапе выполнения запустится:\n\n<code>${esc(cmd)}</code>\n\n<i>Выполнение и выдачу отчёта подключим следующим шагом.</i>`,
+    const { id: runId } = createRun(db, {
+      telegramId: ctx.from?.id ?? null,
+      skill: manifest.id,
+      params,
+      status: 'queued',
+    });
+    await ctx.answerCallbackQuery({ text: 'Запускаю' });
+    await ctx.reply(
+      `⏳ Задача <b>#${runId}</b> «${esc(manifest.title)}» поставлена в очередь. Это может занять до пары минут — пришлю результат сюда.`,
       { parse_mode: 'HTML' }
     );
+    enqueueRun({ manifest, runId, chatId, params });
+    return;
   }
 
   return ctx.answerCallbackQuery();
