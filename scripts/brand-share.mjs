@@ -263,27 +263,49 @@ ${periodBlock(a90)}
 }
 
 // ── main ────────────────────────────────────────────────────────────────────
-const targets = [
-  { brand: 'AIDEMIKO', query: 'Рубашка муслиновая женская' },
-  { brand: 'AIZEK', query: 'Рубашка муслиновая мужская' },
-];
+// Транслитерация кириллицы в латиницу — для безопасных имён файлов.
+const TRANSLIT = { а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'e',ж:'zh',з:'z',и:'i',й:'y',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'c',ч:'ch',ш:'sh',щ:'sch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya' };
+const slug = (s) => String(s).toLowerCase().split('').map((c) => (TRANSLIT[c] ?? c)).join('')
+  .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
-const outDir = process.argv[2] || 'reports-output';
-const slug = (b) => b.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+// Аргументы: --out <dir> и повторяемый --target "БРЕНД|фраза".
+// Без --target берём дефолтную пару (обратная совместимость).
+function parseArgs(argv) {
+  let outDir = 'reports-output';
+  const targets = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--out') { outDir = argv[++i]; }
+    else if (a === '--target') {
+      const [brand, ...rest] = String(argv[++i]).split('|');
+      targets.push({ brand: brand.trim(), query: rest.join('|').trim() });
+    } else if (!a.startsWith('--') && outDir === 'reports-output' && !targets.length) {
+      outDir = a; // позиционный первый аргумент = каталог (как раньше)
+    }
+  }
+  if (!targets.length) {
+    targets.push({ brand: 'AIDEMIKO', query: 'Рубашка муслиновая женская' });
+    targets.push({ brand: 'AIZEK', query: 'Рубашка муслиновая мужская' });
+  }
+  return { outDir, targets };
+}
+
+const { outDir, targets } = parseArgs(process.argv.slice(2));
 
 for (const t of targets) {
   process.stderr.write(`→ ${t.brand} / «${t.query}» …\n`);
   const a30 = await analyze(t.query, t.brand, 30);
   const a90 = await analyze(t.query, t.brand, 90);
   const html = buildHtml(t.brand, t.query, a30, a90, { date: iso(Date.now()) });
-  const out = `${outDir}/brand-share-${slug(t.brand)}.html`;
+  const base = `brand-share-${slug(t.brand)}-${slug(t.query)}`;
+  const out = `${outDir}/${base}.html`;
   writeFileSync(out, html);
   process.stderr.write(`  ✓ ${out}\n`);
-  const pdf = `${outDir}/brand-share-${slug(t.brand)}.pdf`;
+  const pdf = `${outDir}/${base}.pdf`;
   await renderPdf(out, pdf);
   process.stderr.write(`  ✓ ${pdf}\n`);
 
-  console.log(`\n### ${t.brand} · «${t.query}» → ${out}`);
+  console.log(`\n### ${t.brand} · «${t.query}» → ${base}.pdf`);
   for (const a of [a30, a90]) {
     console.log(`  ${a.days}d: доля ${pct(a.shareSales)} шт / ${pct(a.shareRev)} выручка · ` +
       `бренд ${rub(a.brandSales)} шт, ${rub(a.brandRev)} ₽ · ${a.brandCount} карт. · ранг #${a.rankBySales}/${a.totalBrands} · ` +
