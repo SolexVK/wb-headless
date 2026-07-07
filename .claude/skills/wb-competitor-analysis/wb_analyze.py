@@ -1499,8 +1499,14 @@ th{font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--mu
 tbody tr:last-child td{border-bottom:none;}
 td.r,th.r{text-align:right;}
 table.seg th,table.seg td{text-align:center;vertical-align:middle;}
+/* вписываем таблицу в ширину контейнера: «Доминанта» всегда видна как последний столбец,
+   без горизонтальной прокрутки и без наложения на соседний столбец */
+table.chars{table-layout:fixed;width:100%;}
 table.chars th,table.chars td{white-space:normal;font-size:.76rem;vertical-align:top;line-height:1.25;}
-table.chars .dom{position:sticky;right:0;background:rgba(80,162,110,.18);color:var(--good);font-weight:700;box-shadow:-8px 0 10px -8px var(--shadow);}
+table.chars td{overflow-wrap:anywhere;}                 /* длинные значения переносим, но заголовки — целыми словами */
+table.chars th{letter-spacing:0;}
+table.chars th:first-child,table.chars td:first-child{width:14%;}
+table.chars .dom{width:15%;background:rgba(80,162,110,.14);color:var(--good);font-weight:700;border-left:2px solid var(--good);}
 table.belong th,table.belong td{white-space:normal;vertical-align:top;line-height:1.3;}
 table.belong .bname{font-weight:700;}
 table.belong .breq{color:var(--good);}
