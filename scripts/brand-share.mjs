@@ -3,8 +3,29 @@
 // Считаем долю бренда в штуках и в выручке, ранг бренда, ТОП рынка и ТОП артикулов бренда.
 // Периоды: 30 и 90 дней. Выход — самодостаточный HTML-отчёт.
 
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, existsSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { fetchSearchResults } from '../lib/mpstats.js';
+
+// Печать HTML → PDF (A4) через Chromium (Playwright). Возвращает путь к PDF.
+async function renderPdf(htmlPath, pdfPath) {
+  const { chromium } = await import('playwright');
+  // На этом контейнере установлен chromium-1194; executablePath() по умолчанию
+  // может указывать на другую ревизию — подставляем реальный бинарь, если есть.
+  const candidates = ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome', chromium.executablePath()];
+  const exe = candidates.find((p) => p && existsSync(p));
+  const browser = await chromium.launch(exe ? { executablePath: exe } : {});
+  try {
+    const page = await browser.newPage();
+    await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'networkidle' });
+    await page.emulateMedia({ media: 'print' });
+    await page.pdf({ path: pdfPath, format: 'A4', printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '9mm', right: '9mm' } });
+  } finally {
+    await browser.close();
+  }
+  return pdfPath;
+}
 
 const day = 86400000;
 const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -187,6 +208,34 @@ function buildHtml(brand, query, a30, a90, meta) {
   @media (prefers-color-scheme: dark){ .period-tag{ background:#173322; color:#7bdca0 } }
   a{ color:#2563eb; text-decoration:none; } a:hover{ text-decoration:underline; }
   .foot{ color:#999; font-size:12px; margin-top:26px; border-top:1px solid var(--line); padding-top:12px; }
+
+  /* ── Печать / PDF: компактная A4-вёрстка, блоки не рвутся ── */
+  @page{ size:A4; margin:10mm 9mm; }
+  @media print{
+    :root{ color-scheme:light; }
+    body{ background:#fff; color:#111; padding:0; font-size:10.5px; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    h1{ font-size:17px; margin:0 0 2px; }
+    .sub{ font-size:10px; margin-bottom:8px; }
+    h3{ font-size:10px; margin:8px 0 4px; }
+    .period-tag{ font-size:10px; margin:2px 0; padding:2px 9px; }
+    /* убираем большие разрывы */
+    .ov{ padding:8px 10px; }
+    .ov-h{ margin-bottom:7px; font-size:10.5px; }
+    .kpis{ gap:6px 8px; }
+    .kpi .kv{ font-size:13px; } .kpi.big .kv{ font-size:17px; } .kpi .kl{ font-size:9px; }
+    .ctx{ margin-top:7px; padding-top:6px; font-size:9.5px; }
+    table{ font-size:9.5px; margin:1px 0 4px; }
+    th,td{ padding:3px 6px; }
+    td.name{ max-width:none; }
+    .divider{ height:3px; margin:10px 0 8px; }
+    .foot{ font-size:9px; margin-top:12px; padding-top:8px; }
+    /* логика блоков: заголовок держим с таблицей/карточкой, строки не режем */
+    h1,h3,.period-tag{ break-after:avoid; page-break-after:avoid; }
+    .ov,tr,thead{ break-inside:avoid; page-break-inside:avoid; }
+    .period{ break-inside:auto; }
+    thead{ display:table-header-group; }  /* шапка повторяется при переносе таблицы */
+    a{ color:#111; }
+  }
 </style></head><body>
 <h1>${esc(brand)} — доля продаж от всего рынка</h1>
 <div class="sub">Поисковая фраза: «${esc(query)}» · источник: <b>MPStats</b> · метод «Товары по поисковой фразе» · сформировано ${esc(meta.date)}</div>
@@ -222,6 +271,9 @@ for (const t of targets) {
   const out = `${outDir}/brand-share-${slug(t.brand)}.html`;
   writeFileSync(out, html);
   process.stderr.write(`  ✓ ${out}\n`);
+  const pdf = `${outDir}/brand-share-${slug(t.brand)}.pdf`;
+  await renderPdf(out, pdf);
+  process.stderr.write(`  ✓ ${pdf}\n`);
 
   console.log(`\n### ${t.brand} · «${t.query}» → ${out}`);
   for (const a of [a30, a90]) {
