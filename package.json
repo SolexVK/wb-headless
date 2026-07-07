@@ -23,7 +23,10 @@
     "pipeline": "node scripts/wb-pipeline.mjs",
     "docs:fetch": "node scripts/fetch-wb-docs.mjs",
     "docs:limits": "node scripts/fetch-wb-docs.mjs https://dev.wildberries.ru/docs/openapi/api-information docs/wb-api/limits.md",
-    "sales:by-keyword": "node scripts/wb-brand-keyword-sales.mjs"
+    "sales:by-keyword": "node scripts/wb-brand-keyword-sales.mjs",
+    "report:brand-share": "node scripts/brand-share.mjs",
+    "report:brand-top20": "node scripts/brand-top20.mjs",
+    "phrases:probe": "node scripts/phrase-probe.mjs"
   },
   "engines": {
     "node": ">=18"
