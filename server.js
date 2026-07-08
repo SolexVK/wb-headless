@@ -6,6 +6,7 @@ import path from 'path';
 import puppeteer from 'puppeteer';
 import { v4 as uuidv4 } from 'uuid';
 import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
+import { buildAbcReport, abcReportToCSV } from './lib/abcReport.js';
 import { defaultPeriod, loadItems, selectItems, selectByGroup, writeOutputs } from './report-stock.js';
 
 const app = express();
@@ -201,6 +202,42 @@ app.get('/reports/stock-availability', requireKey, async (req, res) => {
         `attachment; filename="stock-${d1}_${d2}.csv"`
       );
       return res.send(reportToCSV(report));
+    }
+    return res.json(report);
+  } catch (err) {
+    return res.status(500).json({ error: 'report_failed', detail: String(err?.message || err) });
+  }
+});
+
+// ---------- REPORT: ABC(-XYZ) анализ товарной матрицы ----------
+// GET /reports/abc?d1=YYYY-MM-DD&d2=YYYY-MM-DD&format=json|csv&filter=РМП&group=...&metric=revenue|units
+// Без d1/d2 берётся период = последние REPORT_DAYS (по умолчанию 30) дней.
+// metric — по чему ранжируется ABC: revenue (по умолчанию) или units.
+app.get('/reports/abc', requireKey, async (req, res) => {
+  try {
+    if (!process.env.MPSTATS_TOKEN) {
+      return res.status(500).json({ error: 'mpstats_token_missing' });
+    }
+    let { d1, d2, format, filter, group, metric } = req.query;
+    if (!d1 || !d2) ({ d1, d2 } = defaultPeriod(Number(process.env.REPORT_DAYS) || 30));
+
+    // Приоритет: точечный фильтр → группа → все.
+    const all = loadItems();
+    const items = filter && String(filter).trim()
+      ? selectItems(all, filter)
+      : selectByGroup(all, group);
+    const report = await buildAbcReport({
+      items,
+      d1,
+      d2,
+      metric: metric === 'units' ? 'units' : 'revenue',
+      concurrency: Number(process.env.REPORT_CONCURRENCY) || 5,
+    });
+
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="abc-${d1}_${d2}.csv"`);
+      return res.send(abcReportToCSV(report));
     }
     return res.json(report);
   } catch (err) {
