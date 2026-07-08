@@ -27,6 +27,13 @@ def money_short(x):
 def vars_style(pal):
     return f"--accent:{pal[0]};--accent2:{pal[1]};--tint:{pal[2]};--soft:{pal[3]}"
 
+# ---- WB deep links (кликабельные ссылки в PDF) ----
+import urllib.parse as _up
+def wb_item(sku): return f"https://www.wildberries.ru/catalog/{sku}/detail.aspx"
+def wb_brand(b):  return "https://www.wildberries.ru/catalog/0/search.aspx?search=" + _up.quote(str(b))
+def a_item(sku, text=None, cls='lnk'):  return f'<a class="{cls}" href="{wb_item(sku)}">{sku if text is None else text}</a>'
+def a_brand(b, text=None, cls='lnk'):   return f'<a class="{cls}" href="{wb_brand(b)}">{b if text is None else text}</a>'
+
 WH_NAMES = {'507':'Коледино','117986':'Казань','120762':'Электросталь','130744':'Тула',
             '206348':'СПб · Уткина Заводь','208277':'Невинномысск','300571':'Обухово'}
 def wh_label(wid): return WH_NAMES.get(str(wid), f'СЦ · {wid}')
@@ -126,7 +133,7 @@ table.kw tr.bad td.q, table.kw tr.bad td.pos { color:#b23; }
 table.lt { width:100%; border-collapse:collapse; }
 table.lt th { font-size:8.4px; text-transform:uppercase; letter-spacing:.04em; color:#9aa2b3; text-align:right; padding:4px 5px; border-bottom:1px solid #e6e9f0; }
 table.lt th:first-child { text-align:left; }
-table.lt td { font-size:9px; padding:4px 5px; border-bottom:1px solid #f2f3f7; }
+table.lt td { font-size:8.8px; padding:2.5px 5px; border-bottom:1px solid #f2f3f7; }
 table.lt td.q { font-weight:700; color:#1c2230; }
 table.lt td.q i { display:block; font-style:normal; font-weight:600; font-size:8px; color:#9aa2b3; }
 table.lt td.num { text-align:right; font-weight:700; white-space:nowrap; }
@@ -153,9 +160,23 @@ table.lt td.num { text-align:right; font-weight:700; white-space:nowrap; }
 .tak li { font-size:10.5px; color:#33405a; line-height:1.6; padding-left:16px; position:relative; list-style:none; }
 .tak li::before { content:'→'; position:absolute; left:0; color:var(--accent2); font-weight:800; }
 .toc { margin-top:18px; display:flex; gap:9px; }
-.toc div { flex:1; border:1px solid #e6e9f0; border-radius:9px; padding:9px 11px; font-size:9.5px; color:#5a6478; }
-.toc div b { display:block; font-size:11px; color:#141a26; margin-bottom:2px; }
+.toc a { flex:1; border:1px solid #e6e9f0; border-radius:9px; padding:9px 11px; font-size:9.5px; color:#5a6478; display:block; }
+.toc a b { display:block; font-size:11px; color:#141a26; margin-bottom:2px; }
 .toc .pg { float:right; font-weight:800; color:var(--accent2); }
+.cvhead { display:flex; gap:10px; align-items:flex-start; }
+.cvph { width:44px; height:59px; border-radius:7px; object-fit:cover; border:1.5px solid var(--c); flex:0 0 auto; }
+.cvmeta { min-width:0; }
+.cvart { font-size:10px; color:#5a6478; font-weight:700; margin-top:3px; }
+/* links */
+a { color:inherit; text-decoration:none; }
+.lnk { color:var(--accent2); text-decoration:none; border-bottom:1px dotted color-mix(in srgb, var(--accent2) 50%, transparent); }
+.lnk.b { font-weight:800; }
+/* niche leader thumbnails */
+.ltprod { display:flex; gap:7px; align-items:center; }
+.ltprod > div { min-width:0; line-height:1.15; }
+.ltph { width:23px; height:30px; border-radius:4px; object-fit:cover; border:1px solid #e6e9f0; flex:0 0 auto; }
+.ocph { width:30px; height:40px; border-radius:6px; object-fit:cover; border:1px solid #e6e9f0; flex:0 0 auto; }
+.ohead { display:flex; gap:9px; align-items:flex-start; }
 """
 
 # ---------- fragment builders ----------
@@ -196,7 +217,7 @@ def kw_rows(kw):
                     f'<td><span class="kbadge none">нет</span></td><td class="fr">—</td></tr>')
     return out
 
-def card_fragment(sku, o, meta, market_total, top100_sum, n_sku):
+def card_fragment(sku, o, meta, market_total, top100_sum, n_sku, anchor=''):
     pal = o['palette']; c = o['cat_row']
     orders = c['sales']; rev = c['revenue']
     avg_price = round(rev/orders) if orders else o['final_price']
@@ -210,11 +231,12 @@ def card_fragment(sku, o, meta, market_total, top100_sum, n_sku):
     lost_sub = ('дефицит размеров: ' + ', '.join(zeros+low)) if (zeros or low) else 'карточка не уходила в ноль'
     wh_more = f"+ ещё {o['warehouses_count']-6} складов с меньшими остатками" if o['warehouses_count'] > 6 else ''
     sigs = ''.join(f'<div class="sig {st}"><span class="ico">{"▲" if st=="ok" else "▼"}</span>{t}</div>' for t, st in o['signals'])
-    return f"""<div class="page card-report" style="{vars_style(pal)}">
+    return f"""<div class="page card-report" id="{anchor}" style="{vars_style(pal)}">
 <div class="accbar"></div>
-<div class="hd"><img class="ph" src="{o.get('image','')}"/>
+<div class="hd"><a href="{wb_item(sku)}"><img class="ph" src="{o.get('image','')}"/></a>
   <div class="main"><div class="eyebrow">Анализ карточки конкурента · Wildberries</div>
-    <h1>{o['name']}</h1><div class="artno">Артикул {sku} · <b>{o['brand']}</b></div>
+    <h1><a class="lnk" href="{wb_item(sku)}">{o['name']}</a></h1>
+    <div class="artno">Артикул {a_item(sku, cls='lnk b')} · {a_brand(o['brand'], f"<b>{o['brand']}</b>")}</div>
     <div class="chips" style="margin-top:6px">
       <span class="chip">{o['seller']}</span><span class="chip">★ {o['rating']} · {o['comments']} отзывов</span>
       <span class="chip">На ВБ с {o['first_date']}</span><span class="chip">{c['days_in_site']} дн. на площадке</span></div>
@@ -246,25 +268,34 @@ def hbars(items):
     mx = max([v for _, v, _ in items] + [1])
     return ''.join(f'<div class="hb"><span class="hbl">{l}</span><div class="hbt"><div class="hbf" style="width:{max(3,v/mx*100):.0f}%;background:var(--accent)"></div></div><span class="hbv">{rt}</span></div>' for l, v, rt in items)
 
-def niche_fragment(D, meta):
+def niche_fragment(D, meta, articles=None, anchor=''):
+    articles = articles or {}
     pal = D['palette']
     price_bars = hbars([(l, s, f'{s}%') for (l, _, s, _) in D['bands']])
-    brand_bars = hbars([((b if len(b) <= 18 else b[:17]+'…'), s, f'{s}% · {cnt} SKU') for (b, _, s, cnt) in D['brands'][:6]])
+    brand_bars = hbars([(a_brand(b, (b if len(b) <= 18 else b[:17]+'…')), s, f'<b>{s}%</b> · {cnt} SKU') for (b, _, s, cnt) in D['brands'][:6]])
     lead = ''
     for r in D['leaders'][:5]:
-        nm = r['name']; nm = nm if len(nm) <= 44 else nm[:43]+'…'
-        lead += (f"<tr><td class='q'>{nm}<i>{r['brand']}</i></td><td class='num'>{nf(r['rev'])}</td>"
-                 f"<td class='num'>{r['share']}%</td><td class='num'>{nf(r['price'])}</td><td class='num'>{r['buyout']}%</td></tr>")
+        nm = r['name']; nm = nm if len(nm) <= 30 else nm[:29]+'…'
+        iid = r.get('id')
+        ph = f"<a href='{wb_item(iid)}'><img class='ltph' src='{r.get('image','')}'/></a>" if iid else ''
+        nm_h = a_item(iid, nm) if iid else nm
+        br_h = a_brand(r['brand']) if r.get('brand') else ''
+        lead += (f"<tr><td class='q'><div class='ltprod'>{ph}<div>{nm_h}<i>{br_h}</i></div></div></td>"
+                 f"<td class='num'>{nf(r['rev'])}</td><td class='num'><b>{r['share']}%</b></td>"
+                 f"<td class='num'>{nf(r['price'])}</td><td class='num'>{r['buyout']}%</td></tr>")
     ocards = ''
     meta_o = {'447156582': ('#0E9488', 'Классическая'), '428365795': ('#C7891B', 'Приталенная (флагман)')}
     for sku, (col, lab) in meta_o.items():
         o = D['ours'].get(sku) or D['ours'].get(int(sku))
         if isinstance(o, dict):
-            ocards += (f"<div class='ocard' style='border-left-color:{col}'><div class='osku'>{lab} · {sku}</div>"
+            img = (articles.get(sku) or {}).get('image', '')
+            ph = f"<a href='{wb_item(sku)}'><img class='ocph' src='{img}'/></a>" if img else ''
+            ocards += (f"<div class='ocard' style='border-left-color:{col}'><div class='ohead'>{ph}<div>"
+                       f"<div class='osku'>{lab} · {a_item(sku, cls='lnk b')}</div>"
                        f"<div class='orank'>ранг <b>{o['rank']}</b><span>/ {nf(D['n_n'])}</span></div>"
-                       f"<div class='osub'>доля в нише {o['share']}% · {nf(o['revenue'])} ₽ · {o['sales']} заказов</div></div>")
+                       f"<div class='osub'>доля <b>{o['share']}%</b> · {nf(o['revenue'])} ₽ · {o['sales']} заказов</div></div></div></div>")
     ap = ''.join(f'<p>{p}</p>' for p in D['assessment'])
-    return f"""<div class="page niche-report" style="{vars_style(pal)}">
+    return f"""<div class="page niche-report" id="{anchor}" style="{vars_style(pal)}">
 <div class="accbar"></div>
 <div class="eyebrow">Аналитика ниши · Wildberries</div>
 <h1 style="font-size:22px;margin:4px 0 7px">Ниша: «<span style="color:var(--accent)">{D['query']}</span>»</h1>
@@ -287,8 +318,8 @@ def niche_fragment(D, meta):
   <div class="card"><h3>Лидеры по брендам <span>доля выручки · число SKU</span></h3>{brand_bars}</div>
   <div class="card"><h3>ТОП-карточки ниши <span>выручка · доля · цена · выкуп</span></h3>
     <table class="lt"><tr><th>Товар / бренд</th><th>Выручка ₽</th><th>Доля</th><th>Цена</th><th>Выкуп</th></tr>{lead}</table></div></div>
-<div class="card" style="margin-top:10px"><h3>Наши анализируемые артикулы в этой нише <span>место среди {nf(D['n_n'])} SKU</span></h3><div class="ours">{ocards}</div></div>
-<div class="assess" style="margin-top:10px"><h3>Оценка ниши</h3>{ap}</div>
+<div class="card" style="margin-top:8px;padding:9px 13px"><h3>Наши анализируемые артикулы в этой нише <span>место среди {nf(D['n_n'])} SKU</span></h3><div class="ours">{ocards}</div></div>
+<div class="assess" style="margin-top:8px"><h3>Оценка ниши</h3>{ap}</div>
 <div class="foot"><span>Источник: MPStats API · сегмент категории «{meta['category']}» · период {meta['d1']}–{meta['d2']} ({meta['days']} дней)</span>
   <span>Ниша выделена фильтром по однотонности и длинному рукаву (исключены принты, короткий рукав, оверсайз/пляжные).</span></div>
 </div>"""
@@ -299,19 +330,23 @@ def cover_fragment(data):
     cv = ''
     for sku in data['order']:
         o = arts[sku]; c = o['cat_row']; col = o['palette'][0]
-        cv += (f"<div class='cvcard' style='--c:{col}'><div class='tag'>Артикул · карточка</div>"
-               f"<div class='nm'>{o['name']}</div>"
+        ph = f"<a href='{wb_item(sku)}'><img class='cvph' src='{o.get('image','')}'/></a>"
+        cv += (f"<div class='cvcard' style='--c:{col}'>"
+               f"<div class='cvhead'>{ph}<div class='cvmeta'><div class='tag'>Артикул · карточка</div>"
+               f"<div class='nm'><a class='lnk' href='{wb_item(sku)}'>{o['name']}</a></div>"
+               f"<div class='cvart'>Арт. {a_item(sku, cls='lnk b')}</div></div></div>"
                f"<div class='big'>{money_short(c['revenue'])} <small>₽/30д</small></div>"
-               f"<ul><li>{o['brand']} · ранг {nf(o['market']['rank'])} из {nf(meta['n_sku'])}</li>"
-               f"<li>доля рынка {o['market']['share_pct']}% · выкуп {c['purchase']}%</li>"
+               f"<ul><li>{a_brand(o['brand'])} · ранг <b>{nf(o['market']['rank'])}</b> из {nf(meta['n_sku'])}</li>"
+               f"<li>доля рынка <b>{o['market']['share_pct']}%</b> · выкуп <b>{c['purchase']}%</b></li>"
                f"<li>{o['role']}</li></ul></div>")
     col = D['palette'][0]
-    cv += (f"<div class='cvcard' style='--c:{col}'><div class='tag'>Ниша · рынок</div>"
-           f"<div class='nm'>{D['query']}</div>"
+    cv += (f"<div class='cvcard' style='--c:{col}'>"
+           f"<div class='cvhead'><div class='cvmeta'><div class='tag'>Ниша · рынок</div>"
+           f"<div class='nm'>{D['query']}</div></div></div>"
            f"<div class='big'>{money_short(D['n_rev'])} <small>₽/30д</small></div>"
-           f"<ul><li>{nf(D['n_n'])} SKU · {D['niche_rev_share']}% рынка рубашек</li>"
-           f"<li>медиана {nf(D['price_median'])} ₽ · выкуп {D['buyout']}%</li>"
-           f"<li>раздроблен: ТОП-100 = {D['top100']}% выручки</li></ul></div>")
+           f"<ul><li><b>{nf(D['n_n'])} SKU</b> · {D['niche_rev_share']}% рынка рубашек</li>"
+           f"<li>медиана <b>{nf(D['price_median'])} ₽</b> · выкуп <b>{D['buyout']}%</b></li>"
+           f"<li>раздроблен: ТОП-100 = <b>{D['top100']}%</b> выручки</li></ul></div>")
     return f"""<div class="page cover" style="{vars_style(pal)}">
 <div class="accbar" style="background:linear-gradient(90deg,{arts[data['order'][0]]['palette'][0]},{arts[data['order'][1]]['palette'][0]},{D['palette'][0]})"></div>
 <div class="eyebrow">Аналитический отчёт · MPStats × Wildberries</div>
@@ -319,16 +354,16 @@ def cover_fragment(data):
 <div class="lead">Сводный отчёт по двум карточкам конкурента и нише «{D['query']}». Данные MPStats API за период {meta['d1']} – {meta['d2']} ({meta['days']} дней). Дата формирования: {meta['generated']}.</div>
 <div class="cvcards">{cv}</div>
 <div class="tak"><h3>Ключевые выводы</h3><ul>
-  <li>Оба артикула — одного продавца (ООО Вандер Текстайл, бренд Marco Santoni): приталенная модель — флагман, классическая — второстепенная.</li>
-  <li>Флагман 428365795 входит в ТОП-100 категории (ранг 43) и ТОП-25 профильной ниши, но вымыл ядро размеров S/M/L — риск упущенных продаж.</li>
-  <li>Классическая 447156582 — среднего хвоста (ранг 2051): стабильна, но слабая поисковая видимость и затоварка.</li>
-  <li>Ниша крупная (1,31 млрд ₽/мес) и раздробленная: вход открыт, но без рекламы и SEO карточка тонет; ценовое ядро 1 500–2 500 ₽.</li>
-  <li>Общая слабость обеих карточек — нет органики в поиске: показы идут только через рекламу.</li>
+  <li>Оба артикула — одного продавца (ООО Вандер Текстайл, бренд {a_brand('Marco Santoni')}): приталенная модель — флагман, классическая — второстепенная.</li>
+  <li>Флагман {a_item(data['order'][1], cls='lnk b')} входит в <b>ТОП-100</b> категории (ранг {nf(arts[data['order'][1]]['market']['rank'])}) и ТОП-25 профильной ниши, но вымыл ядро размеров S/M/L — риск упущенных продаж.</li>
+  <li>Классическая {a_item(data['order'][0], cls='lnk b')} — среднего хвоста (ранг {nf(arts[data['order'][0]]['market']['rank'])}): стабильна, но слабая поисковая видимость и затоварка.</li>
+  <li>Ниша крупная (<b>{money_short(D['n_rev'])} ₽/мес</b>) и раздробленная: вход открыт, но без рекламы и SEO карточка тонет; ценовое ядро <b>1 500–2 500 ₽</b>.</li>
+  <li>Общая слабость обеих карточек — <b>нет органики в поиске</b>: показы идут только через рекламу.</li>
 </ul></div>
 <div class="toc">
-  <div><span class="pg">стр. 2</span><b>Артикул {data['order'][0]}</b>Классическая рубашка · карточка конкурента</div>
-  <div><span class="pg">стр. 3</span><b>Артикул {data['order'][1]}</b>Приталенная рубашка · карточка конкурента</div>
-  <div><span class="pg">стр. 4</span><b>Анализ ниши</b>Рубашка мужская однотонная, длинный рукав</div>
+  <a href="#p2"><span class="pg">стр. 2</span><b>Артикул {data['order'][0]}</b>Классическая рубашка · карточка конкурента</a>
+  <a href="#p3"><span class="pg">стр. 3</span><b>Артикул {data['order'][1]}</b>Приталенная рубашка · карточка конкурента</a>
+  <a href="#p4"><span class="pg">стр. 4</span><b>Анализ ниши</b>Рубашка мужская однотонная, длинный рукав</a>
 </div>
 <div class="foot"><span>Источник данных: MPStats API</span><span>Конфиденциально · подготовлено для внутреннего анализа</span></div>
 </div>"""
@@ -336,10 +371,11 @@ def cover_fragment(data):
 # ---------- assembly / render ----------
 def build_html(data):
     pages = [cover_fragment(data)]
-    for sku in data['order']:
+    for i, sku in enumerate(data['order']):
         pages.append(card_fragment(sku, data['articles'][sku], data['meta'],
-                                   data['meta']['market_total_revenue'], data['meta']['top100_sum'], data['meta']['n_sku']))
-    pages.append(niche_fragment(data['niche'], data['meta']))
+                                   data['meta']['market_total_revenue'], data['meta']['top100_sum'],
+                                   data['meta']['n_sku'], anchor=f'p{i+2}'))
+    pages.append(niche_fragment(data['niche'], data['meta'], data['articles'], anchor=f'p{len(data["order"])+2}'))
     return ("<!doctype html><html><head><meta charset='utf-8'><style>@page{size:A4;margin:0}"
             + CSS + "</style></head><body>" + "\n".join(pages) + "</body></html>")
 

@@ -166,8 +166,9 @@ def compute_niche(all_rows, query, ref, ours_ids):
     for sku in ours_ids:
         r = next((x for x in NICHE if x['id'] == int(sku)), None)
         if r: ours[str(sku)] = dict(rank=rankmap[int(sku)], revenue=rev(r), sales=sl(r), share=round(rev(r) / n_rev * 100, 3))
-    leaders = [dict(name=r['name'][:46], brand=r.get('brand'), rev=rev(r), sales=sl(r),
-                    price=r.get('final_price'), buyout=r.get('purchase'), share=round(rev(r) / n_rev * 100, 2)) for r in srt[:6]]
+    leaders = [dict(id=r['id'], name=r['name'][:46], brand=r.get('brand'), rev=rev(r), sales=sl(r),
+                    price=r.get('final_price'), buyout=r.get('purchase'),
+                    share=round(rev(r) / n_rev * 100, 2), image=fetch_image(r)) for r in srt[:6]]
     return dict(
         query=query, palette=NICHE_PALETTE, n_n=n_n, n_rev=n_rev, n_sales=n_sales,
         niche_rev_share=round(n_rev / cat_rev * 100, 1), niche_n_share=round(n_n / len(all_rows) * 100, 1),
