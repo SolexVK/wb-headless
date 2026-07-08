@@ -425,6 +425,86 @@ async function runCcSubmit({ runId, chatId }) {
   );
 }
 
+// ─────────────── «Конкурентный анализ» (Python-движок → HTML/PDF) ───────────────
+
+/** Краткая сводка ниши из JSON-агрегатов движка (защищённо). */
+function caSummary(j) {
+  const p = [];
+  if (j?.niche)
+    p.push(`📦 Ёмкость: <b>${fmt(j.niche.total_revenue)} ₽</b> · ${j.niche.players} продавцов · ${j.niche.skus} SKU`);
+  if (j?.price_zone)
+    p.push(`💰 Зона объёма: ${fmt(j.price_zone.lo)}–${fmt(j.price_zone.hi)} ₽ (медиана ${fmt(j.price_zone.wmedian)})`);
+  const c = j?.economics?.corridor;
+  if (c) {
+    const lo = Array.isArray(c) ? c[0] : c.lo ?? c.min;
+    const hi = Array.isArray(c) ? c[1] : c.hi ?? c.max;
+    if (lo && hi) p.push(`✅ Коридор по марже 25–30%: <b>${fmt(lo)}–${fmt(hi)} ₽</b>`);
+  }
+  if (j?.top?.[0]) p.push(`🏆 Лидер: ${esc(j.top[0].name)} — ${fmt(j.top[0].revenue)} ₽`);
+  return p.join('\n');
+}
+
+/** Запуск движка → сводка + HTML/PDF файлами. */
+async function startCompetitorAnalysis({ manifest, chatId, telegramId, params }) {
+  const { id: runId } = createRun(db, { telegramId, skill: manifest.id, params, status: 'running' });
+  await bot.api.sendMessage(
+    chatId,
+    `⏳ Задача #${runId} «${esc(manifest.title)}» — собираю нишу из MPStats и считаю экономику (до пары минут)…`
+  );
+  const htmlOut = path.join(RUNS_DIR, `ca-${runId}.html`);
+  const pdfOut = path.join(RUNS_DIR, `ca-${runId}.pdf`);
+  const jsonOut = path.join(RUNS_DIR, `ca-${runId}.json`);
+  const argv = manifest.buildArgv(params, { htmlOut, pdfOut, jsonOut });
+  queue.enqueue(
+    async () => {
+      const res = await runCli({ npmScript: manifest.npmScript, argv, cwd: ROOT, timeoutMs: 300000 });
+      if (!res.ok && !fs.existsSync(htmlOut)) {
+        const msg = tail(res.stderr || res.stdout || `код ${res.code}`, 500);
+        finishRun(db, runId, { error: msg });
+        await bot.api
+          .sendMessage(chatId, `❌ Анализ #${runId}: не удалось.\n<code>${esc(msg)}</code>`, { parse_mode: 'HTML' })
+          .catch(() => {});
+        return;
+      }
+      let summary = '';
+      try {
+        summary = caSummary(JSON.parse(fs.readFileSync(jsonOut, 'utf8')));
+      } catch {
+        /* без сводки */
+      }
+      finishRun(db, runId, { result: { params, jsonOut } });
+      await bot.api.sendMessage(
+        chatId,
+        `✅ <b>Конкурентный анализ #${runId}</b>\n${summary}\n\n<i>Полный отчёт — в файлах ниже. В конце — чек-лист ручной доработки карточки.</i>`,
+        { parse_mode: 'HTML' }
+      );
+      for (const [format, fpath, mime] of [
+        ['pdf', pdfOut, 'application/pdf'],
+        ['html', htmlOut, 'text/html'],
+      ]) {
+        if (!fs.existsSync(fpath)) continue;
+        try {
+          const bytes = fs.readFileSync(fpath);
+          const fileId = saveReportFile(db, {
+            source: `bot.${manifest.id}`,
+            entity: String(runId),
+            filename: `анализ-ниши-${runId}.${format}`,
+            mime,
+            bytes,
+          });
+          saveArtifact(db, runId, format, fileId);
+          await bot.api.sendDocument(chatId, new InputFile(fpath, `анализ-ниши-${runId}.${format}`), {
+            caption: `#${runId} · Конкурентный анализ · ${format.toUpperCase()}`,
+          });
+        } catch (e) {
+          await bot.api.sendMessage(chatId, `⚠️ ${format.toUpperCase()} не отправлен: ${esc(e.message)}`).catch(() => {});
+        }
+      }
+    },
+    { lane: 'mpstats' } // общий лимит MPStats с «Конкуренты по запросу»
+  );
+}
+
 // ─────────────── команды ───────────────
 
 bot.command('start', async (ctx) => {
@@ -620,6 +700,10 @@ bot.on('callback_query:data', async (ctx) => {
     // Кастомный исполнитель (браузерная автоматизация с DRY-RUN/подтверждением)
     if (manifest.runner === 'cardsCompare') {
       return startCardsCompare({ manifest, chatId, telegramId, params });
+    }
+    // Конкурентный анализ (Python-движок → HTML/PDF/JSON-файлы)
+    if (manifest.runner === 'competitorAnalysis') {
+      return startCompetitorAnalysis({ manifest, chatId, telegramId, params });
     }
 
     // Обычный CLI-исполнитель через очередь
