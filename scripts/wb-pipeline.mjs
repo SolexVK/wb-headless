@@ -133,25 +133,36 @@ try {
   }
 
   // ── Фаза 2: analysis ──
-  if (!opt.our) { log('Фаза 2 требует наш артикул: --our <nmId>.'); process.exit(2); }
-  const doSubmit = !!opt.submit;
-  const doExisting = !!opt['export-existing'];
-  if (!doSubmit && !doExisting) {
-    log('\n[2] Для [3] нужна воронка из «Сравнения карточек». Добавь --submit (потратит 1 из лимита)');
-    log('    или --export-existing (переиспользовать готовое сравнение бесплатно). Стоп.');
-    process.exit(0);
-  }
+  if (!opt.our) { log('Фаза 2 требует анализируемый артикул: --our <nmId>.'); process.exit(2); }
 
-  log(`\n[2] Сравнение карточек${doSubmit ? ' (--submit, тратит 1 лимит)' : ' (--export-existing)'}: ` +
-      `наш ${opt.our} + [${rivals.join(', ')}]…`);
-  const cmp = await runCardsComparison({
-    our: opt.our, rivals: rivals.slice(0, MAX_RIVALS),
-    submit: doSubmit, exportExisting: doExisting,
-    out: `${dir}/cards-compare.xlsx`, log,
-  });
-  if (!cmp?.data) throw new Error('[2] не вернул разобранные данные (cards-compare). Проверь сессию кабинета/выгрузку.');
-  writeFileSync(`${dir}/cards-compare.json`, JSON.stringify(cmp.data, null, 2));
-  log(`    → ${dir}/cards-compare.json (${cmp.data.articles?.length || 0} карточек)`);
+  // Чужой артикул (--foreign): его нет в вашем кабинете → «Сравнение карточек» [2] невозможно.
+  // Пропускаем шаг [2] и воронку; [3] строится по нише/топу + карточке из публичных источников.
+  const foreign = !!opt.foreign;
+  let hasFunnel = false;
+  if (foreign) {
+    log(`\n[2] Пропущено: --foreign (артикул ${opt.our} — чужой, нет доступа к кабинету).`);
+    log('    Отчёт [3] будет без блока «Воронка [2]»; карточка сравнивается с нишей по публичным данным.');
+  } else {
+    const doSubmit = !!opt.submit;
+    const doExisting = !!opt['export-existing'];
+    if (!doSubmit && !doExisting) {
+      log('\n[2] Для [3] нужна воронка из «Сравнения карточек». Добавь --submit (потратит 1 из лимита)');
+      log('    или --export-existing (переиспользовать готовое сравнение бесплатно).');
+      log('    Если анализируешь ЧУЖОЙ артикул (нет в твоём кабинете) — добавь --foreign. Стоп.');
+      process.exit(0);
+    }
+    log(`\n[2] Сравнение карточек${doSubmit ? ' (--submit, тратит 1 лимит)' : ' (--export-existing)'}: ` +
+        `наш ${opt.our} + [${rivals.join(', ')}]…`);
+    const cmp = await runCardsComparison({
+      our: opt.our, rivals: rivals.slice(0, MAX_RIVALS),
+      submit: doSubmit, exportExisting: doExisting,
+      out: `${dir}/cards-compare.xlsx`, log,
+    });
+    if (!cmp?.data) throw new Error('[2] не вернул разобранные данные (cards-compare). Проверь сессию кабинета/выгрузку.');
+    writeFileSync(`${dir}/cards-compare.json`, JSON.stringify(cmp.data, null, 2));
+    log(`    → ${dir}/cards-compare.json (${cmp.data.articles?.length || 0} карточек)`);
+    hasFunnel = true;
+  }
 
   // ── [3] Конкурентный анализ (Python-движок, каскадный режим) ──
   log(`\n[3] Конкурентный анализ (wb_analyze.py, каскад)…`);
@@ -159,7 +170,6 @@ try {
   const engineArgs = [
     ENGINE,
     '--items-json', topPath,
-    '--funnel-json', `${dir}/cards-compare.json`,
     '--query', top.query || opt.query || 'каскад',
     '--top', String(numOpt(opt.top) ?? 20),
     '--bench', '20', '--cards', '6',
@@ -168,6 +178,8 @@ try {
     '--html-out', `${dir}/analysis.html`,
     '--pdf-out', `${dir}/analysis.pdf`,
   ];
+  if (hasFunnel) engineArgs.push('--funnel-json', `${dir}/cards-compare.json`);
+  if (foreign) engineArgs.push('--foreign', '--my-sku', String(opt.our));  // без воронки my_sku надо задать явно
   if (opt.niche) engineArgs.push('--niche', String(opt.niche));
   if (periodLabel) engineArgs.push('--period-label', periodLabel);
   if (opt.cost != null) engineArgs.push('--cost', String(numOpt(opt.cost)));

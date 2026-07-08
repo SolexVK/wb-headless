@@ -1084,6 +1084,7 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
     ranked = sorted(agg.items(), key=lambda kv: kv[1]["rev"], reverse=True)
     top = ranked[:10]                       # в отчёт выводим ТОП-10 (расчёты — по всему срезу)
     top_share = sum(v["rev"] for _, v in top) / tot_rev * 100 if tot_rev else 0
+    subj_own = not getattr(args, "foreign", False)   # своя карточка vs чужой (анализируемый) артикул
     L = []
 
     # --- шапка ---
@@ -1259,9 +1260,11 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
             if key in m:
                 L.append(row(key))
         L.append("")
-        L.append("> «Заказов» и «Выручка по заказам» — на ОДНОЙ базе у топа и у вашей карточки: "
+        _subj_gen = "вашей" if subj_own else "анализируемой"
+        _subj_src = "ваши — из отчёта [2]" if subj_own else "субъект — из среза MPStats/card.json"
+        L.append(f"> «Заказов» и «Выручка по заказам» — на ОДНОЙ базе у топа и у {_subj_gen} карточки: "
                  "заказы (штуки) и заказы × цена продажи (валовая стоимость заказов, БЕЗ вычета расходов "
-                 "ВБ и без учёта выкупа). Это НЕ прибыль. Данные топа — MPStats; ваши — из отчёта [2].")
+                 f"ВБ и без учёта выкупа). Это НЕ прибыль. Данные топа — MPStats; {_subj_src}.")
         # рекомендация смысл-слов в название (по частоте в топе) — из хвостов запросов (F2)
         if wbd and wbd.get("tails"):
             tags = ", ".join(w for w, _n in wbd["tails"][:12])
@@ -1322,7 +1325,8 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
     # --- G. Разбор своей карточки ---
     gaps = []
     if args.my_sku:
-        L.append("## G. Ваша карточка против ниши")
+        L.append("## G. " + ("Ваша карточка против ниши" if subj_own
+                             else "Анализируемая карточка против ниши"))
         if not mine:
             L.append(f"- ⚠️ SKU `{args.my_sku}` не найден в этом срезе — проверьте артикул/категорию "
                      f"или задайте `--path` вручную. Гэп-анализ пропущен.")
@@ -1408,7 +1412,7 @@ def build_report(args, path, path_note, name_filter, items, total, agg, tot_rev,
 
     # --- H. План доработки ---
     L += ["## H. План доработки карточки", "",
-          "### Гэпы карточки (метрики ниши + воронка [2])"]
+          "### Гэпы карточки (метрики ниши" + (" + воронка [2])" if funnel else ")")]
     if args.my_sku and gaps:
         for g in gaps:
             L.append(f"- [ ] {g}")
@@ -1668,6 +1672,9 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
     phrase = args.query or name_filter or path
     title = niche
     by_label = "Продавец" if args.by == "seller" else "Бренд"
+    subj_own = not getattr(args, "foreign", False)   # своя карточка vs чужой (анализируемый) артикул
+    subj_col = "Ваше" if subj_own else "Артикул"      # заголовок колонки субъекта в бенчмарке
+    subj_card_title = "Ваша карточка против ниши" if subj_own else "Анализируемая карточка против ниши"
     top_share = sum(v["rev"] for _, v in top) / tot_rev * 100 if tot_rev else 0
     P = []
 
@@ -1863,7 +1870,7 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                  ("latest_negative_comments_percent", "lo"), ("search_words_count", "hi")]
         head = '<th>Метрика</th><th class="r">Медиана топа</th><th class="r">Лидер</th>'
         if mine:
-            head += '<th class="r">Ваше</th>'
+            head += f'<th class="r">{subj_col}</th>'
         trs = []
         for key, direction in specs:
             d = m.get(key)
@@ -1894,9 +1901,11 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                     cell = f'<td class="r num {cls}">{fmtv(mv)}</td>'
             trs.append(f'<tr><td>{esc(d.get("label", key))}</td><td class="r num">{med}</td>'
                        f'<td class="r num">{lead}</td>{cell}</tr>')
-        basis = ('<p class="meta">«Заказов» и «Выручка по заказам» — на одной базе у топа и у вашей '
+        subj_gen = "вашей" if subj_own else "анализируемой"
+        subj_src = "ваше — из отчёта [2]" if subj_own else "субъект — из среза MPStats/card.json"
+        basis = (f'<p class="meta">«Заказов» и «Выручка по заказам» — на одной базе у топа и у {subj_gen} '
                  'карточки: заказы (шт) и заказы × цена продажи (валовая стоимость заказов, БЕЗ вычета '
-                 'расходов ВБ и без учёта выкупа) — это не прибыль. Топ — MPStats; ваше — из отчёта [2].</p>')
+                 f'расходов ВБ и без учёта выкупа) — это не прибыль. Топ — MPStats; {subj_src}.</p>')
         smysl = ""
         if wbd and wbd.get("tails"):
             tags = ", ".join(esc(w) for w, _n in wbd["tails"][:12])
@@ -1927,11 +1936,11 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
                 chips = "".join(f'<span class="chip bad">{esc(g.split(" —")[0].split(" (")[0])}</span>' for g in gaps)
             else:
                 chips = '<span class="chip ok">По метрикам на уровне ниши</span>'
-            P.append('<section class="pgbreak"><h2>Ваша карточка против ниши</h2><div class="mycard">'
+            P.append(f'<section class="pgbreak"><h2>{subj_card_title}</h2><div class="mycard">'
                      f'<div style="font-weight:600">{esc((mine.get("name") or "")[:80])}</div>'
                      f'<div class="facts">{facts}</div>{marg}<div class="chips">{chips}</div></div></section>')
         else:
-            P.append(f'<section><h2>Ваша карточка</h2><div class="mycard">'
+            P.append(f'<section><h2>{"Ваша карточка" if subj_own else "Анализируемая карточка"}</h2><div class="mycard">'
                      f'<div class="facts">⚠️ SKU <b>{esc(args.my_sku)}</b> не найден в этом срезе — '
                      f'проверьте артикул/категорию (--path).</div></div></section>')
 
@@ -2056,7 +2065,8 @@ def build_html(args, path, path_note, name_filter, items, agg, tot_rev, top,
     # H. plan (interactive)
     groups = []
     if args.my_sku and gaps:
-        groups.append(("Гэпы карточки (метрики ниши + воронка [2])", [(g, None) for g in gaps]))
+        groups.append(("Гэпы карточки (метрики ниши" + (" + воронка [2])" if funnel else ")"),
+                       [(g, None) for g in gaps]))
     elif args.my_sku and mine:
         groups.append(("Гэпы карточки", [("Оцифрованных гэпов нет — фокус на ручной слой", None)]))
     targets = []
@@ -2233,6 +2243,9 @@ def main():
     ap.add_argument("--keywords", default=None, help="ключевые запросы через запятую — искать конкурентов в выдаче WB")
     ap.add_argument("--kw-limit", dest="kw_limit", type=int, default=8, help="сколько карточек брать из выдачи на запрос")
     ap.add_argument("--no-wb", dest="no_wb", action="store_true", help="не тянуть характеристики/слайды из WB (быстрее/офлайн)")
+    ap.add_argument("--foreign", action="store_true",
+                    help="анализируемый артикул — чужой (нет в вашем кабинете): без воронки [2], "
+                         "блоки карточки нейтрально помечаются «Анализируемая» вместо «Ваша»")
     ap.add_argument("--selftest", action="store_true", help="прогон сборки отчёта на синтетике (без сети)")
     # --- юнит-экономика (дефолты = подтверждённые пользователем цифры; себестоимость обязательна) ---
     ap.add_argument("--cost", type=float, default=None,
@@ -2344,7 +2357,9 @@ def main():
 
     # ── воронка [2] (funnel-json): наша карточка + планка конкурентов ──
     funnel = None
-    if args.funnel_json:
+    if args.foreign and args.funnel_json:
+        notes.append("--foreign: воронка [2] игнорируется (чужой артикул, нет доступа к кабинету)")
+    if args.funnel_json and not args.foreign:
         try:
             funnel = load_funnel_json(args.funnel_json)
             if funnel.get("our") and not args.my_sku:
@@ -2361,23 +2376,27 @@ def main():
         except Exception as e:
             notes.append(f"воронка [2] не прочитана ({str(e)[:40]})")
 
-    # своя карточка (mine): из воронки [2] → иначе из среза ниши
+    # субъект-карточка (mine): из воронки [2] → иначе из среза ниши (чужой артикул / без кабинета)
     if funnel and funnel.get("mine"):
         mine = dict(funnel["mine"])
-        if not args.no_wb and mine.get("id"):
-            try:
-                enrich_content([mine], 1)              # фото/видео/описание нашей карточки по nmId
-            except Exception:
-                pass
-        mine["chars"] = len(mine.get("_chars") or [])  # число характеристик (из card.json)
     else:
-        mine = profile_sku(items, args.my_sku) if args.my_sku else None
-        if args.my_sku and not mine and not args.items_json and nfilter:
+        base = profile_sku(items, args.my_sku) if args.my_sku else None
+        if args.my_sku and not base and not args.items_json and nfilter:
             try:
                 wide, _ = fetch_items(token, path, args.d1, args.d2, None)
-                mine = profile_sku(wide, args.my_sku)
+                base = profile_sku(wide, args.my_sku)
             except MpstatsError as e:
-                notes.append(f"поиск своей карточки без фильтра ({e.code})")
+                notes.append(f"поиск карточки без фильтра ({e.code})")
+        mine = dict(base) if base else None
+    # обогащение карточки по nmId (фото/видео/описание/характеристики) — публичный CDN, без кабинета;
+    # работает и для чужого артикула, поэтому вынесено из ветки воронки
+    if mine and not args.no_wb and mine.get("id"):
+        try:
+            enrich_content([mine], 1)
+        except Exception:
+            pass
+    if mine:
+        mine["chars"] = len(mine.get("_chars") or [])  # число характеристик (из card.json)
 
     # юнит-экономика — только если задана себестоимость
     econ = None
