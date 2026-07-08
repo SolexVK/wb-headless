@@ -12,8 +12,9 @@ const has = (v) => v !== undefined && v !== null && v !== '';
 
 export default {
   id: 'wb-competitor-analysis',
-  command: 'analysis', // /analysis в меню Telegram
+  command: 'analysis', // работает как команда, но в меню скрыт (стадия каскада)
   title: '🧭 Конкурентный анализ ниши',
+  cascade: true, // стадия [3] каскада — в меню отдельным пунктом не показываем
   description: 'Ниша + юнит-экономика + ценовой коридор по марже + план доработки карточки',
   adminOnly: false,
   engineeringMode: true,

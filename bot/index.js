@@ -664,8 +664,9 @@ bot.command('cancel', async (ctx) => {
   await ctx.reply('Отменено. /skills — начать заново.');
 });
 
-// Команды-скиллы (/rivals, /compare, /analysis) — запуск скилла одним тапом из
-// меню Telegram, без /skills.
+// Команды-скиллы: запуск одним тапом. Регистрируем handlers для ВСЕХ (включая
+// стадии каскада — /compare, /analysis работают, если ввести вручную), но в меню
+// Telegram (setMyCommands) покажем только точку входа каскада + самостоятельные.
 for (const skillManifest of registry.values()) {
   if (skillManifest.command) {
     bot.command(skillManifest.command, (ctx) => startSkillFlow(ctx, skillManifest));
@@ -674,9 +675,13 @@ for (const skillManifest of registry.values()) {
 
 /** Регистрирует список команд в меню Telegram (кнопка «Меню» / ввод «/»). */
 async function registerCommands() {
-  const skillCmds = [...registry.values()]
-    .filter((m) => m.command && !m.adminOnly)
-    .map((m) => ({ command: m.command, description: m.title.slice(0, 256) }));
+  const skillCmds = [];
+  for (const m of registry.values()) {
+    if (!m.command || m.adminOnly) continue;
+    if (m.cascade && !m.cascadeEntry) continue; // стадии каскада — не в меню
+    const label = m.cascadeEntry ? m.cascadeTitle || m.title : m.title;
+    skillCmds.push({ command: m.command, description: label.slice(0, 256) });
+  }
   try {
     await bot.api.setMyCommands([
       { command: 'skills', description: '📋 Все отчёты (меню)' },

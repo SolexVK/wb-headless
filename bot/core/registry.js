@@ -101,11 +101,24 @@ export async function loadRegistry(dir = SKILLS_DIR) {
 
 // ─────────────── помощники для FSM/меню ───────────────
 
-/** Пункты меню: {id, title, description}. Скрывает adminOnly для не-админов. */
+/**
+ * Пункты меню: {id, title, description}. Скрывает adminOnly для не-админов.
+ * Каскадные скиллы (cascade:true) сворачиваются в ОДИН пункт — точку входа
+ * (cascadeEntry:true) с групповым заголовком; промежуточные стадии скрыты (они
+ * доступны через кнопки каскада). Самостоятельные скиллы — отдельными пунктами.
+ */
 export function menuItems(registry, { isAdmin = false } = {}) {
-  return [...registry.values()]
-    .filter((m) => isAdmin || !m.adminOnly)
-    .map((m) => ({ id: m.id, title: m.title, description: m.description || '' }));
+  const out = [];
+  for (const m of registry.values()) {
+    if (!isAdmin && m.adminOnly) continue;
+    if (m.cascade && !m.cascadeEntry) continue; // промежуточная стадия каскада — не в меню
+    out.push({
+      id: m.id,
+      title: m.cascadeEntry ? m.cascadeTitle || m.title : m.title,
+      description: m.cascadeEntry ? m.cascadeDescription || m.description || '' : m.description || '',
+    });
+  }
+  return out;
 }
 
 /** Видимые поля при текущих params (учитывает showIf). */

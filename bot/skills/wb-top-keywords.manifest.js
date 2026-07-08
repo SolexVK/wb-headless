@@ -37,9 +37,15 @@ const has = (v) => v !== undefined && v !== null && v !== '';
 
 export default {
   id: 'wb-top-keywords',
-  command: 'rivals', // /rivals в меню Telegram
+  command: 'cascade', // /cascade — единая точка входа каскада [1]→[2]→[3]
   title: '🔍 Конкуренты по запросу',
   description: 'ТОП выдачи WB по фразе + фильтры → список артикулов конкурентов',
+  // Каскад: этот скилл — ТОЧКА ВХОДА единого маршрута [1]→[2]→[3]. В меню
+  // показывается одним пунктом; стадии [2]/[3] — через кнопки после результата.
+  cascade: true,
+  cascadeEntry: true,
+  cascadeTitle: '🔗 Каскадный анализ ниши',
+  cascadeDescription: 'Полный цикл: конкуренты по фразе → сравнение карточек → анализ ниши и план',
   adminOnly: false,
   engineeringMode: true,
   npmScript: 'top:keywords', // npm run top:keywords -- <argv>
