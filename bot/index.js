@@ -143,7 +143,19 @@ async function deliverResult({ manifest, runId, chatId, data, outJson }) {
   const head =
     `✅ <b>#${runId} · ${esc(manifest.title)}</b>\n` +
     `Фраза: «${esc(data?.query || '')}»${per ? ` · период ${esc(per)}` : ''}\n` +
-    `Найдено конкурентов: <b>${rivals.length}</b>${data?.total ? ` (из выдачи ${data.total})` : ''}`;
+    `Найдено конкурентов: <b>${rivals.length}</b>${data?.total ? ` (из выдачи ${data.total})` : ''}` +
+    (data?.searchFromCache ? ' · <i>выдача из кэша</i>' : '');
+  // Воронка отсева: где и сколько отсеялось (прозрачность агрессивности фильтров).
+  let funnelLine = '';
+  if (data?.funnel) {
+    const f = data.funnel;
+    const parts = [`&lt;100k₽ −${f.belowRevenue}`];
+    if (f.byMetrics) parts.push(`метрики −${f.byMetrics}`);
+    if (f.byExclude) parts.push(`исключения −${f.byExclude}`);
+    for (const [label, n] of Object.entries(f.byFacet || {})) parts.push(`${esc(label)} −${n}`);
+    if (f.byGroup) parts.push(`не по группам −${f.byGroup}`);
+    funnelLine = `\n\n📉 <b>Воронка:</b> ${f.fetched} → ${parts.join(' · ')} → <b>${f.kept}</b>`;
+  }
   const lines = rivals.slice(0, 10).map((r, i) => {
     const name = String(r.name || '').slice(0, 60);
     const mark = r.patternUncertain ? '🟡 ' : '';
@@ -158,7 +170,7 @@ async function deliverResult({ manifest, runId, chatId, data, outJson }) {
     (rivals.length > 10
       ? `\n\n… ещё ${rivals.length - 10}. Скачать полный отчёт в нужном формате:`
       : '\n\nСкачать отчёт:') + uncNote;
-  await bot.api.sendMessage(chatId, `${head}\n\n${lines.join('\n')}${more}`, {
+  await bot.api.sendMessage(chatId, `${head}${funnelLine}\n\n${lines.join('\n')}${more}`, {
     parse_mode: 'HTML',
     reply_markup: kb.resultActionsKeyboard(runId, manifest.formats || ['html', 'pdf', 'xlsx']),
   });

@@ -31,6 +31,23 @@
 
 import { topByKeywords, formatHtml, formatPickTable, embedThumbnails } from '../lib/wbTopKeywords.js';
 import { buildFacetFilters } from '../lib/wbFacets.js';
+import { openDb, cacheGet, cachePut } from '../lib/db.js';
+
+// Кэш выдачи MPStats — только когда задан DB_PATH (запуск из бота с рантайм-БД);
+// standalone без DB_PATH кэш не трогает каноническую data/wb.db.
+function makeSearchCache() {
+  if (!process.env.DB_PATH || process.env.DB_DISABLE) return null;
+  try {
+    const db = openDb(process.env.DB_PATH);
+    return {
+      get: (k) => cacheGet(db, 'mpstats.search', k)?.payload || null,
+      set: (k, v) =>
+        cachePut(db, { source: 'mpstats.search', key: k, entity: k.phrase, payload: v }),
+    };
+  } catch {
+    return null;
+  }
+}
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -109,13 +126,23 @@ try {
     our: opt.our,
     topN: numOpt(opt.top) ?? null,
     maxRows: numOpt(opt['max-rows']),
+    searchCache: makeSearchCache(),
   });
 
   const exCount = res.rivals.filter((r) => r.matchType === 'exception').length;
   log(`Фраза: «${res.query}» | период ${res.period.d1}…${res.period.d2}`);
-  log(`Выдача: всего ${res.total}${res.capped ? ' (упёрлись в предохранитель)' : ''}, разобрано ${res.fetched}, после отсева <${res.filters.revenueFloor}₽ — ${res.pool}.`);
+  log(`Выдача: всего ${res.total}${res.capped ? ' (упёрлись в предохранитель)' : ''}, разобрано ${res.fetched}${res.searchFromCache ? ' (из кэша, лимит MPStats не потрачен)' : ''}, после отсева <${res.filters.revenueFloor}₽ — ${res.pool}.`);
   if (groups.length) log(`Порог «безхвостых» (ТОП-${filters.exceptionRank ?? 20} по выручке): ${res.exceptionRevenueThreshold}₽.`);
   if (res.enrich) log(`Добор карточек: ${res.enrich.enriched} новых + ${res.enrich.fromCache} из кэша, без card.json — ${res.enrich.misses}.`);
+  if (res.funnel) {
+    const f = res.funnel;
+    const parts = [`<100k₽ −${f.belowRevenue}`];
+    if (f.byMetrics) parts.push(`метрики −${f.byMetrics}`);
+    if (f.byExclude) parts.push(`исключения −${f.byExclude}`);
+    for (const [label, n] of Object.entries(f.byFacet)) parts.push(`${label} −${n}`);
+    if (f.byGroup) parts.push(`не по группам −${f.byGroup}`);
+    log(`Воронка: ${f.fetched} → ${parts.join(' · ')} → осталось ${f.kept}${f.shown < f.kept ? ` (показано ${f.shown})` : ''}.`);
+  }
   log(`Итог: ${res.rivals.length} шт.${exCount ? ` (из них по исключению «безхвостые»: ${exCount})` : ''}`);
   if (res.uncertainPattern) log(`🟡 Признак не определён у ${res.uncertainPattern} карточек (нет тега — кандидаты на визуальную проверку).`);
 
