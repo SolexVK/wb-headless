@@ -20,5 +20,8 @@ __pycache__/
 *.db-wal
 *.db-shm
 
+# Файловый кэш карточек WB (эфемерный, вне git)
+data/card-cache.json
+
 # Рантайм-БД бота (сессии/прогоны) — НЕ коммитим
 data/wb-runtime.db
