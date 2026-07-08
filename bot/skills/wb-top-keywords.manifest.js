@@ -5,6 +5,33 @@
 //
 // Продакшн-логика скилла живёт отдельно (.claude/skills/wb-top-keywords/ +
 // scripts/wb-top-keywords.mjs); здесь — только бот-обёртка.
+//
+// Признаки-фасеты (Тип ткани/Покрой/Воротник/…): поля генерируются из справочника
+// lib/wbFacets.js. Пользователь настраивает ТОЛЬКО релевантные (через «⚙ Настроить»):
+// выбранное значение = плюс-ключ, остальные значения признака → минус-ключи.
+
+import { FACETS } from '../../lib/wbFacets.js';
+
+// Поля-признаки: choice, advanced, с «Любой» (не фильтровать). key = facet_<key>.
+const facetFields = FACETS.map((f) => ({
+  key: `facet_${f.key}`,
+  facetKey: f.key,
+  label: f.label,
+  type: 'choice',
+  advanced: true,
+  default: 'любой',
+  options: [{ value: 'любой', label: 'Любой' }, ...f.options.map((o) => ({ value: o.value, label: o.label }))],
+}));
+
+/** Собирает --facet <key>=<value> для выбранных (не «любой») признаков. */
+function facetArgv(p) {
+  const a = [];
+  for (const f of FACETS) {
+    const v = p[`facet_${f.key}`];
+    if (v && v !== 'любой') a.push('--facet', `${f.key}=${v}`);
+  }
+  return a;
+}
 
 /** Разбирает поле «группы»: по строке (или через ;) — одно значение --group. */
 function parseGroups(raw) {
@@ -85,30 +112,15 @@ export default {
       hint: 'потолок выдачи ~100',
     },
 
-    // ── ⚙ дополнительные ──
+    // ── ⚙ дополнительные: признаки-фасеты (только релевантные) ──
+    ...facetFields,
+    // ── ⚙ прочие фильтры ──
     {
       key: 'groups',
-      label: 'Группы-признаки',
+      label: 'Группы-признаки (свои)',
       type: 'text',
       advanced: true,
-      hint: 'по строке: имя=стем1,стем2 — стемы без окончаний (прям, отлож, оверс)',
-    },
-    {
-      key: 'pattern',
-      label: 'Тип рисунка ткани',
-      type: 'choice',
-      advanced: true,
-      default: 'любой',
-      hint: 'фильтр по рисунку (название+характеристики+описание); 🟡 «не определён» помечается',
-      options: [
-        { value: 'любой', label: 'Любой' },
-        { value: 'однотон', label: 'Однотонная' },
-        { value: 'полоска', label: 'Полоска' },
-        { value: 'клетка', label: 'Клетка' },
-        { value: 'горошек', label: 'Горошек' },
-        { value: 'цветочный', label: 'Цветочный' },
-        { value: 'принт', label: 'Принт/абстракция' },
-      ],
+      hint: 'по строке: имя=стем1,стем2 — если признака нет в списке выше',
     },
     { key: 'exclude', label: 'Слова-исключения', type: 'text', advanced: true, hint: 'через запятую, жёсткий гейт (по названию+характеристикам)' },
     { key: 'priceMin', label: 'Цена от, ₽', type: 'number', advanced: true },
@@ -134,7 +146,7 @@ export default {
         a.push('--top', String(p.top ?? 20));
         for (const g of parseGroups(p.groups)) a.push('--group', g);
         if (has(p.exclude)) a.push('--exclude', normCsv(p.exclude));
-        if (has(p.pattern) && p.pattern !== 'любой') a.push('--pattern', String(p.pattern));
+        a.push(...facetArgv(p)); // выбранные признаки-фасеты → --facet key=value
         if (has(p.priceMin)) a.push('--price-min', String(p.priceMin));
         if (has(p.priceMax)) a.push('--price-max', String(p.priceMax));
         if (has(p.our)) a.push('--our', String(p.our));

@@ -30,6 +30,7 @@
 //   # (авто-топ-K без выбора, если явно нужен): --nmids-only | wb-cards-compare
 
 import { topByKeywords, formatHtml, formatPickTable, embedThumbnails } from '../lib/wbTopKeywords.js';
+import { buildFacetFilters } from '../lib/wbFacets.js';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -37,12 +38,14 @@ import { dirname } from 'node:path';
 const argv = process.argv.slice(2);
 const opt = {};
 const groupsRaw = [];
+const facetsRaw = [];
 for (let i = 0; i < argv.length; i++) {
   if (!argv[i].startsWith('--')) continue;
   const k = argv[i].slice(2);
   const n = argv[i + 1];
   const val = n && !n.startsWith('--') ? (i++, n) : true;
   if (k === 'group') groupsRaw.push(val);
+  else if (k === 'facet') facetsRaw.push(val); // повторяемый: --facet cut=приталенный
   else opt[k] = val;
 }
 const log = (...a) => process.stderr.write(a.join(' ') + '\n');
@@ -76,6 +79,15 @@ const groups = groupsRaw
   })
   .filter((g) => g.any.length);
 
+// Фасеты: "--facet cut=приталенный" (+ back-compat "--pattern полоска" → pattern=…).
+const facetSel = {};
+for (const raw of facetsRaw) {
+  const [k, v] = String(raw).split('=');
+  if (k && v) facetSel[k.trim()] = v.trim().toLowerCase();
+}
+if (opt.pattern) facetSel.pattern = String(opt.pattern).trim().toLowerCase();
+const facets = buildFacetFilters(facetSel);
+
 const filters = clean({
   revenueFloor: numOpt(opt['revenue-floor']),
   exceptionRank: numOpt(opt['exception-rank']),
@@ -85,7 +97,7 @@ const filters = clean({
   minReviews: numOpt(opt['min-reviews']),
   minSales: numOpt(opt['min-sales']),
   deep: (groups.length || opt.exclude) ? { groups, exclude: listOpt(opt.exclude) || [] } : undefined,
-  pattern: opt.pattern ? String(opt.pattern).trim().toLowerCase() : undefined,
+  facets: facets.length ? facets : undefined,
 });
 
 try {
@@ -105,7 +117,7 @@ try {
   if (groups.length) log(`Порог «безхвостых» (ТОП-${filters.exceptionRank ?? 20} по выручке): ${res.exceptionRevenueThreshold}₽.`);
   if (res.enrich) log(`Добор карточек: ${res.enrich.enriched} новых + ${res.enrich.fromCache} из кэша, без card.json — ${res.enrich.misses}.`);
   log(`Итог: ${res.rivals.length} шт.${exCount ? ` (из них по исключению «безхвостые»: ${exCount})` : ''}`);
-  if (res.uncertainPattern) log(`🟡 Рисунок не определён у ${res.uncertainPattern} карточек (нет тега — кандидаты на визуальную проверку).`);
+  if (res.uncertainPattern) log(`🟡 Признак не определён у ${res.uncertainPattern} карточек (нет тега — кандидаты на визуальную проверку).`);
 
   // JSON-вывод пишем ДО вшивания фото — иначе base64 картинок раздует файл.
   // --nmids-only: голый JSON-массив nmId (для пайпа в wb-cards-compare).
