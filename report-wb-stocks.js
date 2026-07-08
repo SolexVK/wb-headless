@@ -63,8 +63,8 @@ async function runHistory(d1, d2) {
   const items = loadItems();
   process.stderr.write(`WB история остатков ${period.d1} … ${period.d2}, товаров в связке: ${items.length}\n`);
 
-  const history = await fetchDailyStockHistory({ d1: period.d1, d2: period.d2 });
-  const avail = computeStockAvailability(history, period.d1, period.d2);
+  const parsed = await fetchDailyStockHistory({ d1: period.d1, d2: period.d2 });
+  const avail = computeStockAvailability(parsed);
 
   const rows = items.map((it) => {
     const a = avail.get(Number(it.wb));
