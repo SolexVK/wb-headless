@@ -26,6 +26,12 @@
   чувствительности (цена/ДРР), прогноз за период. Вход: `--cost` (обязат.) + `--price`/
   `--seller-price`/`--nm` (цена по артикулу из MPStats). Вывод текст/JSON/HTML/PDF. Эталон:
   `--cost 536 --price 2400` → прибыль 705 ₽, маржа 28%, коридор 2094–2613 ₽, безубыт. 1051 ₽.
+  - **Telegram-бот** (`npm run unit:bot`): `lib/wbUnitBot.js` (чистый reducer диалога, тестируется
+    офлайн) + `lib/telegram.js` (клиент Bot API на fetch, без зависимостей) + `scripts/wb-unit-bot.mjs`
+    (long-poll раннер). Пошаговый диалог себестоимость→цена→ДРР + быстрый ввод «536 2400 8» /
+    `cost=536 price=2400 drr=8 маржа=28 ед=300`, кнопки (цена под маржу/ДРР/PDF/новый расчёт).
+    Токен `TELEGRAM_BOT_TOKEN` (@BotFather), доступ ограничивается `TELEGRAM_ALLOWED_CHAT_IDS`.
+    Живьём с ботом НЕ прогонялся (нет токена в сессии) — reducer покрыт офлайн-сценариями.
 - **[3] Конкурентный анализ — РАБОТАЕТ в каскаде; отчёт по структуре ПРОЙДЕН ПОЛНОСТЬЮ (A–H).**
   Python-движок `.claude/skills/wb-competitor-analysis/wb_analyze.py` (~1950 строк). Собирает
   markdown+HTML+PDF+JSON. Каскадный режим: `--items-json` (ниша из [1]) + `--funnel-json`
