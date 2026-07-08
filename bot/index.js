@@ -564,6 +564,80 @@ async function startCascadeAnalysis({ chatId, telegramId, ccRunId, cost }) {
   runAnalysisEngine({ chatId, runId, argv, htmlOut, pdfOut, jsonOut, resultParams: { mode: 'cascade', ccRunId, cost } });
 }
 
+// ─────────────── «Наши продажи по запросам» (WB Statistics → PDF) ───────────────
+
+/** Краткая сводка продаж из JSON (итоги по периодам). */
+function salesSummary(j) {
+  const lines = [`Бренды: <b>${esc((j.brands || []).join(', '))}</b>`];
+  for (const p of j.periods || []) {
+    const t = j.totals?.[p.key];
+    if (!t) continue;
+    lines.push(
+      `📅 ${esc(p.label)}: выкупов <b>${t.buyouts}</b> на <b>${fmt(t.sum)} ₽</b>` +
+        (t.returns ? ` <i>(возвр. ${t.returns} на ${fmt(t.returnSum)} ₽)</i>` : '')
+    );
+  }
+  return lines.join('\n');
+}
+
+/** Запуск CLI продаж (медленный, 1 запрос/мин) → сводка + PDF. */
+async function startBrandSales({ manifest, chatId, telegramId, params }) {
+  const { id: runId } = createRun(db, { telegramId, skill: manifest.id, params, status: 'running' });
+  await bot.api.sendMessage(
+    chatId,
+    `⏳ Задача #${runId} «${esc(manifest.title)}» — тяну фактические продажи из кабинета WB. ` +
+      `Это <b>2–4 минуты</b> (лимит WB: 1 запрос в минуту) — пришлю PDF сюда.`,
+    { parse_mode: 'HTML' }
+  );
+  const pdfOut = path.join(RUNS_DIR, `sales-${runId}.pdf`);
+  const jsonOut = path.join(RUNS_DIR, `sales-${runId}.json`);
+  const argv = manifest.buildArgv(params, { pdfOut, jsonOut });
+  queue.enqueue(
+    async () => {
+      const res = await runCli({ npmScript: manifest.npmScript, argv, cwd: ROOT, timeoutMs: 600000 });
+      if (!res.ok && !fs.existsSync(pdfOut)) {
+        const msg = tail(res.stderr || res.stdout || `код ${res.code}`, 500);
+        finishRun(db, runId, { error: msg });
+        await bot.api
+          .sendMessage(chatId, `❌ Продажи #${runId}: не удалось.\n<code>${esc(msg)}</code>`, { parse_mode: 'HTML' })
+          .catch(() => {});
+        return;
+      }
+      let summary = '';
+      try {
+        summary = salesSummary(JSON.parse(fs.readFileSync(jsonOut, 'utf8')));
+      } catch {
+        /* без сводки */
+      }
+      finishRun(db, runId, { result: { params, jsonOut } });
+      await bot.api.sendMessage(
+        chatId,
+        `✅ <b>Продажи по запросам #${runId}</b>\n${summary}\n\n<i>Выкупы валовые; возвраты показаны отдельно. Полный разбор по фразам и артикулам — в PDF.</i>`,
+        { parse_mode: 'HTML' }
+      );
+      if (fs.existsSync(pdfOut)) {
+        try {
+          const bytes = fs.readFileSync(pdfOut);
+          const fileId = saveReportFile(db, {
+            source: `bot.${manifest.id}`,
+            entity: String(runId),
+            filename: `продажи-по-запросам-${runId}.pdf`,
+            mime: 'application/pdf',
+            bytes,
+          });
+          saveArtifact(db, runId, 'pdf', fileId);
+          await bot.api.sendDocument(chatId, new InputFile(pdfOut, `продажи-по-запросам-${runId}.pdf`), {
+            caption: `#${runId} · Наши продажи по запросам · PDF`,
+          });
+        } catch (e) {
+          await bot.api.sendMessage(chatId, `⚠️ PDF не отправлен: ${esc(e.message)}`).catch(() => {});
+        }
+      }
+    },
+    { lane: 'wb.sales' } // WB Statistics 1/мин — сериализуем
+  );
+}
+
 // ─────────────── команды ───────────────
 
 /** Запуск скилла: новый flow + сброс каскад-состояния + первый экран формы. */
@@ -814,6 +888,10 @@ bot.on('callback_query:data', async (ctx) => {
     // Конкурентный анализ (Python-движок → HTML/PDF/JSON-файлы)
     if (manifest.runner === 'competitorAnalysis') {
       return startCompetitorAnalysis({ manifest, chatId, telegramId, params });
+    }
+    // Наши продажи по запросам (WB Statistics → PDF), медленный (1 запрос/мин)
+    if (manifest.runner === 'brandSales') {
+      return startBrandSales({ manifest, chatId, telegramId, params });
     }
 
     // Обычный CLI-исполнитель через очередь
