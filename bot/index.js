@@ -212,6 +212,53 @@ function saveSelected(runId, run, set) {
   updateRun(db, runId, { result: { ...run.result, _selected: [...set] } });
 }
 
+/** Скачивает миниатюру карточки (Telegram не может забрать webp с CDN WB сам). */
+async function fetchThumb(url) {
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!res.ok) return null;
+    return Buffer.from(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Фото-пикер: топ-N конкурентов, каждый — фото с тумблером ⬜/✅ под ним, затем «Готово».
+ * Фото шлём БАЙТАМИ (webp по URL Telegram не принимает; байты — принимает).
+ */
+async function sendPhotoPicker(chatId, runId, rivals, sel, { min, max, topN = 12 } = {}) {
+  const list = rivals.slice(0, topN);
+  await bot.api.sendMessage(
+    chatId,
+    `🎯 Отметьте <b>${min}–${max}</b> конкурента тумблером под их фото, затем «Готово». Показаны топ-${list.length}.`,
+    { parse_mode: 'HTML' }
+  );
+  // качаем миниатюры параллельно, шлём по порядку (сохранить нумерацию)
+  const bufs = await Promise.all(list.map((r) => (r.thumb ? fetchThumb(r.thumb) : Promise.resolve(null))));
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i];
+    const cap =
+      `${i + 1}. ${r.patternUncertain ? '🟡 ' : ''}<b>${esc(r.brand || '—')}</b> · ${fmt(r.price)}₽ · выручка ${fmt(r.revenue)}₽\n` +
+      `<i>${esc(String(r.name || '').slice(0, 80))}</i>\nnmId <code>${esc(r.nmId)}</code>`;
+    const markup = kb.photoToggleKeyboard(runId, i, sel.has(String(r.nmId)));
+    try {
+      if (bufs[i]) {
+        await bot.api.sendPhoto(chatId, new InputFile(bufs[i], `${r.nmId}.webp`), {
+          caption: cap,
+          parse_mode: 'HTML',
+          reply_markup: markup,
+        });
+      } else {
+        await bot.api.sendMessage(chatId, cap, { parse_mode: 'HTML', reply_markup: markup });
+      }
+    } catch {
+      await bot.api.sendMessage(chatId, cap, { parse_mode: 'HTML', reply_markup: markup }).catch(() => {});
+    }
+  }
+  await bot.api.sendMessage(chatId, 'Отметили — жмите:', { reply_markup: kb.pickDoneKeyboard(runId) });
+}
+
 // ─────────────── команды ───────────────
 
 bot.command('start', async (ctx) => {
@@ -252,7 +299,7 @@ bot.on('callback_query:data', async (ctx) => {
     await ctx.answerCallbackQuery({ text: `${value.toUpperCase()}…` });
     return deliverFormat({ runId: Number(key), chatId: ctx.chat.id, format: value });
   }
-  if (action === 'pick' || action === 'pkt' || action === 'pkpg' || action === 'pkok') {
+  if (action === 'pick' || action === 'pkt' || action === 'pkok') {
     const runId = Number(key);
     const run = getRun(db, runId);
     if (!run || !run.result) {
@@ -267,10 +314,7 @@ bot.on('callback_query:data', async (ctx) => {
 
     if (action === 'pick') {
       await ctx.answerCallbackQuery();
-      return ctx.reply(
-        `🎯 Отметьте <b>${min}–${max}</b> конкурента для «Сравнения карточек» (кнопки-тумблеры):`,
-        { parse_mode: 'HTML', reply_markup: kb.pickKeyboard(runId, rivals, sel, 0) }
-      );
+      return sendPhotoPicker(ctx.chat.id, runId, rivals, sel, { min, max });
     }
     if (action === 'pkt') {
       const idx = Number(value);
@@ -283,13 +327,11 @@ bot.on('callback_query:data', async (ctx) => {
         } else sel.add(nm);
         saveSelected(runId, run, sel);
       }
-      await ctx.answerCallbackQuery();
-      const page = Math.floor(idx / 8);
-      return ctx.editMessageReplyMarkup({ reply_markup: kb.pickKeyboard(runId, rivals, sel, page) }).catch(() => {});
-    }
-    if (action === 'pkpg') {
-      await ctx.answerCallbackQuery();
-      return ctx.editMessageReplyMarkup({ reply_markup: kb.pickKeyboard(runId, rivals, sel, Number(value)) }).catch(() => {});
+      await ctx.answerCallbackQuery({ text: `Выбрано: ${sel.size}` });
+      // редактируем тумблер ИМЕННО под этим фото
+      return ctx
+        .editMessageReplyMarkup({ reply_markup: kb.photoToggleKeyboard(runId, idx, sel.has(nm)) })
+        .catch(() => {});
     }
     if (action === 'pkok') {
       if (sel.size < min) {

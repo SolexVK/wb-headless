@@ -55,6 +55,16 @@ export function advancedMenuKeyboard(manifest, flow) {
   return kb;
 }
 
+/** Одиночный тумблер под фото конкурента (фото-пикер). */
+export function photoToggleKeyboard(runId, idx, on) {
+  return new InlineKeyboard().text(on ? '✅ Выбрано' : '⬜ Выбрать', `pkt:${runId}:${idx}`);
+}
+
+/** Кнопка «Готово» под фото-пикером. */
+export function pickDoneKeyboard(runId) {
+  return new InlineKeyboard().text('✅ Готово', `pkok:${runId}`);
+}
+
 /** Подтверждение запуска. */
 export function confirmKeyboard() {
   return new InlineKeyboard()
