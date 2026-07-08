@@ -93,7 +93,24 @@ export default {
       advanced: true,
       hint: 'по строке: имя=стем1,стем2 — стемы без окончаний (прям, отлож, оверс)',
     },
-    { key: 'exclude', label: 'Слова-исключения', type: 'text', advanced: true, hint: 'через запятую, жёсткий гейт' },
+    {
+      key: 'pattern',
+      label: 'Тип рисунка ткани',
+      type: 'choice',
+      advanced: true,
+      default: 'любой',
+      hint: 'фильтр по рисунку (название+характеристики+описание); 🟡 «не определён» помечается',
+      options: [
+        { value: 'любой', label: 'Любой' },
+        { value: 'однотон', label: 'Однотонная' },
+        { value: 'полоска', label: 'Полоска' },
+        { value: 'клетка', label: 'Клетка' },
+        { value: 'горошек', label: 'Горошек' },
+        { value: 'цветочный', label: 'Цветочный' },
+        { value: 'принт', label: 'Принт/абстракция' },
+      ],
+    },
+    { key: 'exclude', label: 'Слова-исключения', type: 'text', advanced: true, hint: 'через запятую, жёсткий гейт (по названию+характеристикам)' },
     { key: 'priceMin', label: 'Цена от, ₽', type: 'number', advanced: true },
     { key: 'priceMax', label: 'Цена до, ₽', type: 'number', advanced: true },
     { key: 'our', label: 'Наш артикул (исключить)', type: 'number', advanced: true },
@@ -117,6 +134,7 @@ export default {
         a.push('--top', String(p.top ?? 20));
         for (const g of parseGroups(p.groups)) a.push('--group', g);
         if (has(p.exclude)) a.push('--exclude', normCsv(p.exclude));
+        if (has(p.pattern) && p.pattern !== 'любой') a.push('--pattern', String(p.pattern));
         if (has(p.priceMin)) a.push('--price-min', String(p.priceMin));
         if (has(p.priceMax)) a.push('--price-max', String(p.priceMax));
         if (has(p.our)) a.push('--our', String(p.our));

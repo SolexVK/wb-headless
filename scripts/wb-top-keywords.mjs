@@ -85,6 +85,7 @@ const filters = clean({
   minReviews: numOpt(opt['min-reviews']),
   minSales: numOpt(opt['min-sales']),
   deep: (groups.length || opt.exclude) ? { groups, exclude: listOpt(opt.exclude) || [] } : undefined,
+  pattern: opt.pattern ? String(opt.pattern).trim().toLowerCase() : undefined,
 });
 
 try {
@@ -102,7 +103,9 @@ try {
   log(`Фраза: «${res.query}» | период ${res.period.d1}…${res.period.d2}`);
   log(`Выдача: всего ${res.total}${res.capped ? ' (упёрлись в предохранитель)' : ''}, разобрано ${res.fetched}, после отсева <${res.filters.revenueFloor}₽ — ${res.pool}.`);
   if (groups.length) log(`Порог «безхвостых» (ТОП-${filters.exceptionRank ?? 20} по выручке): ${res.exceptionRevenueThreshold}₽.`);
+  if (res.enrich) log(`Добор карточек: ${res.enrich.enriched} новых + ${res.enrich.fromCache} из кэша, без card.json — ${res.enrich.misses}.`);
   log(`Итог: ${res.rivals.length} шт.${exCount ? ` (из них по исключению «безхвостые»: ${exCount})` : ''}`);
+  if (res.uncertainPattern) log(`🟡 Рисунок не определён у ${res.uncertainPattern} карточек (нет тега — кандидаты на визуальную проверку).`);
 
   // JSON-вывод пишем ДО вшивания фото — иначе base64 картинок раздует файл.
   // --nmids-only: голый JSON-массив nmId (для пайпа в wb-cards-compare).

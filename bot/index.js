@@ -146,15 +146,18 @@ async function deliverResult({ manifest, runId, chatId, data, outJson }) {
     `Найдено конкурентов: <b>${rivals.length}</b>${data?.total ? ` (из выдачи ${data.total})` : ''}`;
   const lines = rivals.slice(0, 10).map((r, i) => {
     const name = String(r.name || '').slice(0, 60);
+    const mark = r.patternUncertain ? '🟡 ' : '';
     return (
-      `${i + 1}. <code>${esc(r.nmId)}</code> · ${esc(r.brand || '—')} — ${fmt(r.price)}₽ · выручка ${fmt(r.revenue)}₽\n` +
+      `${i + 1}. ${mark}<code>${esc(r.nmId)}</code> · ${esc(r.brand || '—')} — ${fmt(r.price)}₽ · выручка ${fmt(r.revenue)}₽\n` +
       `   <i>${esc(name)}</i>`
     );
   });
+  const uncertain = rivals.filter((r) => r.patternUncertain).length;
+  const uncNote = uncertain ? `\n🟡 у ${uncertain} карточек рисунок не определён — проверьте визуально.` : '';
   const more =
-    rivals.length > 10
+    (rivals.length > 10
       ? `\n\n… ещё ${rivals.length - 10}. Скачать полный отчёт в нужном формате:`
-      : '\n\nСкачать отчёт:';
+      : '\n\nСкачать отчёт:') + uncNote;
   await bot.api.sendMessage(chatId, `${head}\n\n${lines.join('\n')}${more}`, {
     parse_mode: 'HTML',
     reply_markup: kb.resultActionsKeyboard(runId, manifest.formats || ['html', 'pdf', 'xlsx']),

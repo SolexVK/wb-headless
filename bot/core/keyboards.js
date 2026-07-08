@@ -86,7 +86,8 @@ export function pickKeyboard(runId, rivals, selected, page = 0, { pageSize = 8 }
   rivals.slice(start, start + pageSize).forEach((r, i) => {
     const idx = start + i;
     const on = selected.has(String(r.nmId));
-    const label = `${on ? '✅' : '⬜'} ${idx + 1}. ${String(r.brand || '—').slice(0, 18)} · ${r.price}₽`;
+    const unc = r.patternUncertain ? '🟡' : '';
+    const label = `${on ? '✅' : '⬜'} ${idx + 1}. ${unc}${String(r.brand || '—').slice(0, 16)} · ${r.price}₽`;
     kb.text(label, `pkt:${runId}:${idx}`).row();
   });
   if (pages > 1) {
