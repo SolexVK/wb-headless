@@ -336,45 +336,25 @@ async function startCardsCompare({ manifest, chatId, telegramId, params }) {
     );
   }
 
-  // Наш → DRY-RUN (бесплатно): добавить карточки и показать скрин «N из 5».
+  // Наш → текстовое подтверждение (БЕЗ отдельного DRY-RUN браузера). Одна сессия
+  // на submit надёжнее двухфазной схемы, где состояние между двумя браузерами хрупко
+  // (падения «5 из 5»/«page closed»). Гейт + список + подтверждение защищают лимит.
   const { id: runId } = createRun(db, {
     telegramId,
     skill: manifest.id,
     params: { our, rivals },
-    status: 'running',
+    status: 'awaiting_user',
   });
+  const markup = new InlineKeyboard()
+    .text('🚀 Подтвердить (−1 сравнение)', `ccok:${runId}`)
+    .row()
+    .text('✖ Отмена', `cccancel:${runId}`);
   await bot.api.sendMessage(
     chatId,
-    `✅ Артикул ваш. Готовлю предпросмотр (DRY-RUN, лимит не тратится) — это ~минута.`
-  );
-  queue.enqueue(
-    async () => {
-      try {
-        const res = await runCardsComparison({ our, rivals, submit: false });
-        updateRun(db, runId, { status: 'awaiting_user' });
-        const cap =
-          `Предпросмотр #${runId}: ваш <code>${esc(our)}</code> + ${rivals.length} конкурентов` +
-          `${res.counter ? ` · ${esc(res.counter)}` : ''}.\n` +
-          `Подтвердите — запуск потратит <b>1 сравнение</b> из месячного лимита.`;
-        const markup = new InlineKeyboard()
-          .text('🚀 Подтвердить (−1 сравнение)', `ccok:${runId}`)
-          .row()
-          .text('✖ Отмена', `cccancel:${runId}`);
-        if (res.screenshot && fs.existsSync(res.screenshot)) {
-          await bot.api.sendPhoto(chatId, new InputFile(res.screenshot), {
-            caption: cap,
-            parse_mode: 'HTML',
-            reply_markup: markup,
-          });
-        } else {
-          await bot.api.sendMessage(chatId, cap, { parse_mode: 'HTML', reply_markup: markup });
-        }
-      } catch (e) {
-        finishRun(db, runId, { error: e.message });
-        await ccError(chatId, runId, e);
-      }
-    },
-    { lane: 'wb.cards-compare' }
+    `✅ Артикул ваш. Сравнить: ваш <code>${esc(our)}</code> + ${rivals.length} конкурентов ` +
+      `(<code>${rivals.map(esc).join('</code>, <code>')}</code>).\n` +
+      `Запуск потратит <b>1 сравнение</b> из месячного лимита. Подтвердите:`,
+    { parse_mode: 'HTML', reply_markup: markup }
   );
 }
 
@@ -387,12 +367,11 @@ async function runCcSubmit({ runId, chatId }) {
   queue.enqueue(
     async () => {
       updateRun(db, runId, { status: 'running' });
-      try {
-        const out = path.join(RUNS_DIR, `cards-compare-${runId}.xlsx`);
-        const res = await runCardsComparison({ our, rivals, submit: true, out });
-        // Правило 72 ч: сразу материализуем файл в БД (BLOB).
+      const out = path.join(RUNS_DIR, `cards-compare-${runId}.xlsx`);
+      // Сохранить XLSX в БД + отдать документом. Общий хвост для успеха и восстановления.
+      const deliver = async (res, note) => {
         let fileId = null;
-        if (res.out && fs.existsSync(res.out)) {
+        if (res?.out && fs.existsSync(res.out)) {
           const bytes = fs.readFileSync(res.out);
           fileId = saveReportFile(db, {
             source: 'wb.cards-compare',
@@ -403,10 +382,10 @@ async function runCcSubmit({ runId, chatId }) {
           });
           saveArtifact(db, runId, 'xlsx', fileId);
         }
-        finishRun(db, runId, { result: { our, rivals, data: res.data || null, xlsxFileId: fileId } });
+        finishRun(db, runId, { result: { our, rivals, data: res?.data || null, xlsxFileId: fileId } });
         await bot.api.sendMessage(
           chatId,
-          `✅ Сравнение #${runId} готово (ваш <code>${esc(our)}</code> + ${rivals.length} конкурентов). ` +
+          `✅ Сравнение #${runId} готово${note ? ` ${note}` : ''} (ваш <code>${esc(our)}</code> + ${rivals.length} конкурентов). ` +
             `Данные сохранены: доступ у WB — 72 ч, у нас — навсегда.`,
           { parse_mode: 'HTML' }
         );
@@ -416,7 +395,30 @@ async function runCcSubmit({ runId, chatId }) {
             caption: `#${runId} · Сравнение карточек · XLSX`,
           });
         }
+        return fileId;
+      };
+
+      try {
+        const res = await runCardsComparison({ our, rivals, submit: true, out });
+        await deliver(res);
       } catch (e) {
+        // Прогон мог прерваться ПОСЛЕ клика «Сравнить» (спенд прошёл), но до выгрузки.
+        // Пробуем бесплатно до-скачать готовое сравнение из истории (в пределах 72 ч).
+        await bot.api
+          .sendMessage(
+            chatId,
+            `⚠️ Прогон #${runId} прервался (${esc(String(e.message).slice(0, 120))}). Пробую восстановить готовое сравнение бесплатно…`
+          )
+          .catch(() => {});
+        try {
+          const rec = await runCardsComparison({ our, exportExisting: true, out });
+          if (rec?.out && fs.existsSync(rec.out)) {
+            await deliver(rec, '(восстановлено из истории — лимит не потрачен повторно)');
+            return;
+          }
+        } catch (_) {
+          /* нечего восстанавливать */
+        }
         finishRun(db, runId, { error: e.message });
         await ccError(chatId, runId, e);
       }
