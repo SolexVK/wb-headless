@@ -342,7 +342,7 @@ async function startCardsCompare({ manifest, chatId, telegramId, params }) {
   const { id: runId } = createRun(db, {
     telegramId,
     skill: manifest.id,
-    params: { our, rivals },
+    params: { our, rivals, originRunId: params.originRunId ?? null },
     status: 'awaiting_user',
   });
   const markup = new InlineKeyboard()
@@ -394,6 +394,15 @@ async function runCcSubmit({ runId, chatId }) {
           await bot.api.sendDocument(chatId, new InputFile(Buffer.from(f.bytes), f.filename), {
             caption: `#${runId} · Сравнение карточек · XLSX`,
           });
+        }
+        // Каскад [2]→[3]: если сравнение пришло из «Конкуренты по запросу» —
+        // предлагаем конкурентный анализ на данных [1]+[2].
+        if (run.params.originRunId) {
+          await bot.api
+            .sendMessage(chatId, 'Построить конкурентный анализ ниши на этих данных?', {
+              reply_markup: new InlineKeyboard().text('🧭 Конкурентный анализ ниши', `ca2:${runId}`),
+            })
+            .catch(() => {});
         }
         return fileId;
       };
@@ -457,10 +466,15 @@ async function startCompetitorAnalysis({ manifest, chatId, telegramId, params })
   const pdfOut = path.join(RUNS_DIR, `ca-${runId}.pdf`);
   const jsonOut = path.join(RUNS_DIR, `ca-${runId}.json`);
   const argv = manifest.buildArgv(params, { htmlOut, pdfOut, jsonOut });
+  runAnalysisEngine({ chatId, runId, argv, htmlOut, pdfOut, jsonOut, resultParams: params });
+}
+
+/** Общий запуск Python-движка анализа + выдача PDF/HTML (категорийный и каскадный). */
+function runAnalysisEngine({ chatId, runId, argv, htmlOut, pdfOut, jsonOut, resultParams }) {
   queue.enqueue(
     async () => {
-      const res = await runCli({ npmScript: manifest.npmScript, argv, cwd: ROOT, timeoutMs: 300000 });
-      if (!res.ok && !fs.existsSync(htmlOut)) {
+      const res = await runCli({ npmScript: 'analysis:competitive', argv, cwd: ROOT, timeoutMs: 300000 });
+      if (!res.ok && !fs.existsSync(pdfOut) && !fs.existsSync(htmlOut)) {
         const msg = tail(res.stderr || res.stdout || `код ${res.code}`, 500);
         finishRun(db, runId, { error: msg });
         await bot.api
@@ -474,7 +488,7 @@ async function startCompetitorAnalysis({ manifest, chatId, telegramId, params })
       } catch {
         /* без сводки */
       }
-      finishRun(db, runId, { result: { params, jsonOut } });
+      finishRun(db, runId, { result: { ...resultParams, jsonOut } });
       await bot.api.sendMessage(
         chatId,
         `✅ <b>Конкурентный анализ #${runId}</b>\n${summary}\n\n<i>Полный отчёт — в файлах ниже. В конце — чек-лист ручной доработки карточки.</i>`,
@@ -488,7 +502,7 @@ async function startCompetitorAnalysis({ manifest, chatId, telegramId, params })
         try {
           const bytes = fs.readFileSync(fpath);
           const fileId = saveReportFile(db, {
-            source: `bot.${manifest.id}`,
+            source: 'bot.wb-competitor-analysis',
             entity: String(runId),
             filename: `анализ-ниши-${runId}.${format}`,
             mime,
@@ -507,10 +521,54 @@ async function startCompetitorAnalysis({ manifest, chatId, telegramId, params })
   );
 }
 
+/** Каскад [2]→[3]: конкурентный анализ на данных [1] (items-json) + [2] (funnel-json). */
+async function startCascadeAnalysis({ chatId, telegramId, ccRunId, cost }) {
+  const manifest = registry.get('wb-competitor-analysis');
+  const ccRun = getRun(db, ccRunId);
+  const origin = ccRun?.params?.originRunId ? getRun(db, ccRun.params.originRunId) : null;
+  if (!origin?.result) {
+    return bot.api.sendMessage(
+      chatId,
+      'Данные каскада недоступны (прогон [1] не найден). Запустите «🔍 Конкуренты по запросу» заново.'
+    );
+  }
+  const { id: runId } = createRun(db, {
+    telegramId,
+    skill: manifest.id,
+    params: { mode: 'cascade', ccRunId, originRunId: ccRun.params.originRunId, cost },
+    status: 'running',
+  });
+  await bot.api.sendMessage(
+    chatId,
+    `⏳ Задача #${runId} «${esc(manifest.title)}» (каскад [1]→[2]→[3]) — считаю нишу из конкурентов и воронки…`
+  );
+  const itemsJson = path.join(RUNS_DIR, `casc-items-${runId}.json`);
+  const funnelJson = path.join(RUNS_DIR, `casc-funnel-${runId}.json`);
+  fs.writeFileSync(itemsJson, JSON.stringify(origin.result));
+  const funnel = ccRun.result?.data;
+  const hasFunnel = !!funnel;
+  if (hasFunnel) fs.writeFileSync(funnelJson, JSON.stringify(funnel));
+  const htmlOut = path.join(RUNS_DIR, `ca-${runId}.html`);
+  const pdfOut = path.join(RUNS_DIR, `ca-${runId}.pdf`);
+  const jsonOut = path.join(RUNS_DIR, `ca-${runId}.json`);
+  const seas = origin.result?._meta?.seasonality?.delta_pct;
+  const argv = [
+    '--items-json', itemsJson,
+    '--query', String(origin.result?.query || 'каскад'),
+    '--cost', String(cost),
+    '--top', '20', '--bench', '20', '--cards', '6',
+    '--html-out', htmlOut, '--pdf-out', pdfOut, '--json-out', jsonOut,
+  ];
+  if (hasFunnel) argv.push('--funnel-json', funnelJson);
+  if (seas != null && Number.isFinite(Number(seas))) argv.push('--seasonality-delta', String(seas));
+  runAnalysisEngine({ chatId, runId, argv, htmlOut, pdfOut, jsonOut, resultParams: { mode: 'cascade', ccRunId, cost } });
+}
+
 // ─────────────── команды ───────────────
 
 bot.command('start', async (ctx) => {
   ctx.session.flow = null;
+  ctx.session.cascadeCost = null;
   await ctx.reply(
     'Привет! Я собираю отчёты по Wildberries. Выберите отчёт в меню, ответьте на пару вопросов — и я подготовлю результат.'
   );
@@ -521,6 +579,7 @@ bot.command(['skills', 'menu'], showMenu);
 
 bot.command('cancel', async (ctx) => {
   ctx.session.flow = null;
+  ctx.session.cascadeCost = null;
   await ctx.reply('Отменено. /skills — начать заново.');
 });
 
@@ -536,6 +595,7 @@ bot.on('callback_query:data', async (ctx) => {
     const manifest = manifestOf(key);
     if (!manifest) return ctx.answerCallbackQuery({ text: 'Скилл не найден', show_alert: true });
     ctx.session.flow = fsm.startFlow(manifest);
+    ctx.session.cascadeCost = null;
     await ctx.answerCallbackQuery();
     return showScreen(ctx, manifest, ctx.session.flow);
   }
@@ -612,6 +672,7 @@ bot.on('callback_query:data', async (ctx) => {
     const ccManifest = registry.get('wb-cards-compare');
     const flow = fsm.startFlow(ccManifest);
     flow.params.rivals = rivals.join(','); // конкуренты уже есть — спросим только «наш»
+    flow.params.originRunId = runId; // прогон [1] — источник данных для каскада [3]
     ctx.session.flow = flow;
     await ctx.answerCallbackQuery();
     await ctx.reply(
@@ -619,6 +680,24 @@ bot.on('callback_query:data', async (ctx) => {
       { parse_mode: 'HTML' }
     );
     return showScreen(ctx, ccManifest, flow);
+  }
+
+  // каскад [2]→[3]: конкурентный анализ на данных сравнения (по ccRunId)
+  if (action === 'ca2') {
+    const ccRunId = Number(key);
+    const ccRun = getRun(db, ccRunId);
+    const origin = ccRun?.params?.originRunId ? getRun(db, ccRun.params.originRunId) : null;
+    if (!origin?.result) {
+      await ctx.answerCallbackQuery({ text: 'Данные каскада недоступны', show_alert: true });
+      return;
+    }
+    ctx.session.flow = null;
+    ctx.session.cascadeCost = { ccRunId };
+    await ctx.answerCallbackQuery();
+    return ctx.reply(
+      'Укажите <b>себестоимость</b> вашего товара, ₽ (landed до склада WB) — нужна для расчёта маржи и выгодного коридора цен:',
+      { parse_mode: 'HTML' }
+    );
   }
 
   // подтверждение/отмена «Сравнения карточек» (по runId)
@@ -724,6 +803,17 @@ bot.on('callback_query:data', async (ctx) => {
 // ─────────────── текстовый ввод (ответ на «Введите …») ───────────────
 
 bot.on('message:text', async (ctx) => {
+  // Каскад [2]→[3]: ждём себестоимость перед запуском конкурентного анализа.
+  if (ctx.session.cascadeCost) {
+    const cost = Number(String(ctx.message.text).trim().replace(',', '.'));
+    if (!Number.isFinite(cost) || cost <= 0) {
+      return ctx.reply('⚠️ Нужно число — себестоимость в ₽. Повторите.');
+    }
+    const { ccRunId } = ctx.session.cascadeCost;
+    ctx.session.cascadeCost = null;
+    return startCascadeAnalysis({ chatId: ctx.chat.id, telegramId: ctx.from?.id ?? null, ccRunId, cost });
+  }
+
   const flow = ctx.session.flow;
   if (!flow || !flow.asking) {
     return ctx.reply('Чтобы собрать отчёт — /skills.');
