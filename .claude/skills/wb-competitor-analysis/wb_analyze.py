@@ -1631,6 +1631,9 @@ footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--hair);color:v
   tr:hover td{background:none;} a{color:var(--accent2);}
   /* в PDF прокрутки нет — широкие таблицы не обрезаем, а переносим текст и вписываем */
   .tbl-wrap{overflow:visible;border-radius:0;} table{font-size:.72rem;} th,td{white-space:normal;padding:5px 8px;}
+  /* «Доминанта» sticky нужен только для горизонт. скролла в HTML; в печати он
+     налезает на соседний столбец — делаем обычной ячейкой. */
+  table.chars .dom{position:static;box-shadow:none;}
   .pic{padding:3px 6px;} .bthumb{width:34px;height:45px;}
   .plan>div{break-inside:avoid;}
   footer{margin-top:12px;padding-top:8px;font-size:.7rem;break-before:avoid;}
