@@ -1,18 +1,21 @@
 // bot/index.js — точка входа Telegram-бота (grammY).
 //
-// Этап 3a: меню из реестра → сбор формы (обязательные + ⚙ дополнительные) →
-// подтверждение. Выполнение скилла подключается следующим этапом — сейчас на
-// «Запустить» бот показывает собранную CLI-команду (доказательство маппинга).
+// Меню из реестра → сбор формы → подтверждение → выполнение (очередь+CLI) →
+// готовый прогон: выбор формата (HTML/PDF/XLSX) и пикер конкурентов (2–4).
 
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { Bot, InputFile, session, GrammyError, HttpError } from 'grammy';
-import { openDb, createRun, updateRun, finishRun } from '../lib/db.js';
+import {
+  openDb, createRun, updateRun, finishRun, getRun,
+  saveReportFile, getReportFile, saveArtifact, getArtifact,
+} from '../lib/db.js';
 import { loadRegistry, menuItems } from './core/registry.js';
 import { sqliteStorage } from './core/session-store.js';
 import { Queue } from './core/queue.js';
 import { runCli, tail } from './core/executor.js';
+import { renderReport } from './render/index.js';
 import * as fsm from './core/fsm.js';
 import * as kb from './core/keyboards.js';
 
@@ -121,7 +124,8 @@ function enqueueRun({ manifest, runId, chatId, params }) {
           .catch(() => {});
         return;
       }
-      finishRun(db, runId, { result: res.data });
+      // прогон готов: держим статус awaiting_user, показываем сводку + действия
+      updateRun(db, runId, { status: 'awaiting_user', result: res.data, finishedAt: new Date().toISOString() });
       await deliverResult({ manifest, runId, chatId, data: res.data, outJson }).catch(async (e) => {
         await bot.api
           .sendMessage(chatId, `⚠️ Задача #${runId} выполнена, но выдача не удалась: ${esc(e.message)}`)
@@ -140,20 +144,69 @@ async function deliverResult({ manifest, runId, chatId, data, outJson }) {
     `✅ <b>#${runId} · ${esc(manifest.title)}</b>\n` +
     `Фраза: «${esc(data?.query || '')}»${per ? ` · период ${esc(per)}` : ''}\n` +
     `Найдено конкурентов: <b>${rivals.length}</b>${data?.total ? ` (из выдачи ${data.total})` : ''}`;
-  const lines = rivals.slice(0, 15).map((r, i) => {
-    const name = String(r.name || '').slice(0, 70);
+  const lines = rivals.slice(0, 10).map((r, i) => {
+    const name = String(r.name || '').slice(0, 60);
     return (
       `${i + 1}. <code>${esc(r.nmId)}</code> · ${esc(r.brand || '—')} — ${fmt(r.price)}₽ · выручка ${fmt(r.revenue)}₽\n` +
       `   <i>${esc(name)}</i>`
     );
   });
-  const more = rivals.length > 15 ? `\n\n… ещё ${rivals.length - 15}. Полный список — в файле.` : '';
-  await bot.api.sendMessage(chatId, `${head}\n\n${lines.join('\n')}${more}`, { parse_mode: 'HTML' });
-  if (fs.existsSync(outJson)) {
-    await bot.api.sendDocument(chatId, new InputFile(outJson, `top-rivals-${runId}.json`), {
-      caption: 'JSON-контракт (top-rivals) — источник для «Сравнения карточек».',
-    });
+  const more =
+    rivals.length > 10
+      ? `\n\n… ещё ${rivals.length - 10}. Скачать полный отчёт в нужном формате:`
+      : '\n\nСкачать отчёт:';
+  await bot.api.sendMessage(chatId, `${head}\n\n${lines.join('\n')}${more}`, {
+    parse_mode: 'HTML',
+    reply_markup: kb.resultActionsKeyboard(runId, manifest.formats || ['html', 'pdf', 'xlsx']),
+  });
+}
+
+/** Рендерит формат (с кэшем в report_files/skill_artifacts) и шлёт документом. */
+async function deliverFormat({ runId, chatId, format }) {
+  const run = getRun(db, runId);
+  if (!run || !run.result) {
+    return bot.api.sendMessage(chatId, `Задача #${runId}: данные недоступны. Запустите заново — /skills.`);
   }
+  const manifest = registry.get(run.skill);
+  const cached = getArtifact(db, runId, format);
+  if (cached?.file_id) {
+    const f = getReportFile(db, cached.file_id);
+    if (f) {
+      return bot.api.sendDocument(chatId, new InputFile(Buffer.from(f.bytes), f.filename), {
+        caption: `#${runId} · ${format.toUpperCase()} (из кэша)`,
+      });
+    }
+  }
+  const wait = await bot.api.sendMessage(chatId, `⏳ Готовлю ${format.toUpperCase()}…`);
+  try {
+    const images = run.params?.images !== false;
+    const { path: outPath, filename, mime } = await renderReport({
+      skill: run.skill,
+      format,
+      data: run.result,
+      outDir: RUNS_DIR,
+      runId,
+      images: format === 'xlsx' ? false : images,
+    });
+    const bytes = fs.readFileSync(outPath);
+    const fileId = saveReportFile(db, { source: `bot.${run.skill}`, entity: String(runId), filename, mime, bytes });
+    saveArtifact(db, runId, format, fileId);
+    await bot.api.sendDocument(chatId, new InputFile(outPath, filename), {
+      caption: `#${runId} · ${esc(manifest?.title || run.skill)} · ${format.toUpperCase()}`,
+    });
+  } catch (e) {
+    await bot.api.sendMessage(chatId, `⚠️ Не удалось собрать ${format.toUpperCase()}: ${esc(e.message)}`);
+  } finally {
+    await bot.api.deleteMessage(chatId, wait.message_id).catch(() => {});
+  }
+}
+
+/** Множество выбранных nmId прогона (из result._selected). */
+function selectedSet(run) {
+  return new Set((run?.result?._selected || []).map(String));
+}
+function saveSelected(runId, run, set) {
+  updateRun(db, runId, { result: { ...run.result, _selected: [...set] } });
 }
 
 // ─────────────── команды ───────────────
@@ -187,6 +240,68 @@ bot.on('callback_query:data', async (ctx) => {
     ctx.session.flow = fsm.startFlow(manifest);
     await ctx.answerCallbackQuery();
     return showScreen(ctx, manifest, ctx.session.flow);
+  }
+
+  if (action === 'noop') return ctx.answerCallbackQuery();
+
+  // ── действия над готовым прогоном (по runId, вне сессии) ──
+  if (action === 'fmt') {
+    await ctx.answerCallbackQuery({ text: `${value.toUpperCase()}…` });
+    return deliverFormat({ runId: Number(key), chatId: ctx.chat.id, format: value });
+  }
+  if (action === 'pick' || action === 'pkt' || action === 'pkpg' || action === 'pkok') {
+    const runId = Number(key);
+    const run = getRun(db, runId);
+    if (!run || !run.result) {
+      await ctx.answerCallbackQuery({ text: 'Данные недоступны', show_alert: true });
+      return;
+    }
+    const rivals = Array.isArray(run.result.rivals) ? run.result.rivals : [];
+    const sel = selectedSet(run);
+    const step = (registry.get(run.skill)?.steps || []).find((s) => s.interaction === 'pick-list') || {};
+    const min = step.min ?? 2;
+    const max = step.max ?? 4;
+
+    if (action === 'pick') {
+      await ctx.answerCallbackQuery();
+      return ctx.reply(
+        `🎯 Отметьте <b>${min}–${max}</b> конкурента для «Сравнения карточек» (кнопки-тумблеры):`,
+        { parse_mode: 'HTML', reply_markup: kb.pickKeyboard(runId, rivals, sel, 0) }
+      );
+    }
+    if (action === 'pkt') {
+      const idx = Number(value);
+      const nm = String(rivals[idx]?.nmId);
+      if (nm && nm !== 'undefined') {
+        if (sel.has(nm)) sel.delete(nm);
+        else if (sel.size >= max) {
+          await ctx.answerCallbackQuery({ text: `Не больше ${max}`, show_alert: true });
+          return;
+        } else sel.add(nm);
+        saveSelected(runId, run, sel);
+      }
+      await ctx.answerCallbackQuery();
+      const page = Math.floor(idx / 8);
+      return ctx.editMessageReplyMarkup({ reply_markup: kb.pickKeyboard(runId, rivals, sel, page) }).catch(() => {});
+    }
+    if (action === 'pkpg') {
+      await ctx.answerCallbackQuery();
+      return ctx.editMessageReplyMarkup({ reply_markup: kb.pickKeyboard(runId, rivals, sel, Number(value)) }).catch(() => {});
+    }
+    if (action === 'pkok') {
+      if (sel.size < min) {
+        await ctx.answerCallbackQuery({ text: `Нужно минимум ${min}`, show_alert: true });
+        return;
+      }
+      await ctx.answerCallbackQuery({ text: 'Сохранено' });
+      const chosen = rivals.filter((r) => sel.has(String(r.nmId)));
+      const list = chosen.map((r) => `• <code>${esc(r.nmId)}</code> · ${esc(r.brand || '—')}`).join('\n');
+      return ctx.reply(
+        `✅ Выбрано ${chosen.size} конкурентов (задача #${runId}):\n${list}\n\n` +
+          `<i>Пойдут в «Сравнение карточек», когда подключим этот скилл. nmId сохранены в прогоне.</i>`,
+        { parse_mode: 'HTML' }
+      );
+    }
   }
 
   const flow = ctx.session.flow;
