@@ -6,11 +6,14 @@
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { Bot, InputFile, session, GrammyError, HttpError } from 'grammy';
+import { Bot, InputFile, InlineKeyboard, session, GrammyError, HttpError } from 'grammy';
 import {
   openDb, createRun, updateRun, finishRun, getRun,
   saveReportFile, getReportFile, saveArtifact, getArtifact,
+  cacheGet, cachePut,
 } from '../lib/db.js';
+import { runCardsComparison } from '../lib/wbCardsCompare.js';
+import { checkOwnArticle } from '../lib/wbOwnCards.js';
 import { loadRegistry, menuItems } from './core/registry.js';
 import { sqliteStorage } from './core/session-store.js';
 import { Queue } from './core/queue.js';
@@ -271,6 +274,157 @@ async function sendPhotoPicker(chatId, runId, rivals, sel, { min, max, topN = 12
   await bot.api.sendMessage(chatId, 'Отметили — жмите:', { reply_markup: kb.pickDoneKeyboard(runId) });
 }
 
+// ─────────────── «Сравнение карточек» (кабинет WB, кастомный исполнитель) ───────────────
+
+/** Кэш множества наших nmID поверх source_cache (рантайм-БД, эфемерный). */
+function ownCache() {
+  return {
+    get: (k) => cacheGet(db, 'wb.own-cards', { k })?.payload,
+    set: (k, v) => cachePut(db, { source: 'wb.own-cards', key: { k }, payload: v }),
+  };
+}
+
+const parseRivalsText = (raw) =>
+  String(raw || '')
+    .split(/[\s,;]+/)
+    .map((s) => s.trim())
+    .filter((s) => /^\d{5,}$/.test(s));
+
+/** SESSION_EXPIRED и прочие ошибки кабинета — в понятное сообщение. */
+async function ccError(chatId, runId, e) {
+  const msg = String(e?.message || e);
+  if (msg.includes('SESSION_EXPIRED')) {
+    return bot.api
+      .sendMessage(
+        chatId,
+        `🔑 Сессия кабинета WB истекла (#${runId}). Нужны свежие креды кабинета ` +
+          `(куки + localStorage). Обновите WB_COOKIES / WB_LOCALSTORAGE и повторите.`
+      )
+      .catch(() => {});
+  }
+  return bot.api.sendMessage(chatId, `❌ Сравнение #${runId}: ${esc(msg.slice(0, 400))}`).catch(() => {});
+}
+
+/** Старт: валидация → гейт «наш/не наш» → DRY-RUN (скрин) → подтверждение. */
+async function startCardsCompare({ manifest, chatId, telegramId, params }) {
+  const our = String(params.our);
+  const rivals = parseRivalsText(params.rivals);
+  if (rivals.length < 2 || rivals.length > 4) {
+    return bot.api.sendMessage(
+      chatId,
+      `Нужно 2–4 конкурента (распознано ${rivals.length}). Повторите — /skills.`
+    );
+  }
+
+  // Гейт: наш ли артикул (Content API — лимит сравнений НЕ тратит).
+  await bot.api.sendMessage(chatId, `🔎 Проверяю, ваш ли артикул <code>${esc(our)}</code>…`, {
+    parse_mode: 'HTML',
+  });
+  let ownership;
+  try {
+    ownership = await checkOwnArticle(our, { cache: ownCache() });
+  } catch (e) {
+    return bot.api.sendMessage(chatId, `⚠️ Не удалось проверить принадлежность: ${esc(e.message)}`);
+  }
+  if (!ownership.ours) {
+    return bot.api.sendMessage(
+      chatId,
+      `🚫 Артикул <code>${esc(our)}</code> не найден в вашем кабинете (сверено с ${ownership.total} вашими карточками).\n\n` +
+        `«Сравнение карточек» строит воронку «ваш vs конкуренты», а её WB отдаёт только по своим карточкам. ` +
+        `Лимит не потрачен. Укажите свой артикул, или используйте «🔍 Конкуренты по запросу» для списка конкурентов.`,
+      { parse_mode: 'HTML' }
+    );
+  }
+
+  // Наш → DRY-RUN (бесплатно): добавить карточки и показать скрин «N из 5».
+  const { id: runId } = createRun(db, {
+    telegramId,
+    skill: manifest.id,
+    params: { our, rivals },
+    status: 'running',
+  });
+  await bot.api.sendMessage(
+    chatId,
+    `✅ Артикул ваш. Готовлю предпросмотр (DRY-RUN, лимит не тратится) — это ~минута.`
+  );
+  queue.enqueue(
+    async () => {
+      try {
+        const res = await runCardsComparison({ our, rivals, submit: false });
+        updateRun(db, runId, { status: 'awaiting_user' });
+        const cap =
+          `Предпросмотр #${runId}: ваш <code>${esc(our)}</code> + ${rivals.length} конкурентов` +
+          `${res.counter ? ` · ${esc(res.counter)}` : ''}.\n` +
+          `Подтвердите — запуск потратит <b>1 сравнение</b> из месячного лимита.`;
+        const markup = new InlineKeyboard()
+          .text('🚀 Подтвердить (−1 сравнение)', `ccok:${runId}`)
+          .row()
+          .text('✖ Отмена', `cccancel:${runId}`);
+        if (res.screenshot && fs.existsSync(res.screenshot)) {
+          await bot.api.sendPhoto(chatId, new InputFile(res.screenshot), {
+            caption: cap,
+            parse_mode: 'HTML',
+            reply_markup: markup,
+          });
+        } else {
+          await bot.api.sendMessage(chatId, cap, { parse_mode: 'HTML', reply_markup: markup });
+        }
+      } catch (e) {
+        finishRun(db, runId, { error: e.message });
+        await ccError(chatId, runId, e);
+      }
+    },
+    { lane: 'wb.cards-compare' }
+  );
+}
+
+/** Подтверждено: submit (тратит лимит) → XLSX + данные в БД (72 ч) → выдача. */
+async function runCcSubmit({ runId, chatId }) {
+  const run = getRun(db, runId);
+  if (!run || !run.params) return;
+  const { our, rivals } = run.params;
+  await bot.api.sendMessage(chatId, `⏳ Выполняю сравнение #${runId} (тратит 1 сравнение)…`);
+  queue.enqueue(
+    async () => {
+      updateRun(db, runId, { status: 'running' });
+      try {
+        const out = path.join(RUNS_DIR, `cards-compare-${runId}.xlsx`);
+        const res = await runCardsComparison({ our, rivals, submit: true, out });
+        // Правило 72 ч: сразу материализуем файл в БД (BLOB).
+        let fileId = null;
+        if (res.out && fs.existsSync(res.out)) {
+          const bytes = fs.readFileSync(res.out);
+          fileId = saveReportFile(db, {
+            source: 'wb.cards-compare',
+            entity: String(our),
+            filename: `сравнение-${our}.xlsx`,
+            mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            bytes,
+          });
+          saveArtifact(db, runId, 'xlsx', fileId);
+        }
+        finishRun(db, runId, { result: { our, rivals, data: res.data || null, xlsxFileId: fileId } });
+        await bot.api.sendMessage(
+          chatId,
+          `✅ Сравнение #${runId} готово (ваш <code>${esc(our)}</code> + ${rivals.length} конкурентов). ` +
+            `Данные сохранены: доступ у WB — 72 ч, у нас — навсегда.`,
+          { parse_mode: 'HTML' }
+        );
+        if (fileId) {
+          const f = getReportFile(db, fileId);
+          await bot.api.sendDocument(chatId, new InputFile(Buffer.from(f.bytes), f.filename), {
+            caption: `#${runId} · Сравнение карточек · XLSX`,
+          });
+        }
+      } catch (e) {
+        finishRun(db, runId, { error: e.message });
+        await ccError(chatId, runId, e);
+      }
+    },
+    { lane: 'wb.cards-compare' }
+  );
+}
+
 // ─────────────── команды ───────────────
 
 bot.command('start', async (ctx) => {
@@ -361,6 +515,25 @@ bot.on('callback_query:data', async (ctx) => {
     }
   }
 
+  // подтверждение/отмена «Сравнения карточек» (по runId)
+  if (action === 'ccok' || action === 'cccancel') {
+    const runId = Number(key);
+    const run = getRun(db, runId);
+    if (!run) {
+      await ctx.answerCallbackQuery({ text: 'Задача не найдена', show_alert: true });
+      return;
+    }
+    if (action === 'cccancel') {
+      finishRun(db, runId, { error: 'отменено пользователем' });
+      await ctx.answerCallbackQuery({ text: 'Отменено' });
+      await ctx.editMessageReplyMarkup({}).catch(() => {});
+      return ctx.reply(`Сравнение #${runId} отменено. Лимит не потрачен.`);
+    }
+    await ctx.answerCallbackQuery({ text: 'Запускаю сравнение' });
+    await ctx.editMessageReplyMarkup({}).catch(() => {});
+    return runCcSubmit({ runId, chatId: ctx.chat.id });
+  }
+
   const flow = ctx.session.flow;
   if (!flow) {
     await ctx.answerCallbackQuery();
@@ -413,17 +586,20 @@ bot.on('callback_query:data', async (ctx) => {
       await ctx.answerCallbackQuery();
       return showScreen(ctx, manifest, flow);
     }
-    // run — этап 3b: реальное выполнение через очередь
+    // run — выполнение
     const params = { ...flow.params };
     const chatId = ctx.chat.id;
+    const telegramId = ctx.from?.id ?? null;
     ctx.session.flow = null;
-    const { id: runId } = createRun(db, {
-      telegramId: ctx.from?.id ?? null,
-      skill: manifest.id,
-      params,
-      status: 'queued',
-    });
     await ctx.answerCallbackQuery({ text: 'Запускаю' });
+
+    // Кастомный исполнитель (браузерная автоматизация с DRY-RUN/подтверждением)
+    if (manifest.runner === 'cardsCompare') {
+      return startCardsCompare({ manifest, chatId, telegramId, params });
+    }
+
+    // Обычный CLI-исполнитель через очередь
+    const { id: runId } = createRun(db, { telegramId, skill: manifest.id, params, status: 'queued' });
     await ctx.reply(
       `⏳ Задача <b>#${runId}</b> «${esc(manifest.title)}» поставлена в очередь. Это может занять до пары минут — пришлю результат сюда.`,
       { parse_mode: 'HTML' }
