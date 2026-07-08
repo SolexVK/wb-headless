@@ -11,7 +11,8 @@
     "build:chrome": "npx @puppeteer/browsers install chrome@stable --install-dir=./chrome --cache-dir=./chrome",
     "start": "node server.js",
     "report:stock": "node report-stock.js",
-    "report:abc": "node report-abc.js"
+    "report:abc": "node report-abc.js",
+    "report:wb-stocks": "node report-wb-stocks.js"
   },
   "engines": {
     "node": ">=18"
