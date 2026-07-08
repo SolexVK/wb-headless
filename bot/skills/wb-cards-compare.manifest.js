@@ -16,6 +16,7 @@ export function parseRivals(raw) {
 
 export default {
   id: 'wb-cards-compare',
+  command: 'compare', // /compare в меню Telegram
   title: '📊 Сравнение карточек',
   description: 'Воронка «ваша карточка vs конкуренты» из кабинета WB (2–5 карточек)',
   adminOnly: false,

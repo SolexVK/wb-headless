@@ -37,6 +37,7 @@ const has = (v) => v !== undefined && v !== null && v !== '';
 
 export default {
   id: 'wb-top-keywords',
+  command: 'rivals', // /rivals в меню Telegram
   title: '🔍 Конкуренты по запросу',
   description: 'ТОП выдачи WB по фразе + фильтры → список артикулов конкурентов',
   adminOnly: false,

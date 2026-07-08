@@ -566,6 +566,13 @@ async function startCascadeAnalysis({ chatId, telegramId, ccRunId, cost }) {
 
 // ─────────────── команды ───────────────
 
+/** Запуск скилла: новый flow + сброс каскад-состояния + первый экран формы. */
+async function startSkillFlow(ctx, manifest) {
+  ctx.session.flow = fsm.startFlow(manifest);
+  ctx.session.cascadeCost = null;
+  return showScreen(ctx, manifest, ctx.session.flow);
+}
+
 bot.command('start', async (ctx) => {
   ctx.session.flow = null;
   ctx.session.cascadeCost = null;
@@ -583,6 +590,30 @@ bot.command('cancel', async (ctx) => {
   await ctx.reply('Отменено. /skills — начать заново.');
 });
 
+// Команды-скиллы (/rivals, /compare, /analysis) — запуск скилла одним тапом из
+// меню Telegram, без /skills.
+for (const skillManifest of registry.values()) {
+  if (skillManifest.command) {
+    bot.command(skillManifest.command, (ctx) => startSkillFlow(ctx, skillManifest));
+  }
+}
+
+/** Регистрирует список команд в меню Telegram (кнопка «Меню» / ввод «/»). */
+async function registerCommands() {
+  const skillCmds = [...registry.values()]
+    .filter((m) => m.command && !m.adminOnly)
+    .map((m) => ({ command: m.command, description: m.title.slice(0, 256) }));
+  try {
+    await bot.api.setMyCommands([
+      { command: 'skills', description: '📋 Все отчёты (меню)' },
+      ...skillCmds,
+      { command: 'cancel', description: '✖ Отмена диалога' },
+    ]);
+  } catch (e) {
+    console.error('setMyCommands:', e.message);
+  }
+}
+
 // ─────────────── инлайн-кнопки ───────────────
 
 bot.on('callback_query:data', async (ctx) => {
@@ -594,10 +625,8 @@ bot.on('callback_query:data', async (ctx) => {
   if (action === 'menu') {
     const manifest = manifestOf(key);
     if (!manifest) return ctx.answerCallbackQuery({ text: 'Скилл не найден', show_alert: true });
-    ctx.session.flow = fsm.startFlow(manifest);
-    ctx.session.cascadeCost = null;
     await ctx.answerCallbackQuery();
-    return showScreen(ctx, manifest, ctx.session.flow);
+    return startSkillFlow(ctx, manifest);
   }
 
   if (action === 'noop') return ctx.answerCallbackQuery();
@@ -841,5 +870,8 @@ function shellQuote(s) {
 
 console.log(`Реестр: ${[...registry.keys()].join(', ') || '(пусто)'}`);
 bot.start({
-  onStart: (me) => console.log(`Бот @${me.username} (id ${me.id}) запущен.`),
+  onStart: async (me) => {
+    await registerCommands();
+    console.log(`Бот @${me.username} (id ${me.id}) запущен. Команды меню зарегистрированы.`);
+  },
 });

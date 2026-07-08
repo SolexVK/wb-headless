@@ -12,6 +12,7 @@ const has = (v) => v !== undefined && v !== null && v !== '';
 
 export default {
   id: 'wb-competitor-analysis',
+  command: 'analysis', // /analysis в меню Telegram
   title: '🧭 Конкурентный анализ ниши',
   description: 'Ниша + юнит-экономика + ценовой коридор по марже + план доработки карточки',
   adminOnly: false,
