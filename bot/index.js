@@ -509,10 +509,34 @@ bot.on('callback_query:data', async (ctx) => {
       const list = chosen.map((r) => `• <code>${esc(r.nmId)}</code> · ${esc(r.brand || '—')}`).join('\n');
       return ctx.reply(
         `✅ Выбрано ${chosen.size} конкурентов (задача #${runId}):\n${list}\n\n` +
-          `<i>Пойдут в «Сравнение карточек», когда подключим этот скилл. nmId сохранены в прогоне.</i>`,
-        { parse_mode: 'HTML' }
+          `Сравнить их с вашей карточкой (воронка из кабинета)?`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: new InlineKeyboard().text('📊 Сравнить с моим артикулом', `cc2:${runId}`),
+        }
       );
     }
+  }
+
+  // каскад [1]→[2]: запустить «Сравнение карточек» с конкурентами из пикера
+  if (action === 'cc2') {
+    const runId = Number(key);
+    const run = getRun(db, runId);
+    const rivals = (run?.result?._selected || []).map(String);
+    if (rivals.length < 2) {
+      await ctx.answerCallbackQuery({ text: 'Сначала выберите 2–4 конкурента', show_alert: true });
+      return;
+    }
+    const ccManifest = registry.get('wb-cards-compare');
+    const flow = fsm.startFlow(ccManifest);
+    flow.params.rivals = rivals.join(','); // конкуренты уже есть — спросим только «наш»
+    ctx.session.flow = flow;
+    await ctx.answerCallbackQuery();
+    await ctx.reply(
+      `Конкуренты взяты из отчёта #${runId} (${rivals.length} шт.). Теперь укажите <b>ваш</b> артикул для сравнения:`,
+      { parse_mode: 'HTML' }
+    );
+    return showScreen(ctx, ccManifest, flow);
   }
 
   // подтверждение/отмена «Сравнения карточек» (по runId)
