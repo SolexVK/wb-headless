@@ -125,13 +125,13 @@ function marketTopTable(a) {
       <td><a href="${wbUrl(r.nmId)}" target="_blank" rel="noopener">${esc(r.nmId)}</a></td>
       <td>${esc(r.brand)}${mine ? ' <span class="tag">бренд</span>' : ''}</td>
       <td class="name">${esc(r.name)}</td>
-      <td class="num money">${rub(r.sales)}</td>
       <td class="num money">${rub(r.revenue)}</td>
+      <td class="num money">${rub(r.sales)}</td>
       <td class="num">${rub(r.price)}</td>
     </tr>`;
   }).join('\n');
   return `<table><thead><tr>
-      <th>#</th><th>Артикул</th><th>Бренд</th><th>Название</th><th>Продажи, шт</th><th>Выручка ₽</th><th>Ср. цена</th>
+      <th>#</th><th>Артикул</th><th>Бренд</th><th>Название</th><th>Выручка ₽</th><th>Продажи, шт</th><th>Ср. цена</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
@@ -142,13 +142,13 @@ function brandTopTable(a) {
       <td><a href="${wbUrl(r.nmId)}" target="_blank" rel="noopener">${esc(r.nmId)}</a></td>
       <td class="name">${esc(r.name)}</td>
       <td>${esc(r.color || '—')}</td>
-      <td class="num money">${rub(r.sales)}</td>
       <td class="num money">${rub(r.revenue)}</td>
+      <td class="num money">${rub(r.sales)}</td>
       <td class="num">${rub(r.price)}</td>
       <td class="num">${a.marketRev ? pct(100 * r.revenue / a.marketRev) : '—'}</td>
     </tr>`).join('\n');
   return `<table><thead><tr>
-      <th>#</th><th>Артикул</th><th>Название</th><th>Цвет</th><th>Продажи, шт</th><th>Выручка ₽</th><th>Ср. цена</th><th>Доля рынка (выручка)</th>
+      <th>#</th><th>Артикул</th><th>Название</th><th>Цвет</th><th>Выручка ₽</th><th>Продажи, шт</th><th>Ср. цена</th><th>Доля рынка (выручка)</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
