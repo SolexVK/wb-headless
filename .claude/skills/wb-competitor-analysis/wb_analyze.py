@@ -73,28 +73,54 @@ def load_token():
     return ""
 
 
-def curl_json(method, path, params=None, body=None, token=""):
+# Транзиентные ошибки curl (обрыв/таймаут/сеть) — ретраим: через агент-прокси
+# большие ответы MPStats иногда рвутся (18 = CURLE_PARTIAL_FILE «transfer closed»).
+_CURL_TRANSIENT = {7, 16, 18, 28, 35, 52, 55, 56, 92}
+
+
+def curl_json(method, path, params=None, body=None, token="", tries=4):
     url = f"{API}/{path}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    cmd = ["curl", "-sS", "-m", "90", "-X", method, url,
+    # --http1.1 + --retry-all-errors: устойчивее к обрыву больших потоков через прокси.
+    cmd = ["curl", "-sS", "-m", "120", "--http1.1",
+           "--retry", "2", "--retry-all-errors", "--retry-delay", "2",
+           "-X", method, url,
            "-H", f"X-Mpstats-TOKEN: {token}", "-H", "Accept: application/json"]
     if body is not None:
         cmd += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
-    out = subprocess.run(cmd, capture_output=True, text=True)
-    if out.returncode != 0:
-        raise RuntimeError(f"curl failed ({out.returncode}): {out.stderr.strip()[:300]}")
-    txt = out.stdout.strip()
-    if not txt:
-        raise RuntimeError(f"пустой ответ от {path} (проверьте параметры/лимиты)")
-    try:
-        data = json.loads(txt)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"не JSON от {path}: {txt[:300]}")
-    # MPStats отдаёт ошибки конвертом {code, message} — не путать с пустыми данными
-    if isinstance(data, dict) and isinstance(data.get("code"), int) and data["code"] >= 400:
-        raise MpstatsError(data["code"], data.get("message", ""), path)
-    return data
+    last_err = None
+    for attempt in range(tries):
+        out = subprocess.run(cmd, capture_output=True, text=True)
+        # 1) ошибка транспорта curl
+        if out.returncode != 0:
+            last_err = f"curl failed ({out.returncode}): {out.stderr.strip()[:200]}"
+            if out.returncode in _CURL_TRANSIENT and attempt < tries - 1:
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise RuntimeError(last_err)
+        txt = out.stdout.strip()
+        # 2) пустой ответ — считаем транзиентным (прокси мог оборвать)
+        if not txt:
+            last_err = f"пустой ответ от {path}"
+            if attempt < tries - 1:
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise RuntimeError(last_err + " (проверьте параметры/лимиты)")
+        # 3) обрезанный JSON (прокси срезал большой поток) — ретраим
+        try:
+            data = json.loads(txt)
+        except json.JSONDecodeError:
+            last_err = f"обрезанный/не JSON от {path} ({len(txt)} б)"
+            if attempt < tries - 1:
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise RuntimeError(f"{last_err}: {txt[:200]}")
+        # MPStats отдаёт ошибки конвертом {code, message} — не путать с пустыми данными
+        if isinstance(data, dict) and isinstance(data.get("code"), int) and data["code"] >= 400:
+            raise MpstatsError(data["code"], data.get("message", ""), path)
+        return data
+    raise RuntimeError(last_err or f"curl_json: не удалось получить {path}")
 
 
 class MpstatsError(RuntimeError):
@@ -261,12 +287,16 @@ def pattern_stem(p):
     return pl, pl
 
 
-def fetch_items(token, path, d1, d2, name_filter=None):
+def fetch_items(token, path, d1, d2, name_filter=None, max_items=6000):
     params = {"path": path, "d1": d1, "d2": d2}
     fm = {}
     if name_filter:
         fm["name"] = {"filterType": "text", "type": "contains", "filter": name_filter}
-    items, start, page = [], 0, 5000
+    # Страница 1500 строк (≈3МБ) вместо 5000 (≈10МБ): большой поток агент-прокси
+    # иногда режет (curl 18 / обрезанный JSON). Мельче страница — надёжнее.
+    # Потолок max_items: категория отсортирована по выручке, «хвост» из тысяч мелких
+    # SKU почти не влияет на ёмкость/ТОП, но резко раздувает время и квоту.
+    items, start, page = [], 0, 1500
     total = None
     while True:
         body = {"startRow": start, "endRow": start + page,
@@ -275,10 +305,10 @@ def fetch_items(token, path, d1, d2, name_filter=None):
         chunk = r.get("data") or []
         total = r.get("total", len(chunk))
         items.extend(chunk)
-        if len(chunk) < page or len(items) >= (total or 0):
+        if len(chunk) < page or len(items) >= (total or 0) or len(items) >= max_items:
             break
         start += page
-    return items, total
+    return items[:max_items], total
 
 
 # ======================= публичные API Wildberries (без квоты MPStats) =======================
@@ -2445,7 +2475,7 @@ def main():
                       "pattern": args.pattern, "path": path, "name_filter": nfilter,
                       "d1": args.d1, "d2": args.d2, "by": args.by, "top": args.top,
                       "my_sku": args.my_sku},
-            "niche": {"skus": len(items), "players": len(agg), "total_revenue": tot_rev,
+            "niche": {"skus": total or len(items), "players": len(agg), "total_revenue": tot_rev,
                       "seasonality_delta_pct": (seas or {}).get("delta_pct")},
             "price_zone": pz,
             "economics": econ,
