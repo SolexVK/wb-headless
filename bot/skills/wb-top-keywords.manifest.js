@@ -33,24 +33,6 @@ function facetArgv(p) {
   return a;
 }
 
-/** Разбирает поле «группы»: по строке (или через ;) — одно значение --group. */
-function parseGroups(raw) {
-  if (!raw) return [];
-  return String(raw)
-    .split(/\r?\n|;/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-/** Нормализует список через запятую (обрезает пробелы, убирает пустые). */
-function normCsv(raw) {
-  return String(raw || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .join(',');
-}
-
 const has = (v) => v !== undefined && v !== null && v !== '';
 
 export default {
@@ -113,16 +95,11 @@ export default {
     },
 
     // ── ⚙ дополнительные: признаки-фасеты (только релевантные) ──
+    // Признаки задаются кнопками ниже; исключения строятся автоматически
+    // (не выбранное значение признака = минус-ключ). Поля «Группы»/«Исключения»
+    // убраны как ручные — они дублировали фасеты.
     ...facetFields,
     // ── ⚙ прочие фильтры ──
-    {
-      key: 'groups',
-      label: 'Группы-признаки (свои)',
-      type: 'text',
-      advanced: true,
-      hint: 'по строке: имя=стем1,стем2 — если признака нет в списке выше',
-    },
-    { key: 'exclude', label: 'Слова-исключения', type: 'text', advanced: true, hint: 'через запятую, жёсткий гейт (по названию+характеристикам)' },
     { key: 'priceMin', label: 'Цена от, ₽', type: 'number', advanced: true },
     { key: 'priceMax', label: 'Цена до, ₽', type: 'number', advanced: true },
     { key: 'our', label: 'Наш артикул (исключить)', type: 'number', advanced: true },
@@ -144,8 +121,6 @@ export default {
           a.push('--period', String(p.period ?? 30));
         }
         a.push('--top', String(p.top ?? 20));
-        for (const g of parseGroups(p.groups)) a.push('--group', g);
-        if (has(p.exclude)) a.push('--exclude', normCsv(p.exclude));
         a.push(...facetArgv(p)); // выбранные признаки-фасеты → --facet key=value
         if (has(p.priceMin)) a.push('--price-min', String(p.priceMin));
         if (has(p.priceMax)) a.push('--price-max', String(p.priceMax));
