@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.205",
     "express": "^4.19.2",
     "puppeteer": "^22.10.0",
     "uuid": "^9.0.1"
@@ -10,7 +11,8 @@
   "scripts": {
     "build:chrome": "npx @puppeteer/browsers install chrome@stable --install-dir=./chrome --cache-dir=./chrome",
     "start": "node server.js",
-    "report:stock": "node report-stock.js"
+    "report:stock": "node report-stock.js",
+    "bot": "node telegram-bot.js"
   },
   "engines": {
     "node": ">=18"
