@@ -7,25 +7,28 @@
 // Режим связи с Telegram — long polling (getUpdates): бот сам опрашивает
 // Telegram, публичный URL/веб-хук не нужен. Запустил `npm run bot` — работает.
 //
-// Архитектура (Tier 0): опрос Telegram и выполнение задач расцеплены —
-// это два независимых цикла (poll + worker). Пока агент работает над задачей,
-// бот продолжает принимать сообщения; задачи ставятся в очередь.
+// Архитектура: опрос Telegram и выполнение задач расцеплены — это два
+// независимых цикла (poll + worker). Пока агент работает над задачей, бот
+// продолжает принимать сообщения; задачи ставятся в очередь.
 //
 // Переменные окружения (см. .env.example / TELEGRAM.md):
 //   TELEGRAM_BOT_TOKEN      — токен бота от @BotFather (обязательно)
 //   TELEGRAM_ALLOWED_CHAT   — ваш chat id; только он может писать боту (обязательно)
 //   ANTHROPIC_API_KEY       — ключ Claude API для движка агента (обязательно)
-//   CLAUDE_MODEL            — модель (по умолчанию claude-opus-4-8)
-//   CLAUDE_PERMISSION_MODE  — режим прав агента (по умолчанию acceptEdits)
+//   CLAUDE_MODEL            — модель по умолчанию (claude-opus-4-8)
+//   CLAUDE_PERMISSION_MODE  — режим прав по умолчанию (acceptEdits)
 //   BOT_WORKDIR             — рабочая папка агента (по умолчанию папка проекта)
-//   AGENT_TIMEOUT_MS        — таймаут одной задачи, мс (по умолчанию 600000 = 10 мин)
+//   AGENT_TIMEOUT_MS        — таймаут одной задачи, мс (по умолчанию 600000)
+//   DAILY_COST_LIMIT        — дневной лимит расходов в $ (0/пусто = без лимита)
 //   BOT_STATE_FILE          — файл состояния (по умолчанию .bot-state.json рядом)
 
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+// true, если файл запущен напрямую (`node telegram-bot.js`), а не импортирован в тестах
+const IS_MAIN = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 // ---------- 0.2 Автозагрузка .env (без внешних зависимостей) ----------
 function loadDotenv(file) {
@@ -48,11 +51,13 @@ loadDotenv(path.join(SCRIPT_DIR, '.env'));
 // ---------- конфигурация ----------
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const ALLOWED_CHAT = String(process.env.TELEGRAM_ALLOWED_CHAT || '').trim();
-const MODEL = process.env.CLAUDE_MODEL || 'claude-opus-4-8';
-const PERMISSION_MODE = process.env.CLAUDE_PERMISSION_MODE || 'acceptEdits';
+const MODEL_DEFAULT = process.env.CLAUDE_MODEL || 'claude-opus-4-8';
+const MODE_DEFAULT = process.env.CLAUDE_PERMISSION_MODE || 'acceptEdits';
 const WORKDIR = process.env.BOT_WORKDIR || SCRIPT_DIR;
 const AGENT_TIMEOUT_MS = Number(process.env.AGENT_TIMEOUT_MS) || 600000;
+const DAILY_COST_LIMIT = Number(process.env.DAILY_COST_LIMIT) || 0; // 0 = без лимита
 const STATE_FILE = process.env.BOT_STATE_FILE || path.join(SCRIPT_DIR, '.bot-state.json');
+const MODES = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
 
 const TG_API = `https://api.telegram.org/bot${TG_TOKEN}`;
 const TG_MSG_LIMIT = 4096; // лимит длины сообщения в Telegram
@@ -74,9 +79,12 @@ function requireEnv() {
   }
 }
 
-// ---------- 0.5 Персистентность состояния (сессия переживает рестарт) ----------
+// ---------- 0.5 Персистентность состояния (переживает рестарт) ----------
 let state = loadState();
 let sessionId = state.sessionId || null;
+// 1.6 текущие настройки (можно менять из чата, сохраняются в state)
+let model = state.model || MODEL_DEFAULT;
+let permissionMode = state.permissionMode || MODE_DEFAULT;
 
 function loadState() {
   try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); }
@@ -89,6 +97,18 @@ function saveState() {
 function setSession(id) {
   if (id && id !== sessionId) { sessionId = id; state.sessionId = id; saveState(); }
 }
+
+// ---------- 1.5 учёт расходов по дням ----------
+function today() { return new Date().toISOString().slice(0, 10); }
+function costToday() { return state.costDate === today() ? (state.costToday || 0) : 0; }
+function addCost(usd) {
+  if (!usd || typeof usd !== 'number') return;
+  const d = today();
+  if (state.costDate !== d) { state.costDate = d; state.costToday = 0; }
+  state.costToday = (state.costToday || 0) + usd;
+  saveState();
+}
+function limitReached() { return DAILY_COST_LIMIT > 0 && costToday() >= DAILY_COST_LIMIT; }
 
 // ---------- Claude Agent SDK (грузим динамически ради понятной ошибки) ----------
 async function loadAgent() {
@@ -128,7 +148,7 @@ async function tg(method, payload, signal) {
   return data.result;
 }
 
-async function sendMessage(chatId, text) {
+function chunk(text) {
   const chunks = [];
   let rest = String(text || '').trim() || '(пустой ответ)';
   while (rest.length > TG_MSG_LIMIT) {
@@ -138,10 +158,52 @@ async function sendMessage(chatId, text) {
     rest = rest.slice(cut);
   }
   chunks.push(rest);
-  for (const chunk of chunks) {
-    try { await tg('sendMessage', { chat_id: chatId, text: chunk }); }
+  return chunks;
+}
+
+// Простой текст (системные уведомления, прогресс).
+async function sendMessage(chatId, text) {
+  for (const c of chunk(text)) {
+    try { await tg('sendMessage', { chat_id: chatId, text: c }); }
     catch (err) { console.error('sendMessage:', err?.message || err); }
   }
+}
+
+// 1.4 Ответ агента с HTML-форматированием и надёжным откатом в простой текст.
+async function sendResult(chatId, text) {
+  const html = toHtml(text);
+  if (html.length <= TG_MSG_LIMIT) {
+    try {
+      await tg('sendMessage', { chat_id: chatId, text: html, parse_mode: 'HTML' });
+      return;
+    } catch (err) {
+      console.error('HTML send failed, откат в текст:', err?.message || err);
+    }
+  }
+  await sendMessage(chatId, text); // длинный ответ или сбой парсинга — простым текстом
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+// Лёгкая конвертация Markdown → Telegram HTML (код-блоки, инлайн-код, жирный).
+function toHtml(md) {
+  const parts = String(md || '').split('```');
+  let out = '';
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 1) {
+      // содержимое код-блока; первую строку-язык (если это просто идентификатор) убираем
+      let code = parts[i].replace(/^([A-Za-z0-9_+-]*)\n/, '');
+      out += '<pre><code>' + escapeHtml(code.replace(/\n$/, '')) + '</code></pre>';
+    } else {
+      let seg = escapeHtml(parts[i]);
+      seg = seg.replace(/`([^`]+)`/g, (_, c) => '<code>' + c + '</code>');
+      seg = seg.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+      seg = seg.replace(/__([^_]+)__/g, '<b>$1</b>');
+      out += seg;
+    }
+  }
+  return out;
 }
 
 async function sendTyping(chatId) {
@@ -153,7 +215,7 @@ async function sendTyping(chatId) {
 const queue = [];
 let wake = null;          // резолвер «в очереди появилась задача»
 let busy = false;         // выполняется ли задача прямо сейчас
-let currentAbort = null;  // AbortController текущей задачи (для таймаута/остановки)
+let currentAbort = null;  // AbortController текущей задачи (таймаут / /stop / shutdown)
 let shuttingDown = false;
 
 function enqueue(item) {
@@ -181,21 +243,21 @@ async function worker(query) {
 async function processTask(query, { chatId, text }) {
   const abort = new AbortController();
   currentAbort = abort;
-  // 0.3 таймаут задачи
-  const timeout = setTimeout(() => abort.abort('timeout'), AGENT_TIMEOUT_MS);
-  // фоновый индикатор «печатает…»
+  const timeout = setTimeout(() => abort.abort('timeout'), AGENT_TIMEOUT_MS); // 0.3
   sendTyping(chatId);
   const typing = setInterval(() => sendTyping(chatId), 5000);
   try {
-    const answer = await runAgent(query, text, abort);
-    await sendMessage(chatId, answer);
+    const { text: answer, cost } = await runAgent(query, text, abort, chatId);
+    addCost(cost); // 1.5
+    await sendResult(chatId, answer);
   } catch (err) {
     if (abort.signal.aborted) {
       const reason = abort.signal.reason;
       if (reason === 'timeout') {
         await sendMessage(chatId, `Задача прервана по таймауту (${Math.round(AGENT_TIMEOUT_MS / 1000)}с).`);
+      } else if (reason === 'user') {
+        await sendMessage(chatId, 'Задача остановлена.');
       } else if (reason === 'shutdown') {
-        // бот выключается — сообщать поздно, просто логируем
         console.log('Задача прервана из-за остановки бота.');
       } else {
         await sendMessage(chatId, 'Задача прервана.');
@@ -210,15 +272,27 @@ async function processTask(query, { chatId, text }) {
   }
 }
 
-async function runAgent(query, prompt, abort) {
+// Компактная строка активности для события использования инструмента (1.1).
+function summarizeTool(b) {
+  const name = b.name || 'tool';
+  const inp = b.input || {};
+  let hint = inp.file_path || inp.path || inp.pattern || inp.command || inp.url || inp.query || '';
+  if (typeof hint !== 'string') hint = '';
+  hint = hint.replace(/\s+/g, ' ').trim();
+  if (hint.length > 120) hint = hint.slice(0, 117) + '…';
+  return `🔧 ${name}${hint ? ': ' + hint : ''}`;
+}
+
+async function runAgent(query, prompt, abort, chatId) {
   let finalText = '';
+  let cost = 0;
   const options = {
     cwd: WORKDIR,
-    model: MODEL,
-    permissionMode: PERMISSION_MODE,
+    model,
+    permissionMode,
     abortController: abort,
   };
-  if (PERMISSION_MODE === 'bypassPermissions') {
+  if (permissionMode === 'bypassPermissions') {
     options.allowDangerouslySkipPermissions = true; // требование SDK
   }
   if (sessionId) options.resume = sessionId; // продолжаем диалог
@@ -226,7 +300,14 @@ async function runAgent(query, prompt, abort) {
   for await (const message of query({ prompt, options })) {
     if (message.type === 'system' && message.subtype === 'init') {
       setSession(message.session_id);
+    } else if (message.type === 'assistant') {
+      // 1.1 прогресс: сообщаем о вызовах инструментов по мере работы
+      const blocks = message.message?.content || [];
+      for (const b of blocks) {
+        if (b && b.type === 'tool_use') sendMessage(chatId, summarizeTool(b)); // fire-and-forget
+      }
     } else if (message.type === 'result') {
+      if (typeof message.total_cost_usd === 'number') cost = message.total_cost_usd;
       if (typeof message.result === 'string') {
         finalText = message.result;
       } else if (message.is_error) {
@@ -237,7 +318,7 @@ async function runAgent(query, prompt, abort) {
       }
     }
   }
-  return finalText;
+  return { text: finalText, cost };
 }
 
 // ---------- команды и маршрутизация входящих ----------
@@ -246,20 +327,76 @@ const HELP = [
   'Просто пишите задачу текстом — я выполню её в репозитории и пришлю результат.',
   '',
   'Команды:',
-  '/start — приветствие',
+  '/start, /help — справка',
+  '/status — что происходит (очередь, модель, расходы)',
+  '/stop — остановить текущую задачу и очистить очередь',
   '/reset — начать новый диалог (сбросить контекст сессии)',
-  '/help — эта справка',
+  '/model [id] — показать/сменить модель',
+  '/mode [' + MODES.join('|') + '] — показать/сменить режим прав',
   '',
   'Пока идёт одна задача, новые становятся в очередь.',
 ].join('\n');
+
+function statusText() {
+  const lines = [
+    `Занят: ${busy ? 'да' : 'нет'}`,
+    `В очереди: ${queue.length}`,
+    `Модель: ${model}`,
+    `Режим прав: ${permissionMode}`,
+    `Папка: ${WORKDIR}`,
+    `Сессия: ${sessionId || 'нет'}`,
+  ];
+  const spent = `$${costToday().toFixed(2)}`;
+  lines.push(`Потрачено сегодня: ${spent}${DAILY_COST_LIMIT ? ` из $${DAILY_COST_LIMIT}` : ''}`);
+  return lines.join('\n');
+}
 
 function dispatch(chatId, text) {
   const t = text.trim();
 
   if (t === '/start' || t === '/help') { sendMessage(chatId, HELP); return; }
-  if (t === '/reset') {
-    setSession(null); sessionId = null; state.sessionId = null; saveState();
+  if (t === '/status') { sendMessage(chatId, statusText()); return; }
+
+  if (t === '/reset') { // сброс контекста диалога
+    sessionId = null; state.sessionId = null; saveState();
     sendMessage(chatId, 'Контекст сброшен. Начинаем новый диалог.');
+    return;
+  }
+
+  if (t === '/stop') { // 1.2 остановка текущей задачи + очистка очереди
+    const queued = queue.length;
+    queue.length = 0;
+    if (currentAbort) {
+      currentAbort.abort('user');
+      sendMessage(chatId, `Останавливаю текущую задачу.${queued ? ` Очередь очищена (${queued}).` : ''}`);
+    } else {
+      sendMessage(chatId, queued ? `Очередь очищена (${queued}). Активной задачи нет.` : 'Активной задачи нет.');
+    }
+    return;
+  }
+
+  if (t === '/model' || t.startsWith('/model ')) { // 1.6
+    const arg = t.slice(6).trim();
+    if (!arg) { sendMessage(chatId, `Текущая модель: ${model}\nСменить: /model <id>`); return; }
+    model = arg; state.model = arg; saveState();
+    sendMessage(chatId, `Модель: ${model}`);
+    return;
+  }
+
+  if (t === '/mode' || t.startsWith('/mode ')) { // 1.6
+    const arg = t.slice(5).trim();
+    if (!arg) { sendMessage(chatId, `Текущий режим прав: ${permissionMode}\nСменить: /mode ${MODES.join('|')}`); return; }
+    if (!MODES.includes(arg)) { sendMessage(chatId, `Неизвестный режим. Допустимо: ${MODES.join(', ')}`); return; }
+    permissionMode = arg; state.permissionMode = arg; saveState();
+    sendMessage(chatId, `Режим прав: ${permissionMode}`);
+    return;
+  }
+
+  // обычный текст → задача
+  if (limitReached()) { // 1.5
+    sendMessage(chatId,
+      `Дневной лимит расходов исчерпан: $${costToday().toFixed(2)} из $${DAILY_COST_LIMIT}. ` +
+      `Сбросится завтра, или увеличьте DAILY_COST_LIMIT.`);
     return;
   }
 
@@ -340,13 +477,19 @@ async function main() {
   console.log(`Бот @${me.username} запущен (long polling).`);
   console.log(`Рабочая папка агента: ${WORKDIR}`);
   console.log(`Разрешённый chat id: ${ALLOWED_CHAT}`);
-  console.log(`Таймаут задачи: ${Math.round(AGENT_TIMEOUT_MS / 1000)}с`);
+  console.log(`Модель: ${model} | режим: ${permissionMode} | таймаут: ${Math.round(AGENT_TIMEOUT_MS / 1000)}с`);
+  if (DAILY_COST_LIMIT) console.log(`Дневной лимит расходов: $${DAILY_COST_LIMIT} (потрачено сегодня $${costToday().toFixed(2)})`);
   if (sessionId) console.log(`Восстановлена сессия: ${sessionId}`);
 
   await Promise.all([poll(), worker(query)]);
 }
 
-main().catch((err) => {
-  console.error('Фатальная ошибка бота:', err?.message || err);
-  process.exit(1);
-});
+if (IS_MAIN) {
+  main().catch((err) => {
+    console.error('Фатальная ошибка бота:', err?.message || err);
+    process.exit(1);
+  });
+}
+
+// экспорт чистых функций для тестов (Tier 3.4)
+export { toHtml, escapeHtml, chunk, summarizeTool, loadDotenv };

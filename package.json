@@ -12,7 +12,8 @@
     "build:chrome": "npx @puppeteer/browsers install chrome@stable --install-dir=./chrome --cache-dir=./chrome",
     "start": "node server.js",
     "report:stock": "node report-stock.js",
-    "bot": "node telegram-bot.js"
+    "bot": "node telegram-bot.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"
