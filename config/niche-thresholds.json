@@ -1,0 +1,31 @@
+{
+  "_note": "Пороги скоринга анализа ниши (lib/nicheAnalysis.js). Правьте под свои ниши. Денежные пороги (*Month) — на 30 дней. Файл переопределяет встроенные дефолты; можно указать другой путь через env NICHE_THRESHOLDS. Лишние ключи игнорируются, недостающие берутся из дефолтов.",
+  "capacity": {
+    "revLowMonth": 3000000,
+    "revHighMonth": 30000000,
+    "perActiveLowMonth": 30000,
+    "perActiveHighMonth": 150000
+  },
+  "trend": {
+    "downPct": -10,
+    "upPct": 10
+  },
+  "seasonality": {
+    "lowStrength": 0.15,
+    "highStrength": 0.4
+  },
+  "competition": {
+    "monopolyHealthy": 15,
+    "monopolyHigh": 40,
+    "reviewsBarrier": 3000,
+    "thinSellers": 10
+  },
+  "saturation": {
+    "withSalesBad": 30,
+    "withSalesGood": 60
+  },
+  "queryDemand": {
+    "ratioHigh": 10,
+    "ratioMid": 3
+  }
+}
