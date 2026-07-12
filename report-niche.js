@@ -130,6 +130,15 @@ export function writeOutputs(analysis) {
 export function printSummary(analysis) {
   const { score, capacity: c, competition: comp, saturation: sat, trend, seasonality: seas } = analysis;
 
+  if (analysis.conclusion?.points?.length) {
+    console.log('\n' + '─'.repeat(64));
+    console.log(`ЗАКЛЮЧЕНИЕ: ${analysis.conclusion.verdict} (${analysis.conclusion.total}/100) · узкое место: ${analysis.conclusion.bottleneck}`);
+    for (const p of analysis.conclusion.points) {
+      const mark = p.tone === 'good' ? '✓' : p.tone === 'bad' ? '✗' : '•';
+      console.log(`  ${mark} ${p.text}`);
+    }
+  }
+
   console.log('\n' + '═'.repeat(64));
   console.log(`АНАЛИЗ НИШИ: ${analysis.categoryPath}`);
   console.log(`Период: ${analysis.period.d1} … ${analysis.period.d2} (${analysis.period.days} дн)`);
@@ -158,6 +167,9 @@ export function printSummary(analysis) {
   console.log(`  Товаров: ${fmt(c.productsInNiche)}` + (c.truncated ? ` (детально выгружено ${fmt(c.productsAnalyzed)} топ по выручке)` : ''));
   console.log(`  Выручка: ${fmt(c.totalRevenue)} ₽ (${fmt(c.totalUnits)} шт) за период — ${basis}`);
   console.log(`  Упущенная выручка (дефицит спроса): ${fmt(c.lostRevenue)} ₽`);
+  if (analysis.sellThrough?.ratio != null) {
+    console.log(`  Sell-through (Овчинников): ${analysis.sellThrough.ratio}× продажи/остаток · оборот ${analysis.sellThrough.medianTurnoverDays} дн.`);
+  }
   console.log(`  Цена сред./медиана: ${fmt(c.avgPrice)} / ${fmt(c.medianPrice)} ₽`);
   console.log(`  Продавцов: ${fmt(comp.sellersCount)} · брендов: ${fmt(comp.brandsCount)}`);
   console.log(`  Монополизация (топ-10 товаров): ${comp.monopolyPct}% · лидер: ${comp.topSeller} (${comp.topSellerSharePct}%)`);
