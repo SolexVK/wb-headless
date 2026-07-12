@@ -251,23 +251,49 @@ def main():
                'our_best_rank': min([targets[str(s)]['rank'] for s in TARGETS if targets[str(s)]['rank']] or [0]),
                'our_best_kpb_rank': min([targets[str(s)]['kpb_rank'] for s in TARGETS if targets[str(s)]['kpb_rank']] or [0])}
 
-    # ---- potential (scenario model) + stock distribution plan ----
+    # ---- potential: коэффициенты привязаны к ДОЛЕ ЦЕНТРАЛЬНОГО СПРОСА по регионам ----
     price = compare['our_avg_price'] or 0
     base_units = seller_sales
-    REAL_MULT, AMB_MULT = 2.5, 4.0   # допущения: выход на центр. склады (+доставка/ранг) + отзывы/консолидация
+    # справочник долей спроса по макрорегионам (эвристика, редактируемая)
+    rd_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wb_region_demand.json')
+    REGION_W = {k: v for k, v in (json.load(open(rd_path, encoding='utf-8')) if os.path.exists(rd_path) else {}).items() if not k.startswith('_')}
+    HUB_REGION = {507: 'Москва/ЦФО', 120762: 'Москва/ЦФО', 206348: 'Москва/ЦФО', 117501: 'Москва/ЦФО',
+                  218623: 'Москва/ЦФО', 301229: 'Москва/ЦФО', 206236: 'Москва/ЦФО', 301809: 'Москва/ЦФО',
+                  218210: 'Санкт-Петербург', 312807: 'Санкт-Петербург', 2737: 'Санкт-Петербург',
+                  117986: 'Казань/Приволжье', 1733: 'Екатеринбург/Урал',
+                  130744: 'Юг (Краснодар/СКФО)', 208277: 'Юг (Краснодар/СКФО)', 686: 'Новосибирск/Сибирь'}
+    CENTRAL_REGIONS = ['Москва/ЦФО', 'Санкт-Петербург', 'Казань/Приволжье', 'Екатеринбург/Урал']
+    central_demand = round(sum(REGION_W.get(r, 0) for r in CENTRAL_REGIONS) * 100)
+    # какие центральные регионы продавец реально закрывает (порог значимого стока)
+    thresh = max(10, round(seller_total * 0.05))
+    reg_seller = defaultdict(int)
+    for w, q in seller_wh.items():
+        if w in HUB_REGION: reg_seller[HUB_REGION[w]] += q
+    covered = {r for r in CENTRAL_REGIONS if reg_seller.get(r, 0) >= thresh}
+    missing_regions = [r for r in CENTRAL_REGIONS if r not in covered]
+    c_missing = sum(REGION_W.get(r, 0) for r in missing_regions)     # недоступная доля центр. спроса
+    # логистический фактор = вернуть capture-долю недостающего центр. спроса; контент/отзывы — отдельный фактор
+    def scen(cap_log, cap_rev, name):
+        log_f = round(1 + c_missing * cap_log, 2); rev_f = cap_rev
+        mult = round(log_f * rev_f, 2)
+        return {'name': name, 'mult': mult, 'log_f': log_f, 'rev_f': rev_f,
+                'units': round(base_units * mult), 'revenue': round(base_units * mult * price)}
     scenarios = [
-        {'name': 'Сейчас', 'mult': 1, 'units': base_units, 'revenue': base_units * price},
-        {'name': 'Реалистичный (выход на центр. склады + отзывы)', 'mult': REAL_MULT,
-         'units': round(base_units * REAL_MULT), 'revenue': round(base_units * REAL_MULT * price)},
-        {'name': 'Амбициозный (уровень сильного игрока сегмента)', 'mult': AMB_MULT,
-         'units': round(base_units * AMB_MULT), 'revenue': round(base_units * AMB_MULT * price)}]
+        {'name': 'Сейчас', 'mult': 1, 'log_f': 1, 'rev_f': 1, 'units': base_units, 'revenue': base_units * price},
+        scen(0.5, 1.5, 'Реалистичный (центр. склады + отзывы)'),
+        scen(0.85, 2.0, 'Амбициозный (центр. склады + сильный контент)')]
     # веса распределения — по фактическому стоку конкурентов на центральных хабах
     cq = warehouses['central_qty']; cq_tot = sum(cq.values()) or 1
-    target_units = scenarios[1]['units']          # план под реалистичный сценарий (мес.)
+    target_units = scenarios[1]['units']
     dist_plan = [{'hub': h, 'weight': round(q / cq_tot * 100), 'units': round(q / cq_tot * target_units)}
                  for h, q in list(cq.items())[:8]]
     potential = {'base_units': base_units, 'price': price, 'scenarios': scenarios,
-                 'assumptions': f'допущения: выход на центральные хабы, набор отзывов, консолидация карточек; цена {price} ₽; при прочих равных',
+                 'central_demand_pct': central_demand, 'c_missing_pct': round(c_missing * 100),
+                 'missing_regions': missing_regions, 'covered_regions': sorted(covered),
+                 'region_weights': [(r, round(REGION_W.get(r, 0) * 100)) for r in CENTRAL_REGIONS],
+                 'assumptions': (f'коэффициенты привязаны к доле центрального спроса: центральные регионы дают ≈{central_demand}% спроса ниши, '
+                                 f'из них продавцу фактически недоступно ≈{round(c_missing*100)}% (нет стока). Логистический фактор = 1 + недоступная доля × доля отвоевания; '
+                                 f'умножается на фактор контента/отзывов. Цена {price} ₽; оценочно, при прочих равных.'),
                  'target_units': target_units, 'dist_plan': dist_plan}
 
     # ---- auto roadmap ----

@@ -237,7 +237,7 @@ def build_all(D):
             f'<div class="sbox" style="--c:{cols[i]}"><div class="t">{s["name"]}</div>'
             f'<div class="n">{money_short(s["revenue"])} <small>₽/мес</small></div>'
             f'<div class="d">{nf(s["units"])} шт/мес · ×{s["mult"]}'
-            + (f' · +{money_short(s["revenue"]-POT["scenarios"][0]["revenue"])} ₽ к текущему' if i > 0 else '') + '</div></div>'
+            + (f'<br>лог. ×{s.get("log_f")} × контент ×{s.get("rev_f")} · +{money_short(s["revenue"]-POT["scenarios"][0]["revenue"])} ₽' if i > 0 else '') + '</div></div>'
             for i, s in enumerate(POT['scenarios']))
         mxrev = max(s['revenue'] for s in POT['scenarios']) or 1
         revbars = ''.join(
@@ -251,16 +251,16 @@ def build_all(D):
         <div class="card" style="margin-top:12px"><h3>Сценарии потенциала <span>выручка/мес при разной проработке</span></h3>
           <div class="scen">{sboxes}</div>
           <div style="margin-top:11px">{revbars}</div>
-          <div class="callout" style="margin-top:9px">{POT['assumptions']}. Оценка опирается на разрыв по продажам с конкурентами на центральных складах; не гарантия, а ориентир для планирования.</div>
+          <div class="callout" style="margin-top:9px">{POT['assumptions']} Не гарантия, а ориентир для планирования.</div>
         </div>
         <div class="grid2" style="margin-top:12px">
           <div class="card"><h3>План распределения стока <span>под реалистичный сценарий · {nf(POT['target_units'])} шт/мес</span></h3>
             <table class="plan"><tr><th>Склад (центр. хаб)</th><th>Доля</th><th>Ед./мес</th></tr>{prows}</table>
             <div class="callout" style="margin-top:9px">Доли — по фактическому размещению стока ТОП-конкурентов на центральных хабах. Начинать с <b>{POT['dist_plan'][0]['hub'] if POT['dist_plan'] else '—'}</b> и <b>{POT['dist_plan'][1]['hub'] if len(POT['dist_plan'])>1 else '—'}</b>.</div></div>
-          <div class="card"><h3>Как считали</h3>
-            <div class="callout" style="margin-bottom:8px"><b>Потенциал:</b> текущие {nf(POT['base_units'])} шт/мес × коэффициент выхода на центральные склады и набора отзывов (×{POT['scenarios'][1]['mult']} реалистично, ×{POT['scenarios'][2]['mult']} амбициозно).</div>
-            <div class="callout" style="margin-bottom:8px"><b>Распределение:</b> целевой объём {nf(POT['target_units'])} шт/мес разложен по хабам пропорционально тому, как их используют лидеры сегмента.</div>
-            <div class="callout"><b>Важно:</b> сначала логистика + отзывы (P1), затем реклама — иначе бюджет на рекламу уходит в карточку с медленной доставкой и слабой конверсией.</div></div>
+          <div class="card"><h3>Как считали <span>коэффициент привязан к доле центр. спроса</span></h3>
+            <div class="callout" style="margin-bottom:8px"><b>Доля центрального спроса.</b> Центральные регионы дают ≈<b>{POT['central_demand_pct']}%</b> спроса ниши ({' · '.join(f'{r} {w}%' for r, w in POT['region_weights'])}). Продавцу недоступно ≈<b>{POT['c_missing_pct']}%</b> (нет стока в: {', '.join(POT['missing_regions'])}).</div>
+            <div class="callout" style="margin-bottom:8px"><b>Множитель.</b> Логистический фактор = 1 + недоступная доля × доля отвоевания (0,5 реал. / 0,85 амб.); умножается на фактор контента/отзывов (×1,5 / ×2,0). Итог: ×{POT['scenarios'][1]['mult']} и ×{POT['scenarios'][2]['mult']}.</div>
+            <div class="callout"><b>Распределение</b> целевого объёма {nf(POT['target_units'])} шт/мес — по фактическому стоку лидеров на хабах. Сначала логистика+отзывы (P1), потом реклама.</div></div>
         </div>
         <div class="foot"><span>Источник: MPStats + справочник складов WB · период {M['d1']}–{M['d2']}</span><span>Оценочный расчёт · допущения в тексте</span></div>"""
         return page('niche-report', P_POT, inner, anchor)
