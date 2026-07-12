@@ -57,19 +57,22 @@ export async function runNicheReport({ categoryPath, d1, d2, query, frequency, s
   const q = query ?? process.env.NICHE_QUERY;
   const freq = frequency ?? process.env.NICHE_FREQ;
   const supply = supplyCards ?? process.env.NICHE_SUPPLY;
+  // Несколько уточняющих фраз, если в спецификации есть «;» или «=фраза:карточки».
+  const isMulti = q && /[;=]/.test(String(q));
 
   process.stderr.write(
     `Анализ ниши: «${cat}», период ${period.d1} … ${period.d2}` +
-      (q && String(q).trim() ? `, запрос «${String(q).trim()}»` : '') + '\n'
+      (q && String(q).trim() ? `, ${isMulti ? 'уточняющие фразы' : 'запрос'} «${String(q).trim()}»` : '') + '\n'
   );
 
   return buildNicheAnalysis({
     categoryPath: cat,
     d1: period.d1,
     d2: period.d2,
-    query: q && String(q).trim() ? String(q).trim() : null,
-    frequency: freq != null && String(freq).trim() ? Number(freq) : null,
-    supplyCards: supply != null && String(supply).trim() ? Number(supply) : null,
+    query: isMulti ? null : q && String(q).trim() ? String(q).trim() : null,
+    frequency: isMulti ? null : freq != null && String(freq).trim() ? Number(freq) : null,
+    supplyCards: isMulti ? null : supply != null && String(supply).trim() ? Number(supply) : null,
+    queries: isMulti ? String(q) : null,
     maxRows: Number(process.env.NICHE_MAX_ROWS) || 5000,
     pageSize: Number(process.env.NICHE_PAGE_SIZE) || 500,
     onPage: (loaded, total) => {
@@ -133,8 +136,18 @@ export function printSummary(analysis) {
     }
   }
 
-  const qd = analysis.queryDemand;
-  if (qd) {
+  const qds = analysis.queryDemands || (analysis.queryDemand ? [analysis.queryDemand] : []);
+
+  // Сравнительная таблица спрос:предложение (если фраз несколько и есть отношения).
+  const withRatio = qds.filter((q) => q.demandSupplyRatio != null);
+  if (withRatio.length > 1) {
+    console.log('\nУточняющие фразы — спрос:предложение (по убыванию):');
+    for (const q of [...withRatio].sort((a, b) => b.demandSupplyRatio - a.demandSupplyRatio)) {
+      console.log(`  ${q.demandSupplyRatio.toFixed(1).padStart(4)}:1  ${q.ratioVerdict.padEnd(24)} ${q.query} (частота ${fmt(q.frequency)} ÷ ${fmt(q.supplyCards)})`);
+    }
+  }
+
+  for (const qd of qds) {
     console.log(`\nТОП-выдача по запросу «${qd.query}» (${qd.period.d1} … ${qd.period.d2}):`);
     console.log(`  Карточек в топе: ${fmt(qd.topCount)}` + (qd.topCapped ? ' (эндпоинт отдаёт максимум ~100)' : ''));
     console.log(`  Выручка топа: ${fmt(qd.revenue)} ₽ · на карточку ${fmt(qd.avgRevenuePerCard)} ₽ (на «живую» ${fmt(qd.avgRevenuePerActiveCard)} ₽)`);
@@ -154,6 +167,8 @@ export function printSummary(analysis) {
 
 // Запуск как самостоятельного скрипта.
 //   node report-niche.js "<категория>" [d1] [d2] [запрос] [частотность] [кол-во_карточек]
+// Несколько уточняющих фраз — 4-м аргументом через «;», у каждой опц. «=частота:карточки»:
+//   node report-niche.js "<кат>" d1 d2 "тёплая=4569:4471; фланелевая=2086:2966"
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [, , argCat, argD1, argD2, argQuery, argFreq, argSupply] = process.argv;
   runNicheReport({

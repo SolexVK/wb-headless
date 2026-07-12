@@ -230,9 +230,11 @@ app.get('/reports/niche', requireKey, async (req, res) => {
       categoryPath: String(categoryPath),
       d1,
       d2,
-      query: query && String(query).trim() ? String(query).trim() : null,
+      // query может быть одиночной фразой или мультиспеком «фраза=частота:карточки; …».
+      query: query && !/[;=]/.test(String(query)) && String(query).trim() ? String(query).trim() : null,
       frequency: freq != null && String(freq).trim() ? Number(freq) : null,
       supplyCards: supply != null && String(supply).trim() ? Number(supply) : null,
+      queries: query && /[;=]/.test(String(query)) ? String(query) : null,
       maxRows: Number(maxRows) || Number(process.env.NICHE_MAX_ROWS) || 5000,
       pageSize: Number(pageSize) || Number(process.env.NICHE_PAGE_SIZE) || 500,
     });
