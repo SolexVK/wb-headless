@@ -45,7 +45,7 @@ function toCsvReport(analysis) {
   };
 }
 
-export async function runNicheReport({ categoryPath, d1, d2 } = {}) {
+export async function runNicheReport({ categoryPath, d1, d2, query, frequency } = {}) {
   const cat = categoryPath || process.env.NICHE_PATH;
   if (!cat || !String(cat).trim()) {
     throw new Error(
@@ -54,13 +54,20 @@ export async function runNicheReport({ categoryPath, d1, d2 } = {}) {
     );
   }
   const period = d1 && d2 ? { d1, d2 } : defaultPeriod(Number(process.env.REPORT_DAYS) || 30);
+  const q = query ?? process.env.NICHE_QUERY;
+  const freq = frequency ?? process.env.NICHE_FREQ;
 
-  process.stderr.write(`Анализ ниши: «${cat}», период ${period.d1} … ${period.d2}\n`);
+  process.stderr.write(
+    `Анализ ниши: «${cat}», период ${period.d1} … ${period.d2}` +
+      (q && String(q).trim() ? `, запрос «${String(q).trim()}»` : '') + '\n'
+  );
 
   return buildNicheAnalysis({
     categoryPath: cat,
     d1: period.d1,
     d2: period.d2,
+    query: q && String(q).trim() ? String(q).trim() : null,
+    frequency: freq != null && String(freq).trim() ? Number(freq) : null,
     maxRows: Number(process.env.NICHE_MAX_ROWS) || 5000,
     pageSize: Number(process.env.NICHE_PAGE_SIZE) || 500,
     onPage: (loaded, total) => {
@@ -123,6 +130,20 @@ export function printSummary(analysis) {
     }
   }
 
+  const qd = analysis.queryDemand;
+  if (qd) {
+    console.log(`\nНасыщенность по запросу «${qd.query}» (${qd.period.d1} … ${qd.period.d2}):`);
+    console.log(`  Предложение (карточек по запросу): ${fmt(qd.supply)}` + (qd.capped ? ` (анализ по ${fmt(qd.analyzed)})` : ''));
+    console.log(`  Выручка выдачи: ${fmt(qd.revenue)} ₽ · на карточку ${fmt(qd.avgRevenuePerCard)} ₽ (на «живую» ${fmt(qd.avgRevenuePerActiveCard)} ₽)`);
+    console.log(`  С продажами: ${qd.withSalesPct}% · монополизация топ-10: ${qd.monopolyTop10Pct}% · упущено ${fmt(qd.lostRevenue)} ₽`);
+    console.log(`  Медиана цены продажи: ${fmt(qd.medianAvgSalePrice)} ₽`);
+    if (qd.demandSupplyRatio != null) {
+      console.log(`  Спрос:предложение = ${qd.demandSupplyRatio}:1 (частотность ${fmt(qd.frequency)}) → ${qd.ratioVerdict}`);
+    } else if (qd.note) {
+      console.log(`  ⚠ ${qd.note}`);
+    }
+  }
+
   if (analysis.notes?.length) {
     console.log('\n⚠ Примечания:');
     for (const n of analysis.notes) console.log(`  • ${n}`);
@@ -130,13 +151,15 @@ export function printSummary(analysis) {
 }
 
 // Запуск как самостоятельного скрипта.
-//   node report-niche.js "<категория>" [d1] [d2]
+//   node report-niche.js "<категория>" [d1] [d2] [запрос] [частотность]
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [, , argCat, argD1, argD2] = process.argv;
+  const [, , argCat, argD1, argD2, argQuery, argFreq] = process.argv;
   runNicheReport({
     categoryPath: argCat || undefined,
     d1: argD1 || undefined,
     d2: argD2 || undefined,
+    query: argQuery || undefined,
+    frequency: argFreq || undefined,
   })
     .then((analysis) => {
       const { csvPath, jsonPath } = writeOutputs(analysis);

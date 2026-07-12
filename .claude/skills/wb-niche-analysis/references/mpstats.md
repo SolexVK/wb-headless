@@ -14,6 +14,13 @@
 | `GET wb/get/category/trends` | динамика категории по датам | `path`, `d1`, `d2` |
 | `GET wb/get/category/price_segmentation` | распределение по ценовым сегментам | `path`, `d1`, `d2` |
 | `GET wb/get/item/{sku}/sales` | продажи/остатки конкретной карточки | `d1`, `d2` |
+| `POST analytics/v1/wb/search/items` | выдача по ключевому запросу (фаза 2, «от спроса») | query: `path`=запрос, `d1`, `d2`; body: `{startRow,endRow}` |
+
+**Поисковая выдача (фаза 2).** Рабочий эндпоинт — `POST /analytics/v1/wb/search/items` (залочен
+живым токеном). Ключевое слово идёт в query-параметре `path`; ответ `{total,data:[...]}`, где
+`total` = кол-во карточек по запросу (предложение), `id`=nmId. `d2` должен быть СТРОГО раньше
+сегодня (иначе 422). Старый `/wb/get/search` — html-заглушка (пустой 200), НЕ использовать.
+Частотность (спрос) этот эндпоинт не отдаёт — источник в API не подтверждён (Оракул — Wildbox).
 
 `filterModel` — формат AG-Grid, напр. фильтр по названию:
 `{"name":{"filterType":"text","type":"contains","filter":"полос"}}`.
