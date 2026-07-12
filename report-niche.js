@@ -14,6 +14,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildNicheAnalysis } from './lib/nicheAnalysis.js';
 import { nicheReportToCSV } from './lib/nicheReport.js';
+import { readOracle, filterPhrases, toQueries } from './lib/oraclePhrases.js';
 import { defaultPeriod } from './report-stock.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,19 +61,36 @@ export async function runNicheReport({ categoryPath, d1, d2, query, frequency, s
   // Несколько уточняющих фраз, если в спецификации есть «;» или «=фраза:карточки».
   const isMulti = q && /[;=]/.test(String(q));
 
+  // Ингест Оракула (Wildbox): фразы из файла, отфильтрованные плюс/минус-ключами.
+  const oracleFile = process.env.NICHE_ORACLE;
+  let oracleQueries = null;
+  if (oracleFile && String(oracleFile).trim()) {
+    const phrases = readOracle(String(oracleFile).trim());
+    const { selected } = filterPhrases(phrases, { plus: process.env.NICHE_PLUS, minus: process.env.NICHE_MINUS });
+    oracleQueries = toQueries(selected);
+    process.stderr.write(
+      `Оракул: отобрано ${selected.length} из ${phrases.length} фраз ` +
+        `(плюс: ${process.env.NICHE_PLUS || '—'} | минус: ${process.env.NICHE_MINUS || '—'})\n`
+    );
+    for (const s of selected) {
+      process.stderr.write(`  • ${s.phrase} — ${s.frequency}/${s.count}\n`);
+    }
+  }
+
   process.stderr.write(
     `Анализ ниши: «${cat}», период ${period.d1} … ${period.d2}` +
-      (q && String(q).trim() ? `, ${isMulti ? 'уточняющие фразы' : 'запрос'} «${String(q).trim()}»` : '') + '\n'
+      (oracleQueries ? `, фраз из Оракула: ${oracleQueries.length}` :
+        q && String(q).trim() ? `, ${isMulti ? 'уточняющие фразы' : 'запрос'} «${String(q).trim()}»` : '') + '\n'
   );
 
   return buildNicheAnalysis({
     categoryPath: cat,
     d1: period.d1,
     d2: period.d2,
-    query: isMulti ? null : q && String(q).trim() ? String(q).trim() : null,
-    frequency: isMulti ? null : freq != null && String(freq).trim() ? Number(freq) : null,
-    supplyCards: isMulti ? null : supply != null && String(supply).trim() ? Number(supply) : null,
-    queries: isMulti ? String(q) : null,
+    query: oracleQueries ? null : isMulti ? null : q && String(q).trim() ? String(q).trim() : null,
+    frequency: oracleQueries ? null : isMulti ? null : freq != null && String(freq).trim() ? Number(freq) : null,
+    supplyCards: oracleQueries ? null : isMulti ? null : supply != null && String(supply).trim() ? Number(supply) : null,
+    queries: oracleQueries || (isMulti ? String(q) : null),
     maxRows: Number(process.env.NICHE_MAX_ROWS) || 5000,
     pageSize: Number(process.env.NICHE_PAGE_SIZE) || 500,
     onPage: (loaded, total) => {
