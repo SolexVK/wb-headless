@@ -34,9 +34,19 @@ def wb_brand(b):  return "https://www.wildberries.ru/catalog/0/search.aspx?searc
 def a_item(sku, text=None, cls='lnk'):  return f'<a class="{cls}" href="{wb_item(sku)}">{sku if text is None else text}</a>'
 def a_brand(b, text=None, cls='lnk'):   return f'<a class="{cls}" href="{wb_brand(b)}">{b if text is None else text}</a>'
 
-WH_NAMES = {'507':'Коледино','117986':'Казань','120762':'Электросталь','130744':'Тула',
-            '206348':'СПб · Уткина Заводь','208277':'Невинномысск','300571':'Обухово'}
-def wh_label(wid): return WH_NAMES.get(str(wid), f'СЦ · {wid}')
+# Справочник складов WB грузим из wb_warehouses.json (официальные названия из
+# stores-data.json). Раньше здесь был хардкод с ошибками (130744≠Тула это Краснодар,
+# 206348≠СПб это Алексин) — не возвращаем.
+def _load_wh_names():
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wb_warehouses.json')
+    try:
+        return json.load(open(p, encoding='utf-8'))
+    except Exception:
+        return {}
+WH_NAMES = _load_wh_names()
+def wh_label(wid):
+    n = WH_NAMES.get(str(wid))
+    return n.replace(' WB', '') if n else f'СЦ · {wid}'
 
 # ---------- shared CSS (var-driven accents) ----------
 CSS = r"""

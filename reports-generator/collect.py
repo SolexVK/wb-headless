@@ -32,8 +32,13 @@ PALETTES = [
 ]
 NICHE_PALETTE = ['#3B4CA8', '#2A377E', '#EBEDFA', '#F5F6FC']
 
-WH_NAMES = {'507': 'Коледино', '117986': 'Казань', '120762': 'Электросталь', '130744': 'Тула',
-            '206348': 'СПб · Уткина Заводь', '208277': 'Невинномысск', '300571': 'Обухово'}
+def _load_wh_names():
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wb_warehouses.json')
+    try:
+        return json.load(open(p, encoding='utf-8'))
+    except Exception:
+        return {}
+WH_NAMES = _load_wh_names()  # официальные названия складов WB (см. wb_warehouses.json)
 
 # ---- HTTP ----
 def token():
