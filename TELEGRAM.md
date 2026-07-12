@@ -98,6 +98,46 @@ npm run bot
 - **Защита от двойного запуска.** Если Telegram вернёт 409 (запущен второй
   экземпляр или активен webhook) — бот сообщит и остановится.
 
+## Развёртывание (always-on)
+Бот должен работать постоянно. Три варианта:
+
+**systemd** (готовый юнит — `deploy/wb-telegram-bot.service`):
+```bash
+sudo cp deploy/wb-telegram-bot.service /etc/systemd/system/
+# поправьте WorkingDirectory и User в файле
+sudo systemctl daemon-reload
+sudo systemctl enable --now wb-telegram-bot
+journalctl -u wb-telegram-bot -f   # логи
+```
+
+**Docker** (`deploy/Dockerfile`):
+```bash
+docker build -f deploy/Dockerfile -t wb-telegram-bot .
+docker run -d --restart=always --env-file .env --name wb-bot wb-telegram-bot
+```
+
+**pm2**:
+```bash
+pm2 start telegram-bot.js --name wb-bot && pm2 save && pm2 startup
+```
+
+Логи можно писать в файл: `BOT_LOG_FILE=/var/log/wb-telegram-bot.log`
+(ротация по размеру `BOT_LOG_MAX`).
+
+## Webhook вместо polling
+По умолчанию бот работает в режиме **polling**. Для сервера с доменом можно
+включить **webhook** (`BOT_MODE=webhook`) — нужен публичный HTTPS-URL:
+```bash
+BOT_MODE=webhook BOT_WEBHOOK_URL=https://ваш-домен/telegram/webhook \
+BOT_WEBHOOK_SECRET=секрет BOT_WEBHOOK_PORT=8081 npm run bot
+```
+Или встроить приём в существующий `server.js` (тот же порт, что и API):
+```bash
+TELEGRAM_WEBHOOK_IN_SERVER=1 BOT_WEBHOOK_URL=https://ваш-домен/telegram/webhook \
+BOT_WEBHOOK_SECRET=секрет npm start
+```
+Секрет проверяется по заголовку `X-Telegram-Bot-Api-Secret-Token`.
+
 ## Long polling vs Webhook — в чём разница
 
 Бот использует **long polling** — сам опрашивает Telegram методом `getUpdates`.

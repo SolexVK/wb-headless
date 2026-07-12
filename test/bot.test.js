@@ -5,7 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { toHtml, escapeHtml, chunk, summarizeTool, loadDotenv, parseProjects } from '../telegram-bot.js';
+import { toHtml, escapeHtml, chunk, summarizeTool, loadDotenv, parseProjects, parseAllowed } from '../telegram-bot.js';
 
 test('escapeHtml экранирует спецсимволы', () => {
   assert.equal(escapeHtml('a < b & c > d'), 'a &lt; b &amp; c &gt; d');
@@ -53,6 +53,13 @@ test('summarizeTool: длинная подсказка обрезается', ()
   const line = summarizeTool({ name: 'Bash', input: { command: 'a'.repeat(300) } });
   assert.ok(line.length <= 3 + 5 + 2 + 120); // эмодзи+имя+': '+120
   assert.ok(line.endsWith('…'));
+});
+
+test('parseAllowed: список chat id в множество, мусор отброшен', () => {
+  const s = parseAllowed('111, 222 ,, 333');
+  assert.equal(s.size, 3);
+  assert.ok(s.has('111') && s.has('222') && s.has('333'));
+  assert.equal(parseAllowed('').size, 0);
 });
 
 test('parseProjects: пусто → один проект default', () => {

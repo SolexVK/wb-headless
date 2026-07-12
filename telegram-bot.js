@@ -13,6 +13,7 @@
 // Переменные окружения — см. .env.example / TELEGRAM.md.
 
 import fs from 'fs';
+import http from 'http';
 import path from 'path';
 import { execFile } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -57,10 +58,10 @@ const PROJECTS = parseProjects();
 // ---------- конфигурация ----------
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 // 2.5 несколько пользователей (список chat id), обратная совместимость с одиночным
-const ALLOWED = new Set(
-  (process.env.TELEGRAM_ALLOWED_CHATS || process.env.TELEGRAM_ALLOWED_CHAT || '')
-    .split(',').map((s) => s.trim()).filter(Boolean)
-);
+function parseAllowed(str) {
+  return new Set(String(str || '').split(',').map((s) => s.trim()).filter(Boolean));
+}
+const ALLOWED = parseAllowed(process.env.TELEGRAM_ALLOWED_CHATS || process.env.TELEGRAM_ALLOWED_CHAT || '');
 const MODEL_DEFAULT = process.env.CLAUDE_MODEL || 'claude-opus-4-8';
 const MODE_DEFAULT = process.env.CLAUDE_PERMISSION_MODE || 'acceptEdits';
 const AGENT_TIMEOUT_MS = Number(process.env.AGENT_TIMEOUT_MS) || 600000;
@@ -74,12 +75,35 @@ const TG_MSG_LIMIT = 4096;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function allowed(chatId) { return ALLOWED.has(String(chatId)); }
 
+// ---------- 3.3 логирование в файл (опционально, с ротацией по размеру) ----------
+function setupLogging() {
+  const file = process.env.BOT_LOG_FILE;
+  if (!file) return;
+  const max = Number(process.env.BOT_LOG_MAX) || 5 * 1024 * 1024;
+  const write = (level, args) => {
+    const line = `[${new Date().toISOString()}] ${level} ` +
+      args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') + '\n';
+    try {
+      try { if (fs.statSync(file).size > max) fs.renameSync(file, file + '.1'); } catch (_) {}
+      fs.appendFileSync(file, line);
+    } catch (_) {}
+  };
+  const origLog = console.log.bind(console);
+  const origErr = console.error.bind(console);
+  console.log = (...a) => { origLog(...a); write('INFO', a); };
+  console.error = (...a) => { origErr(...a); write('ERROR', a); };
+}
+
 // ---------- проверка окружения ----------
+function envMissing() {
+  const m = [];
+  if (!TG_TOKEN) m.push('TELEGRAM_BOT_TOKEN');
+  if (ALLOWED.size === 0) m.push('TELEGRAM_ALLOWED_CHAT(S)');
+  if (!process.env.ANTHROPIC_API_KEY) m.push('ANTHROPIC_API_KEY');
+  return m;
+}
 function requireEnv() {
-  const missing = [];
-  if (!TG_TOKEN) missing.push('TELEGRAM_BOT_TOKEN');
-  if (ALLOWED.size === 0) missing.push('TELEGRAM_ALLOWED_CHAT(S)');
-  if (!process.env.ANTHROPIC_API_KEY) missing.push('ANTHROPIC_API_KEY');
+  const missing = envMissing();
   if (missing.length) {
     console.error(
       'Не заданы переменные окружения: ' + missing.join(', ') +
@@ -629,21 +653,76 @@ function shutdown(reason) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+// ---------- 3.2 режим webhook (альтернатива polling) ----------
+async function registerWebhook() {
+  const secret = process.env.BOT_WEBHOOK_SECRET || '';
+  if (process.env.BOT_WEBHOOK_URL) {
+    const payload = { url: process.env.BOT_WEBHOOK_URL, allowed_updates: ['message', 'callback_query'] };
+    if (secret) payload.secret_token = secret;
+    await tg('setWebhook', payload);
+    console.log('Webhook зарегистрирован в Telegram:', process.env.BOT_WEBHOOK_URL);
+  }
+}
+function webhookRequestGuard(req) {
+  const secret = process.env.BOT_WEBHOOK_SECRET || '';
+  return !secret || req.headers['x-telegram-bot-api-secret-token'] === secret;
+}
+
+// Самостоятельный webhook-сервер (BOT_MODE=webhook): свой HTTP-порт.
+async function startWebhook(query) {
+  const port = Number(process.env.BOT_WEBHOOK_PORT) || 8081;
+  const pathName = process.env.BOT_WEBHOOK_PATH || '/telegram/webhook';
+  await registerWebhook();
+  const server = http.createServer((req, res) => {
+    if (req.method !== 'POST' || req.url !== pathName) { res.writeHead(404); res.end(); return; }
+    if (!webhookRequestGuard(req)) { res.writeHead(401); res.end(); return; }
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 2 * 1024 * 1024) req.destroy(); });
+    req.on('end', () => {
+      res.writeHead(200); res.end();
+      try { handleUpdate(JSON.parse(body)); } catch (e) { console.error('webhook parse:', e.message); }
+    });
+  });
+  server.listen(port, () => console.log(`Webhook-сервер слушает :${port}${pathName}`));
+  await worker(query);
+}
+
+// Встраивание webhook в существующий Express-app (server.js). Не завершает процесс.
+export async function registerExpressWebhook(app) {
+  const missing = envMissing();
+  if (missing.length) { console.error('Telegram webhook не смонтирован — нет: ' + missing.join(', ')); return; }
+  setupLogging();
+  const query = await loadAgent();
+  const pathName = process.env.BOT_WEBHOOK_PATH || '/telegram/webhook';
+  app.post(pathName, (req, res) => {
+    if (!webhookRequestGuard(req)) { res.status(401).end(); return; }
+    res.status(200).end();
+    try { handleUpdate(req.body); } catch (e) { console.error('webhook:', e.message); }
+  });
+  await registerWebhook();
+  worker(query); // фоновый воркер (не await)
+  console.log('Telegram webhook смонтирован в Express на', pathName);
+}
+
 // ---------- запуск ----------
 async function main() {
+  setupLogging();
   requireEnv();
   const query = await loadAgent();
   const me = await tg('getMe', {});
-  console.log(`Бот @${me.username} запущен (long polling).`);
+  const mode = (process.env.BOT_MODE || 'polling').toLowerCase();
+  console.log(`Бот @${me.username} запущен (${mode}).`);
   console.log(`Проект: ${project} (${workdir})`);
   console.log(`Разрешённые chat id: ${[...ALLOWED].join(', ')}`);
   console.log(`Модель: ${model} | режим: ${permissionMode} | таймаут: ${Math.round(AGENT_TIMEOUT_MS / 1000)}с`);
   if (DAILY_COST_LIMIT) console.log(`Дневной лимит: $${DAILY_COST_LIMIT} (потрачено $${costToday().toFixed(2)})`);
-  await Promise.all([poll(), worker(query)]);
+
+  if (mode === 'webhook') await startWebhook(query);
+  else await Promise.all([poll(), worker(query)]);
 }
 
 if (IS_MAIN) {
   main().catch((err) => { console.error('Фатальная ошибка бота:', err?.message || err); process.exit(1); });
 }
 
-export { toHtml, escapeHtml, chunk, summarizeTool, loadDotenv, parseProjects };
+export { toHtml, escapeHtml, chunk, summarizeTool, loadDotenv, parseProjects, parseAllowed };

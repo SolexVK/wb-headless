@@ -32,10 +32,12 @@ Tier 0 (0.1): опрос и выполнение расцеплены — нез
 - [x] 2.6 Голосовые → текст (транскрипция через OpenAI-совместимый STT)
 
 ## Tier 3 — Эксплуатация и деплой
-- [ ] 3.1 Always-on (`systemd` / `pm2` / Docker + автоперезапуск)
-- [ ] 3.2 Режим webhook (`/telegram/webhook` в `server.js` + `setWebhook`)
-- [ ] 3.3 Логирование в файл (структурные логи, ротация)
-- [ ] 3.4 Тесты (чанкинг, проверка chat id, парсинг команд; mock-режим агента)
+- [x] 3.1 Always-on (`deploy/wb-telegram-bot.service`, `deploy/Dockerfile`, pm2)
+- [x] 3.2 Режим webhook (`BOT_MODE=webhook` + встраивание в `server.js`)
+- [x] 3.3 Логирование в файл (`BOT_LOG_FILE`, ротация по размеру)
+- [x] 3.4 Тесты (`node --test`): chunk, toHtml, summarizeTool, loadDotenv, parseProjects, parseAllowed
+
+## Готово: все тиры (0–3) реализованы.
 
 ## Рекомендуемый порядок
 1. Весь Tier 0 (фундамент, особенно 0.1).

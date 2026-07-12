@@ -370,6 +370,14 @@ function startReportScheduler() {
   console.log(`Планировщик отчёта включён: ежедневно в ${hour}:00 UTC`);
 }
 
+// Необязательно: смонтировать Telegram-бот в режиме webhook (см. TELEGRAM.md).
+// Включается через TELEGRAM_WEBHOOK_IN_SERVER=1. Не влияет на остальной сервис.
+if (process.env.TELEGRAM_WEBHOOK_IN_SERVER === '1') {
+  import('./telegram-bot.js')
+    .then((m) => m.registerExpressWebhook(app))
+    .catch((err) => console.error('Telegram webhook:', err?.message || err));
+}
+
 app.listen(PORT, () => {
   console.log('WB headless listening on', PORT);
   startReportScheduler();

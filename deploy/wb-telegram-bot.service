@@ -1,0 +1,20 @@
+[Unit]
+Description=WB headless — Telegram bot (мост в Claude Agent)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Путь к проекту на сервере (поправьте под себя)
+WorkingDirectory=/opt/wb-headless
+ExecStart=/usr/bin/node telegram-bot.js
+# Переменные берутся из .env (бот читает его сам); EnvironmentFile — по желанию
+EnvironmentFile=-/opt/wb-headless/.env
+Restart=always
+RestartSec=5
+# Отдельный пользователь без прав root (создайте заранее)
+User=wb
+Group=wb
+
+[Install]
+WantedBy=multi-user.target
