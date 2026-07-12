@@ -15,6 +15,8 @@ import { fileURLToPath } from 'url';
 import { buildNicheAnalysis } from './lib/nicheAnalysis.js';
 import { nicheReportToCSV } from './lib/nicheReport.js';
 import { readOracle, filterPhrases, toQueries } from './lib/oraclePhrases.js';
+import { nicheHtmlDocument } from './lib/nicheReportHtml.js';
+import { htmlToPdf } from './lib/renderPdf.js';
 import { defaultPeriod } from './report-stock.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -105,9 +107,24 @@ export function writeOutputs(analysis) {
   const base = `niche-${slugCategory(analysis.categoryPath)}-${analysis.period.d1}_${analysis.period.d2}`;
   const csvPath = path.join(dir, `${base}.csv`);
   const jsonPath = path.join(dir, `${base}.json`);
+  const htmlPath = path.join(dir, `${base}.html`);
   fs.writeFileSync(csvPath, nicheReportToCSV(toCsvReport(analysis)));
   fs.writeFileSync(jsonPath, JSON.stringify(analysis, null, 2));
-  return { csvPath, jsonPath };
+
+  // HTML всегда; PDF — если найден Chromium и не отключено NICHE_PDF=0.
+  const html = nicheHtmlDocument(analysis);
+  fs.writeFileSync(htmlPath, html);
+  const out = { csvPath, jsonPath, htmlPath };
+  if (process.env.NICHE_PDF !== '0') {
+    const pdfPath = path.join(dir, `${base}.pdf`);
+    try {
+      htmlToPdf(html, pdfPath);
+      out.pdfPath = pdfPath;
+    } catch (err) {
+      process.stderr.write(`⚠ PDF не собран: ${String(err?.message || err)} (HTML сохранён)\n`);
+    }
+  }
+  return out;
 }
 
 export function printSummary(analysis) {
@@ -198,9 +215,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     supplyCards: argSupply || undefined,
   })
     .then((analysis) => {
-      const { csvPath, jsonPath } = writeOutputs(analysis);
+      const out = writeOutputs(analysis);
       printSummary(analysis);
-      console.log(`\nФайлы:\n  ${csvPath}\n  ${jsonPath}`);
+      console.log('\nФайлы:');
+      for (const p of [out.pdfPath, out.htmlPath, out.csvPath, out.jsonPath]) if (p) console.log(`  ${p}`);
     })
     .catch((err) => {
       console.error('Ошибка анализа ниши:', err?.message || err);
