@@ -123,8 +123,8 @@ export function printSummary(analysis) {
   console.log(`  Цена сред./медиана: ${fmt(c.avgPrice)} / ${fmt(c.medianPrice)} ₽`);
   console.log(`  Продавцов: ${fmt(comp.sellersCount)} · брендов: ${fmt(comp.brandsCount)}`);
   console.log(`  Монополизация (топ-10 товаров): ${comp.monopolyPct}% · лидер: ${comp.topSeller} (${comp.topSellerSharePct}%)`);
-  if (trend) console.log(`  Тренд выручки: ${trend.deltaPct}% (${trend.direction})`);
-  if (seas?.sufficient) console.log(`  Сезонность: ${seas.level}, пик — месяц ${seas.peakMonth}`);
+  if (trend) console.log(`  Тренд выручки: ${trend.growthPct}% ${trend.basis === 'yoy' ? 'год к году' : ''} (${trend.direction})`);
+  if (seas?.sufficient) console.log(`  Сезонность: ${seas.level}, пик — мес ${seas.peakMonth}, спад — мес ${seas.troughMonth}`);
 
   if (analysis.sellers?.length) {
     console.log('\nТоп-продавцы ниши:');
