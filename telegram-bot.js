@@ -1,74 +1,84 @@
 // telegram-bot.js — мост Telegram ↔ Claude Agent.
 //
-// Позволяет ставить задачи по проекту прямо из Telegram-чата: ваши сообщения
-// уходят в Claude Agent SDK (тот же движок, что и Claude Code — с доступом к
-// файлам репозитория, git и командам), а ответ приходит обратно в чат.
+// Ставьте задачи по проекту прямо из Telegram: сообщения уходят в Claude Agent
+// SDK (движок Claude Code — доступ к файлам репозитория, git, командам), ответ
+// приходит в чат. Связь с Telegram — long polling (getUpdates), публичный URL
+// не нужен. Запуск: `npm run bot`.
 //
-// Режим связи с Telegram — long polling (getUpdates): бот сам опрашивает
-// Telegram, публичный URL/веб-хук не нужен. Запустил `npm run bot` — работает.
+// Возможности: очередь задач, таймаут, graceful shutdown, персистентная сессия,
+// прогресс в реальном времени, лимит расходов, подтверждение опасных действий
+// кнопками, git-шорткаты, приём/отдача файлов, несколько проектов и пользователей,
+// голосовые сообщения (при настроенном STT).
 //
-// Архитектура: опрос Telegram и выполнение задач расцеплены — это два
-// независимых цикла (poll + worker). Пока агент работает над задачей, бот
-// продолжает принимать сообщения; задачи ставятся в очередь.
-//
-// Переменные окружения (см. .env.example / TELEGRAM.md):
-//   TELEGRAM_BOT_TOKEN      — токен бота от @BotFather (обязательно)
-//   TELEGRAM_ALLOWED_CHAT   — ваш chat id; только он может писать боту (обязательно)
-//   ANTHROPIC_API_KEY       — ключ Claude API для движка агента (обязательно)
-//   CLAUDE_MODEL            — модель по умолчанию (claude-opus-4-8)
-//   CLAUDE_PERMISSION_MODE  — режим прав по умолчанию (acceptEdits)
-//   BOT_WORKDIR             — рабочая папка агента (по умолчанию папка проекта)
-//   AGENT_TIMEOUT_MS        — таймаут одной задачи, мс (по умолчанию 600000)
-//   DAILY_COST_LIMIT        — дневной лимит расходов в $ (0/пусто = без лимита)
-//   BOT_STATE_FILE          — файл состояния (по умолчанию .bot-state.json рядом)
+// Переменные окружения — см. .env.example / TELEGRAM.md.
 
 import fs from 'fs';
 import path from 'path';
+import { execFile } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-// true, если файл запущен напрямую (`node telegram-bot.js`), а не импортирован в тестах
 const IS_MAIN = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 // ---------- 0.2 Автозагрузка .env (без внешних зависимостей) ----------
 function loadDotenv(file) {
   let txt;
-  try { txt = fs.readFileSync(file, 'utf8'); } catch (_) { return; } // .env необязателен
+  try { txt = fs.readFileSync(file, 'utf8'); } catch (_) { return; }
   for (const line of txt.split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(.*?)\s*$/);
-    if (!m) continue; // комментарии и пустые строки пропускаем
+    if (!m) continue;
     const key = m[1];
     let val = m[2];
     if ((val.startsWith('"') && val.endsWith('"')) ||
         (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
     }
-    if (!(key in process.env)) process.env[key] = val; // реальное окружение приоритетнее
+    if (!(key in process.env)) process.env[key] = val;
   }
 }
 loadDotenv(path.join(SCRIPT_DIR, '.env'));
 
+// ---------- 2.4 проекты ----------
+const WORKDIR_DEFAULT = process.env.BOT_WORKDIR || SCRIPT_DIR;
+function parseProjects() {
+  const map = {};
+  for (const pair of (process.env.BOT_PROJECTS || '').split(',')) {
+    const idx = pair.indexOf(':');
+    if (idx < 1) continue;
+    const name = pair.slice(0, idx).trim();
+    const dir = pair.slice(idx + 1).trim();
+    if (name && dir) map[name] = dir;
+  }
+  if (Object.keys(map).length === 0) map.default = WORKDIR_DEFAULT;
+  return map;
+}
+const PROJECTS = parseProjects();
+
 // ---------- конфигурация ----------
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-const ALLOWED_CHAT = String(process.env.TELEGRAM_ALLOWED_CHAT || '').trim();
+// 2.5 несколько пользователей (список chat id), обратная совместимость с одиночным
+const ALLOWED = new Set(
+  (process.env.TELEGRAM_ALLOWED_CHATS || process.env.TELEGRAM_ALLOWED_CHAT || '')
+    .split(',').map((s) => s.trim()).filter(Boolean)
+);
 const MODEL_DEFAULT = process.env.CLAUDE_MODEL || 'claude-opus-4-8';
 const MODE_DEFAULT = process.env.CLAUDE_PERMISSION_MODE || 'acceptEdits';
-const WORKDIR = process.env.BOT_WORKDIR || SCRIPT_DIR;
 const AGENT_TIMEOUT_MS = Number(process.env.AGENT_TIMEOUT_MS) || 600000;
-const DAILY_COST_LIMIT = Number(process.env.DAILY_COST_LIMIT) || 0; // 0 = без лимита
+const DAILY_COST_LIMIT = Number(process.env.DAILY_COST_LIMIT) || 0;
 const STATE_FILE = process.env.BOT_STATE_FILE || path.join(SCRIPT_DIR, '.bot-state.json');
 const MODES = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
 
 const TG_API = `https://api.telegram.org/bot${TG_TOKEN}`;
-const TG_MSG_LIMIT = 4096; // лимит длины сообщения в Telegram
+const TG_MSG_LIMIT = 4096;
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function allowed(chatId) { return ALLOWED.has(String(chatId)); }
 
 // ---------- проверка окружения ----------
 function requireEnv() {
   const missing = [];
   if (!TG_TOKEN) missing.push('TELEGRAM_BOT_TOKEN');
-  if (!ALLOWED_CHAT) missing.push('TELEGRAM_ALLOWED_CHAT');
+  if (ALLOWED.size === 0) missing.push('TELEGRAM_ALLOWED_CHAT(S)');
   if (!process.env.ANTHROPIC_API_KEY) missing.push('ANTHROPIC_API_KEY');
   if (missing.length) {
     console.error(
@@ -79,12 +89,13 @@ function requireEnv() {
   }
 }
 
-// ---------- 0.5 Персистентность состояния (переживает рестарт) ----------
+// ---------- 0.5 Персистентность состояния ----------
 let state = loadState();
-let sessionId = state.sessionId || null;
-// 1.6 текущие настройки (можно менять из чата, сохраняются в state)
 let model = state.model || MODEL_DEFAULT;
 let permissionMode = state.permissionMode || MODE_DEFAULT;
+let project = (state.project && PROJECTS[state.project]) ? state.project : Object.keys(PROJECTS)[0];
+let workdir = PROJECTS[project];
+state.sessions = state.sessions || {};
 
 function loadState() {
   try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); }
@@ -94,9 +105,12 @@ function saveState() {
   try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2)); }
   catch (err) { console.error('Не удалось сохранить состояние:', err?.message || err); }
 }
-function setSession(id) {
-  if (id && id !== sessionId) { sessionId = id; state.sessionId = id; saveState(); }
+// 2.5 сессии на каждый чат — контексты пользователей не смешиваются
+function getSession(chatId) { return state.sessions[chatId] || null; }
+function setSession(chatId, id) {
+  if (id && state.sessions[chatId] !== id) { state.sessions[chatId] = id; saveState(); }
 }
+function resetSession(chatId) { delete state.sessions[chatId]; saveState(); }
 
 // ---------- 1.5 учёт расходов по дням ----------
 function today() { return new Date().toISOString().slice(0, 10); }
@@ -110,16 +124,13 @@ function addCost(usd) {
 }
 function limitReached() { return DAILY_COST_LIMIT > 0 && costToday() >= DAILY_COST_LIMIT; }
 
-// ---------- Claude Agent SDK (грузим динамически ради понятной ошибки) ----------
+// ---------- Claude Agent SDK ----------
 async function loadAgent() {
-  try {
-    const mod = await import('@anthropic-ai/claude-agent-sdk');
-    return mod.query;
-  } catch (err) {
+  try { return (await import('@anthropic-ai/claude-agent-sdk')).query; }
+  catch (err) {
     console.error(
       'Не найден пакет @anthropic-ai/claude-agent-sdk.\n' +
-      'Установите зависимости: npm install\n' +
-      'Исходная ошибка: ' + (err?.message || err)
+      'Установите зависимости: npm install\nИсходная ошибка: ' + (err?.message || err)
     );
     process.exit(1);
   }
@@ -142,7 +153,7 @@ async function tg(method, payload, signal) {
   const data = await res.json();
   if (!data.ok) {
     const e = new Error(`Telegram ${method}: ${data.description || res.status}`);
-    e.code = data.error_code; // 0.6: пробрасываем код (409 и др.)
+    e.code = data.error_code;
     throw e;
   }
   return data.result;
@@ -153,7 +164,7 @@ function chunk(text) {
   let rest = String(text || '').trim() || '(пустой ответ)';
   while (rest.length > TG_MSG_LIMIT) {
     let cut = rest.lastIndexOf('\n', TG_MSG_LIMIT);
-    if (cut < TG_MSG_LIMIT * 0.5) cut = TG_MSG_LIMIT; // не режем слишком коротко
+    if (cut < TG_MSG_LIMIT * 0.5) cut = TG_MSG_LIMIT;
     chunks.push(rest.slice(0, cut));
     rest = rest.slice(cut);
   }
@@ -161,39 +172,35 @@ function chunk(text) {
   return chunks;
 }
 
-// Простой текст (системные уведомления, прогресс).
-async function sendMessage(chatId, text) {
-  for (const c of chunk(text)) {
-    try { await tg('sendMessage', { chat_id: chatId, text: c }); }
+async function sendMessage(chatId, text, extra) {
+  const parts = chunk(text);
+  for (let i = 0; i < parts.length; i++) {
+    const payload = { chat_id: chatId, text: parts[i] };
+    if (extra && i === parts.length - 1) Object.assign(payload, extra); // клавиатуру — к последней части
+    try { await tg('sendMessage', payload); }
     catch (err) { console.error('sendMessage:', err?.message || err); }
   }
 }
 
-// 1.4 Ответ агента с HTML-форматированием и надёжным откатом в простой текст.
+// 1.4 ответ агента с HTML-форматированием и откатом в простой текст
 async function sendResult(chatId, text) {
   const html = toHtml(text);
   if (html.length <= TG_MSG_LIMIT) {
-    try {
-      await tg('sendMessage', { chat_id: chatId, text: html, parse_mode: 'HTML' });
-      return;
-    } catch (err) {
-      console.error('HTML send failed, откат в текст:', err?.message || err);
-    }
+    try { await tg('sendMessage', { chat_id: chatId, text: html, parse_mode: 'HTML' }); return; }
+    catch (err) { console.error('HTML send failed, откат в текст:', err?.message || err); }
   }
-  await sendMessage(chatId, text); // длинный ответ или сбой парсинга — простым текстом
+  await sendMessage(chatId, text);
 }
 
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
-// Лёгкая конвертация Markdown → Telegram HTML (код-блоки, инлайн-код, жирный).
 function toHtml(md) {
   const parts = String(md || '').split('```');
   let out = '';
   for (let i = 0; i < parts.length; i++) {
     if (i % 2 === 1) {
-      // содержимое код-блока; первую строку-язык (если это просто идентификатор) убираем
-      let code = parts[i].replace(/^([A-Za-z0-9_+-]*)\n/, '');
+      const code = parts[i].replace(/^([A-Za-z0-9_+-]*)\n/, '');
       out += '<pre><code>' + escapeHtml(code.replace(/\n$/, '')) + '</code></pre>';
     } else {
       let seg = escapeHtml(parts[i]);
@@ -208,23 +215,111 @@ function toHtml(md) {
 
 async function sendTyping(chatId) {
   try { await tg('sendChatAction', { chat_id: chatId, action: 'typing' }); }
-  catch (_) { /* не критично */ }
+  catch (_) {}
 }
 
-// ---------- 0.1 Очередь задач + воркер (расцеплены с опросом) ----------
+// 2.3 отправка файла из рабочей папки в чат (с защитой от выхода за пределы)
+async function sendDocument(chatId, relPath) {
+  const root = path.resolve(workdir);
+  const abs = path.resolve(root, relPath);
+  if (abs !== root && !abs.startsWith(root + path.sep)) {
+    return sendMessage(chatId, 'Путь вне рабочей папки.');
+  }
+  let buf;
+  try { buf = fs.readFileSync(abs); }
+  catch (_) { return sendMessage(chatId, 'Файл не найден: ' + relPath); }
+  try {
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    form.append('document', new Blob([buf]), path.basename(abs));
+    const res = await fetch(`${TG_API}/sendDocument`, { method: 'POST', body: form });
+    const data = await res.json();
+    if (!data.ok) sendMessage(chatId, 'Не удалось отправить файл: ' + (data.description || res.status));
+  } catch (err) { sendMessage(chatId, 'Ошибка отправки файла: ' + (err?.message || err)); }
+}
+
+// скачать файл Telegram по file_id → Buffer
+async function downloadTgFile(fileId) {
+  const f = await tg('getFile', { file_id: fileId });
+  const url = `https://api.telegram.org/file/bot${TG_TOKEN}/${f.file_path}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('download ' + res.status);
+  return { buf: Buffer.from(await res.arrayBuffer()), tgPath: f.file_path };
+}
+
+// 2.3 приём документа: сохраняем в рабочую папку
+async function receiveDocument(chatId, doc) {
+  try {
+    const { buf, tgPath } = await downloadTgFile(doc.file_id);
+    const name = path.basename(doc.file_name || tgPath || 'file');
+    fs.writeFileSync(path.join(workdir, name), buf);
+    sendMessage(chatId, `Файл сохранён: ${name} (${buf.length} байт). Сошлитесь на него в задаче.`);
+  } catch (err) { sendMessage(chatId, 'Не удалось принять файл: ' + (err?.message || err)); }
+}
+
+// 2.6 голос → текст (через OpenAI-совместимый STT-эндпоинт, если настроен)
+async function transcribe(buf, filename) {
+  if (!process.env.STT_API_URL) return null;
+  const form = new FormData();
+  form.append('file', new Blob([buf]), filename);
+  form.append('model', process.env.STT_MODEL || 'whisper-1');
+  const headers = process.env.STT_API_KEY ? { Authorization: `Bearer ${process.env.STT_API_KEY}` } : {};
+  const res = await fetch(process.env.STT_API_URL, { method: 'POST', headers, body: form });
+  const data = await res.json().catch(() => ({}));
+  return data.text || null;
+}
+async function handleVoice(chatId, voice) {
+  if (!process.env.STT_API_URL) {
+    sendMessage(chatId, 'Распознавание голоса не настроено. Задайте STT_API_URL (OpenAI-совместимый /audio/transcriptions) и STT_API_KEY.');
+    return;
+  }
+  try {
+    const { buf } = await downloadTgFile(voice.file_id);
+    const text = await transcribe(buf, 'voice.oga');
+    if (!text) { sendMessage(chatId, 'Не удалось распознать голос.'); return; }
+    sendMessage(chatId, `🎙 Распознано: ${text}`);
+    dispatch(chatId, text);
+  } catch (err) { sendMessage(chatId, 'Ошибка распознавания: ' + (err?.message || err)); }
+}
+
+// ---------- 2.2 git-шорткаты ----------
+function git(args) {
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd: workdir, maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
+      resolve({ code: err ? (err.code || 1) : 0, out: `${stdout || ''}${stderr || ''}`.trim() });
+    });
+  });
+}
+async function gitDiff(chatId) {
+  const stat = await git(['diff', '--stat']);
+  const full = await git(['diff']);
+  const body = (stat.out || 'нет изменений') + (full.out ? '\n\n' + full.out : '');
+  await sendResult(chatId, '```\n' + body + '\n```');
+}
+async function gitPush(chatId) {
+  const r = await git(['push']);
+  await sendMessage(chatId, r.out || (r.code === 0 ? 'push выполнен.' : 'push завершился с ошибкой.'));
+}
+async function gitCommit(chatId, msg) {
+  const add = await git(['add', '-A']);
+  if (add.code !== 0) { await sendMessage(chatId, 'git add: ' + add.out); return; }
+  const r = await git(['commit', '-m', msg]);
+  await sendMessage(chatId, r.out || (r.code === 0 ? 'commit создан.' : 'commit не выполнен.'));
+}
+
+// ---------- 0.1 Очередь задач + воркер ----------
 const queue = [];
-let wake = null;          // резолвер «в очереди появилась задача»
-let busy = false;         // выполняется ли задача прямо сейчас
-let currentAbort = null;  // AbortController текущей задачи (таймаут / /stop / shutdown)
+let wake = null;
+let busy = false;
+let currentAbort = null;
+let activeChatId = null; // чат текущей задачи (для подтверждений 2.1)
 let shuttingDown = false;
 
 function enqueue(item) {
   queue.push(item);
   if (wake) { const w = wake; wake = null; w(); }
 }
-function waitForItem() {
-  return new Promise((resolve) => { wake = resolve; });
-}
+function waitForItem() { return new Promise((resolve) => { wake = resolve; }); }
 
 async function worker(query) {
   while (!shuttingDown) {
@@ -239,29 +334,59 @@ async function worker(query) {
   }
 }
 
-// ---------- выполнение одной задачи в Claude Agent ----------
+// ---------- 2.1 подтверждение опасных действий кнопками ----------
+let confirmSeq = 0;
+let pendingConfirm = null; // { id, resolve }
+
+function canUseTool(toolName, input, { signal }) {
+  const id = String(++confirmSeq);
+  const hint = summarizeTool({ name: toolName, input });
+  const kb = {
+    inline_keyboard: [[
+      { text: '✅ Разрешить', callback_data: `a:${id}` },
+      { text: '⛔ Запретить', callback_data: `d:${id}` },
+    ]],
+  };
+  sendMessage(activeChatId, `Разрешить действие?\n${hint}`, { reply_markup: kb });
+  return new Promise((resolve) => {
+    pendingConfirm = { id, resolve };
+    signal.addEventListener('abort', () => {
+      if (pendingConfirm && pendingConfirm.id === id) {
+        pendingConfirm = null;
+        resolve({ behavior: 'deny', message: 'Отменено.' });
+      }
+    }, { once: true });
+  });
+}
+
+function resolveConfirm(id, allow) {
+  if (!pendingConfirm || pendingConfirm.id !== id) return false;
+  const { resolve } = pendingConfirm;
+  pendingConfirm = null;
+  if (allow) resolve({ behavior: 'allow' });
+  else resolve({ behavior: 'deny', message: 'Запрещено пользователем.' });
+  return true;
+}
+
+// ---------- выполнение задачи ----------
 async function processTask(query, { chatId, text }) {
   const abort = new AbortController();
   currentAbort = abort;
-  const timeout = setTimeout(() => abort.abort('timeout'), AGENT_TIMEOUT_MS); // 0.3
+  activeChatId = chatId;
+  const timeout = setTimeout(() => abort.abort('timeout'), AGENT_TIMEOUT_MS);
   sendTyping(chatId);
   const typing = setInterval(() => sendTyping(chatId), 5000);
   try {
     const { text: answer, cost } = await runAgent(query, text, abort, chatId);
-    addCost(cost); // 1.5
+    addCost(cost);
     await sendResult(chatId, answer);
   } catch (err) {
     if (abort.signal.aborted) {
       const reason = abort.signal.reason;
-      if (reason === 'timeout') {
-        await sendMessage(chatId, `Задача прервана по таймауту (${Math.round(AGENT_TIMEOUT_MS / 1000)}с).`);
-      } else if (reason === 'user') {
-        await sendMessage(chatId, 'Задача остановлена.');
-      } else if (reason === 'shutdown') {
-        console.log('Задача прервана из-за остановки бота.');
-      } else {
-        await sendMessage(chatId, 'Задача прервана.');
-      }
+      if (reason === 'timeout') await sendMessage(chatId, `Задача прервана по таймауту (${Math.round(AGENT_TIMEOUT_MS / 1000)}с).`);
+      else if (reason === 'user') await sendMessage(chatId, 'Задача остановлена.');
+      else if (reason === 'shutdown') console.log('Задача прервана из-за остановки бота.');
+      else await sendMessage(chatId, 'Задача прервана.');
     } else {
       await sendMessage(chatId, 'Ошибка: ' + (err?.message || String(err)));
     }
@@ -269,10 +394,10 @@ async function processTask(query, { chatId, text }) {
     clearTimeout(timeout);
     clearInterval(typing);
     currentAbort = null;
+    activeChatId = null;
   }
 }
 
-// Компактная строка активности для события использования инструмента (1.1).
 function summarizeTool(b) {
   const name = b.name || 'tool';
   const inp = b.input || {};
@@ -287,67 +412,67 @@ async function runAgent(query, prompt, abort, chatId) {
   let finalText = '';
   let cost = 0;
   const options = {
-    cwd: WORKDIR,
+    cwd: workdir,
     model,
     permissionMode,
     abortController: abort,
+    canUseTool, // 2.1 — вызывается SDK, когда инструменту нужно подтверждение
   };
-  if (permissionMode === 'bypassPermissions') {
-    options.allowDangerouslySkipPermissions = true; // требование SDK
-  }
-  if (sessionId) options.resume = sessionId; // продолжаем диалог
+  if (permissionMode === 'bypassPermissions') options.allowDangerouslySkipPermissions = true;
+  const resume = getSession(chatId);
+  if (resume) options.resume = resume;
 
   for await (const message of query({ prompt, options })) {
     if (message.type === 'system' && message.subtype === 'init') {
-      setSession(message.session_id);
+      setSession(chatId, message.session_id);
     } else if (message.type === 'assistant') {
-      // 1.1 прогресс: сообщаем о вызовах инструментов по мере работы
-      const blocks = message.message?.content || [];
-      for (const b of blocks) {
-        if (b && b.type === 'tool_use') sendMessage(chatId, summarizeTool(b)); // fire-and-forget
+      for (const b of (message.message?.content || [])) {
+        if (b && b.type === 'tool_use') sendMessage(chatId, summarizeTool(b));
       }
     } else if (message.type === 'result') {
       if (typeof message.total_cost_usd === 'number') cost = message.total_cost_usd;
-      if (typeof message.result === 'string') {
-        finalText = message.result;
-      } else if (message.is_error) {
+      if (typeof message.result === 'string') finalText = message.result;
+      else if (message.is_error) {
         const errs = Array.isArray(message.errors) ? message.errors.join('\n') : '';
         finalText = 'Агент завершился с ошибкой' +
-          (message.subtype ? ` (${message.subtype})` : '') +
-          (errs ? ':\n' + errs : '.');
+          (message.subtype ? ` (${message.subtype})` : '') + (errs ? ':\n' + errs : '.');
       }
     }
   }
   return { text: finalText, cost };
 }
 
-// ---------- команды и маршрутизация входящих ----------
+// ---------- команды ----------
 const HELP = [
-  'Я — мост в Claude Agent для проекта wb-headless.',
-  'Просто пишите задачу текстом — я выполню её в репозитории и пришлю результат.',
+  'Я — мост в Claude Agent. Пишите задачу текстом — выполню в проекте и пришлю результат.',
   '',
   'Команды:',
   '/start, /help — справка',
-  '/status — что происходит (очередь, модель, расходы)',
+  '/status — очередь, модель, режим, проект, расходы',
   '/stop — остановить текущую задачу и очистить очередь',
-  '/reset — начать новый диалог (сбросить контекст сессии)',
+  '/reset — новый диалог (сброс контекста сессии)',
   '/model [id] — показать/сменить модель',
   '/mode [' + MODES.join('|') + '] — показать/сменить режим прав',
+  '/project [name] — показать/сменить проект',
+  '/diff — показать git diff',
+  '/commit [сообщение] — закоммитить (без сообщения — агент придумает сам)',
+  '/push — git push',
+  '/send <путь> — прислать файл из рабочей папки',
   '',
-  'Пока идёт одна задача, новые становятся в очередь.',
+  'Можно прислать файл (сохраню в проект) или голосовое (распознаю, если настроен STT).',
+  'В режиме прав default опасные действия подтверждаются кнопками.',
 ].join('\n');
 
-function statusText() {
+function statusText(chatId) {
   const lines = [
     `Занят: ${busy ? 'да' : 'нет'}`,
     `В очереди: ${queue.length}`,
+    `Проект: ${project} (${workdir})`,
     `Модель: ${model}`,
     `Режим прав: ${permissionMode}`,
-    `Папка: ${WORKDIR}`,
-    `Сессия: ${sessionId || 'нет'}`,
+    `Сессия: ${getSession(chatId) || 'нет'}`,
   ];
-  const spent = `$${costToday().toFixed(2)}`;
-  lines.push(`Потрачено сегодня: ${spent}${DAILY_COST_LIMIT ? ` из $${DAILY_COST_LIMIT}` : ''}`);
+  lines.push(`Потрачено сегодня: $${costToday().toFixed(2)}${DAILY_COST_LIMIT ? ` из $${DAILY_COST_LIMIT}` : ''}`);
   return lines.join('\n');
 }
 
@@ -355,15 +480,15 @@ function dispatch(chatId, text) {
   const t = text.trim();
 
   if (t === '/start' || t === '/help') { sendMessage(chatId, HELP); return; }
-  if (t === '/status') { sendMessage(chatId, statusText()); return; }
+  if (t === '/status') { sendMessage(chatId, statusText(chatId)); return; }
 
-  if (t === '/reset') { // сброс контекста диалога
-    sessionId = null; state.sessionId = null; saveState();
+  if (t === '/reset') {
+    resetSession(chatId);
     sendMessage(chatId, 'Контекст сброшен. Начинаем новый диалог.');
     return;
   }
 
-  if (t === '/stop') { // 1.2 остановка текущей задачи + очистка очереди
+  if (t === '/stop') {
     const queued = queue.length;
     queue.length = 0;
     if (currentAbort) {
@@ -375,7 +500,7 @@ function dispatch(chatId, text) {
     return;
   }
 
-  if (t === '/model' || t.startsWith('/model ')) { // 1.6
+  if (t === '/model' || t.startsWith('/model ')) {
     const arg = t.slice(6).trim();
     if (!arg) { sendMessage(chatId, `Текущая модель: ${model}\nСменить: /model <id>`); return; }
     model = arg; state.model = arg; saveState();
@@ -383,7 +508,7 @@ function dispatch(chatId, text) {
     return;
   }
 
-  if (t === '/mode' || t.startsWith('/mode ')) { // 1.6
+  if (t === '/mode' || t.startsWith('/mode ')) {
     const arg = t.slice(5).trim();
     if (!arg) { sendMessage(chatId, `Текущий режим прав: ${permissionMode}\nСменить: /mode ${MODES.join('|')}`); return; }
     if (!MODES.includes(arg)) { sendMessage(chatId, `Неизвестный режим. Допустимо: ${MODES.join(', ')}`); return; }
@@ -392,25 +517,46 @@ function dispatch(chatId, text) {
     return;
   }
 
-  // обычный текст → задача
-  if (limitReached()) { // 1.5
-    sendMessage(chatId,
-      `Дневной лимит расходов исчерпан: $${costToday().toFixed(2)} из $${DAILY_COST_LIMIT}. ` +
-      `Сбросится завтра, или увеличьте DAILY_COST_LIMIT.`);
+  if (t === '/project' || t.startsWith('/project ')) { // 2.4
+    const arg = t.slice(9).trim();
+    const names = Object.keys(PROJECTS);
+    if (!arg) { sendMessage(chatId, `Текущий проект: ${project} (${workdir})\nДоступно: ${names.join(', ')}\nСменить: /project <name>`); return; }
+    if (!PROJECTS[arg]) { sendMessage(chatId, `Нет проекта «${arg}». Доступно: ${names.join(', ')}`); return; }
+    project = arg; workdir = PROJECTS[arg]; state.project = arg; saveState();
+    resetSession(chatId); // контекст сессии привязан к папке
+    sendMessage(chatId, `Проект: ${project} (${workdir}). Контекст сброшен.`);
     return;
   }
 
+  if (t === '/diff') { gitDiff(chatId); return; } // 2.2
+  if (t === '/push') { gitPush(chatId); return; }
+  if (t === '/commit' || t.startsWith('/commit ')) {
+    const msg = t.slice(7).trim();
+    if (msg) { gitCommit(chatId, msg); return; }
+    // без сообщения — поручаем агенту осмысленный коммит
+    text = 'Просмотри незакоммиченные изменения (git diff/status) и сделай git commit с осмысленным сообщением на русском. Не делай push.';
+  } else if (t === '/send' || t.startsWith('/send ')) { // 2.3
+    const rel = t.slice(5).trim();
+    if (!rel) sendMessage(chatId, 'Укажите путь: /send <файл>');
+    else sendDocument(chatId, rel);
+    return;
+  }
+
+  // обычный текст → задача
+  if (limitReached()) {
+    sendMessage(chatId, `Дневной лимит расходов исчерпан: $${costToday().toFixed(2)} из $${DAILY_COST_LIMIT}. Сбросится завтра или увеличьте DAILY_COST_LIMIT.`);
+    return;
+  }
   const ahead = queue.length + (busy ? 1 : 0);
-  enqueue({ chatId, text: t });
+  enqueue({ chatId, text: text.trim() });
   if (ahead > 0) sendMessage(chatId, `Задача принята, впереди в очереди: ${ahead}.`);
 }
 
-// ---------- 0.1/0.6 цикл опроса Telegram ----------
+// ---------- цикл опроса Telegram ----------
 const pollAbort = new AbortController();
 
 async function poll() {
   let offset = 0;
-  // сбрасываем «зависшие» апдейты, накопившиеся до запуска
   try {
     const backlog = await tg('getUpdates', { offset: -1, timeout: 0 });
     if (backlog.length) offset = backlog[backlog.length - 1].update_id + 1;
@@ -421,12 +567,9 @@ async function poll() {
     try {
       updates = await tg('getUpdates', { offset, timeout: 30 }, pollAbort.signal);
     } catch (err) {
-      if (err.aborted) return; // штатная остановка
+      if (err.aborted) return;
       if (err.code === 409) {
-        console.error(
-          'Конфликт 409: запущен другой экземпляр бота или установлен webhook.\n' +
-          'Оставьте только один экземпляр (или удалите webhook: deleteWebhook). Останавливаюсь.'
-        );
+        console.error('Конфликт 409: запущен другой экземпляр бота или установлен webhook. Останавливаюсь.');
         shutdown('conflict');
         return;
       }
@@ -437,18 +580,39 @@ async function poll() {
 
     for (const upd of updates) {
       offset = upd.update_id + 1;
-      const msg = upd.message;
-      if (!msg || !msg.text) continue;
-
-      const chatId = String(msg.chat.id);
-      if (chatId !== ALLOWED_CHAT) {
-        // не наш чат — подсказываем chat id (удобно при первичной настройке)
-        sendMessage(chatId, `Доступ запрещён. Ваш chat id: ${chatId}`);
-        continue;
-      }
-      dispatch(chatId, msg.text);
+      try { handleUpdate(upd); }
+      catch (err) { console.error('handleUpdate:', err?.message || err); }
     }
   }
+}
+
+function handleUpdate(upd) {
+  // 2.1 нажатия кнопок подтверждения
+  if (upd.callback_query) {
+    const cq = upd.callback_query;
+    const chatId = String(cq.message?.chat?.id || '');
+    tg('answerCallbackQuery', { callback_query_id: cq.id }).catch(() => {});
+    if (!allowed(chatId)) return;
+    const [act, id] = String(cq.data || '').split(':');
+    const ok = resolveConfirm(id, act === 'a');
+    const verdict = act === 'a' ? '✅ разрешено' : '⛔ запрещено';
+    tg('editMessageText', {
+      chat_id: chatId, message_id: cq.message.message_id,
+      text: (cq.message.text || 'Подтверждение') + '\n' + (ok ? verdict : '(уже обработано)'),
+    }).catch(() => {});
+    return;
+  }
+
+  const msg = upd.message;
+  if (!msg) return;
+  const chatId = String(msg.chat.id);
+  if (!allowed(chatId)) {
+    sendMessage(chatId, `Доступ запрещён. Ваш chat id: ${chatId}`);
+    return;
+  }
+  if (msg.text) dispatch(chatId, msg.text);
+  else if (msg.document) receiveDocument(chatId, msg.document);
+  else if (msg.voice) handleVoice(chatId, msg.voice);
 }
 
 // ---------- 0.4 Graceful shutdown ----------
@@ -456,12 +620,9 @@ function shutdown(reason) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`\nЗавершение работы (${reason})...`);
-  pollAbort.abort();                 // прервать текущий long-poll
-  if (wake) { const w = wake; wake = null; w(); } // разбудить воркер
-  if (currentAbort) {
-    console.log('Прерываю текущую задачу...');
-    currentAbort.abort('shutdown');
-  }
+  pollAbort.abort();
+  if (wake) { const w = wake; wake = null; w(); }
+  if (currentAbort) { console.log('Прерываю текущую задачу...'); currentAbort.abort('shutdown'); }
   saveState();
   setTimeout(() => process.exit(0), 500);
 }
@@ -472,24 +633,17 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 async function main() {
   requireEnv();
   const query = await loadAgent();
-
-  const me = await tg('getMe', {}); // проверка токена + имя бота
+  const me = await tg('getMe', {});
   console.log(`Бот @${me.username} запущен (long polling).`);
-  console.log(`Рабочая папка агента: ${WORKDIR}`);
-  console.log(`Разрешённый chat id: ${ALLOWED_CHAT}`);
+  console.log(`Проект: ${project} (${workdir})`);
+  console.log(`Разрешённые chat id: ${[...ALLOWED].join(', ')}`);
   console.log(`Модель: ${model} | режим: ${permissionMode} | таймаут: ${Math.round(AGENT_TIMEOUT_MS / 1000)}с`);
-  if (DAILY_COST_LIMIT) console.log(`Дневной лимит расходов: $${DAILY_COST_LIMIT} (потрачено сегодня $${costToday().toFixed(2)})`);
-  if (sessionId) console.log(`Восстановлена сессия: ${sessionId}`);
-
+  if (DAILY_COST_LIMIT) console.log(`Дневной лимит: $${DAILY_COST_LIMIT} (потрачено $${costToday().toFixed(2)})`);
   await Promise.all([poll(), worker(query)]);
 }
 
 if (IS_MAIN) {
-  main().catch((err) => {
-    console.error('Фатальная ошибка бота:', err?.message || err);
-    process.exit(1);
-  });
+  main().catch((err) => { console.error('Фатальная ошибка бота:', err?.message || err); process.exit(1); });
 }
 
-// экспорт чистых функций для тестов (Tier 3.4)
-export { toHtml, escapeHtml, chunk, summarizeTool, loadDotenv };
+export { toHtml, escapeHtml, chunk, summarizeTool, loadDotenv, parseProjects };
