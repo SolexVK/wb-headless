@@ -220,7 +220,7 @@ app.get('/reports/niche', requireKey, async (req, res) => {
     if (!process.env.MPSTATS_TOKEN) {
       return res.status(500).json({ error: 'mpstats_token_missing' });
     }
-    let { d1, d2, format, path: categoryPath, maxRows, pageSize, query, freq } = req.query;
+    let { d1, d2, format, path: categoryPath, maxRows, pageSize, query, freq, supply } = req.query;
     if (!categoryPath || !String(categoryPath).trim()) {
       return res.status(400).json({ error: 'category_path_missing', detail: 'Укажите ?path=<категория WB>' });
     }
@@ -232,6 +232,7 @@ app.get('/reports/niche', requireKey, async (req, res) => {
       d2,
       query: query && String(query).trim() ? String(query).trim() : null,
       frequency: freq != null && String(freq).trim() ? Number(freq) : null,
+      supplyCards: supply != null && String(supply).trim() ? Number(supply) : null,
       maxRows: Number(maxRows) || Number(process.env.NICHE_MAX_ROWS) || 5000,
       pageSize: Number(pageSize) || Number(process.env.NICHE_PAGE_SIZE) || 500,
     });

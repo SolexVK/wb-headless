@@ -45,17 +45,18 @@ function toCsvReport(analysis) {
   };
 }
 
-export async function runNicheReport({ categoryPath, d1, d2, query, frequency } = {}) {
+export async function runNicheReport({ categoryPath, d1, d2, query, frequency, supplyCards } = {}) {
   const cat = categoryPath || process.env.NICHE_PATH;
   if (!cat || !String(cat).trim()) {
     throw new Error(
       'Не задан путь категории. Укажите его аргументом или через NICHE_PATH, ' +
-        'напр.: NICHE_PATH="Женщинам/Одежда/Платья" node report-niche.js'
+        'напр.: NICHE_PATH="Женщинам/Платья и сарафаны/Платья" node report-niche.js'
     );
   }
   const period = d1 && d2 ? { d1, d2 } : defaultPeriod(Number(process.env.REPORT_DAYS) || 30);
   const q = query ?? process.env.NICHE_QUERY;
   const freq = frequency ?? process.env.NICHE_FREQ;
+  const supply = supplyCards ?? process.env.NICHE_SUPPLY;
 
   process.stderr.write(
     `Анализ ниши: «${cat}», период ${period.d1} … ${period.d2}` +
@@ -68,6 +69,7 @@ export async function runNicheReport({ categoryPath, d1, d2, query, frequency } 
     d2: period.d2,
     query: q && String(q).trim() ? String(q).trim() : null,
     frequency: freq != null && String(freq).trim() ? Number(freq) : null,
+    supplyCards: supply != null && String(supply).trim() ? Number(supply) : null,
     maxRows: Number(process.env.NICHE_MAX_ROWS) || 5000,
     pageSize: Number(process.env.NICHE_PAGE_SIZE) || 500,
     onPage: (loaded, total) => {
@@ -113,9 +115,10 @@ export function printSummary(analysis) {
     console.log(`  ${''.padEnd(13)} ${b.detail}`);
   }
 
+  const basis = c.dataBasis === 'niche' ? 'вся ниша, по ценовым сегментам' : 'по выгруженным top-N';
   console.log('\nЦифры ниши:');
-  console.log(`  Товаров: ${fmt(c.productsInNiche)}` + (c.truncated ? ` (анализ по ${fmt(c.productsAnalyzed)} топ по выручке)` : ''));
-  console.log(`  Выручка: ${fmt(c.totalRevenue)} ₽ (${fmt(c.totalUnits)} шт) за период`);
+  console.log(`  Товаров: ${fmt(c.productsInNiche)}` + (c.truncated ? ` (детально выгружено ${fmt(c.productsAnalyzed)} топ по выручке)` : ''));
+  console.log(`  Выручка: ${fmt(c.totalRevenue)} ₽ (${fmt(c.totalUnits)} шт) за период — ${basis}`);
   console.log(`  Упущенная выручка (дефицит спроса): ${fmt(c.lostRevenue)} ₽`);
   console.log(`  Цена сред./медиана: ${fmt(c.avgPrice)} / ${fmt(c.medianPrice)} ₽`);
   console.log(`  Продавцов: ${fmt(comp.sellersCount)} · брендов: ${fmt(comp.brandsCount)}`);
@@ -132,16 +135,15 @@ export function printSummary(analysis) {
 
   const qd = analysis.queryDemand;
   if (qd) {
-    console.log(`\nНасыщенность по запросу «${qd.query}» (${qd.period.d1} … ${qd.period.d2}):`);
-    console.log(`  Предложение (карточек по запросу): ${fmt(qd.supply)}` + (qd.capped ? ` (анализ по ${fmt(qd.analyzed)})` : ''));
-    console.log(`  Выручка выдачи: ${fmt(qd.revenue)} ₽ · на карточку ${fmt(qd.avgRevenuePerCard)} ₽ (на «живую» ${fmt(qd.avgRevenuePerActiveCard)} ₽)`);
+    console.log(`\nТОП-выдача по запросу «${qd.query}» (${qd.period.d1} … ${qd.period.d2}):`);
+    console.log(`  Карточек в топе: ${fmt(qd.topCount)}` + (qd.topCapped ? ' (эндпоинт отдаёт максимум ~100)' : ''));
+    console.log(`  Выручка топа: ${fmt(qd.revenue)} ₽ · на карточку ${fmt(qd.avgRevenuePerCard)} ₽ (на «живую» ${fmt(qd.avgRevenuePerActiveCard)} ₽)`);
     console.log(`  С продажами: ${qd.withSalesPct}% · монополизация топ-10: ${qd.monopolyTop10Pct}% · упущено ${fmt(qd.lostRevenue)} ₽`);
     console.log(`  Медиана цены продажи: ${fmt(qd.medianAvgSalePrice)} ₽`);
     if (qd.demandSupplyRatio != null) {
-      console.log(`  Спрос:предложение = ${qd.demandSupplyRatio}:1 (частотность ${fmt(qd.frequency)}) → ${qd.ratioVerdict}`);
-    } else if (qd.note) {
-      console.log(`  ⚠ ${qd.note}`);
+      console.log(`  Спрос:предложение = ${qd.demandSupplyRatio}:1 (частотность ${fmt(qd.frequency)} ÷ ${fmt(qd.supplyCards)} карточек) → ${qd.ratioVerdict}`);
     }
+    for (const n of qd.notes || []) console.log(`  ⚠ ${n}`);
   }
 
   if (analysis.notes?.length) {
@@ -151,15 +153,16 @@ export function printSummary(analysis) {
 }
 
 // Запуск как самостоятельного скрипта.
-//   node report-niche.js "<категория>" [d1] [d2] [запрос] [частотность]
+//   node report-niche.js "<категория>" [d1] [d2] [запрос] [частотность] [кол-во_карточек]
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [, , argCat, argD1, argD2, argQuery, argFreq] = process.argv;
+  const [, , argCat, argD1, argD2, argQuery, argFreq, argSupply] = process.argv;
   runNicheReport({
     categoryPath: argCat || undefined,
     d1: argD1 || undefined,
     d2: argD2 || undefined,
     query: argQuery || undefined,
     frequency: argFreq || undefined,
+    supplyCards: argSupply || undefined,
   })
     .then((analysis) => {
       const { csvPath, jsonPath } = writeOutputs(analysis);
