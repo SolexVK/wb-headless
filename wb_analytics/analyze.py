@@ -1,34 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-collect_seller.py — конкурентный анализ ПРОДАВЦА по его артикулам и нише.
+analyze.py — слой данных единой аналитической системы wb_analytics.
 
-Собирает из MPStats API по списку nmId продавца: метрики целевых карточек,
-рынок ниши, сопоставимый сегмент (например, комплекты), ТОП-конкурентов,
-географию складов (продавец vs конкуренты), оценку потенциала и план
-распределения стока по центральным хабам, авто-дорожную карту → seller_data.json
-для build_seller.py.
+`analyze(cfg) -> report` собирает из MPStats API по конфигу единый отчёт
+(один и тот же для любой ниши/типа товара): метрики целевых карточек, рынок
+ниши, сопоставимый сегмент, ТОП-конкурентов, географию складов
+(продавец vs конкуренты), оценку потенциала и план распределения стока,
+авто-дорожную карту. Результат (dict той же схемы, что рендерит render.py)
+можно сохранить в JSON и переиспользовать без обращения к сети.
+
+Конфиг (см. configs/*.example.json) описывает нишу и что считать; секции,
+которые нужно нарисовать, задаются в cfg['sections'] и здесь используются
+только для «гейтинга» лишних запросов (ключевые слова, картинки).
 
 Почему по nmId: MPStats не отдаёт ассортимент продавца по id/имени надёжно
 (бренд-сквоттинг, seller-by-id закрыт), а WB catalog/card API за антиботом.
-По nmId же item/* и category работают стабильно.
-
-Требуется MPSTATS_TOKEN. Пример:
-    MPSTATS_TOKEN=xxx python3 collect_seller.py \
-      --sku 707011618 529697243 707008613 ... \
-      --category "Дом/Детская/Постельные принадлежности/Для детей/Постельное белье" \
-      --niche-name "детское постельное бельё" \
-      --comparable постельное_бель кпб \
-      --seller-name "ИП Комиренко Т А" --seller-id 4289467 \
-      --detailed 3 --out reports-output/seller_data.json
+По nmId же item/* и category работают стабильно. Требуется MPSTATS_TOKEN.
 """
-import json, os, sys, ssl, time, base64, argparse, datetime as dt, urllib.parse, urllib.request
+import json, os, sys, ssl, time, base64, datetime as dt, urllib.parse, urllib.request
 import statistics as st
 from collections import defaultdict
 
 BASE = os.environ.get('MPSTATS_BASE_URL', 'https://mpstats.io/api').rstrip('/')
 CTX = ssl.create_default_context()
 STORES_URL = 'https://static-basket-01.wbbasket.ru/vol0/data/stores-data.json'
+_HERE = os.path.dirname(os.path.abspath(__file__))
+REGION_DEMAND_PATH = os.path.join(_HERE, 'reference', 'wb_region_demand.json')
 
 # Центральные (флагманские) хабы WB — Москва/ЦФО + города-миллионники, куда идёт
 # основная масса заказов. PRIORITY — 6 ключевых для сводки.
@@ -36,6 +34,13 @@ CENTRAL_IDS = {507, 120762, 206348, 117501, 218623, 301229, 206236, 218210, 3128
                117986, 2737, 1733, 130744, 686, 208277, 301809}
 PRIORITY = [(507, 'Коледино'), (120762, 'Электросталь'), (206348, 'Алексин (Тула)'),
             (117986, 'Казань'), (2737, 'Санкт-Петербург'), (1733, 'Екатеринбург')]
+HUB_REGION = {507: 'Москва/ЦФО', 120762: 'Москва/ЦФО', 206348: 'Москва/ЦФО', 117501: 'Москва/ЦФО',
+              218623: 'Москва/ЦФО', 301229: 'Москва/ЦФО', 206236: 'Москва/ЦФО', 301809: 'Москва/ЦФО',
+              218210: 'Санкт-Петербург', 312807: 'Санкт-Петербург', 2737: 'Санкт-Петербург',
+              117986: 'Казань/Приволжье', 1733: 'Екатеринбург/Урал',
+              130744: 'Юг (Краснодар/СКФО)', 208277: 'Юг (Краснодар/СКФО)', 686: 'Новосибирск/Сибирь'}
+CENTRAL_REGIONS = ['Москва/ЦФО', 'Санкт-Петербург', 'Казань/Приволжье', 'Екатеринбург/Урал']
+
 
 def token():
     t = os.environ.get('MPSTATS_TOKEN')
@@ -101,34 +106,40 @@ def fetch_category(path, d1, d2, page=5000):
         if start >= total: break
     seen = set(); return [r for r in rows if not (r['id'] in seen or seen.add(r['id']))]
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--sku', nargs='+', type=int, required=True)
-    ap.add_argument('--category', required=True)
-    ap.add_argument('--niche-name', required=True)
-    ap.add_argument('--comparable', nargs='*', default=['постельное бель', 'кпб', 'комплект бель'],
-                    help='подстроки названия, определяющие сопоставимый сегмент (комплекты). "a b" = обе подстроки.')
-    ap.add_argument('--seller-name', required=True)
-    ap.add_argument('--seller-id', type=int, required=True)
-    ap.add_argument('--detailed', type=int, default=3)
-    ap.add_argument('--days', type=int, default=30)
-    ap.add_argument('--d1'); ap.add_argument('--d2')
-    ap.add_argument('--n-competitors', type=int, default=12)
-    ap.add_argument('--out', default='reports-output/seller_data.json')
-    a = ap.parse_args()
-    d2 = a.d2 or dt.date.today().isoformat()
-    d1 = a.d1 or (dt.date.fromisoformat(d2) - dt.timedelta(days=a.days)).isoformat()
-    TARGETS = a.sku; DETAILED = TARGETS[:a.detailed]
+
+def _period(cfg):
+    p = cfg.get('period', {}) or {}
+    days = p.get('days', 30)
+    d2 = p.get('d2') or dt.date.today().isoformat()
+    d1 = p.get('d1') or (dt.date.fromisoformat(d2) - dt.timedelta(days=days)).isoformat()
+    return d1, d2, days
+
+
+def analyze(cfg):
+    """Собрать единый отчёт по конфигу. Возвращает dict схемы, которую рендерит render.py."""
+    d1, d2, days = _period(cfg)
+    category = cfg['category']
+    seller = cfg.get('seller', {}) or {}
+    seller_name = seller.get('name', ''); seller_id = seller.get('id')
+    TARGETS = list(cfg.get('targets', []))
+    detailed_n = cfg.get('detailed', 3)
+    n_competitors = cfg.get('n_competitors', 12)
+    comparable = cfg.get('comparable') or ['постельное бель', 'кпб', 'комплект бель']
+    sections = cfg.get('sections') or ['cover', 'target_cards', 'competitors', 'warehouses', 'potential', 'niche', 'roadmap']
+    fetch_images = cfg.get('fetch_images', True)
+    want_kw = 'target_cards' in sections
+    DETAILED = TARGETS[:detailed_n]
     rev = lambda r: r.get('revenue') or 0; sl = lambda r: r.get('sales') or 0
+    imgof = (lambda r: img_b64(r)) if fetch_images else (lambda r: '')
 
     def is_comp(r):
         n = (r.get('name') or '').lower()
-        for term in a.comparable:
+        for term in comparable:
             if all(t in n for t in term.replace('_', ' ').split()): return True
         return False
 
-    print(f'период {d1}…{d2} · ниша «{a.category}» · артикулов {len(TARGETS)}')
-    print('· категория (рынок)…'); ALL = fetch_category(a.category, d1, d2)
+    print(f'период {d1}…{d2} · ниша «{category}» · артикулов {len(TARGETS)}')
+    print('· категория (рынок)…'); ALL = fetch_category(category, d1, d2)
     if not ALL: sys.exit('пустой ответ категории — повторите запуск')
     print(f'  {len(ALL)} SKU')
     ALL.sort(key=lambda r: -rev(r)); total_rev = sum(rev(r) for r in ALL); total_sales = sum(sl(r) for r in ALL)
@@ -155,9 +166,9 @@ def main():
                  rank=rankmap.get(sku), kpb_rank=kpb_rank.get(sku), share=round(rev(r) / total_rev * 100, 4) if total_rev else 0,
                  days_in_stock=r.get('days_in_stock'), rating=r.get('rating'), comments=r.get('comments'),
                  warehouses_count=len(wh), lost_profit=r.get('lost_profit'), sales_per_day=r.get('sales_per_day_average'),
-                 sizes=sizes_of(info), warehouses_ids=sorted(wh.items(), key=lambda x: -x[1]), image=img_b64(r))
+                 sizes=sizes_of(info), warehouses_ids=sorted(wh.items(), key=lambda x: -x[1]), image=imgof(r))
         o['stock'] = sum(s['qty'] for s in o['sizes'])
-        if sku in DETAILED:
+        if want_kw and sku in DETAILED:
             ik = api(f'/wb/get/item/{sku}/by_keywords', q={'d1': d1, 'd2': d2}) or {}
             words = ik.get('words', {}) if isinstance(ik, dict) else {}
             kws = [(w, wd.get('avg_pos') or 0, wd.get('avg_organic_pos') or 0, wd.get('total') or 0)
@@ -169,7 +180,7 @@ def main():
         print(f'  target {sku} rank {rankmap.get(sku)} sales {sl(r)}')
 
     # ---- competitors (comparable segment, exclude our seller) + warehouse footprint ----
-    comp_rows = [r for r in COMP_SEG if r['id'] not in TARGETS and (r.get('seller') or '') != a.seller_name][:a.n_competitors]
+    comp_rows = [r for r in COMP_SEG if r['id'] not in TARGETS and (r.get('seller') or '') != seller_name][:n_competitors]
     competitors = []; central_cov = defaultdict(int); central_qty = defaultdict(int); comp_central_shares = []
     for r in comp_rows:
         info = (api(f"/wb/get/item/{r['id']}") or {}).get('item') or {}
@@ -183,7 +194,7 @@ def main():
             buyout=r.get('purchase'), share=round(rev(r) / kpb_rev * 100, 3) if kpb_rev else 0,
             rank=rankmap[r['id']], kpb_rank=kpb_rank[r['id']], days=r.get('days_in_site'),
             n_wh=len(wh), central_n=len(cnames), central_names=cnames,
-            central_share=round(cent / tot * 100) if tot else 0, image=img_b64(r)))
+            central_share=round(cent / tot * 100) if tot else 0, image=imgof(r)))
         print(f"  comp {r['id']} central={len(cnames)} share={round(cent/tot*100) if tot else 0}%")
 
     # ---- seller warehouse footprint ----
@@ -213,7 +224,7 @@ def main():
     ours = [byid[s] for s in TARGETS if s in byid]
     seller_sales = sum(sl(r) for r in ours); seller_rev = sum(rev(r) for r in ours)
     seller_prices = [r.get('final_price') for r in ours if r.get('final_price')]
-    comparable = {'n': len(COMP_SEG), 'rev': kpb_rev, 'sales': sum(sl(r) for r in COMP_SEG),
+    comparable_agg = {'n': len(COMP_SEG), 'rev': kpb_rev, 'sales': sum(sl(r) for r in COMP_SEG),
                   'price_median': round(st.median(kpb_prices)) if kpb_prices else None,
                   'price_mean': round(st.mean(kpb_prices)) if kpb_prices else None,
                   'p25': pctile(kpb_prices, 25), 'p75': pctile(kpb_prices, 75),
@@ -240,9 +251,9 @@ def main():
              'bands': [(l, round(sum(rev(r) for r in ALL if a2 <= (r.get('final_price') or 0) < b2) / max(1, total_rev) * 100, 1)) for l, a2, b2 in bands_def]}
 
     compare = {'our_avg_price': round(st.mean(seller_prices)) if seller_prices else None,
-               'niche_median_price': niche['price_median'], 'kpb_median_price': comparable['price_median'],
-               'top10_avg_price': comparable['top10_avg_price'], 'top10_avg_sales': comparable['top10_avg_sales'],
-               'top10_avg_comments': comparable['top10_avg_comments'],
+               'niche_median_price': niche['price_median'], 'kpb_median_price': comparable_agg['price_median'],
+               'top10_avg_price': comparable_agg['top10_avg_price'], 'top10_avg_sales': comparable_agg['top10_avg_sales'],
+               'top10_avg_comments': comparable_agg['top10_avg_comments'],
                'our_total_sales': seller_sales, 'our_total_rev': seller_rev,
                'our_avg_sales': round(seller_sales / len(ours)) if ours else 0,
                'our_avg_comments': round(st.mean([byid[s].get('comments') or 0 for s in TARGETS if s in byid])) if ours else 0,
@@ -254,25 +265,18 @@ def main():
     # ---- potential: коэффициенты привязаны к ДОЛЕ ЦЕНТРАЛЬНОГО СПРОСА по регионам ----
     price = compare['our_avg_price'] or 0
     base_units = seller_sales
-    # справочник долей спроса по макрорегионам (эвристика, редактируемая)
-    rd_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wb_region_demand.json')
-    REGION_W = {k: v for k, v in (json.load(open(rd_path, encoding='utf-8')) if os.path.exists(rd_path) else {}).items() if not k.startswith('_')}
-    HUB_REGION = {507: 'Москва/ЦФО', 120762: 'Москва/ЦФО', 206348: 'Москва/ЦФО', 117501: 'Москва/ЦФО',
-                  218623: 'Москва/ЦФО', 301229: 'Москва/ЦФО', 206236: 'Москва/ЦФО', 301809: 'Москва/ЦФО',
-                  218210: 'Санкт-Петербург', 312807: 'Санкт-Петербург', 2737: 'Санкт-Петербург',
-                  117986: 'Казань/Приволжье', 1733: 'Екатеринбург/Урал',
-                  130744: 'Юг (Краснодар/СКФО)', 208277: 'Юг (Краснодар/СКФО)', 686: 'Новосибирск/Сибирь'}
-    CENTRAL_REGIONS = ['Москва/ЦФО', 'Санкт-Петербург', 'Казань/Приволжье', 'Екатеринбург/Урал']
+    REGION_W = {k: v for k, v in (json.load(open(REGION_DEMAND_PATH, encoding='utf-8')) if os.path.exists(REGION_DEMAND_PATH) else {}).items() if not k.startswith('_')}
     central_demand = round(sum(REGION_W.get(r, 0) for r in CENTRAL_REGIONS) * 100)
-    # какие центральные регионы продавец реально закрывает (порог значимого стока)
     thresh = max(10, round(seller_total * 0.05))
     reg_seller = defaultdict(int)
     for w, q in seller_wh.items():
         if w in HUB_REGION: reg_seller[HUB_REGION[w]] += q
     covered = {r for r in CENTRAL_REGIONS if reg_seller.get(r, 0) >= thresh}
     missing_regions = [r for r in CENTRAL_REGIONS if r not in covered]
-    c_missing = sum(REGION_W.get(r, 0) for r in missing_regions)     # недоступная доля центр. спроса
-    # логистический фактор = вернуть capture-долю недостающего центр. спроса; контент/отзывы — отдельный фактор
+    c_missing = sum(REGION_W.get(r, 0) for r in missing_regions)
+    cap_real, cap_amb = cfg.get('capture', {}).get('real', 0.5), cfg.get('capture', {}).get('ambitious', 0.85)
+    content_real, content_amb = cfg.get('content_factor', {}).get('real', 1.5), cfg.get('content_factor', {}).get('ambitious', 2.0)
+
     def scen(cap_log, cap_rev, name):
         log_f = round(1 + c_missing * cap_log, 2); rev_f = cap_rev
         mult = round(log_f * rev_f, 2)
@@ -280,9 +284,8 @@ def main():
                 'units': round(base_units * mult), 'revenue': round(base_units * mult * price)}
     scenarios = [
         {'name': 'Сейчас', 'mult': 1, 'log_f': 1, 'rev_f': 1, 'units': base_units, 'revenue': base_units * price},
-        scen(0.5, 1.5, 'Реалистичный (центр. склады + отзывы)'),
-        scen(0.85, 2.0, 'Амбициозный (центр. склады + сильный контент)')]
-    # веса распределения — по фактическому стоку конкурентов на центральных хабах
+        scen(cap_real, content_real, 'Реалистичный (центр. склады + отзывы)'),
+        scen(cap_amb, content_amb, 'Амбициозный (центр. склады + сильный контент)')]
     cq = warehouses['central_qty']; cq_tot = sum(cq.values()) or 1
     target_units = scenarios[1]['units']
     dist_plan = [{'hub': h, 'weight': round(q / cq_tot * 100), 'units': round(q / cq_tot * target_units)}
@@ -301,13 +304,13 @@ def main():
     if missing_priority:
         roadmap.append(['P1', 'сейчас', 'Распределить поставки на центральные склады',
             f"Корневая причина низких продаж — товар только на регион-складах. Срочно завести FBW-поставки на {', '.join(missing_priority[:4])} — оттуда идёт основная масса заказов. См. план распределения стока."])
-    if compare['our_avg_comments'] < comparable['top10_avg_comments'] / 3:
+    if comparable_agg['top10_avg_comments'] and compare['our_avg_comments'] < comparable_agg['top10_avg_comments'] / 3:
         roadmap.append(['P1', 'сейчас', 'Набрать отзывы на ключевые карточки',
-            f"У вас в среднем {compare['our_avg_comments']} отзывов против ≈{comparable['top10_avg_comments']} у ТОП-10 — низкая доказанность бьёт по конверсии. Сбор отзывов на 3–4 лучшие карточки в рамках правил WB."])
+            f"У вас в среднем {compare['our_avg_comments']} отзывов против ≈{comparable_agg['top10_avg_comments']} у ТОП-10 — низкая доказанность бьёт по конверсии. Сбор отзывов на 3–4 лучшие карточки в рамках правил WB."])
     if len(TARGETS) > 4:
         roadmap.append(['P1', 'сейчас', f'Консолидировать {len(TARGETS)} карточек в 2–4 сильные',
             'Почти одинаковые SKU дробят трафик, отзывы и рекламу. Свести дубли в карточки с вариациями размеров/цветов, склеив отзывы и историю.'])
-    if not any(o.get('brand') for o in targets.values()):
+    if targets and not any(o.get('brand') for o in targets.values()):
         roadmap.append(['P2', '2–4 недели', 'Оформить бренд и брендовую линейку',
             'Поле бренда пустое — теряете брендовый трафик и узнаваемость. Указать бренд, единый стиль карточек, витрину.'])
     roadmap.append(['P2', '2–4 недели', 'SEO-заголовки, характеристики и контент',
@@ -315,18 +318,15 @@ def main():
     roadmap.append(['P3', '1–2 месяца', 'Реклама и участие в акциях',
         'Автокампании/АРК на топ-запросы и участие в акциях — после набора отзывов и контента.'])
 
-    data = {'meta': {'d1': d1, 'd2': d2, 'days': a.days, 'niche_path': a.category, 'niche_name': a.niche_name,
-                     'seller': a.seller_name, 'seller_id': a.seller_id, 'generated': d2,
+    return {'meta': {'d1': d1, 'd2': d2, 'days': days, 'niche_path': category, 'niche_name': cfg['niche_name'],
+                     'seller': seller_name, 'seller_id': seller_id, 'generated': d2,
+                     'segment_name': cfg.get('segment_name', 'сопоставимый сегмент'),
+                     'segment_note': cfg.get('segment_note', ''),
+                     'sections': sections,
                      'market_total': total_rev, 'top100_sum': top100, 'n_sku': len(ALL)},
             'target_order': [str(s) for s in TARGETS], 'detailed': [str(s) for s in DETAILED],
-            'targets': targets, 'competitors': competitors, 'niche': niche, 'comparable': comparable,
+            'targets': targets, 'competitors': competitors, 'niche': niche, 'comparable': comparable_agg,
             'warehouses': warehouses, 'compare': compare, 'potential': potential, 'roadmap': roadmap,
             'seller_agg': {'n': len(ours), 'sales': seller_sales, 'revenue': seller_rev,
                            'share': compare['our_share'], 'avg_price': compare['our_avg_price'],
                            'best_rank': compare['our_best_rank']}}
-    os.makedirs(os.path.dirname(a.out) or '.', exist_ok=True)
-    json.dump(data, open(a.out, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
-    print(f'✓ {a.out} · рынок {total_rev:,} ₽ · продавец {seller_sales} продаж · центр. хабов {warehouses["seller"]["central_n"]}')
-
-if __name__ == '__main__':
-    main()
