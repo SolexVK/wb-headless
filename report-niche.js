@@ -48,7 +48,7 @@ function toCsvReport(analysis) {
   };
 }
 
-export async function runNicheReport({ categoryPath, d1, d2, query, frequency, supplyCards } = {}) {
+export async function runNicheReport({ categoryPath, d1, d2, query, frequency, supplyCards, cost: costArg } = {}) {
   const cat = categoryPath || process.env.NICHE_PATH;
   if (!cat || !String(cat).trim()) {
     throw new Error(
@@ -60,6 +60,7 @@ export async function runNicheReport({ categoryPath, d1, d2, query, frequency, s
   const q = query ?? process.env.NICHE_QUERY;
   const freq = frequency ?? process.env.NICHE_FREQ;
   const supply = supplyCards ?? process.env.NICHE_SUPPLY;
+  const cost = costArg ?? process.env.NICHE_COST;
   // Несколько уточняющих фраз, если в спецификации есть «;» или «=фраза:карточки».
   const isMulti = q && /[;=]/.test(String(q));
 
@@ -93,6 +94,7 @@ export async function runNicheReport({ categoryPath, d1, d2, query, frequency, s
     frequency: oracleQueries ? null : isMulti ? null : freq != null && String(freq).trim() ? Number(freq) : null,
     supplyCards: oracleQueries ? null : isMulti ? null : supply != null && String(supply).trim() ? Number(supply) : null,
     queries: oracleQueries || (isMulti ? String(q) : null),
+    cost: cost != null && String(cost).trim() ? Number(cost) : null,
     maxRows: Number(process.env.NICHE_MAX_ROWS) || 5000,
     pageSize: Number(process.env.NICHE_PAGE_SIZE) || 500,
     onPage: (loaded, total) => {
@@ -137,6 +139,10 @@ export function printSummary(analysis) {
       const mark = p.tone === 'good' ? '✓' : p.tone === 'bad' ? '✗' : '•';
       console.log(`  ${mark} ${p.text}`);
     }
+    for (const f of analysis.conclusion.flags || []) {
+      console.log(`  ${f.level === 'stop' ? '⛔' : '⚠'} ${f.text}`);
+    }
+    if (analysis.conclusion.recommendation) console.log(`  → ${analysis.conclusion.recommendation}`);
   }
 
   console.log('\n' + '═'.repeat(64));
@@ -168,7 +174,7 @@ export function printSummary(analysis) {
   console.log(`  Выручка: ${fmt(c.totalRevenue)} ₽ (${fmt(c.totalUnits)} шт) за период — ${basis}`);
   console.log(`  Упущенная выручка (дефицит спроса): ${fmt(c.lostRevenue)} ₽`);
   if (analysis.sellThrough?.ratio != null) {
-    console.log(`  Sell-through (Овчинников): ${analysis.sellThrough.ratio}× продажи/остаток · оборот ${analysis.sellThrough.medianTurnoverDays} дн.`);
+    console.log(`  Реализация остатка (Овчинников): ${analysis.sellThrough.ratio}× продажи/остаток · оборот ${analysis.sellThrough.medianTurnoverDays} дн.`);
   }
   console.log(`  Цена сред./медиана: ${fmt(c.avgPrice)} / ${fmt(c.medianPrice)} ₽`);
   console.log(`  Продавцов: ${fmt(comp.sellersCount)} · брендов: ${fmt(comp.brandsCount)}`);
@@ -183,27 +189,19 @@ export function printSummary(analysis) {
     }
   }
 
-  const qds = analysis.queryDemands || (analysis.queryDemand ? [analysis.queryDemand] : []);
-
-  // Сравнительная таблица спрос:предложение (если фраз несколько и есть отношения).
-  const withRatio = qds.filter((q) => q.demandSupplyRatio != null);
-  if (withRatio.length > 1) {
-    console.log('\nУточняющие фразы — спрос:предложение (по убыванию):');
-    for (const q of [...withRatio].sort((a, b) => b.demandSupplyRatio - a.demandSupplyRatio)) {
-      console.log(`  ${q.demandSupplyRatio.toFixed(1).padStart(4)}:1  ${q.ratioVerdict.padEnd(24)} ${q.query} (частота ${fmt(q.frequency)} ÷ ${fmt(q.supplyCards)})`);
+  // Уточняющие фразы — единой таблицей, ранжировано по реализации остатка.
+  const qds = (analysis.queryDemands || []).slice()
+    .sort((a, b) => (b.sellThrough?.ratio || 0) - (a.sellThrough?.ratio || 0));
+  if (qds.length) {
+    console.log('\nУточняющие фразы (по реализации остатка ↓):');
+    console.log('  реализ.  оборот  спрос:предл  частота  запрос');
+    for (const q of qds) {
+      const st = q.sellThrough?.ratio;
+      console.log(
+        `  ${(st != null ? st + '×' : '—').padStart(6)}  ${(q.sellThrough?.medianTurnoverDays != null ? q.sellThrough.medianTurnoverDays + ' дн' : '—').padStart(6)}` +
+        `  ${(q.demandSupplyRatio != null ? q.demandSupplyRatio + ':1' : '—').padStart(9)}  ${(fmt(q.frequency) || '—').padStart(7)}  ${q.query}`
+      );
     }
-  }
-
-  for (const qd of qds) {
-    console.log(`\nТОП-выдача по запросу «${qd.query}» (${qd.period.d1} … ${qd.period.d2}):`);
-    console.log(`  Карточек в топе: ${fmt(qd.topCount)}` + (qd.topCapped ? ' (эндпоинт отдаёт максимум ~100)' : ''));
-    console.log(`  Выручка топа: ${fmt(qd.revenue)} ₽ · на карточку ${fmt(qd.avgRevenuePerCard)} ₽ (на «живую» ${fmt(qd.avgRevenuePerActiveCard)} ₽)`);
-    console.log(`  С продажами: ${qd.withSalesPct}% · монополизация топ-10: ${qd.monopolyTop10Pct}% · упущено ${fmt(qd.lostRevenue)} ₽`);
-    console.log(`  Медиана цены продажи: ${fmt(qd.medianAvgSalePrice)} ₽`);
-    if (qd.demandSupplyRatio != null) {
-      console.log(`  Спрос:предложение = ${qd.demandSupplyRatio}:1 (частотность ${fmt(qd.frequency)} ÷ ${fmt(qd.supplyCards)} карточек) → ${qd.ratioVerdict}`);
-    }
-    for (const n of qd.notes || []) console.log(`  ⚠ ${n}`);
   }
 
   if (analysis.notes?.length) {
@@ -217,11 +215,12 @@ export function printSummary(analysis) {
 // Несколько уточняющих фраз — 4-м аргументом через «;», у каждой опц. «=частота:карточки»:
 //   node report-niche.js "<кат>" d1 d2 "тёплая=4569:4471; фланелевая=2086:2966"
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [, , argCat, argD1, argD2, argQuery, argFreq, argSupply] = process.argv;
+  const [, , argCat, argD1, argD2, argQuery, argFreq, argSupply, argCost] = process.argv;
   runNicheReport({
     categoryPath: argCat || undefined,
     d1: argD1 || undefined,
     d2: argD2 || undefined,
+    cost: argCost || undefined,
     query: argQuery || undefined,
     frequency: argFreq || undefined,
     supplyCards: argSupply || undefined,
