@@ -185,7 +185,8 @@ export function printSummary(analysis) {
   if (analysis.sellers?.length) {
     console.log('\nТоп-продавцы ниши:');
     for (const s of analysis.sellers.slice(0, 7)) {
-      console.log(`  ${s.seller}\t${s.products} карт.\t${fmt(s.revenue)} ₽\t${s.revenueSharePct}%`);
+      const brand = s.brand && s.brand !== s.seller ? ` (${s.brand})` : '';
+      console.log(`  ${s.seller}${brand}\t${s.products} карт.\t${fmt(s.revenue)} ₽\t${s.revenueSharePct}%${s.url ? '\t' + s.url : ''}`);
     }
   }
 
@@ -197,9 +198,11 @@ export function printSummary(analysis) {
     console.log('  реализ.  оборот  спрос:предл  частота  запрос');
     for (const q of qds) {
       const st = q.sellThrough?.ratio;
+      const ds = q.demandSupplyRatio;
+      const arrow = ds == null ? ' ' : ds > 1 ? '↑' : ds < 1 ? '↓' : ' ';
       console.log(
         `  ${(st != null ? st + '×' : '—').padStart(6)}  ${(q.sellThrough?.medianTurnoverDays != null ? q.sellThrough.medianTurnoverDays + ' дн' : '—').padStart(6)}` +
-        `  ${(q.demandSupplyRatio != null ? q.demandSupplyRatio + ':1' : '—').padStart(9)}  ${(fmt(q.frequency) || '—').padStart(7)}  ${q.query}`
+        `  ${(ds != null ? arrow + ds + ':1' : '—').padStart(9)}  ${(fmt(q.frequency) || '—').padStart(7)}  ${q.query}`
       );
     }
   }
