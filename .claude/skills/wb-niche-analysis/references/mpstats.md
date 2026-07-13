@@ -27,7 +27,9 @@
 
 ## Ключевые поля товара (из wb/get/category)
 
-- Идентификация: `id` (SKU), `name`, `brand`, `seller`, `color`, `subject`, `category`.
+- Идентификация: `id` (SKU), `name`, `brand`, `seller`, `supplier_id` (→ ссылка на витрину
+  `wildberries.ru/seller/<id>`), `color`, `subject`, `category`.
+- Ассортимент: `size_count`, `size_count_in_stock` (размерный ряд — для планки входа).
 - Продажи/выручка: `sales`, `sales_per_day_average`, `sales_estimated`, `revenue`,
   `revenue_potential`, `percent_from_revenue`, `lost_profit`, `lost_profit_percent`.
 - Цена: `final_price`, `final_price_average`, `basic_price`, `client_price`, структура скидок
@@ -39,7 +41,9 @@
 - SEO/видимость: `search_visibility`, `search_position_avg`, `category_position`,
   `category_visibility`, `search_words_count`, `search_cpm_avg`.
 - Графики по дням (массивы): `sales_graph`, `revenue_graph`, `stocks_graph`, `price_graph`,
-  `search_position_graph`, `category_position_graph`.
+  `search_position_graph`, `category_position_graph`. Движок агрегирует `sales_graph`/`stocks_graph`
+  поэлементно по всем товарам и группирует по месяцам → **помесячная реализация остатка** (временнáя
+  диаграмма благоприятных окон). После агрегации дневные массивы удаляются из JSON (не раздувать вывод).
 
 ## Ошибки
 - Ошибки приходят **конвертом** `{"code": <int>, "message": "..."}` (а не пустыми данными). Движок
