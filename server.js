@@ -7,6 +7,8 @@ import puppeteer from 'puppeteer';
 import { v4 as uuidv4 } from 'uuid';
 import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
 import { defaultPeriod, loadItems, selectItems, selectByGroup, writeOutputs } from './report-stock.js';
+import { buildSeasonPlanReport, seasonPlanToCSV } from './lib/seasonPlanReport.js';
+import { buildParamsFromArgs } from './season-plan.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -201,6 +203,44 @@ app.get('/reports/stock-availability', requireKey, async (req, res) => {
         `attachment; filename="stock-${d1}_${d2}.csv"`
       );
       return res.send(reportToCSV(report));
+    }
+    return res.json(report);
+  } catch (err) {
+    return res.status(500).json({ error: 'report_failed', detail: String(err?.message || err) });
+  }
+});
+
+// ---------- REPORT: план продаж на сезон ----------
+// Источник группы — один из:
+//   A. линейка:  GET /reports/season-plan?group=РМП&d1=2024-08-01&d2=2025-01-31
+//   B. предмет:  GET /reports/season-plan?path=Женщинам/Одежда/Платья&words=платье
+//                    &price-min=1500&price-max=4000&min-sales=3&limit=60&d1=...&d2=...
+// Без d1/d2 берётся год-назад-сезон (последние 365 дней). format=json|csv.
+app.get('/reports/season-plan', requireKey, async (req, res) => {
+  try {
+    if (!process.env.MPSTATS_TOKEN) {
+      return res.status(500).json({ error: 'mpstats_token_missing' });
+    }
+    let params;
+    try {
+      // req.query совпадает по именам ключей с CLI-аргументами (group/path/words/…).
+      params = buildParamsFromArgs(req.query);
+    } catch (e) {
+      return res.status(400).json({ error: 'bad_params', detail: String(e?.message || e) });
+    }
+
+    const report = await buildSeasonPlanReport({
+      ...params,
+      concurrency: Number(process.env.REPORT_CONCURRENCY) || 5,
+    });
+
+    if (req.query.format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="season-${params.d1}_${params.d2}.csv"`
+      );
+      return res.send(seasonPlanToCSV(report));
     }
     return res.json(report);
   } catch (err) {
