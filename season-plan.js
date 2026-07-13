@@ -130,12 +130,23 @@ function printSummary(report) {
   }
 
   console.log('\n— Ранг сезонности —');
-  console.log(`  ${p.rank.rank} (амплитуда ${p.rank.amplitude}, p90/p10 = ${p.rank.p90}/${p.rank.p10})`);
+  console.log(`  ${p.rank.rank} (амплитуда p90/p50 = ${p.rank.amplitude}; медиана ${p.rank.p50}, пик ${p.rank.p90}, провал ${p.rank.p10})`);
+
+  const ds = p.dataSufficiency;
+  if (ds) {
+    console.log(`  Активный период: ${ds.activeFrom}…${ds.activeTo} (${ds.approxMonths} мес.` +
+      (ds.trimmedDays ? `, обрезано нулей: ${ds.trimmedDays} дн.` : '') + ')');
+    if (ds.lowConfidence) {
+      console.log(`  ⚠ Данных < ${'~10 мес'} — годовой профиль НЕДОСТОВЕРЕН, нужен более длинный период.`);
+    }
+  }
 
   const ph = p.phases;
   if (ph) {
+    if (ph.peakAtEdge) console.log('  ⚠ Пик у края окна — расширьте период, сезон может быть срезан.');
+    if (ph.saleTruncated) console.log('  ⚠ Фаза распродажи упирается в конец окна — данных после пика нет.');
     console.log('\n— Фазы сезона (история → проекция на след. год) —');
-    const line = (o) => `${o.date} → ${o.dateNext}` + (o.kSales != null ? `  (k=${o.kSales})` : '');
+    const line = (o) => `${o.date} → ${o.dateNext}` + (o.index != null ? `  (индекс=${o.index})` : '');
     console.log(`  Вход в рынок:      ${ph.entry.date} → ${ph.entry.dateNext}${ph.entry.beforeWindow ? '  (раньше окна данных)' : ''}  [−${ph.entry.leadDays} дн. на подготовку]`);
     console.log(`  Старт разгона:     ${line(ph.ramp)}`);
     console.log(`  Горячий сезон с:   ${line(ph.hotStart)}`);

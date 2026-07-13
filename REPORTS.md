@@ -199,8 +199,9 @@ curl -H "x-api-key: $API_KEY" \
 
 | Поле | Описание |
 |---|---|
-| `plan.rank` | Ранг сезонности: `ярко выраженный`/`умеренный`/`слабый` + амплитуда |
-| `plan.phases` | Даты фаз (история + проекция `+1 год`): `entry`, `ramp`, `hotStart`, `peak`, `hotEnd`, `sale` |
+| `plan.rank` | Ранг: `ярко выраженный`/`умеренный`/`слабый` + `amplitude` (p90/p50) |
+| `plan.dataSufficiency` | `activeDays`, `approxMonths`, `lowConfidence` (< ~10 мес — профиль ненадёжен), активный период |
+| `plan.phases` | Даты фаз (история + проекция `+1 год`): `entry`, `ramp`, `hotStart`, `peak`, `hotEnd`, `sale`; `monthlyProfile` (индексы по месяцам); флаги `peakAtEdge`/`saleTruncated` |
 | `plan.pricing` | Рекомендованная цена: `entry` / `peak` / `sale` (₽) |
 | `plan.baseDaily` | База плана, заказов/день |
 | `plan.daily[]` | По дням: `date`, `dateNext`, `kSales`, `kStock`, `kPrice`, `plannedOrders` |
