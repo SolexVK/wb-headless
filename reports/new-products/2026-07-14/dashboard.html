@@ -1,0 +1,520 @@
+<title>Новинки WB · рубашка в клетку</title>
+<style>
+:root{
+  --paper:#F7F6F3; --surface:#FFFFFF; --surface2:#FBFAF8; --ink:#1C1D22; --ink2:#5B5C63;
+  --line:#E7E4DE; --line2:#D8D4CC;
+  --w:#A6385A; --w-soft:#e9ccd6; --m:#34568B; --m-soft:#c9d6e8;
+  --good:#2E7D5B; --warn:#B8791F; --crit:#B4433B; --muted:#9A9A95;
+  --accent:#34568B;
+  --shadow:0 1px 2px rgba(28,29,34,.05),0 8px 24px -12px rgba(28,29,34,.12);
+  --radius:14px;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#16171B; --surface:#1F2126; --surface2:#24262C; --ink:#ECECEA; --ink2:#A2A39C;
+    --line:#2E3037; --line2:#3A3C44; --w:#E36A8C; --m:#7FA6DE; --w-soft:#43303a; --m-soft:#2b384c;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 30px -14px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#16171B; --surface:#1F2126; --surface2:#24262C; --ink:#ECECEA; --ink2:#A2A39C;
+  --line:#2E3037; --line2:#3A3C44; --w:#E36A8C; --m:#7FA6DE; --w-soft:#43303a; --m-soft:#2b384c;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 30px -14px rgba(0,0,0,.6);
+}
+:root[data-theme="light"]{
+  --paper:#F7F6F3; --surface:#FFFFFF; --surface2:#FBFAF8; --ink:#1C1D22; --ink2:#5B5C63;
+  --line:#E7E4DE; --line2:#D8D4CC; --w:#A6385A; --m:#34568B; --w-soft:#e9ccd6; --m-soft:#c9d6e8;
+  --shadow:0 1px 2px rgba(28,29,34,.05),0 8px 24px -12px rgba(28,29,34,.12);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  font-feature-settings:"kern";-webkit-font-smoothing:antialiased;line-height:1.5}
+.mono{font-variant-numeric:tabular-nums;font-family:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.wrap{max-width:1120px;margin:0 auto;padding:40px 22px 64px}
+a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
+a:hover{border-bottom-color:currentColor}
+
+/* header */
+.top{padding:20px 0 30px;border-bottom:1px solid var(--line);margin-bottom:34px;
+  position:relative}
+.top::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:3px;
+  background:repeating-linear-gradient(90deg,var(--w) 0 22px,transparent 22px 30px,var(--m) 30px 52px,transparent 52px 60px)}
+.teyebrow{text-transform:uppercase;letter-spacing:.13em;font-size:11.5px;font-weight:600;color:var(--ink2)}
+h1{font-size:clamp(30px,4.6vw,46px);line-height:1.04;margin:12px 0 10px;font-weight:800;letter-spacing:-.02em;text-wrap:balance}
+.sub{max-width:64ch;color:var(--ink2);font-size:15.5px;margin:0 0 18px}
+.sub b{color:var(--ink)}
+.chips{display:flex;gap:10px;flex-wrap:wrap}
+.chip{font-size:13px;padding:6px 12px;border-radius:999px;border:1px solid var(--line2);background:var(--surface);color:var(--ink2)}
+.chip b{color:var(--ink)}
+.chip.w{border-color:var(--w);background:color-mix(in srgb,var(--w) 8%,var(--surface))}
+.chip.m{border-color:var(--m);background:color-mix(in srgb,var(--m) 8%,var(--surface))}
+
+/* query section */
+.qsec{margin-bottom:40px}
+.qhead{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.qhead h2{font-size:22px;font-weight:750;margin:0;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+.qdot{width:11px;height:11px;border-radius:3px}
+.w .qdot{background:var(--w)} .m .qdot{background:var(--m)}
+.qmeta{font-size:13px;color:var(--ink2);font-variant-numeric:tabular-nums}
+
+.qgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px 18px 16px;box-shadow:var(--shadow)}
+.span2{grid-column:1 / -1}
+.eyebrow{text-transform:uppercase;letter-spacing:.1em;font-size:11px;font-weight:700;color:var(--ink2);margin-bottom:14px}
+
+/* funnel */
+.funnel{display:flex;flex-direction:column;gap:7px;align-items:center}
+.fstage{width:var(--w);min-width:230px;transition:width .3s}
+.fbar{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:9px;
+  background:var(--surface2);border:1px solid var(--line);position:relative;overflow:hidden}
+.fstage.tone-a .fbar{background:color-mix(in srgb,var(--accent) 12%,var(--surface));border-color:color-mix(in srgb,var(--accent) 30%,var(--line))}
+.fstage.tone-good .fbar{background:color-mix(in srgb,var(--good) 16%,var(--surface));border-color:color-mix(in srgb,var(--good) 40%,var(--line))}
+.fstage.tone-muted .fbar{opacity:.55;border-style:dashed}
+.w .fstage.tone-a .fbar{background:color-mix(in srgb,var(--w) 12%,var(--surface));border-color:color-mix(in srgb,var(--w) 30%,var(--line))}
+.ficon{font-size:15px}
+.fname{font-weight:600;font-size:14px;flex:1}
+.fweight{font-variant-numeric:tabular-nums;font-weight:700;font-size:13px;color:var(--ink2)}
+.tone-good .fweight{color:var(--good)}
+.fmetric{text-align:center;font-size:12px;color:var(--ink2);margin-top:3px;font-variant-numeric:tabular-nums}
+.fnote{font-size:12.5px;color:var(--ink2);margin:14px 0 0;line-height:1.55}
+.fnote .good{color:var(--good)}
+.good{color:var(--good)}
+
+/* listing */
+.listing{display:flex;flex-direction:column;gap:11px}
+.llegend{display:flex;gap:14px;font-size:11.5px;color:var(--ink2);margin-bottom:2px}
+.lg{display:flex;align-items:center;gap:6px}
+.lg::before{content:"";width:11px;height:11px;border-radius:3px;background:var(--line2)}
+.lg.top::before{background:var(--ink2)}
+.lg.nw.w::before{background:var(--w)} .lg.nw.m::before{background:var(--m)}
+.lrow{display:grid;grid-template-columns:78px 1fr;gap:10px;align-items:center}
+.lname{font-size:13px;color:var(--ink2);font-weight:500}
+.lbars{display:flex;flex-direction:column;gap:4px}
+.lbar{display:flex;align-items:center;gap:8px;height:15px}
+.lbar .fill{height:9px;border-radius:3px;display:block;min-width:2px}
+.fill.top{background:var(--ink2);opacity:.42}
+.fill.nw.w{background:var(--w)} .fill.nw.m{background:var(--m)}
+.lbar span{font-size:11.5px;color:var(--ink2);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* table */
+.scrollx{overflow-x:auto}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2);
+  font-weight:600;padding:0 12px 8px;border-bottom:1px solid var(--line)}
+.tbl th.num{text-align:right}
+.tbl td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tbody tr:hover{background:var(--surface2)}
+.pname{color:var(--ink2);font-size:12px;margin-top:2px}
+.revcell{position:relative;min-width:150px}
+.revbar{position:absolute;left:12px;top:6px;height:16px;border-radius:3px;opacity:.18;z-index:0}
+.revbar.w{background:var(--w)} .revbar.m{background:var(--m)}
+.revcell span{position:relative;z-index:1}
+
+/* sellers */
+.sellers{display:flex;flex-direction:column;gap:9px}
+.srow{display:grid;grid-template-columns:1fr 90px 44px;gap:9px;align-items:center;font-size:13px}
+.sname{color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sbarwrap{background:var(--surface2);border-radius:3px;height:9px;overflow:hidden}
+.sbar{display:block;height:100%;border-radius:3px;background:var(--accent);opacity:.8}
+.w .sbar{background:var(--w)} .m .sbar{background:var(--m)}
+.sshare{text-align:right;color:var(--ink2)}
+
+.foot{border-top:1px solid var(--line);margin-top:20px;padding-top:20px;color:var(--ink2);font-size:12.5px;line-height:1.6}
+.foot b{color:var(--ink)}
+.sig{margin-bottom:0;opacity:.85}
+
+@media (max-width:720px){
+  .qgrid{grid-template-columns:1fr}
+  .span2{grid-column:auto}
+  .wrap{padding:26px 15px 48px}
+}
+</style>
+<div class="wrap">
+  <header class="top">
+    <div class="teyebrow">MPStats · Wildberries · снимок 2026-07-13</div>
+    <h1>Товары-новинки: «рубашка&nbsp;в&nbsp;клетку»</h1>
+    <p class="sub">Карточки, вышедшие на WB за последние <b>60 дней</b>, по двум поисковым запросам. Продажи, листинг, воронка ранжирования и конкурентная картина ниши.</p>
+    <div class="chips">
+      <span class="chip w">Женская: <b>13</b> новинок · 1% выручки</span><span class="chip m">Мужская: <b>12</b> новинок · 5% выручки</span>
+    </div>
+  </header>
+  
+  <section class="qsec w">
+    <div class="qhead">
+      <h2><span class="qdot"></span>«рубашка в клетку женская»</h2>
+      <div class="qmeta">13 новинок · 2026-05-14 … 2026-07-13</div>
+    </div>
+    <div class="qgrid">
+      <div class="panel span2">
+        <div class="eyebrow">Визуальная воронка · модель ранжирования WB</div>
+        <div class="funnel w">
+      <div class="fstage tone-n" style="--w:100%">
+        <div class="fbar">
+          <span class="ficon">👁</span>
+          <span class="fname">Показы / видимость</span>
+          <span class="fweight">вход</span>
+        </div>
+        <div class="fmetric">вид. ≈ 133</div>
+      </div>
+      <div class="fstage tone-a" style="--w:76%">
+        <div class="fbar">
+          <span class="ficon">🖱</span>
+          <span class="fname">Клик (CTR)</span>
+          <span class="fweight">+25%</span>
+        </div>
+        <div class="fmetric">ср. позиция ≈ 118</div>
+      </div>
+      <div class="fstage tone-muted" style="--w:58%">
+        <div class="fbar">
+          <span class="ficon">🛒</span>
+          <span class="fname">Корзина</span>
+          <span class="fweight">0%</span>
+        </div>
+        <div class="fmetric">фактор убран WB</div>
+      </div>
+      <div class="fstage tone-a" style="--w:44%">
+        <div class="fbar">
+          <span class="ficon">📦</span>
+          <span class="fname">Заказ</span>
+          <span class="fweight">+25%</span>
+        </div>
+        <div class="fmetric">1.9 шт/день</div>
+      </div>
+      <div class="fstage tone-good" style="--w:30%">
+        <div class="fbar">
+          <span class="ficon">✅</span>
+          <span class="fname">Выкуп</span>
+          <span class="fweight">+50%</span>
+        </div>
+        <div class="fmetric">≈ 39% (ниша)</div>
+      </div></div>
+        <p class="fnote">Вклад в органику (KB&nbsp;01): клик <b>+25%</b>, корзина <b>0%</b>, заказ <b>+25%</b>, <b class="good">выкуп +50%</b> — главный фактор роста и фиксации позиции. Метрики — медиана по новинкам.</p>
+      </div>
+      <div class="panel">
+        <div class="eyebrow">Листинг: планка ниши vs новинки</div>
+        <div class="listing"><div class="llegend"><span class="lg top">планка топ-20</span><span class="lg nw w">новинки</span></div><div class="lrow">
+        <div class="lname">Фото</div>
+        <div class="lbars">
+          <div class="lbar"><i class="fill top" style="width:100%"></i><span>23</span></div>
+          <div class="lbar"><i class="fill nw w" style="width:71.11111111111111%"></i><span>16</span></div>
+        </div>
+      </div><div class="lrow">
+        <div class="lname">Видео %</div>
+        <div class="lbars">
+          <div class="lbar"><i class="fill top" style="width:100%"></i><span>90%</span></div>
+          <div class="lbar"><i class="fill nw w" style="width:60%"></i><span>54%</span></div>
+        </div>
+      </div><div class="lrow">
+        <div class="lname">SEO-слов</div>
+        <div class="lbars">
+          <div class="lbar"><i class="fill top" style="width:100%"></i><span>180</span></div>
+          <div class="lbar"><i class="fill nw w" style="width:91.66666666666666%"></i><span>165</span></div>
+        </div>
+      </div><div class="lrow">
+        <div class="lname">Отзывов</div>
+        <div class="lbars">
+          <div class="lbar"><i class="fill top" style="width:100%"></i><span>3 612</span></div>
+          <div class="lbar"><i class="fill nw w" style="width:32.032115171650055%"></i><span>1 157</span></div>
+        </div>
+      </div><div class="lrow">
+        <div class="lname">Описание</div>
+        <div class="lbars">
+          <div class="lbar"><i class="fill top" style="width:59.8546042003231%"></i><span>741</span></div>
+          <div class="lbar"><i class="fill nw w" style="width:100%"></i><span>1 238</span></div>
+        </div>
+      </div></div>
+      </div>
+      <div class="panel span2">
+        <div class="eyebrow">Продажи новинок за 60 дней</div>
+        <div class="scrollx"><table class="tbl">
+    <thead><tr><th class="num">#</th><th>SKU / название</th><th>вышла</th><th class="num">цена</th><th class="num">продаж</th><th>выручка 60 дн.</th></tr></thead>
+    <tbody><tr>
+        <td class="num">1</td>
+        <td><a href="https://www.wildberries.ru/catalog/1095824553/detail.aspx" target="_blank" rel="noopener">1095824553</a><div class="pname">Рубашка в клетку оверсайз</div></td>
+        <td class="mono">2026-06-03</td>
+        <td class="num mono">2 060</td>
+        <td class="num mono">603</td>
+        <td class="revcell"><div class="revbar w" style="width:100%"></div><span class="mono">1 115 436</span></td>
+      </tr><tr>
+        <td class="num">2</td>
+        <td><a href="https://www.wildberries.ru/catalog/1052000593/detail.aspx" target="_blank" rel="noopener">1052000593</a><div class="pname">Рубашка в клетку хлопок на весну и лето</div></td>
+        <td class="mono">2026-06-08</td>
+        <td class="num mono">990</td>
+        <td class="num mono">551</td>
+        <td class="revcell"><div class="revbar w" style="width:41.4912195769188%"></div><span class="mono">462 808</span></td>
+      </tr><tr>
+        <td class="num">3</td>
+        <td><a href="https://www.wildberries.ru/catalog/1128812446/detail.aspx" target="_blank" rel="noopener">1128812446</a><div class="pname">Рубашка в клетку оверсайз</div></td>
+        <td class="mono">2026-07-01</td>
+        <td class="num mono">1 468</td>
+        <td class="num mono">237</td>
+        <td class="revcell"><div class="revbar w" style="width:30.71157825280877%"></div><span class="mono">342 568</span></td>
+      </tr><tr>
+        <td class="num">4</td>
+        <td><a href="https://www.wildberries.ru/catalog/1052000620/detail.aspx" target="_blank" rel="noopener">1052000620</a><div class="pname">Рубашка в клетку хлопок на весну и лето</div></td>
+        <td class="mono">2026-06-05</td>
+        <td class="num mono">990</td>
+        <td class="num mono">365</td>
+        <td class="revcell"><div class="revbar w" style="width:27.786981951452166%"></div><span class="mono">309 946</span></td>
+      </tr><tr>
+        <td class="num">5</td>
+        <td><a href="https://www.wildberries.ru/catalog/1093697392/detail.aspx" target="_blank" rel="noopener">1093697392</a><div class="pname">Рубашка в клетку оверсайз летняя</div></td>
+        <td class="mono">2026-07-10</td>
+        <td class="num mono">2 178</td>
+        <td class="num mono">101</td>
+        <td class="revcell"><div class="revbar w" style="width:19.267802007466138%"></div><span class="mono">214 920</span></td>
+      </tr><tr>
+        <td class="num">6</td>
+        <td><a href="https://www.wildberries.ru/catalog/1128812448/detail.aspx" target="_blank" rel="noopener">1128812448</a><div class="pname">Рубашка в клетку оверсайз</div></td>
+        <td class="mono">2026-06-24</td>
+        <td class="num mono">1 512</td>
+        <td class="num mono">128</td>
+        <td class="revcell"><div class="revbar w" style="width:18.05482340537691%"></div><span class="mono">201 390</span></td>
+      </tr><tr>
+        <td class="num">7</td>
+        <td><a href="https://www.wildberries.ru/catalog/1093697393/detail.aspx" target="_blank" rel="noopener">1093697393</a><div class="pname">Летняя рубашка в клетку оверсайз</div></td>
+        <td class="mono">2026-07-10</td>
+        <td class="num mono">2 178</td>
+        <td class="num mono">83</td>
+        <td class="revcell"><div class="revbar w" style="width:15.732323503993056%"></div><span class="mono">175 484</span></td>
+      </tr><tr>
+        <td class="num">8</td>
+        <td><a href="https://www.wildberries.ru/catalog/1021468812/detail.aspx" target="_blank" rel="noopener">1021468812</a><div class="pname">Рубашка в клетку</div></td>
+        <td class="mono">2026-06-09</td>
+        <td class="num mono">1 292</td>
+        <td class="num mono">114</td>
+        <td class="revcell"><div class="revbar w" style="width:13.473027587418732%"></div><span class="mono">150 283</span></td>
+      </tr><tr>
+        <td class="num">9</td>
+        <td><a href="https://www.wildberries.ru/catalog/1062578096/detail.aspx" target="_blank" rel="noopener">1062578096</a><div class="pname">Рубашка в клетку оверсайз</div></td>
+        <td class="mono">2026-06-05</td>
+        <td class="num mono">5 152</td>
+        <td class="num mono">12</td>
+        <td class="revcell"><div class="revbar w" style="width:5.207111837882227%"></div><span class="mono">58 082</span></td>
+      </tr><tr>
+        <td class="num">10</td>
+        <td><a href="https://www.wildberries.ru/catalog/1010481691/detail.aspx" target="_blank" rel="noopener">1010481691</a><div class="pname">Рубашка в клетку удлиненная на весну и лето</div></td>
+        <td class="mono">2026-05-25</td>
+        <td class="num mono">1 347</td>
+        <td class="num mono">29</td>
+        <td class="revcell"><div class="revbar w" style="width:3.62665361347491%"></div><span class="mono">40 453</span></td>
+      </tr><tr>
+        <td class="num">11</td>
+        <td><a href="https://www.wildberries.ru/catalog/1128812447/detail.aspx" target="_blank" rel="noopener">1128812447</a><div class="pname">Рубашка в клетку оверсайз</div></td>
+        <td class="mono">2026-07-11</td>
+        <td class="num mono">1 468</td>
+        <td class="num mono">8</td>
+        <td class="revcell"><div class="revbar w" style="width:2%"></div><span class="mono">11 336</span></td>
+      </tr><tr>
+        <td class="num">12</td>
+        <td><a href="https://www.wildberries.ru/catalog/1141733096/detail.aspx" target="_blank" rel="noopener">1141733096</a><div class="pname">Рубашка в клетку оверсайз удлиненная</div></td>
+        <td class="mono">2026-06-24</td>
+        <td class="num mono">1 620</td>
+        <td class="num mono">2</td>
+        <td class="revcell"><div class="revbar w" style="width:2%"></div><span class="mono">3 330</span></td>
+      </tr><tr>
+        <td class="num">13</td>
+        <td><a href="https://www.wildberries.ru/catalog/1140004629/detail.aspx" target="_blank" rel="noopener">1140004629</a><div class="pname">Рубашка в клетку оверсайз удлиненная</div></td>
+        <td class="mono">2026-07-06</td>
+        <td class="num mono">2 158</td>
+        <td class="num mono">0</td>
+        <td class="revcell"><div class="revbar w" style="width:2%"></div><span class="mono">0</span></td>
+      </tr></tbody></table></div>
+      </div>
+      <div class="panel">
+        <div class="eyebrow">Конкуренция: доля продавцов</div>
+        <div class="sellers"><div class="srow"><span class="sname">ИП Омурбекова Н М</span><div class="sbarwrap"><i class="sbar" style="width:56.54655199039209%"></i></div><span class="mono sshare">14.1%</span></div><div class="srow"><span class="sname">ИП Молотов А И</span><div class="sbarwrap"><i class="sbar" style="width:56.137728591974266%"></i></div><span class="mono sshare">14.0%</span></div><div class="srow"><span class="sname">Осоо Ниидл</span><div class="sbarwrap"><i class="sbar" style="width:42.15392748617746%"></i></div><span class="mono sshare">10.5%</span></div><div class="srow"><span class="sname">ИП Жумакадыров Атабек Русла…</span><div class="sbarwrap"><i class="sbar" style="width:37.244155610315474%"></i></div><span class="mono sshare">9.3%</span></div><div class="srow"><span class="sname">ИП Веселовская Елена Юрьевна</span><div class="sbarwrap"><i class="sbar" style="width:33.821265880947024%"></i></div><span class="mono sshare">8.5%</span></div><div class="srow"><span class="sname">ИП Ысмаилов Искендер</span><div class="sbarwrap"><i class="sbar" style="width:21.81395372126804%"></i></div><span class="mono sshare">5.5%</span></div></div>
+        <p class="fnote">HHI 0.0795 — ниша раздроблена, нет доминатора &gt;20%.</p>
+      </div>
+    </div>
+  </section>
+  <section class="qsec m">
+    <div class="qhead">
+      <h2><span class="qdot"></span>«рубашка в клетку мужская»</h2>
+      <div class="qmeta">12 новинок · 2026-05-14 … 2026-07-13</div>
+    </div>
+    <div class="qgrid">
+      <div class="panel span2">
+        <div class="eyebrow">Визуальная воронка · модель ранжирования WB</div>
+        <div class="funnel m">
+      <div class="fstage tone-n" style="--w:100%">
+        <div class="fbar">
+          <span class="ficon">👁</span>
+          <span class="fname">Показы / видимость</span>
+          <span class="fweight">вход</span>
+        </div>
+        <div class="fmetric">вид. ≈ 52</div>
+      </div>
+      <div class="fstage tone-a" style="--w:76%">
+        <div class="fbar">
+          <span class="ficon">🖱</span>
+          <span class="fname">Клик (CTR)</span>
+          <span class="fweight">+25%</span>
+        </div>
+        <div class="fmetric">ср. позиция ≈ 150</div>
+      </div>
+      <div class="fstage tone-muted" style="--w:58%">
+        <div class="fbar">
+          <span class="ficon">🛒</span>
+          <span class="fname">Корзина</span>
+          <span class="fweight">0%</span>
+        </div>
+        <div class="fmetric">фактор убран WB</div>
+      </div>
+      <div class="fstage tone-a" style="--w:44%">
+        <div class="fbar">
+          <span class="ficon">📦</span>
+          <span class="fname">Заказ</span>
+          <span class="fweight">+25%</span>
+        </div>
+        <div class="fmetric">0.3 шт/день</div>
+      </div>
+      <div class="fstage tone-good" style="--w:30%">
+        <div class="fbar">
+          <span class="ficon">✅</span>
+          <span class="fname">Выкуп</span>
+          <span class="fweight">+50%</span>
+        </div>
+        <div class="fmetric">≈ 39% (ниша)</div>
+      </div></div>
+        <p class="fnote">Вклад в органику (KB&nbsp;01): клик <b>+25%</b>, корзина <b>0%</b>, заказ <b>+25%</b>, <b class="good">выкуп +50%</b> — главный фактор роста и фиксации позиции. Метрики — медиана по новинкам.</p>
+      </div>
+      <div class="panel">
+        <div class="eyebrow">Листинг: планка ниши vs новинки</div>
+        <div class="listing"><div class="llegend"><span class="lg top">планка топ-20</span><span class="lg nw m">новинки</span></div><div class="lrow">
+        <div class="lname">Фото</div>
+        <div class="lbars">
+          <div class="lbar"><i class="fill top" style="width:100%"></i><span>16</span></div>
+          <div class="lbar"><i class="fill nw m" style="width:56.25%"></i><span>9</span></div>
+        </div>
+      </div><div class="lrow">
+        <div class="lname">Видео %</div>
+        <div class="lbars">
+          <div class="lbar"><i class="fill top" style="width:100%"></i><span>60%</span></div>
+          <div class="lbar"><i class="fill nw m" style="width:13.333333333333334%"></i><span>8%</span></div>
+        </div>
+      </div><div class="lrow">
+        <div class="lname">SEO-слов</div>
+        <div class="lbars">
+          <div class="lbar"><i class="fill top" style="width:100%"></i><span>108</span></div>
+          <div class="lbar"><i class="fill nw m" style="width:57.407407407407405%"></i><span>62</span></div>
+        </div>
+      </div><div class="lrow">
+        <div class="lname">Отзывов</div>
+        <div class="lbars">
+          <div class="lbar"><i class="fill top" style="width:100%"></i><span>1 353</span></div>
+          <div class="lbar"><i class="fill nw m" style="width:0.07390983000739099%"></i><span>1</span></div>
+        </div>
+      </div><div class="lrow">
+        <div class="lname">Описание</div>
+        <div class="lbars">
+          <div class="lbar"><i class="fill top" style="width:100%"></i><span>1 300</span></div>
+          <div class="lbar"><i class="fill nw m" style="width:69.23076923076923%"></i><span>900</span></div>
+        </div>
+      </div></div>
+      </div>
+      <div class="panel span2">
+        <div class="eyebrow">Продажи новинок за 60 дней</div>
+        <div class="scrollx"><table class="tbl">
+    <thead><tr><th class="num">#</th><th>SKU / название</th><th>вышла</th><th class="num">цена</th><th class="num">продаж</th><th>выручка 60 дн.</th></tr></thead>
+    <tbody><tr>
+        <td class="num">1</td>
+        <td><a href="https://www.wildberries.ru/catalog/1016184515/detail.aspx" target="_blank" rel="noopener">1016184515</a><div class="pname">Рубашка в клетку с коротким рукавом</div></td>
+        <td class="mono">2026-05-16</td>
+        <td class="num mono">643</td>
+        <td class="num mono">1 908</td>
+        <td class="revcell"><div class="revbar m" style="width:100%"></div><span class="mono">1 404 558</span></td>
+      </tr><tr>
+        <td class="num">2</td>
+        <td><a href="https://www.wildberries.ru/catalog/1013899289/detail.aspx" target="_blank" rel="noopener">1013899289</a><div class="pname">Рубашка мужская с коротким рукавом в клетку х…</div></td>
+        <td class="mono">2026-05-14</td>
+        <td class="num mono">2 243</td>
+        <td class="num mono">226</td>
+        <td class="revcell"><div class="revbar m" style="width:44.10554779510708%"></div><span class="mono">619 488</span></td>
+      </tr><tr>
+        <td class="num">3</td>
+        <td><a href="https://www.wildberries.ru/catalog/804912364/detail.aspx" target="_blank" rel="noopener">804912364</a><div class="pname">Базовая оверсайз рубашка в клетку с коротким …</div></td>
+        <td class="mono">2026-06-04</td>
+        <td class="num mono">1 485</td>
+        <td class="num mono">357</td>
+        <td class="revcell"><div class="revbar m" style="width:42.990392707171935%"></div><span class="mono">603 825</span></td>
+      </tr><tr>
+        <td class="num">4</td>
+        <td><a href="https://www.wildberries.ru/catalog/993491957/detail.aspx" target="_blank" rel="noopener">993491957</a><div class="pname">Рубашка в клетку с длинным рукавом</div></td>
+        <td class="mono">2026-07-05</td>
+        <td class="num mono">2 243</td>
+        <td class="num mono">19</td>
+        <td class="revcell"><div class="revbar m" style="width:2.9273266038141537%"></div><span class="mono">41 116</span></td>
+      </tr><tr>
+        <td class="num">5</td>
+        <td><a href="https://www.wildberries.ru/catalog/1073678723/detail.aspx" target="_blank" rel="noopener">1073678723</a><div class="pname">Рубашка в клетку классическая с длинным рукав…</div></td>
+        <td class="mono">2026-06-08</td>
+        <td class="num mono">1 112</td>
+        <td class="num mono">24</td>
+        <td class="revcell"><div class="revbar m" style="width:2.088486199929088%"></div><span class="mono">29 334</span></td>
+      </tr><tr>
+        <td class="num">6</td>
+        <td><a href="https://www.wildberries.ru/catalog/1073678722/detail.aspx" target="_blank" rel="noopener">1073678722</a><div class="pname">Рубашка в клетку классическая с длинным рукав…</div></td>
+        <td class="mono">2026-06-08</td>
+        <td class="num mono">1 112</td>
+        <td class="num mono">19</td>
+        <td class="revcell"><div class="revbar m" style="width:2%"></div><span class="mono">23 773</span></td>
+      </tr><tr>
+        <td class="num">7</td>
+        <td><a href="https://www.wildberries.ru/catalog/1094034210/detail.aspx" target="_blank" rel="noopener">1094034210</a><div class="pname">Рубашка с длинным рукавом на кнопках</div></td>
+        <td class="mono">2026-06-24</td>
+        <td class="num mono">2 109</td>
+        <td class="num mono">10</td>
+        <td class="revcell"><div class="revbar m" style="width:2%"></div><span class="mono">19 390</span></td>
+      </tr><tr>
+        <td class="num">8</td>
+        <td><a href="https://www.wildberries.ru/catalog/1074598125/detail.aspx" target="_blank" rel="noopener">1074598125</a><div class="pname">Рубашка в клетку классическая с длинным рукав…</div></td>
+        <td class="mono">2026-06-08</td>
+        <td class="num mono">1 341</td>
+        <td class="num mono">10</td>
+        <td class="revcell"><div class="revbar m" style="width:2%"></div><span class="mono">15 652</span></td>
+      </tr><tr>
+        <td class="num">9</td>
+        <td><a href="https://www.wildberries.ru/catalog/1073678724/detail.aspx" target="_blank" rel="noopener">1073678724</a><div class="pname">Рубашка в клетку классическая с длинным рукав…</div></td>
+        <td class="mono">2026-06-08</td>
+        <td class="num mono">1 126</td>
+        <td class="num mono">9</td>
+        <td class="revcell"><div class="revbar m" style="width:2%"></div><span class="mono">12 295</span></td>
+      </tr><tr>
+        <td class="num">10</td>
+        <td><a href="https://www.wildberries.ru/catalog/1073678721/detail.aspx" target="_blank" rel="noopener">1073678721</a><div class="pname">Рубашка в клетку классическая с длинным рукав…</div></td>
+        <td class="mono">2026-06-08</td>
+        <td class="num mono">1 126</td>
+        <td class="num mono">7</td>
+        <td class="revcell"><div class="revbar m" style="width:2%"></div><span class="mono">9 615</span></td>
+      </tr><tr>
+        <td class="num">11</td>
+        <td><a href="https://www.wildberries.ru/catalog/1030860414/detail.aspx" target="_blank" rel="noopener">1030860414</a><div class="pname">Рубашка в клетку оверсайз, удобная, для повсе…</div></td>
+        <td class="mono">2026-05-16</td>
+        <td class="num mono">1 307</td>
+        <td class="num mono">6</td>
+        <td class="revcell"><div class="revbar m" style="width:2%"></div><span class="mono">8 523</span></td>
+      </tr><tr>
+        <td class="num">12</td>
+        <td><a href="https://www.wildberries.ru/catalog/1035504635/detail.aspx" target="_blank" rel="noopener">1035504635</a><div class="pname">Рубашка в клетку теплая с длинным рукавом</div></td>
+        <td class="mono">2026-05-18</td>
+        <td class="num mono">1 181</td>
+        <td class="num mono">0</td>
+        <td class="revcell"><div class="revbar m" style="width:2%"></div><span class="mono">0</span></td>
+      </tr></tbody></table></div>
+      </div>
+      <div class="panel">
+        <div class="eyebrow">Конкуренция: доля продавцов</div>
+        <div class="sellers"><div class="srow"><span class="sname">ИП Никитко Ирина Игоревна</span><div class="sbarwrap"><i class="sbar" style="width:55.74308110374632%"></i></div><span class="mono sshare">13.9%</span></div><div class="srow"><span class="sname">ИП Третьяков В Г</span><div class="sbarwrap"><i class="sbar" style="width:48.259547262278126%"></i></div><span class="mono sshare">12.1%</span></div><div class="srow"><span class="sname">ИП Чубаков М А</span><div class="sbarwrap"><i class="sbar" style="width:37.23429483354278%"></i></div><span class="mono sshare">9.3%</span></div><div class="srow"><span class="sname">ИП Картошкин В С</span><div class="sbarwrap"><i class="sbar" style="width:31.778095065471472%"></i></div><span class="mono sshare">7.9%</span></div><div class="srow"><span class="sname">ООО Твое</span><div class="sbarwrap"><i class="sbar" style="width:21.81652086628861%"></i></div><span class="mono sshare">5.5%</span></div><div class="srow"><span class="sname">ООО Взаимно</span><div class="sbarwrap"><i class="sbar" style="width:20.24748736945774%"></i></div><span class="mono sshare">5.1%</span></div></div>
+        <p class="fnote">HHI 0.0659 — ниша раздроблена, нет доминатора &gt;20%.</p>
+      </div>
+    </div>
+  </section>
+  <footer class="foot">
+    <p><b>Как читать.</b> Данные MPStats — оценочные (восстановление продаж по остаткам/выкупам), для сравнения и ранжирования, не бухгалтерия. «Ниша» = топ-100 выдачи по запросу. Выкуп % — оценка на уровне ниши. Корзина/конверсия по слайду/принадлежность — не в этом API (слой Wildbox/Gem).</p>
+    <p class="sig">Отчёт и данные — в репозитории: <span class="mono">reports/new-products/2026-07-14/</span></p>
+  </footer>
+</div>
