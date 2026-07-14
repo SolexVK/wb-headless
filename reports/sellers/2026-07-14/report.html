@@ -1,0 +1,562 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Топ-продавцы и новинки — рубашка в клетку</title><style>@page { size: A4; margin: 13mm 12mm; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root{
+  --ink:#1C1D22; --ink2:#61636B; --line:#E6E3DD; --paper:#fff; --soft:#FAF9F6;
+  --w:#A6385A; --m:#34568B; --good:#2E7D5B; --warn:#B8791F; --accent:#34568B;
+}
+html{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+body{ font-family:-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  color:var(--ink); font-size:10.5px; line-height:1.45; background:#fff; }
+.mono{ font-variant-numeric:tabular-nums; }
+.r{ text-align:right; font-variant-numeric:tabular-nums; }
+b{ font-weight:700; }
+
+.page{ page-break-after:always; position:relative; padding-bottom:4px; }
+.page:last-child{ page-break-after:auto; }
+
+/* cover */
+.cover{ border-bottom:3px solid var(--ink); padding-bottom:12px; margin-bottom:16px; position:relative; }
+.cover::after{ content:""; position:absolute; left:0; right:0; bottom:-3px; height:3px;
+  background:repeating-linear-gradient(90deg,var(--w) 0 26px,transparent 26px 34px,var(--m) 34px 60px,transparent 60px 68px); }
+.eyebrow{ text-transform:uppercase; letter-spacing:.14em; font-size:8.5px; font-weight:700; color:var(--ink2); }
+h1{ font-size:33px; line-height:1.05; letter-spacing:-.02em; margin:8px 0 8px; font-weight:800; }
+h1 .hl{ color:var(--m); }
+.lead{ color:var(--ink2); font-size:11px; max-width:150mm; }
+
+/* query kpi cards */
+.qcard{ border:1px solid var(--line); border-radius:11px; padding:13px 15px; margin-bottom:11px; background:var(--soft); }
+.qcard.w{ border-left:4px solid var(--w); } .qcard.m{ border-left:4px solid var(--m); }
+.qtitle{ font-size:15px; font-weight:750; display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.qdot{ width:10px; height:10px; border-radius:3px; display:inline-block; }
+.kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.kpi{ border-left:1px solid var(--line); padding-left:11px; }
+.kpi:first-child{ border-left:none; padding-left:0; }
+.kv{ font-size:23px; font-weight:800; line-height:1; letter-spacing:-.01em; }
+.kl{ font-size:8.7px; color:var(--ink2); margin-top:3px; text-transform:uppercase; letter-spacing:.03em; }
+.qfoot{ margin-top:11px; padding-top:9px; border-top:1px solid var(--line); font-size:9.3px; color:var(--ink2); }
+
+/* takeaways */
+.takeaways{ display:flex; flex-direction:column; gap:8px; margin-top:14px; }
+.tk{ display:flex; gap:10px; background:#fff; border:1px solid var(--line); border-radius:9px; padding:10px 12px; font-size:10px; }
+.tki{ font-size:16px; line-height:1.2; }
+.tk b{ color:var(--ink); }
+
+/* section pages */
+.ph{ font-size:17px; font-weight:750; display:flex; align-items:center; gap:9px; margin-bottom:12px; letter-spacing:-.01em; }
+.sub{ color:var(--ink2); font-size:10.3px; margin-bottom:13px; max-width:150mm; }
+.grid2{ display:grid; grid-template-columns:1fr 1fr; gap:11px; margin-bottom:11px; }
+.panel{ border:1px solid var(--line); border-radius:10px; padding:12px 13px; margin-bottom:11px; break-inside:avoid; }
+.pt{ font-size:9px; text-transform:uppercase; letter-spacing:.09em; font-weight:700; color:var(--ink2); margin-bottom:10px; }
+.note{ font-size:9px; color:var(--ink2); margin-top:10px; line-height:1.5; }
+
+/* funnel */
+.funnel{ display:flex; flex-direction:column; gap:5px; align-items:center; }
+.fstage{ width:var(--fw); min-width:60%; }
+.fbar{ display:flex; align-items:center; gap:7px; padding:7px 10px; border-radius:7px;
+  background:var(--soft); border:1px solid var(--line); font-size:10px; }
+.fbar b{ flex:1; font-weight:600; } .fbar i{ font-style:normal; font-weight:700; color:var(--ink2); font-variant-numeric:tabular-nums; }
+.fstage.tone-a .fbar{ background:color-mix(in srgb,var(--fc) 12%,#fff); border-color:color-mix(in srgb,var(--fc) 32%,var(--line)); }
+.fstage.tone-good .fbar{ background:color-mix(in srgb,var(--good) 15%,#fff); border-color:color-mix(in srgb,var(--good) 40%,var(--line)); }
+.fstage.tone-good .fbar i{ color:var(--good); }
+.fstage.tone-muted .fbar{ opacity:.5; border-style:dashed; }
+.fm{ text-align:center; font-size:8.6px; color:var(--ink2); margin-top:2px; }
+
+/* benchmark */
+.bench{ display:flex; flex-direction:column; gap:8px; }
+.brow{ display:grid; grid-template-columns:54px 1fr; gap:8px; align-items:center; }
+.bk{ font-size:9.4px; color:var(--ink2); }
+.bb{ display:flex; align-items:center; gap:6px; height:11px; }
+.bb i{ height:8px; border-radius:2px; display:block; min-width:2px; }
+.bb em{ font-style:normal; font-size:8.7px; color:var(--ink2); font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+/* segments */
+.segs{ display:flex; gap:9px; align-items:flex-end; height:110px; padding-top:6px; }
+.seg{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; text-align:center; }
+.segbar{ width:60%; border-radius:3px 3px 0 0; }
+.segrev{ font-size:9px; font-weight:700; margin-top:4px; font-variant-numeric:tabular-nums; }
+.seglbl{ font-size:7.6px; color:var(--ink2); margin-top:2px; }
+.segn{ font-size:7.6px; color:var(--ink2); }
+
+/* sellers */
+.sellers{ display:flex; flex-direction:column; gap:6px; }
+.srow{ display:grid; grid-template-columns:1fr 130px 34px; gap:8px; align-items:center; font-size:9.6px; }
+.srow span{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sbar{ background:var(--soft); border-radius:3px; height:8px; overflow:hidden; }
+.sbar i{ display:block; height:100%; border-radius:3px; }
+.srow em{ font-style:normal; text-align:right; color:var(--ink2); font-variant-numeric:tabular-nums; }
+
+/* news table */
+.nt{ width:100%; border-collapse:collapse; font-size:9.4px; }
+.nt th{ text-align:left; font-size:8px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink2);
+  font-weight:700; padding:0 8px 6px; border-bottom:1px solid var(--line); }
+.nt th.r{ text-align:right; }
+.nt td{ padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+.nt tr:last-child td{ border-bottom:none; }
+.nt .nn{ color:var(--ink2); font-size:8.4px; margin-top:1px; }
+.spark{ display:block; }
+
+/* gallery */
+.galwrap{ }
+.galtitle{ font-size:11px; font-weight:750; margin:6px 0 8px; padding-left:9px; border-left:4px solid; }
+.galtitle.w{ border-color:var(--w); color:var(--w); }
+.galtitle.m{ border-color:var(--m); color:var(--m); margin-top:14px; }
+.gal{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.card{ border:1px solid var(--line); border-radius:9px; overflow:hidden; break-inside:avoid; background:#fff; }
+.card img{ width:100%; height:118px; object-fit:cover; object-position:center 22%; display:block; }
+.card figcaption{ padding:8px 9px 9px; }
+.ctag{ font-size:9.6px; font-weight:750; margin-bottom:3px; }
+.card.tone-good{ border-top:3px solid var(--good); } .card.tone-good .ctag{ color:var(--good); }
+.card.tone-a{ border-top:3px solid var(--accent); } .card.tone-a .ctag{ color:var(--accent); }
+.card.tone-warn{ border-top:3px solid var(--warn); } .card.tone-warn .ctag{ color:var(--warn); }
+.cmeta{ font-size:8px; color:var(--ink2); margin-bottom:5px; font-variant-numeric:tabular-nums; }
+.card p{ font-size:8.6px; line-height:1.42; color:var(--ink); }
+.legend{ display:flex; gap:18px; margin-top:12px; font-size:9px; color:var(--ink2); }
+.legend i{ width:12px; height:12px; border-radius:3px; display:inline-block; vertical-align:-2px; margin-right:5px; }
+.legend .good{ background:var(--good); } .legend .a{ background:var(--accent); } .legend .warn{ background:var(--warn); }
+
+/* filter bar + links */
+.filterbar{ display:inline-block; background:#F3ECE4; border:1px solid #E4D8C8; border-radius:7px;
+  padding:5px 11px; font-size:10px; color:#7A5A2E; margin:2px 0 10px; }
+.filterbar b{ color:#5A3E17; }
+a{ color:inherit; text-decoration:none; border-bottom:1px solid rgba(52,86,139,.35); }
+.nt a, .srow a, .cmeta a, .stitle a, .smeta a{ color:var(--accent); border-bottom:1px solid rgba(52,86,139,.3); }
+
+/* slide strips (10 слайдов) */
+.striprow{ border:1px solid var(--line); border-radius:9px; padding:9px 10px; margin-bottom:9px; break-inside:avoid; }
+.striphd{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:7px; flex-wrap:wrap; }
+.stitle{ font-size:10.5px; font-weight:700; }
+.smeta{ font-size:8.7px; color:var(--ink2); font-variant-numeric:tabular-nums; }
+.strip{ display:flex; gap:5px; }
+.th{ position:relative; flex:1; aspect-ratio:246/328; border-radius:4px; overflow:hidden; background:var(--soft); border:1px solid var(--line); }
+.th img{ width:100%; height:100%; object-fit:cover; display:block; }
+.th span{ position:absolute; left:3px; top:2px; font-size:7px; font-weight:700; color:#fff;
+  background:rgba(20,20,24,.55); border-radius:3px; padding:0 3px; line-height:1.5; }
+
+.foot{ padding-top:6px; font-size:9px; color:var(--ink2); line-height:1.55; }
+.foot .fh{ font-size:10px; font-weight:750; color:var(--ink); text-transform:uppercase; letter-spacing:.06em; margin:12px 0 5px; }
+.foot p{ margin-bottom:4px; }
+
+/* launcher bars (новинки по продавцам) */
+.launch{ display:flex; flex-direction:column; gap:6px; }
+.lrw{ display:grid; grid-template-columns:118px 1fr 40px; gap:9px; align-items:center; font-size:9.6px; }
+.lrw .ln{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lrw .ln a{ color:var(--ink); border:none; }
+.lbarwrap{ background:var(--soft); border-radius:3px; height:15px; display:flex; overflow:hidden; }
+.lbarwrap i{ display:block; height:100%; }
+.lbarwrap .plaid{ background:var(--accent); }
+.lbarwrap .other{ background:#C9C3BA; }
+.lrw em{ font-style:normal; text-align:right; font-variant-numeric:tabular-nums; font-weight:700; }
+.lrw.zero .ln{ color:var(--ink2); }
+.blegend{ display:flex; gap:16px; font-size:8.6px; color:var(--ink2); margin:8px 0 0; }
+.blegend i{ width:10px; height:10px; border-radius:2px; display:inline-block; vertical-align:-1px; margin-right:4px; }
+
+/* wide tables for sellers/articles */
+.wt{ width:100%; border-collapse:collapse; font-size:8.8px; }
+.wt th{ text-align:left; font-size:7.6px; text-transform:uppercase; letter-spacing:.03em; color:var(--ink2); font-weight:700; padding:0 6px 6px; border-bottom:1px solid var(--line); }
+.wt th.r{ text-align:right; } .wt td.r{ text-align:right; font-variant-numeric:tabular-nums; }
+.wt td{ padding:5px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+.wt tr:last-child td{ border-bottom:none; }
+.wt .nn{ color:var(--ink2); font-size:7.8px; }
+.wt a{ color:var(--accent); }
+.wt .newpill{ background:color-mix(in srgb,var(--good) 16%,#fff); color:var(--good); font-weight:700; border-radius:4px; padding:1px 5px; font-variant-numeric:tabular-nums; }
+.wt .zeropill{ color:var(--ink2); }
+.chip2{ display:inline-block; font-size:7.4px; padding:0 4px; border-radius:3px; background:var(--soft); color:var(--ink2); margin-left:3px; }
+.plaidmark{ color:var(--accent); font-weight:700; }
+</style></head>
+<body>
+<section class="page">
+  <header class="cover">
+    <div class="eyebrow">MPStats · Wildberries · снимок 2026-07-13 · окно новинок 60 дней</div>
+    <h1>Топ-продавцы и их <span class="hl">новинки</span></h1>
+    <p class="lead">По запросам «рубашка в клетку женская / мужская»: топ-10 продавцов, топ-10 артикулов и всё, что топ-10 продавцов <b>завели на WB за 2 месяца</b> (из полной категории рубашек — ловим новинки до попадания в топ). Артикулы и продавцы кликабельны.</p>
+  </header>
+  
+  <div class="qcard w">
+    <div class="qtitle"><span class="qdot" style="background:#A6385A"></span>«рубашка в клетку женская»</div>
+    <div class="kpis">
+      <div class="kpi"><div class="kv" style="color:#A6385A">10</div><div class="kl">новинок у топ-10</div></div>
+      <div class="kpi"><div class="kv" style="color:#A6385A">6</div><div class="kl">из них «в клетку»</div></div>
+      <div class="kpi"><div class="kv" style="color:#A6385A">2 671 147</div><div class="kl">выручка новинок, ₽</div></div>
+      <div class="kpi"><div class="kv" style="color:#A6385A">5</div><div class="kl">топов без новинок</div></div>
+    </div>
+  </div>
+  <div class="qcard m">
+    <div class="qtitle"><span class="qdot" style="background:#34568B"></span>«рубашка в клетку мужская»</div>
+    <div class="kpis">
+      <div class="kpi"><div class="kv" style="color:#34568B">42</div><div class="kl">новинок у топ-10</div></div>
+      <div class="kpi"><div class="kv" style="color:#34568B">4</div><div class="kl">из них «в клетку»</div></div>
+      <div class="kpi"><div class="kv" style="color:#34568B">46 436 590</div><div class="kl">выручка новинок, ₽</div></div>
+      <div class="kpi"><div class="kv" style="color:#34568B">7</div><div class="kl">топов без новинок</div></div>
+    </div>
+  </div>
+  <div class="takeaways">
+    <div class="tk"><div class="tki">🧭</div><div><b>Клетку сейчас почти не заводят.</b> Из 52 новинок топ-продавцов лишь 10 — «в клетку». Клетка = осень/зима, массовые запуски ещё впереди → окно для входа до пика.</div></div>
+    <div class="tk"><div class="tki">🏭</div><div><b>Мужской рынок активнее.</b> ООО Твое завёл 23 новинки, ИП Никитко — 13 (премиум-полоска), Alvybrand — 6 (лён). Но в клетку — единицы: крупные тестируют полоску/лён/однотон.</div></div>
+    <div class="tk"><div class="tki">🛡️</div><div><b>Половина топов «спит».</b> Многие лидеры (Ниидл, Жумакадыров, Веселовская, Третьяков, Чубаков…) за 2 месяца не завели ни одной новой рубашки — держат позиции старыми хитами.</div></div>
+  </div>
+</section>
+<section class="page">
+  <h2 class="ph"><span class="qdot" style="background:#A6385A"></span>Женская · кто сколько завёл новинок</h2>
+  <div class="panel"><div class="pt">Новинки топ-10 продавцов за 60 дней (категория рубашек)</div><div class="launch">
+    <div class="lrw ">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/4325217">ИП Омурбекова Н М</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:25%"></i>
+      </div>
+      <em>1</em>
+    </div>
+    <div class="lrw ">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/257967">ИП Молотов А И</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:75%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>3</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/4057619">Осоо Ниидл</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/1267389">ИП Жумакадыров Атаб…</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/563233">ИП Веселовская Елен…</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/1396869">ИП Ысмаилов Искендер</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div>
+    <div class="lrw ">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/4225160">Темир Уулу Арсланбек</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:25%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>1</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/4197435">ИП Эргешов А М</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div>
+    <div class="lrw ">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/741564">ИП Муазен А</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:50%"></i>
+        <i class="other" style="width:50%"></i>
+      </div>
+      <em>4</em>
+    </div>
+    <div class="lrw ">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/1224134">ИП Айгул</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:25%"></i>
+      </div>
+      <em>1</em>
+    </div></div>
+    <div class="blegend"><span><i style="background:#A6385A"></i>в клетку</span><span><i style="background:#C9C3BA"></i>прочие рубашки</span></div></div>
+  <div class="panel"><div class="pt">Топ-10 продавцов по выручке в выдаче запроса</div><table class="wt"><thead><tr>
+    <th>#</th><th>Продавец (витрина)</th><th>Бренд</th><th class="r">в топе</th><th class="r">выручка ₽</th><th class="r">доля</th><th class="r">рубашек</th><th class="r">новинок (клетка)</th></tr></thead><tbody>
+    <tr><td class="r">1</td><td><a href="https://www.wildberries.ru/seller/4325217">ИП Омурбекова Н М</a></td><td>DEN EMOTION</td>
+        <td class="r">2</td><td class="r">42 884 813</td><td class="r">14.1%</td>
+        <td class="r">44</td><td class="r"><span class="newpill">1 (0)</span></td></tr><tr><td class="r">2</td><td><a href="https://www.wildberries.ru/seller/257967">ИП Молотов А И</a></td><td>ALUNA</td>
+        <td class="r">7</td><td class="r">42 574 762</td><td class="r">14%</td>
+        <td class="r">4</td><td class="r"><span class="newpill">3 (3)</span></td></tr><tr><td class="r">3</td><td><a href="https://www.wildberries.ru/seller/4057619">Осоо Ниидл</a></td><td>needlе</td>
+        <td class="r">7</td><td class="r">31 969 470</td><td class="r">10.5%</td>
+        <td class="r">13</td><td class="r"><span class="zeropill">0</span></td></tr><tr><td class="r">4</td><td><a href="https://www.wildberries.ru/seller/1267389">ИП Жумакадыров Атабек Р…</a></td><td>SYRGISHOPP</td>
+        <td class="r">2</td><td class="r">28 245 907</td><td class="r">9.3%</td>
+        <td class="r">4</td><td class="r"><span class="zeropill">0</span></td></tr><tr><td class="r">5</td><td><a href="https://www.wildberries.ru/seller/563233">ИП Веселовская Елена Юр…</a></td><td>INLITE</td>
+        <td class="r">3</td><td class="r">25 649 993</td><td class="r">8.5%</td>
+        <td class="r">8</td><td class="r"><span class="zeropill">0</span></td></tr><tr><td class="r">6</td><td><a href="https://www.wildberries.ru/seller/1396869">ИП Ысмаилов Искендер</a></td><td>shoola</td>
+        <td class="r">4</td><td class="r">16 543 667</td><td class="r">5.5%</td>
+        <td class="r">4</td><td class="r"><span class="zeropill">0</span></td></tr><tr><td class="r">7</td><td><a href="https://www.wildberries.ru/seller/4225160">Темир Уулу Арсланбек</a></td><td>arsshopp</td>
+        <td class="r">3</td><td class="r">16 178 166</td><td class="r">5.3%</td>
+        <td class="r">1</td><td class="r"><span class="newpill">1 (1)</span></td></tr><tr><td class="r">8</td><td><a href="https://www.wildberries.ru/seller/4197435">ИП Эргешов А М</a></td><td>YOUTH</td>
+        <td class="r">4</td><td class="r">14 865 500</td><td class="r">4.9%</td>
+        <td class="r">2</td><td class="r"><span class="zeropill">0</span></td></tr><tr><td class="r">9</td><td><a href="https://www.wildberries.ru/seller/741564">ИП Муазен А</a></td><td>LifeStyle37</td>
+        <td class="r">5</td><td class="r">11 223 729</td><td class="r">3.7%</td>
+        <td class="r">25</td><td class="r"><span class="newpill">4 (2)</span></td></tr><tr><td class="r">10</td><td><a href="https://www.wildberries.ru/seller/1224134">ИП Айгул</a></td><td>—</td>
+        <td class="r">2</td><td class="r">9 264 045</td><td class="r">3.1%</td>
+        <td class="r">7</td><td class="r"><span class="newpill">1 (0)</span></td></tr></tbody></table></div>
+  <div class="panel"><div class="pt">Топ-10 артикулов по выручке</div><table class="wt"><thead><tr>
+    <th>#</th><th>SKU / название</th><th>продавец</th><th class="r">цена</th><th class="r">продаж</th><th class="r">выручка ₽</th><th>вышла</th></tr></thead><tbody>
+    <tr>
+      <td class="r">1</td>
+      <td><a href="https://www.wildberries.ru/catalog/328892062/detail.aspx"><b>328892062</b></a><div class="nn">Рубашка в клетку оверсайз…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/1267389">ИП Жумакадыров …</a></td>
+      <td class="r">1 105</td><td class="r">22 395</td><td class="r">27 877 679</td>
+      <td>2025-02-09</td></tr><tr>
+      <td class="r">2</td>
+      <td><a href="https://www.wildberries.ru/catalog/297181520/detail.aspx"><b>297181520</b></a><div class="nn">Летняя рубашка в клетку o…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/4325217">ИП Омурбекова Н…</a></td>
+      <td class="r">1 425</td><td class="r">15 337</td><td class="r">24 562 039</td>
+      <td>2024-12-19</td></tr><tr>
+      <td class="r">3</td>
+      <td><a href="https://www.wildberries.ru/catalog/400519206/detail.aspx"><b>400519206</b></a><div class="nn">Рубашка в клетку оверсайз</div></td>
+      <td><a href="https://www.wildberries.ru/seller/563233">ИП Веселовская …</a></td>
+      <td class="r">1 686</td><td class="r">9 970</td><td class="r">18 677 956</td>
+      <td>2025-05-12</td></tr><tr>
+      <td class="r">4</td>
+      <td><a href="https://www.wildberries.ru/catalog/473155591/detail.aspx"><b>473155591</b></a><div class="nn">Рубашка летняя в клетку о…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/4325217">ИП Омурбекова Н…</a></td>
+      <td class="r">1 425</td><td class="r">10 387</td><td class="r">18 322 774</td>
+      <td>2025-08-14</td></tr><tr>
+      <td class="r">5</td>
+      <td><a href="https://www.wildberries.ru/catalog/320897845/detail.aspx"><b>320897845</b></a><div class="nn">Рубашка в клетку оверсайз…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/1396869">ИП Ысмаилов Иск…</a></td>
+      <td class="r">1 190</td><td class="r">10 888</td><td class="r">13 571 640</td>
+      <td>2025-02-17</td></tr><tr>
+      <td class="r">6</td>
+      <td><a href="https://www.wildberries.ru/catalog/268459700/detail.aspx"><b>268459700</b></a><div class="nn">Рубашка коричневая в клет…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/4225160">Темир Уулу Арсл…</a></td>
+      <td class="r">1 078</td><td class="r">9 994</td><td class="r">12 352 431</td>
+      <td>2024-10-14</td></tr><tr>
+      <td class="r">7</td>
+      <td><a href="https://www.wildberries.ru/catalog/230404970/detail.aspx"><b>230404970</b></a><div class="nn">Рубашка в клетку оверсайз…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/4057619">Осоо Ниидл</a></td>
+      <td class="r">1 101</td><td class="r">8 929</td><td class="r">11 877 337</td>
+      <td>2024-05-25</td></tr><tr>
+      <td class="r">8</td>
+      <td><a href="https://www.wildberries.ru/catalog/776242947/detail.aspx"><b>776242947</b></a><div class="nn">Рубашка в клетку оверсайз…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/257967">ИП Молотов А И</a></td>
+      <td class="r">2 125</td><td class="r">5 636</td><td class="r">11 764 565</td>
+      <td>2026-02-28</td></tr><tr>
+      <td class="r">9</td>
+      <td><a href="https://www.wildberries.ru/catalog/399655451/detail.aspx"><b>399655451</b></a><div class="nn">Рубашка в клетку оверсайз</div></td>
+      <td><a href="https://www.wildberries.ru/seller/4197435">ИП Эргешов А М</a></td>
+      <td class="r">1 466</td><td class="r">6 446</td><td class="r">10 535 634</td>
+      <td>2025-05-19</td></tr><tr>
+      <td class="r">10</td>
+      <td><a href="https://www.wildberries.ru/catalog/220889051/detail.aspx"><b>220889051</b></a><div class="nn">Рубашка в клетку оверсайз…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/257967">ИП Молотов А И</a></td>
+      <td class="r">2 112</td><td class="r">4 686</td><td class="r">9 427 384</td>
+      <td>2024-04-21</td></tr></tbody></table></div>
+</section>
+<section class="page">
+  <h2 class="ph"><span class="qdot" style="background:#34568B"></span>Мужская · кто сколько завёл новинок</h2>
+  <div class="panel"><div class="pt">Новинки топ-10 продавцов за 60 дней (категория рубашек)</div><div class="launch">
+    <div class="lrw ">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/207146">ИП Никитко Ирина Иг…</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:56.52173913043478%"></i>
+      </div>
+      <em>13</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/1202103">ИП Третьяков В Г</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/555820">ИП Чубаков М А</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/1232766">ИП Картошкин В С</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div>
+    <div class="lrw ">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/5359">ООО Твое</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:17.391304347826086%"></i>
+        <i class="other" style="width:82.6086956521739%"></i>
+      </div>
+      <em>23</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/250095693">ООО Взаимно</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div>
+    <div class="lrw ">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/234878">Alvybrand</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:26.08695652173913%"></i>
+      </div>
+      <em>6</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/57151">ООО Атласформен РУС</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/393170">ИП Дан В Ю</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div>
+    <div class="lrw zero">
+      <span class="ln"><a href="https://www.wildberries.ru/seller/185981">ИП Салманов Ильхам …</a></span>
+      <div class="lbarwrap">
+        <i class="plaid" style="width:0%"></i>
+        <i class="other" style="width:0%"></i>
+      </div>
+      <em>—</em>
+    </div></div>
+    <div class="blegend"><span><i style="background:#34568B"></i>в клетку</span><span><i style="background:#C9C3BA"></i>прочие рубашки</span></div></div>
+  <div class="panel"><div class="pt">Топ-10 продавцов по выручке в выдаче запроса</div><table class="wt"><thead><tr>
+    <th>#</th><th>Продавец (витрина)</th><th>Бренд</th><th class="r">в топе</th><th class="r">выручка ₽</th><th class="r">доля</th><th class="r">рубашек</th><th class="r">новинок (клетка)</th></tr></thead><tbody>
+    <tr><td class="r">1</td><td><a href="https://www.wildberries.ru/seller/207146">ИП Никитко Ирина Игорев…</a></td><td>MAILLIV TREND</td>
+        <td class="r">4</td><td class="r">7 824 577</td><td class="r">13.9%</td>
+        <td class="r">65</td><td class="r"><span class="newpill">13 (0)</span></td></tr><tr><td class="r">2</td><td><a href="https://www.wildberries.ru/seller/1202103">ИП Третьяков В Г</a></td><td>Best TAILOR</td>
+        <td class="r">13</td><td class="r">6 774 124</td><td class="r">12.1%</td>
+        <td class="r">99</td><td class="r"><span class="zeropill">0</span></td></tr><tr><td class="r">3</td><td><a href="https://www.wildberries.ru/seller/555820">ИП Чубаков М А</a></td><td>GOLD GOLF MAN</td>
+        <td class="r">2</td><td class="r">5 226 525</td><td class="r">9.3%</td>
+        <td class="r">17</td><td class="r"><span class="zeropill">0</span></td></tr><tr><td class="r">4</td><td><a href="https://www.wildberries.ru/seller/1232766">ИП Картошкин В С</a></td><td>Botvanix</td>
+        <td class="r">4</td><td class="r">4 460 646</td><td class="r">7.9%</td>
+        <td class="r">5</td><td class="r"><span class="zeropill">0</span></td></tr><tr><td class="r">5</td><td><a href="https://www.wildberries.ru/seller/5359">ООО Твое</a></td><td>ТВОЕ</td>
+        <td class="r">2</td><td class="r">3 062 354</td><td class="r">5.5%</td>
+        <td class="r">66</td><td class="r"><span class="newpill">23 (4)</span></td></tr><tr><td class="r">6</td><td><a href="https://www.wildberries.ru/seller/250095693">ООО Взаимно</a></td><td>—</td>
+        <td class="r">4</td><td class="r">2 842 111</td><td class="r">5.1%</td>
+        <td class="r">18</td><td class="r"><span class="zeropill">0</span></td></tr><tr><td class="r">7</td><td><a href="https://www.wildberries.ru/seller/234878">Alvybrand</a></td><td>ALVY BRAND</td>
+        <td class="r">2</td><td class="r">2 381 372</td><td class="r">4.2%</td>
+        <td class="r">19</td><td class="r"><span class="newpill">6 (0)</span></td></tr><tr><td class="r">8</td><td><a href="https://www.wildberries.ru/seller/57151">ООО Атласформен РУС</a></td><td>Atlas For Men</td>
+        <td class="r">2</td><td class="r">2 178 213</td><td class="r">3.9%</td>
+        <td class="r">61</td><td class="r"><span class="zeropill">0</span></td></tr><tr><td class="r">9</td><td><a href="https://www.wildberries.ru/seller/393170">ИП Дан В Ю</a></td><td>JOHN VARCO</td>
+        <td class="r">4</td><td class="r">2 178 135</td><td class="r">3.9%</td>
+        <td class="r">87</td><td class="r"><span class="zeropill">0</span></td></tr><tr><td class="r">10</td><td><a href="https://www.wildberries.ru/seller/185981">ИП Салманов Ильхам Агаб…</a></td><td>PAOLA BOCCI x…</td>
+        <td class="r">14</td><td class="r">1 659 774</td><td class="r">3%</td>
+        <td class="r">40</td><td class="r"><span class="zeropill">0</span></td></tr></tbody></table></div>
+  <div class="panel"><div class="pt">Топ-10 артикулов по выручке</div><table class="wt"><thead><tr>
+    <th>#</th><th>SKU / название</th><th>продавец</th><th class="r">цена</th><th class="r">продаж</th><th class="r">выручка ₽</th><th>вышла</th></tr></thead><tbody>
+    <tr>
+      <td class="r">1</td>
+      <td><a href="https://www.wildberries.ru/catalog/415779075/detail.aspx"><b>415779075</b></a><div class="nn">Рубашка с коротким рукаво…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/555820">ИП Чубаков М А</a></td>
+      <td class="r">2 040</td><td class="r">1 662</td><td class="r">3 728 405</td>
+      <td>2025-05-16</td></tr><tr>
+      <td class="r">2</td>
+      <td><a href="https://www.wildberries.ru/catalog/466662789/detail.aspx"><b>466662789</b></a><div class="nn">Рубашка в клетку оверсайз…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/207146">ИП Никитко Ирин…</a></td>
+      <td class="r">3 067</td><td class="r">1 269</td><td class="r">3 545 405</td>
+      <td>2025-07-26</td></tr><tr>
+      <td class="r">3</td>
+      <td><a href="https://www.wildberries.ru/catalog/164069733/detail.aspx"><b>164069733</b></a><div class="nn">Рубашка оверсайз в клетку…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/1232766">ИП Картошкин В С</a></td>
+      <td class="r">3 073</td><td class="r">786</td><td class="r">2 191 279</td>
+      <td>2023-06-07</td></tr><tr>
+      <td class="r">4</td>
+      <td><a href="https://www.wildberries.ru/catalog/155401333/detail.aspx"><b>155401333</b></a><div class="nn">Рубашка летняя из хлопка …</div></td>
+      <td><a href="https://www.wildberries.ru/seller/57151">ООО Атласформен…</a></td>
+      <td class="r">1 752</td><td class="r">874</td><td class="r">1 886 378</td>
+      <td>2023-04-26</td></tr><tr>
+      <td class="r">5</td>
+      <td><a href="https://www.wildberries.ru/catalog/166222688/detail.aspx"><b>166222688</b></a><div class="nn">Рубашка в клетку с коротк…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/1202103">ИП Третьяков В Г</a></td>
+      <td class="r">1 558</td><td class="r">1 281</td><td class="r">1 807 629</td>
+      <td>2023-07-06</td></tr><tr>
+      <td class="r">6</td>
+      <td><a href="https://www.wildberries.ru/catalog/366834479/detail.aspx"><b>366834479</b></a><div class="nn">Рубашка в клетку с длинны…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/207146">ИП Никитко Ирин…</a></td>
+      <td class="r">3 113</td><td class="r">637</td><td class="r">1 777 903</td>
+      <td>2025-04-09</td></tr><tr>
+      <td class="r">7</td>
+      <td><a href="https://www.wildberries.ru/catalog/822734661/detail.aspx"><b>822734661</b></a><div class="nn">Рубашка в клетку с длинны…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/5359">ООО Твое</a></td>
+      <td class="r">664</td><td class="r">2 021</td><td class="r">1 657 796</td>
+      <td>2026-02-18</td></tr><tr>
+      <td class="r">8</td>
+      <td><a href="https://www.wildberries.ru/catalog/58731696/detail.aspx"><b>58731696</b></a><div class="nn">Рубашка в клетку с длинны…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/100187">ИП Пышных Светл…</a></td>
+      <td class="r">1 744</td><td class="r">894</td><td class="r">1 579 134</td>
+      <td>2022-01-17</td></tr><tr>
+      <td class="r">9</td>
+      <td><a href="https://www.wildberries.ru/catalog/215004730/detail.aspx"><b>215004730</b></a><div class="nn">Рубашка теплая в клетку с…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/207146">ИП Никитко Ирин…</a></td>
+      <td class="r">2 332</td><td class="r">704</td><td class="r">1 506 606</td>
+      <td>2024-03-18</td></tr><tr>
+      <td class="r">10</td>
+      <td><a href="https://www.wildberries.ru/catalog/415555413/detail.aspx"><b>415555413</b></a><div class="nn">Рубашка с коротким рукаво…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/555820">ИП Чубаков М А</a></td>
+      <td class="r">2 030</td><td class="r">631</td><td class="r">1 498 120</td>
+      <td>2025-05-16</td></tr></tbody></table></div>
+</section>
+<section class="page">
+  <h2 class="ph">Новинки «в клетку» топ-продавцов · крупным планом</h2>
+  <p class="sub">Только карточки в клетку (релевантно нише), заведённые топ-10 продавцами за 2 месяца — отсортированы по выручке. Клик — на карточку/витрину.</p>
+  <div class="panel"><div class="pt"><span class="qdot" style="background:#A6385A;width:8px;height:8px;border-radius:2px;display:inline-block"></span> Женская</div><table class="wt"><thead><tr>
+    <th>SKU / название</th><th>продавец</th><th>вышла</th><th>рукав/сезон</th><th class="r">цена</th><th class="r">продаж</th><th class="r">выручка ₽</th></tr></thead><tbody>
+    <tr>
+      <td><a href="https://www.wildberries.ru/catalog/1052012430/detail.aspx"><b>1052012430</b></a><div class="nn">Рубашка хлопковая в клетку …</div></td>
+      <td><a href="https://www.wildberries.ru/seller/741564">ИП Муазен А</a></td><td>2026-06-08</td><td>—/лето</td>
+      <td class="r">742</td><td class="r">766</td><td class="r">563 590</td></tr><tr>
+      <td><a href="https://www.wildberries.ru/catalog/1052012439/detail.aspx"><b>1052012439</b></a><div class="nn">Рубашка в клетку хлопковая …</div></td>
+      <td><a href="https://www.wildberries.ru/seller/741564">ИП Муазен А</a></td><td>2026-05-29</td><td>—/лето</td>
+      <td class="r">908</td><td class="r">686</td><td class="r">488 071</td></tr><tr>
+      <td><a href="https://www.wildberries.ru/catalog/1093697395/detail.aspx"><b>1093697395</b></a><div class="nn">Летняя рубашка в клетку ове…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/257967">ИП Молотов А И</a></td><td>2026-07-10</td><td>—/лето</td>
+      <td class="r">2 178</td><td class="r">133</td><td class="r">279 913</td></tr><tr>
+      <td><a href="https://www.wildberries.ru/catalog/1093697392/detail.aspx"><b>1093697392</b></a><div class="nn">Рубашка в клетку оверсайз л…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/257967">ИП Молотов А И</a></td><td>2026-07-10</td><td>—/лето</td>
+      <td class="r">2 178</td><td class="r">101</td><td class="r">214 920</td></tr><tr>
+      <td><a href="https://www.wildberries.ru/catalog/1093697393/detail.aspx"><b>1093697393</b></a><div class="nn">Летняя рубашка в клетку ове…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/257967">ИП Молотов А И</a></td><td>2026-07-10</td><td>—/лето</td>
+      <td class="r">2 178</td><td class="r">83</td><td class="r">175 484</td></tr><tr>
+      <td><a href="https://www.wildberries.ru/catalog/1141733096/detail.aspx"><b>1141733096</b></a><div class="nn">Рубашка в клетку оверсайз у…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/4225160">Темир Уулу Арсл…</a></td><td>2026-06-24</td><td>—/—</td>
+      <td class="r">1 620</td><td class="r">2</td><td class="r">3 330</td></tr></tbody></table></div><div class="panel"><div class="pt"><span class="qdot" style="background:#34568B;width:8px;height:8px;border-radius:2px;display:inline-block"></span> Мужская</div><table class="wt"><thead><tr>
+    <th>SKU / название</th><th>продавец</th><th>вышла</th><th>рукав/сезон</th><th class="r">цена</th><th class="r">продаж</th><th class="r">выручка ₽</th></tr></thead><tbody>
+    <tr>
+      <td><a href="https://www.wildberries.ru/catalog/1016184515/detail.aspx"><b>1016184515</b></a><div class="nn">Рубашка в клетку с коротким…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/5359">ООО Твое</a></td><td>2026-05-16</td><td>кор./—</td>
+      <td class="r">643</td><td class="r">1 908</td><td class="r">1 404 558</td></tr><tr>
+      <td><a href="https://www.wildberries.ru/catalog/1016184516/detail.aspx"><b>1016184516</b></a><div class="nn">Рубашка в клетку с коротким…</div></td>
+      <td><a href="https://www.wildberries.ru/seller/5359">ООО Твое</a></td><td>2026-05-16</td><td>кор./—</td>
+      <td class="r">712</td><td class="r">1 282</td><td class="r">1 109 171</td></tr><tr>
+      <td><a href="https://www.wildberries.ru/catalog/1175221794/detail.aspx"><b>1175221794</b></a><div class="nn">Рубашка в клетку с длинным …</div></td>
+      <td><a href="https://www.wildberries.ru/seller/5359">ООО Твое</a></td><td>2026-06-19</td><td>длин./—</td>
+      <td class="r">792</td><td class="r">455</td><td class="r">461 928</td></tr><tr>
+      <td><a href="https://www.wildberries.ru/catalog/1175221793/detail.aspx"><b>1175221793</b></a><div class="nn">Рубашка в клетку с длинным …</div></td>
+      <td><a href="https://www.wildberries.ru/seller/5359">ООО Твое</a></td><td>2026-06-19</td><td>длин./—</td>
+      <td class="r">894</td><td class="r">187</td><td class="r">230 345</td></tr></tbody></table></div>
+  <footer class="foot">
+    <div class="fh">Метод и ссылки</div>
+    <p>Топ-10 продавцов/артикулов — из топ-100 выдачи MPStats по запросу (выручка за 60 дн.). Новинки продавца — из базовой категории рубашек (<span class="mono">Женщинам/Блузки и рубашки/Рубашка</span> / <span class="mono">Мужчинам/Рубашки</span>) с фильтром по <span class="mono">supplier_id</span>, отбор по дате появления ≥ 2026-05-14. Данные MPStats — оценочные. «Выручка в выдаче» и «выручка новинок» — разные базы. Артикул → <span class="mono">catalog/{sku}/detail.aspx</span>, продавец → <span class="mono">seller/{supplierId}</span>.</p>
+  </footer>
+</section></body></html>

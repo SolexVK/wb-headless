@@ -135,3 +135,30 @@ a{ color:inherit; text-decoration:none; border-bottom:1px solid rgba(52,86,139,.
 .foot{ padding-top:6px; font-size:9px; color:var(--ink2); line-height:1.55; }
 .foot .fh{ font-size:10px; font-weight:750; color:var(--ink); text-transform:uppercase; letter-spacing:.06em; margin:12px 0 5px; }
 .foot p{ margin-bottom:4px; }
+
+/* launcher bars (новинки по продавцам) */
+.launch{ display:flex; flex-direction:column; gap:6px; }
+.lrw{ display:grid; grid-template-columns:118px 1fr 40px; gap:9px; align-items:center; font-size:9.6px; }
+.lrw .ln{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lrw .ln a{ color:var(--ink); border:none; }
+.lbarwrap{ background:var(--soft); border-radius:3px; height:15px; display:flex; overflow:hidden; }
+.lbarwrap i{ display:block; height:100%; }
+.lbarwrap .plaid{ background:var(--accent); }
+.lbarwrap .other{ background:#C9C3BA; }
+.lrw em{ font-style:normal; text-align:right; font-variant-numeric:tabular-nums; font-weight:700; }
+.lrw.zero .ln{ color:var(--ink2); }
+.blegend{ display:flex; gap:16px; font-size:8.6px; color:var(--ink2); margin:8px 0 0; }
+.blegend i{ width:10px; height:10px; border-radius:2px; display:inline-block; vertical-align:-1px; margin-right:4px; }
+
+/* wide tables for sellers/articles */
+.wt{ width:100%; border-collapse:collapse; font-size:8.8px; }
+.wt th{ text-align:left; font-size:7.6px; text-transform:uppercase; letter-spacing:.03em; color:var(--ink2); font-weight:700; padding:0 6px 6px; border-bottom:1px solid var(--line); }
+.wt th.r{ text-align:right; } .wt td.r{ text-align:right; font-variant-numeric:tabular-nums; }
+.wt td{ padding:5px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+.wt tr:last-child td{ border-bottom:none; }
+.wt .nn{ color:var(--ink2); font-size:7.8px; }
+.wt a{ color:var(--accent); }
+.wt .newpill{ background:color-mix(in srgb,var(--good) 16%,#fff); color:var(--good); font-weight:700; border-radius:4px; padding:1px 5px; font-variant-numeric:tabular-nums; }
+.wt .zeropill{ color:var(--ink2); }
+.chip2{ display:inline-block; font-size:7.4px; padding:0 4px; border-radius:3px; background:var(--soft); color:var(--ink2); margin-left:3px; }
+.plaidmark{ color:var(--accent); font-weight:700; }

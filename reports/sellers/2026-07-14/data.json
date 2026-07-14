@@ -1,0 +1,1924 @@
+[
+  {
+    "query": "рубашка в клетку женская",
+    "categoryPath": "Женщинам/Блузки и рубашки/Рубашка",
+    "period": {
+      "d1": "2026-05-14",
+      "d2": "2026-07-13"
+    },
+    "cutoff": "2026-05-14",
+    "newWithinDays": 60,
+    "nicheRevenue": 303359349,
+    "topSellers": [
+      {
+        "seller": "ИП Омурбекова Н М",
+        "supplierId": 4325217,
+        "brand": "DEN EMOTION",
+        "cardsInTop": 2,
+        "revenue": 42884813,
+        "sales": 25724,
+        "sharePct": 14.1,
+        "url": "https://www.wildberries.ru/seller/4325217"
+      },
+      {
+        "seller": "ИП Молотов А И",
+        "supplierId": 257967,
+        "brand": "ALUNA",
+        "cardsInTop": 7,
+        "revenue": 42574762,
+        "sales": 20916,
+        "sharePct": 14,
+        "url": "https://www.wildberries.ru/seller/257967"
+      },
+      {
+        "seller": "Осоо Ниидл",
+        "supplierId": 4057619,
+        "brand": "needlе",
+        "cardsInTop": 7,
+        "revenue": 31969470,
+        "sales": 23017,
+        "sharePct": 10.5,
+        "url": "https://www.wildberries.ru/seller/4057619"
+      },
+      {
+        "seller": "ИП Жумакадыров Атабек Русланович",
+        "supplierId": 1267389,
+        "brand": "SYRGISHOPP",
+        "cardsInTop": 2,
+        "revenue": 28245907,
+        "sales": 22648,
+        "sharePct": 9.3,
+        "url": "https://www.wildberries.ru/seller/1267389"
+      },
+      {
+        "seller": "ИП Веселовская Елена Юрьевна",
+        "supplierId": 563233,
+        "brand": "INLITE",
+        "cardsInTop": 3,
+        "revenue": 25649993,
+        "sales": 13188,
+        "sharePct": 8.5,
+        "url": "https://www.wildberries.ru/seller/563233"
+      },
+      {
+        "seller": "ИП Ысмаилов Искендер",
+        "supplierId": 1396869,
+        "brand": "shoola",
+        "cardsInTop": 4,
+        "revenue": 16543667,
+        "sales": 12957,
+        "sharePct": 5.5,
+        "url": "https://www.wildberries.ru/seller/1396869"
+      },
+      {
+        "seller": "Темир Уулу Арсланбек",
+        "supplierId": 4225160,
+        "brand": "arsshopp",
+        "cardsInTop": 3,
+        "revenue": 16178166,
+        "sales": 13077,
+        "sharePct": 5.3,
+        "url": "https://www.wildberries.ru/seller/4225160"
+      },
+      {
+        "seller": "ИП Эргешов А М",
+        "supplierId": 4197435,
+        "brand": "YOUTH",
+        "cardsInTop": 4,
+        "revenue": 14865500,
+        "sales": 9015,
+        "sharePct": 4.9,
+        "url": "https://www.wildberries.ru/seller/4197435"
+      },
+      {
+        "seller": "ИП Муазен А",
+        "supplierId": 741564,
+        "brand": "LifeStyle37",
+        "cardsInTop": 5,
+        "revenue": 11223729,
+        "sales": 10843,
+        "sharePct": 3.7,
+        "url": "https://www.wildberries.ru/seller/741564"
+      },
+      {
+        "seller": "ИП Айгул",
+        "supplierId": 1224134,
+        "brand": "",
+        "cardsInTop": 2,
+        "revenue": 9264045,
+        "sales": 6016,
+        "sharePct": 3.1,
+        "url": "https://www.wildberries.ru/seller/1224134"
+      }
+    ],
+    "topArticles": [
+      {
+        "rank": 1,
+        "sku": 328892062,
+        "name": "Рубашка в клетку оверсайз удлиненная на весну и лето",
+        "brand": "SYRGISHOPP",
+        "seller": "ИП Жумакадыров Атабек Русланович",
+        "supplierId": 1267389,
+        "price": 1105,
+        "sales": 22395,
+        "revenue": 27877679,
+        "rating": 5,
+        "comments": 8270,
+        "firstDate": "2025-02-09",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "summer"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/328892062/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/1267389"
+      },
+      {
+        "rank": 2,
+        "sku": 297181520,
+        "name": "Летняя рубашка в клетку oversize как из PINTEREST",
+        "brand": "DEN EMOTION",
+        "seller": "ИП Омурбекова Н М",
+        "supplierId": 4325217,
+        "price": 1425,
+        "sales": 15337,
+        "revenue": 24562039,
+        "rating": 5,
+        "comments": 9793,
+        "firstDate": "2024-12-19",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "summer"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/297181520/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/4325217"
+      },
+      {
+        "rank": 3,
+        "sku": 400519206,
+        "name": "Рубашка в клетку оверсайз",
+        "brand": "INLITE",
+        "seller": "ИП Веселовская Елена Юрьевна",
+        "supplierId": 563233,
+        "price": 1686,
+        "sales": 9970,
+        "revenue": 18677956,
+        "rating": 5,
+        "comments": 3456,
+        "firstDate": "2025-05-12",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "unknown"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/400519206/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/563233"
+      },
+      {
+        "rank": 4,
+        "sku": 473155591,
+        "name": "Рубашка летняя в клетку оверсайз бежевая",
+        "brand": "DEN EMOTION",
+        "seller": "ИП Омурбекова Н М",
+        "supplierId": 4325217,
+        "price": 1425,
+        "sales": 10387,
+        "revenue": 18322774,
+        "rating": 5,
+        "comments": 1698,
+        "firstDate": "2025-08-14",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "summer"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/473155591/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/4325217"
+      },
+      {
+        "rank": 5,
+        "sku": 320897845,
+        "name": "Рубашка в клетку оверсайз удлиненная",
+        "brand": "shoola",
+        "seller": "ИП Ысмаилов Искендер",
+        "supplierId": 1396869,
+        "price": 1190,
+        "sales": 10888,
+        "revenue": 13571640,
+        "rating": 5,
+        "comments": 1984,
+        "firstDate": "2025-02-17",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "unknown"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/320897845/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/1396869"
+      },
+      {
+        "rank": 6,
+        "sku": 268459700,
+        "name": "Рубашка коричневая в клетку оверсайз удлиненная",
+        "brand": "arsshopp",
+        "seller": "Темир Уулу Арсланбек",
+        "supplierId": 4225160,
+        "price": 1078,
+        "sales": 9994,
+        "revenue": 12352431,
+        "rating": 5,
+        "comments": 3768,
+        "firstDate": "2024-10-14",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "unknown"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/268459700/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/4225160"
+      },
+      {
+        "rank": 7,
+        "sku": 230404970,
+        "name": "Рубашка в клетку оверсайз удлиненная",
+        "brand": "needlе",
+        "seller": "Осоо Ниидл",
+        "supplierId": 4057619,
+        "price": 1101,
+        "sales": 8929,
+        "revenue": 11877337,
+        "rating": 5,
+        "comments": 9735,
+        "firstDate": "2024-05-25",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "unknown"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/230404970/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/4057619"
+      },
+      {
+        "rank": 8,
+        "sku": 776242947,
+        "name": "Рубашка в клетку оверсайз летняя",
+        "brand": "ALUNA",
+        "seller": "ИП Молотов А И",
+        "supplierId": 257967,
+        "price": 2125,
+        "sales": 5636,
+        "revenue": 11764565,
+        "rating": 5,
+        "comments": 8972,
+        "firstDate": "2026-02-28",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "summer"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/776242947/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/257967"
+      },
+      {
+        "rank": 9,
+        "sku": 399655451,
+        "name": "Рубашка в клетку оверсайз",
+        "brand": "YOUTH",
+        "seller": "ИП Эргешов А М",
+        "supplierId": 4197435,
+        "price": 1466,
+        "sales": 6446,
+        "revenue": 10535634,
+        "rating": 5,
+        "comments": 2359,
+        "firstDate": "2025-05-19",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "unknown"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/399655451/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/4197435"
+      },
+      {
+        "rank": 10,
+        "sku": 220889051,
+        "name": "Рубашка в клетку оверсайз летняя",
+        "brand": "MARSHMALL0W",
+        "seller": "ИП Молотов А И",
+        "supplierId": 257967,
+        "price": 2112,
+        "sales": 4686,
+        "revenue": 9427384,
+        "rating": 5,
+        "comments": 8972,
+        "firstDate": "2024-04-21",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "summer"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/220889051/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/257967"
+      }
+    ],
+    "sellerNews": [
+      {
+        "seller": "ИП Омурбекова Н М",
+        "brand": "DEN EMOTION",
+        "supplierId": 4325217,
+        "url": "https://www.wildberries.ru/seller/4325217",
+        "revenue": 42884813,
+        "sharePct": 14.1,
+        "cardsInTop": 2,
+        "totalShirtsInCategory": 44,
+        "newCount": 1,
+        "newPlaidCount": 0,
+        "newRevenue": 114593,
+        "news": [
+          {
+            "sku": 992785720,
+            "name": "Рубашка из купры свободного кроя как из Pinterest",
+            "firstDate": "2026-05-28",
+            "price": 1900,
+            "sales": 47,
+            "revenue": 114593,
+            "rating": 5,
+            "comments": 2,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 406,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/992785720/detail.aspx"
+          }
+        ]
+      },
+      {
+        "seller": "ИП Молотов А И",
+        "brand": "ALUNA",
+        "supplierId": 257967,
+        "url": "https://www.wildberries.ru/seller/257967",
+        "revenue": 42574762,
+        "sharePct": 14,
+        "cardsInTop": 7,
+        "totalShirtsInCategory": 4,
+        "newCount": 3,
+        "newPlaidCount": 3,
+        "newRevenue": 670317,
+        "news": [
+          {
+            "sku": 1093697395,
+            "name": "Летняя рубашка в клетку оверсайз",
+            "firstDate": "2026-07-10",
+            "price": 2178,
+            "sales": 133,
+            "revenue": 279913,
+            "rating": 5,
+            "comments": 8972,
+            "pics": 17,
+            "hasVideo": 1,
+            "balance": 759,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": true,
+            "cardUrl": "https://www.wildberries.ru/catalog/1093697395/detail.aspx"
+          },
+          {
+            "sku": 1093697392,
+            "name": "Рубашка в клетку оверсайз летняя",
+            "firstDate": "2026-07-10",
+            "price": 2178,
+            "sales": 101,
+            "revenue": 214920,
+            "rating": 5,
+            "comments": 8972,
+            "pics": 11,
+            "hasVideo": 1,
+            "balance": 951,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": true,
+            "cardUrl": "https://www.wildberries.ru/catalog/1093697392/detail.aspx"
+          },
+          {
+            "sku": 1093697393,
+            "name": "Летняя рубашка в клетку оверсайз",
+            "firstDate": "2026-07-10",
+            "price": 2178,
+            "sales": 83,
+            "revenue": 175484,
+            "rating": 5,
+            "comments": 8972,
+            "pics": 20,
+            "hasVideo": 1,
+            "balance": 868,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": true,
+            "cardUrl": "https://www.wildberries.ru/catalog/1093697393/detail.aspx"
+          }
+        ]
+      },
+      {
+        "seller": "Осоо Ниидл",
+        "brand": "needlе",
+        "supplierId": 4057619,
+        "url": "https://www.wildberries.ru/seller/4057619",
+        "revenue": 31969470,
+        "sharePct": 10.5,
+        "cardsInTop": 7,
+        "totalShirtsInCategory": 13,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      },
+      {
+        "seller": "ИП Жумакадыров Атабек Русланович",
+        "brand": "SYRGISHOPP",
+        "supplierId": 1267389,
+        "url": "https://www.wildberries.ru/seller/1267389",
+        "revenue": 28245907,
+        "sharePct": 9.3,
+        "cardsInTop": 2,
+        "totalShirtsInCategory": 4,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      },
+      {
+        "seller": "ИП Веселовская Елена Юрьевна",
+        "brand": "INLITE",
+        "supplierId": 563233,
+        "url": "https://www.wildberries.ru/seller/563233",
+        "revenue": 25649993,
+        "sharePct": 8.5,
+        "cardsInTop": 3,
+        "totalShirtsInCategory": 8,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      },
+      {
+        "seller": "ИП Ысмаилов Искендер",
+        "brand": "shoola",
+        "supplierId": 1396869,
+        "url": "https://www.wildberries.ru/seller/1396869",
+        "revenue": 16543667,
+        "sharePct": 5.5,
+        "cardsInTop": 4,
+        "totalShirtsInCategory": 4,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      },
+      {
+        "seller": "Темир Уулу Арсланбек",
+        "brand": "arsshopp",
+        "supplierId": 4225160,
+        "url": "https://www.wildberries.ru/seller/4225160",
+        "revenue": 16178166,
+        "sharePct": 5.3,
+        "cardsInTop": 3,
+        "totalShirtsInCategory": 1,
+        "newCount": 1,
+        "newPlaidCount": 1,
+        "newRevenue": 3330,
+        "news": [
+          {
+            "sku": 1141733096,
+            "name": "Рубашка в клетку оверсайз удлиненная",
+            "firstDate": "2026-06-24",
+            "price": 1620,
+            "sales": 2,
+            "revenue": 3330,
+            "rating": 5,
+            "comments": 1,
+            "pics": 9,
+            "hasVideo": 1,
+            "balance": 480,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "unknown"
+            },
+            "isPlaid": true,
+            "cardUrl": "https://www.wildberries.ru/catalog/1141733096/detail.aspx"
+          }
+        ]
+      },
+      {
+        "seller": "ИП Эргешов А М",
+        "brand": "YOUTH",
+        "supplierId": 4197435,
+        "url": "https://www.wildberries.ru/seller/4197435",
+        "revenue": 14865500,
+        "sharePct": 4.9,
+        "cardsInTop": 4,
+        "totalShirtsInCategory": 2,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      },
+      {
+        "seller": "ИП Муазен А",
+        "brand": "LifeStyle37",
+        "supplierId": 741564,
+        "url": "https://www.wildberries.ru/seller/741564",
+        "revenue": 11223729,
+        "sharePct": 3.7,
+        "cardsInTop": 5,
+        "totalShirtsInCategory": 25,
+        "newCount": 4,
+        "newPlaidCount": 2,
+        "newRevenue": 1332854,
+        "news": [
+          {
+            "sku": 1224446478,
+            "name": "Рубашка хлопковая однотонная на весну и лето",
+            "firstDate": "2026-07-04",
+            "price": 1056,
+            "sales": 33,
+            "revenue": 33303,
+            "rating": 5,
+            "comments": 3156,
+            "pics": 28,
+            "hasVideo": 0,
+            "balance": 108,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1224446478/detail.aspx"
+          },
+          {
+            "sku": 1052012430,
+            "name": "Рубашка хлопковая в клетку на весну и лето",
+            "firstDate": "2026-06-08",
+            "price": 742,
+            "sales": 766,
+            "revenue": 563590,
+            "rating": 5,
+            "comments": 6696,
+            "pics": 28,
+            "hasVideo": 0,
+            "balance": 186,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": true,
+            "cardUrl": "https://www.wildberries.ru/catalog/1052012430/detail.aspx"
+          },
+          {
+            "sku": 1052012439,
+            "name": "Рубашка в клетку хлопковая на весну и лето",
+            "firstDate": "2026-05-29",
+            "price": 908,
+            "sales": 686,
+            "revenue": 488071,
+            "rating": 5,
+            "comments": 3746,
+            "pics": 30,
+            "hasVideo": 0,
+            "balance": 194,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": true,
+            "cardUrl": "https://www.wildberries.ru/catalog/1052012439/detail.aspx"
+          },
+          {
+            "sku": 1052012436,
+            "name": "Рубашка хлопковая однотонная на весну и лето",
+            "firstDate": "2026-05-29",
+            "price": 660,
+            "sales": 345,
+            "revenue": 247890,
+            "rating": 5,
+            "comments": 3156,
+            "pics": 28,
+            "hasVideo": 0,
+            "balance": 252,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1052012436/detail.aspx"
+          }
+        ]
+      },
+      {
+        "seller": "ИП Айгул",
+        "brand": "",
+        "supplierId": 1224134,
+        "url": "https://www.wildberries.ru/seller/1224134",
+        "revenue": 9264045,
+        "sharePct": 3.1,
+        "cardsInTop": 2,
+        "totalShirtsInCategory": 7,
+        "newCount": 1,
+        "newPlaidCount": 0,
+        "newRevenue": 550053,
+        "news": [
+          {
+            "sku": 1035730554,
+            "name": "Рубашка летняя легкая",
+            "firstDate": "2026-06-03",
+            "price": 1325,
+            "sales": 378,
+            "revenue": 550053,
+            "rating": 5,
+            "comments": 21,
+            "pics": 3,
+            "hasVideo": 0,
+            "balance": 110,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1035730554/detail.aspx"
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "newProducts": 10,
+      "newPlaid": 6,
+      "newRevenue": 2671147
+    },
+    "label": "Женская"
+  },
+  {
+    "query": "рубашка в клетку мужская",
+    "categoryPath": "Мужчинам/Рубашки",
+    "period": {
+      "d1": "2026-05-14",
+      "d2": "2026-07-13"
+    },
+    "cutoff": "2026-05-14",
+    "newWithinDays": 60,
+    "nicheRevenue": 56147431,
+    "topSellers": [
+      {
+        "seller": "ИП Никитко Ирина Игоревна",
+        "supplierId": 207146,
+        "brand": "MAILLIV TREND",
+        "cardsInTop": 4,
+        "revenue": 7824577,
+        "sales": 2969,
+        "sharePct": 13.9,
+        "url": "https://www.wildberries.ru/seller/207146"
+      },
+      {
+        "seller": "ИП Третьяков В Г",
+        "supplierId": 1202103,
+        "brand": "Best TAILOR",
+        "cardsInTop": 13,
+        "revenue": 6774124,
+        "sales": 4554,
+        "sharePct": 12.1,
+        "url": "https://www.wildberries.ru/seller/1202103"
+      },
+      {
+        "seller": "ИП Чубаков М А",
+        "supplierId": 555820,
+        "brand": "GOLD GOLF MAN",
+        "cardsInTop": 2,
+        "revenue": 5226525,
+        "sales": 2293,
+        "sharePct": 9.3,
+        "url": "https://www.wildberries.ru/seller/555820"
+      },
+      {
+        "seller": "ИП Картошкин В С",
+        "supplierId": 1232766,
+        "brand": "Botvanix",
+        "cardsInTop": 4,
+        "revenue": 4460646,
+        "sales": 1639,
+        "sharePct": 7.9,
+        "url": "https://www.wildberries.ru/seller/1232766"
+      },
+      {
+        "seller": "ООО Твое",
+        "supplierId": 5359,
+        "brand": "ТВОЕ",
+        "cardsInTop": 2,
+        "revenue": 3062354,
+        "sales": 3929,
+        "sharePct": 5.5,
+        "url": "https://www.wildberries.ru/seller/5359"
+      },
+      {
+        "seller": "ООО Взаимно",
+        "supplierId": 250095693,
+        "brand": "",
+        "cardsInTop": 4,
+        "revenue": 2842111,
+        "sales": 1877,
+        "sharePct": 5.1,
+        "url": "https://www.wildberries.ru/seller/250095693"
+      },
+      {
+        "seller": "Alvybrand",
+        "supplierId": 234878,
+        "brand": "ALVY BRAND",
+        "cardsInTop": 2,
+        "revenue": 2381372,
+        "sales": 867,
+        "sharePct": 4.2,
+        "url": "https://www.wildberries.ru/seller/234878"
+      },
+      {
+        "seller": "ООО Атласформен РУС",
+        "supplierId": 57151,
+        "brand": "Atlas For Men",
+        "cardsInTop": 2,
+        "revenue": 2178213,
+        "sales": 1021,
+        "sharePct": 3.9,
+        "url": "https://www.wildberries.ru/seller/57151"
+      },
+      {
+        "seller": "ИП Дан В Ю",
+        "supplierId": 393170,
+        "brand": "JOHN VARCO",
+        "cardsInTop": 4,
+        "revenue": 2178135,
+        "sales": 1009,
+        "sharePct": 3.9,
+        "url": "https://www.wildberries.ru/seller/393170"
+      },
+      {
+        "seller": "ИП Салманов Ильхам Агабала Оглы",
+        "supplierId": 185981,
+        "brand": "PAOLA BOCCI x NIKOLA ROSSI",
+        "cardsInTop": 14,
+        "revenue": 1659774,
+        "sales": 993,
+        "sharePct": 3,
+        "url": "https://www.wildberries.ru/seller/185981"
+      }
+    ],
+    "topArticles": [
+      {
+        "rank": 1,
+        "sku": 415779075,
+        "name": "Рубашка с коротким рукавом в клетку",
+        "brand": "GOLD GOLF MAN",
+        "seller": "ИП Чубаков М А",
+        "supplierId": 555820,
+        "price": 2040,
+        "sales": 1662,
+        "revenue": 3728405,
+        "rating": 5,
+        "comments": 1663,
+        "firstDate": "2025-05-16",
+        "cls": {
+          "sleeve": "short",
+          "season": "unknown"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/415779075/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/555820"
+      },
+      {
+        "rank": 2,
+        "sku": 466662789,
+        "name": "Рубашка в клетку оверсайз летняя",
+        "brand": "MAILLIV TREND",
+        "seller": "ИП Никитко Ирина Игоревна",
+        "supplierId": 207146,
+        "price": 3067,
+        "sales": 1269,
+        "revenue": 3545405,
+        "rating": 5,
+        "comments": 1353,
+        "firstDate": "2025-07-26",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "summer"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/466662789/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/207146"
+      },
+      {
+        "rank": 3,
+        "sku": 164069733,
+        "name": "Рубашка оверсайз в клетку теплая",
+        "brand": "Botvanix",
+        "seller": "ИП Картошкин В С",
+        "supplierId": 1232766,
+        "price": 3073,
+        "sales": 786,
+        "revenue": 2191279,
+        "rating": 5,
+        "comments": 6806,
+        "firstDate": "2023-06-07",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "winter"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/164069733/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/1232766"
+      },
+      {
+        "rank": 4,
+        "sku": 155401333,
+        "name": "Рубашка летняя из хлопка в клетку",
+        "brand": "Atlas For Men",
+        "seller": "ООО Атласформен РУС",
+        "supplierId": 57151,
+        "price": 1752,
+        "sales": 874,
+        "revenue": 1886378,
+        "rating": 5,
+        "comments": 607,
+        "firstDate": "2023-04-26",
+        "cls": {
+          "sleeve": "unknown",
+          "season": "summer"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/155401333/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/57151"
+      },
+      {
+        "rank": 5,
+        "sku": 166222688,
+        "name": "Рубашка в клетку с коротким рукавом",
+        "brand": "Best TAILOR",
+        "seller": "ИП Третьяков В Г",
+        "supplierId": 1202103,
+        "price": 1558,
+        "sales": 1281,
+        "revenue": 1807629,
+        "rating": 5,
+        "comments": 19155,
+        "firstDate": "2023-07-06",
+        "cls": {
+          "sleeve": "short",
+          "season": "unknown"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/166222688/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/1202103"
+      },
+      {
+        "rank": 6,
+        "sku": 366834479,
+        "name": "Рубашка в клетку с длинным рукавом оверсайз летняя",
+        "brand": "MAILLIV TREND",
+        "seller": "ИП Никитко Ирина Игоревна",
+        "supplierId": 207146,
+        "price": 3113,
+        "sales": 637,
+        "revenue": 1777903,
+        "rating": 5,
+        "comments": 1353,
+        "firstDate": "2025-04-09",
+        "cls": {
+          "sleeve": "long",
+          "season": "summer"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/366834479/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/207146"
+      },
+      {
+        "rank": 7,
+        "sku": 822734661,
+        "name": "Рубашка в клетку с длинным рукавом",
+        "brand": "ТВОЕ",
+        "seller": "ООО Твое",
+        "supplierId": 5359,
+        "price": 664,
+        "sales": 2021,
+        "revenue": 1657796,
+        "rating": 5,
+        "comments": 245,
+        "firstDate": "2026-02-18",
+        "cls": {
+          "sleeve": "long",
+          "season": "unknown"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/822734661/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/5359"
+      },
+      {
+        "rank": 8,
+        "sku": 58731696,
+        "name": "Рубашка в клетку с длинным рукавом",
+        "brand": "INTOUCHCLUB",
+        "seller": "ИП Пышных Светлана Петровна",
+        "supplierId": 100187,
+        "price": 1744,
+        "sales": 894,
+        "revenue": 1579134,
+        "rating": 5,
+        "comments": 4800,
+        "firstDate": "2022-01-17",
+        "cls": {
+          "sleeve": "long",
+          "season": "unknown"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/58731696/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/100187"
+      },
+      {
+        "rank": 9,
+        "sku": 215004730,
+        "name": "Рубашка теплая в клетку с длинным рукавом оверсайз",
+        "brand": "MAILLIV TREND",
+        "seller": "ИП Никитко Ирина Игоревна",
+        "supplierId": 207146,
+        "price": 2332,
+        "sales": 704,
+        "revenue": 1506606,
+        "rating": 5,
+        "comments": 3777,
+        "firstDate": "2024-03-18",
+        "cls": {
+          "sleeve": "long",
+          "season": "winter"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/215004730/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/207146"
+      },
+      {
+        "rank": 10,
+        "sku": 415555413,
+        "name": "Рубашка с коротким рукавом в клетку",
+        "brand": "GOLD GOLF MAN",
+        "seller": "ИП Чубаков М А",
+        "supplierId": 555820,
+        "price": 2030,
+        "sales": 631,
+        "revenue": 1498120,
+        "rating": 5,
+        "comments": 1660,
+        "firstDate": "2025-05-16",
+        "cls": {
+          "sleeve": "short",
+          "season": "unknown"
+        },
+        "cardUrl": "https://www.wildberries.ru/catalog/415555413/detail.aspx",
+        "sellerUrl": "https://www.wildberries.ru/seller/555820"
+      }
+    ],
+    "sellerNews": [
+      {
+        "seller": "ИП Никитко Ирина Игоревна",
+        "brand": "MAILLIV TREND",
+        "supplierId": 207146,
+        "url": "https://www.wildberries.ru/seller/207146",
+        "revenue": 7824577,
+        "sharePct": 13.9,
+        "cardsInTop": 4,
+        "totalShirtsInCategory": 65,
+        "newCount": 13,
+        "newPlaidCount": 0,
+        "newRevenue": 3853820,
+        "news": [
+          {
+            "sku": 1127174036,
+            "name": "Премиум рубашка в полоску оверсайз с длинным рукавом хлопок",
+            "firstDate": "2026-07-05",
+            "price": 3290,
+            "sales": 72,
+            "revenue": 234970,
+            "rating": 5,
+            "comments": 1856,
+            "pics": 17,
+            "hasVideo": 1,
+            "balance": 101,
+            "cls": {
+              "sleeve": "long",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1127174036/detail.aspx"
+          },
+          {
+            "sku": 1127185940,
+            "name": "Премиум рубашка в полоску оверсайз",
+            "firstDate": "2026-07-05",
+            "price": 3426,
+            "sales": 28,
+            "revenue": 96275,
+            "rating": 5,
+            "comments": 1856,
+            "pics": 16,
+            "hasVideo": 1,
+            "balance": 16,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1127185940/detail.aspx"
+          },
+          {
+            "sku": 985724776,
+            "name": "Премиум рубашка оверсайз с длинным рукавом",
+            "firstDate": "2026-06-24",
+            "price": 3290,
+            "sales": 199,
+            "revenue": 685317,
+            "rating": 5,
+            "comments": 335,
+            "pics": 18,
+            "hasVideo": 0,
+            "balance": 168,
+            "cls": {
+              "sleeve": "long",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/985724776/detail.aspx"
+          },
+          {
+            "sku": 985717414,
+            "name": "Премиум рубашка оверсайз с длинным рукавом",
+            "firstDate": "2026-06-24",
+            "price": 3426,
+            "sales": 79,
+            "revenue": 266519,
+            "rating": 5,
+            "comments": 335,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 177,
+            "cls": {
+              "sleeve": "long",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/985717414/detail.aspx"
+          },
+          {
+            "sku": 985753850,
+            "name": "Рубашка оверсайз с длинным рукавом",
+            "firstDate": "2026-06-24",
+            "price": 3381,
+            "sales": 37,
+            "revenue": 124801,
+            "rating": 5,
+            "comments": 2415,
+            "pics": 26,
+            "hasVideo": 1,
+            "balance": 177,
+            "cls": {
+              "sleeve": "long",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/985753850/detail.aspx"
+          },
+          {
+            "sku": 985746691,
+            "name": "Рубашка оверсайз с длинным рукавом",
+            "firstDate": "2026-06-24",
+            "price": 3245,
+            "sales": 35,
+            "revenue": 111641,
+            "rating": 5,
+            "comments": 335,
+            "pics": 14,
+            "hasVideo": 0,
+            "balance": 144,
+            "cls": {
+              "sleeve": "long",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/985746691/detail.aspx"
+          },
+          {
+            "sku": 985739574,
+            "name": "Премиум рубашка оверсайз с длинным рукавом",
+            "firstDate": "2026-06-24",
+            "price": 3204,
+            "sales": 34,
+            "revenue": 105798,
+            "rating": 5,
+            "comments": 335,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 224,
+            "cls": {
+              "sleeve": "long",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/985739574/detail.aspx"
+          },
+          {
+            "sku": 985759698,
+            "name": "Премиум рубашка черная оверсайз с длинным рукавом",
+            "firstDate": "2026-06-24",
+            "price": 3381,
+            "sales": 32,
+            "revenue": 104684,
+            "rating": 5,
+            "comments": 2415,
+            "pics": 26,
+            "hasVideo": 1,
+            "balance": 199,
+            "cls": {
+              "sleeve": "long",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/985759698/detail.aspx"
+          },
+          {
+            "sku": 985741248,
+            "name": "Рубашка летняя оверсайз с длинным рукавом",
+            "firstDate": "2026-06-24",
+            "price": 3381,
+            "sales": 31,
+            "revenue": 99926,
+            "rating": 5,
+            "comments": 335,
+            "pics": 17,
+            "hasVideo": 0,
+            "balance": 220,
+            "cls": {
+              "sleeve": "long",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/985741248/detail.aspx"
+          },
+          {
+            "sku": 912948091,
+            "name": "Премиум рубашка классическая с длинным рукавом офисная белая",
+            "firstDate": "2026-06-24",
+            "price": 2746,
+            "sales": 14,
+            "revenue": 40855,
+            "rating": 5,
+            "comments": 101,
+            "pics": 20,
+            "hasVideo": 1,
+            "balance": 168,
+            "cls": {
+              "sleeve": "long",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/912948091/detail.aspx"
+          },
+          {
+            "sku": 912952249,
+            "name": "Рубашка классическая с длинным рукавом офисная",
+            "firstDate": "2026-06-23",
+            "price": 2746,
+            "sales": 10,
+            "revenue": 26938,
+            "rating": 5,
+            "comments": 101,
+            "pics": 21,
+            "hasVideo": 1,
+            "balance": 174,
+            "cls": {
+              "sleeve": "long",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/912952249/detail.aspx"
+          },
+          {
+            "sku": 912932228,
+            "name": "Рубашка в полоску летняя с коротким рукавом оверсайз",
+            "firstDate": "2026-06-02",
+            "price": 3055,
+            "sales": 456,
+            "revenue": 1440642,
+            "rating": 5,
+            "comments": 556,
+            "pics": 16,
+            "hasVideo": 1,
+            "balance": 14,
+            "cls": {
+              "sleeve": "short",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/912932228/detail.aspx"
+          },
+          {
+            "sku": 912908021,
+            "name": "Рубашка в полоску летняя с коротким рукавом оверсайз",
+            "firstDate": "2026-06-02",
+            "price": 2884,
+            "sales": 175,
+            "revenue": 515454,
+            "rating": 5,
+            "comments": 556,
+            "pics": 15,
+            "hasVideo": 1,
+            "balance": 120,
+            "cls": {
+              "sleeve": "short",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/912908021/detail.aspx"
+          }
+        ]
+      },
+      {
+        "seller": "ИП Третьяков В Г",
+        "brand": "Best TAILOR",
+        "supplierId": 1202103,
+        "url": "https://www.wildberries.ru/seller/1202103",
+        "revenue": 6774124,
+        "sharePct": 12.1,
+        "cardsInTop": 13,
+        "totalShirtsInCategory": 99,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      },
+      {
+        "seller": "ИП Чубаков М А",
+        "brand": "GOLD GOLF MAN",
+        "supplierId": 555820,
+        "url": "https://www.wildberries.ru/seller/555820",
+        "revenue": 5226525,
+        "sharePct": 9.3,
+        "cardsInTop": 2,
+        "totalShirtsInCategory": 17,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      },
+      {
+        "seller": "ИП Картошкин В С",
+        "brand": "Botvanix",
+        "supplierId": 1232766,
+        "url": "https://www.wildberries.ru/seller/1232766",
+        "revenue": 4460646,
+        "sharePct": 7.9,
+        "cardsInTop": 4,
+        "totalShirtsInCategory": 5,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      },
+      {
+        "seller": "ООО Твое",
+        "brand": "ТВОЕ",
+        "supplierId": 5359,
+        "url": "https://www.wildberries.ru/seller/5359",
+        "revenue": 3062354,
+        "sharePct": 5.5,
+        "cardsInTop": 2,
+        "totalShirtsInCategory": 66,
+        "newCount": 23,
+        "newPlaidCount": 4,
+        "newRevenue": 33776021,
+        "news": [
+          {
+            "sku": 1175222022,
+            "name": "Рубашка летняя с коротким рукавом",
+            "firstDate": "2026-06-19",
+            "price": 1103,
+            "sales": 369,
+            "revenue": 488036,
+            "rating": 5,
+            "comments": 11,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 1302,
+            "cls": {
+              "sleeve": "short",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1175222022/detail.aspx"
+          },
+          {
+            "sku": 1175221794,
+            "name": "Рубашка в клетку с длинным рукавом",
+            "firstDate": "2026-06-19",
+            "price": 792,
+            "sales": 455,
+            "revenue": 461928,
+            "rating": 5,
+            "comments": 34,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 1307,
+            "cls": {
+              "sleeve": "long",
+              "season": "unknown"
+            },
+            "isPlaid": true,
+            "cardUrl": "https://www.wildberries.ru/catalog/1175221794/detail.aspx"
+          },
+          {
+            "sku": 1175222021,
+            "name": "Рубашка летняя с коротким рукавом",
+            "firstDate": "2026-06-19",
+            "price": 1057,
+            "sales": 310,
+            "revenue": 421837,
+            "rating": 5,
+            "comments": 9,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 1323,
+            "cls": {
+              "sleeve": "short",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1175222021/detail.aspx"
+          },
+          {
+            "sku": 1175222165,
+            "name": "Рубашка летняя с завязками",
+            "firstDate": "2026-06-19",
+            "price": 1080,
+            "sales": 204,
+            "revenue": 260850,
+            "rating": 5,
+            "comments": 13,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 1625,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1175222165/detail.aspx"
+          },
+          {
+            "sku": 1175221793,
+            "name": "Рубашка в клетку с длинным рукавом",
+            "firstDate": "2026-06-19",
+            "price": 894,
+            "sales": 187,
+            "revenue": 230345,
+            "rating": 5,
+            "comments": 14,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 1590,
+            "cls": {
+              "sleeve": "long",
+              "season": "unknown"
+            },
+            "isPlaid": true,
+            "cardUrl": "https://www.wildberries.ru/catalog/1175221793/detail.aspx"
+          },
+          {
+            "sku": 1175222164,
+            "name": "Рубашка летняя с завязками",
+            "firstDate": "2026-06-19",
+            "price": 896,
+            "sales": 167,
+            "revenue": 194187,
+            "rating": 5,
+            "comments": 13,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 1538,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1175222164/detail.aspx"
+          },
+          {
+            "sku": 1144698953,
+            "name": "Рубашка летняя с орнаментом",
+            "firstDate": "2026-06-15",
+            "price": 925,
+            "sales": 1333,
+            "revenue": 1497558,
+            "rating": 5,
+            "comments": 65,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 147,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1144698953/detail.aspx"
+          },
+          {
+            "sku": 1144279405,
+            "name": "Рубашка из вискозы с орнаментом и коротким рукавом",
+            "firstDate": "2026-06-15",
+            "price": 654,
+            "sales": 763,
+            "revenue": 653672,
+            "rating": 5,
+            "comments": 118,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 1426,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1144279405/detail.aspx"
+          },
+          {
+            "sku": 1084826543,
+            "name": "Рубашка летняя в полоску",
+            "firstDate": "2026-05-30",
+            "price": 781,
+            "sales": 2387,
+            "revenue": 2084289,
+            "rating": 5,
+            "comments": 123,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 1021,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1084826543/detail.aspx"
+          },
+          {
+            "sku": 1084826544,
+            "name": "Рубашка летняя в полоску",
+            "firstDate": "2026-05-30",
+            "price": 643,
+            "sales": 1683,
+            "revenue": 1418994,
+            "rating": 5,
+            "comments": 75,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 1076,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1084826544/detail.aspx"
+          },
+          {
+            "sku": 1084826607,
+            "name": "Рубашка гавайская",
+            "firstDate": "2026-05-30",
+            "price": 654,
+            "sales": 1380,
+            "revenue": 1035087,
+            "rating": 5,
+            "comments": 83,
+            "pics": 15,
+            "hasVideo": 0,
+            "balance": 870,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1084826607/detail.aspx"
+          },
+          {
+            "sku": 1084826577,
+            "name": "Рубашка полосатая летняя",
+            "firstDate": "2026-05-30",
+            "price": 601,
+            "sales": 1244,
+            "revenue": 1031853,
+            "rating": 5,
+            "comments": 73,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 1360,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1084826577/detail.aspx"
+          },
+          {
+            "sku": 1084826576,
+            "name": "Рубашка полосатая летняя",
+            "firstDate": "2026-05-30",
+            "price": 577,
+            "sales": 1045,
+            "revenue": 882749,
+            "rating": 5,
+            "comments": 55,
+            "pics": 15,
+            "hasVideo": 0,
+            "balance": 1283,
+            "cls": {
+              "sleeve": "unknown",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1084826576/detail.aspx"
+          },
+          {
+            "sku": 1029164598,
+            "name": "Рубашка в полоску с коротким рукавом",
+            "firstDate": "2026-05-24",
+            "price": 804,
+            "sales": 4820,
+            "revenue": 4199981,
+            "rating": 5,
+            "comments": 138,
+            "pics": 16,
+            "hasVideo": 0,
+            "balance": 887,
+            "cls": {
+              "sleeve": "short",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1029164598/detail.aspx"
+          },
+          {
+            "sku": 1028633562,
+            "name": "Рубашка летняя с коротким рукавом",
+            "firstDate": "2026-05-24",
+            "price": 1091,
+            "sales": 211,
+            "revenue": 267450,
+            "rating": 5,
+            "comments": 13,
+            "pics": 12,
+            "hasVideo": 0,
+            "balance": 17,
+            "cls": {
+              "sleeve": "short",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1028633562/detail.aspx"
+          },
+          {
+            "sku": 1028633619,
+            "name": "Рубашка летняя с коротким рукавом",
+            "firstDate": "2026-05-24",
+            "price": 1175,
+            "sales": 153,
+            "revenue": 235909,
+            "rating": 0,
+            "comments": 0,
+            "pics": 12,
+            "hasVideo": 0,
+            "balance": 0,
+            "cls": {
+              "sleeve": "short",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1028633619/detail.aspx"
+          },
+          {
+            "sku": 1016184469,
+            "name": "Рубашка в полоску с коротким рукавом",
+            "firstDate": "2026-05-16",
+            "price": 942,
+            "sales": 3638,
+            "revenue": 4575284,
+            "rating": 5,
+            "comments": 78,
+            "pics": 12,
+            "hasVideo": 0,
+            "balance": 104,
+            "cls": {
+              "sleeve": "short",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1016184469/detail.aspx"
+          },
+          {
+            "sku": 1028633620,
+            "name": "Рубашка летняя с коротким рукавом",
+            "firstDate": "2026-05-16",
+            "price": 843,
+            "sales": 3534,
+            "revenue": 3848314,
+            "rating": 5,
+            "comments": 101,
+            "pics": 15,
+            "hasVideo": 0,
+            "balance": 296,
+            "cls": {
+              "sleeve": "short",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1028633620/detail.aspx"
+          },
+          {
+            "sku": 1016184514,
+            "name": "Рубашка в полоску с коротким рукавом",
+            "firstDate": "2026-05-16",
+            "price": 942,
+            "sales": 3343,
+            "revenue": 3459223,
+            "rating": 5,
+            "comments": 81,
+            "pics": 13,
+            "hasVideo": 0,
+            "balance": 137,
+            "cls": {
+              "sleeve": "short",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1016184514/detail.aspx"
+          },
+          {
+            "sku": 1013704330,
+            "name": "Рубашка в полоску с коротким рукавом",
+            "firstDate": "2026-05-16",
+            "price": 689,
+            "sales": 2364,
+            "revenue": 2095727,
+            "rating": 5,
+            "comments": 75,
+            "pics": 14,
+            "hasVideo": 0,
+            "balance": 511,
+            "cls": {
+              "sleeve": "short",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1013704330/detail.aspx"
+          },
+          {
+            "sku": 1016184468,
+            "name": "Рубашка в полоску с коротким рукавом",
+            "firstDate": "2026-05-16",
+            "price": 873,
+            "sales": 2223,
+            "revenue": 1919019,
+            "rating": 5,
+            "comments": 88,
+            "pics": 15,
+            "hasVideo": 0,
+            "balance": 228,
+            "cls": {
+              "sleeve": "short",
+              "season": "unknown"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/1016184468/detail.aspx"
+          },
+          {
+            "sku": 1016184515,
+            "name": "Рубашка в клетку с коротким рукавом",
+            "firstDate": "2026-05-16",
+            "price": 643,
+            "sales": 1908,
+            "revenue": 1404558,
+            "rating": 5,
+            "comments": 86,
+            "pics": 14,
+            "hasVideo": 0,
+            "balance": 1021,
+            "cls": {
+              "sleeve": "short",
+              "season": "unknown"
+            },
+            "isPlaid": true,
+            "cardUrl": "https://www.wildberries.ru/catalog/1016184515/detail.aspx"
+          },
+          {
+            "sku": 1016184516,
+            "name": "Рубашка в клетку с коротким рукавом",
+            "firstDate": "2026-05-16",
+            "price": 712,
+            "sales": 1282,
+            "revenue": 1109171,
+            "rating": 5,
+            "comments": 74,
+            "pics": 14,
+            "hasVideo": 0,
+            "balance": 970,
+            "cls": {
+              "sleeve": "short",
+              "season": "unknown"
+            },
+            "isPlaid": true,
+            "cardUrl": "https://www.wildberries.ru/catalog/1016184516/detail.aspx"
+          }
+        ]
+      },
+      {
+        "seller": "ООО Взаимно",
+        "brand": "",
+        "supplierId": 250095693,
+        "url": "https://www.wildberries.ru/seller/250095693",
+        "revenue": 2842111,
+        "sharePct": 5.1,
+        "cardsInTop": 4,
+        "totalShirtsInCategory": 18,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      },
+      {
+        "seller": "Alvybrand",
+        "brand": "ALVY BRAND",
+        "supplierId": 234878,
+        "url": "https://www.wildberries.ru/seller/234878",
+        "revenue": 2381372,
+        "sharePct": 4.2,
+        "cardsInTop": 2,
+        "totalShirtsInCategory": 19,
+        "newCount": 6,
+        "newPlaidCount": 0,
+        "newRevenue": 8806749,
+        "news": [
+          {
+            "sku": 946666786,
+            "name": "Рубашка летняя с длинным рукавом лен оверсайз легкая",
+            "firstDate": "2026-05-29",
+            "price": 3470,
+            "sales": 811,
+            "revenue": 2860702,
+            "rating": 5,
+            "comments": 292,
+            "pics": 24,
+            "hasVideo": 1,
+            "balance": 122,
+            "cls": {
+              "sleeve": "long",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/946666786/detail.aspx"
+          },
+          {
+            "sku": 946690404,
+            "name": "Рубашка летняя с длинным рукавом лен оверсайз легкая",
+            "firstDate": "2026-05-29",
+            "price": 2877,
+            "sales": 312,
+            "revenue": 1032921,
+            "rating": 5,
+            "comments": 292,
+            "pics": 24,
+            "hasVideo": 1,
+            "balance": 252,
+            "cls": {
+              "sleeve": "long",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/946690404/detail.aspx"
+          },
+          {
+            "sku": 969032395,
+            "name": "Рубашка с коротким рукавом летняя хлопок в полоску оверсайз",
+            "firstDate": "2026-05-29",
+            "price": 2877,
+            "sales": 313,
+            "revenue": 1030971,
+            "rating": 5,
+            "comments": 114,
+            "pics": 19,
+            "hasVideo": 1,
+            "balance": 186,
+            "cls": {
+              "sleeve": "short",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/969032395/detail.aspx"
+          },
+          {
+            "sku": 946696693,
+            "name": "Рубашка летняя с длинным рукавом лен оверсайз легкая",
+            "firstDate": "2026-05-29",
+            "price": 3204,
+            "sales": 230,
+            "revenue": 855327,
+            "rating": 5,
+            "comments": 292,
+            "pics": 26,
+            "hasVideo": 1,
+            "balance": 99,
+            "cls": {
+              "sleeve": "long",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/946696693/detail.aspx"
+          },
+          {
+            "sku": 946620571,
+            "name": "Рубашка с коротким рукавом летняя хлопок в полоску оверсайз",
+            "firstDate": "2026-05-26",
+            "price": 3073,
+            "sales": 526,
+            "revenue": 1724058,
+            "rating": 5,
+            "comments": 116,
+            "pics": 29,
+            "hasVideo": 1,
+            "balance": 136,
+            "cls": {
+              "sleeve": "short",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/946620571/detail.aspx"
+          },
+          {
+            "sku": 946629762,
+            "name": "Рубашка с коротким рукавом летняя хлопок в полоску оверсайз",
+            "firstDate": "2026-05-26",
+            "price": 2877,
+            "sales": 399,
+            "revenue": 1302770,
+            "rating": 5,
+            "comments": 116,
+            "pics": 21,
+            "hasVideo": 1,
+            "balance": 179,
+            "cls": {
+              "sleeve": "short",
+              "season": "summer"
+            },
+            "isPlaid": false,
+            "cardUrl": "https://www.wildberries.ru/catalog/946629762/detail.aspx"
+          }
+        ]
+      },
+      {
+        "seller": "ООО Атласформен РУС",
+        "brand": "Atlas For Men",
+        "supplierId": 57151,
+        "url": "https://www.wildberries.ru/seller/57151",
+        "revenue": 2178213,
+        "sharePct": 3.9,
+        "cardsInTop": 2,
+        "totalShirtsInCategory": 61,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      },
+      {
+        "seller": "ИП Дан В Ю",
+        "brand": "JOHN VARCO",
+        "supplierId": 393170,
+        "url": "https://www.wildberries.ru/seller/393170",
+        "revenue": 2178135,
+        "sharePct": 3.9,
+        "cardsInTop": 4,
+        "totalShirtsInCategory": 87,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      },
+      {
+        "seller": "ИП Салманов Ильхам Агабала Оглы",
+        "brand": "PAOLA BOCCI x NIKOLA ROSSI",
+        "supplierId": 185981,
+        "url": "https://www.wildberries.ru/seller/185981",
+        "revenue": 1659774,
+        "sharePct": 3,
+        "cardsInTop": 14,
+        "totalShirtsInCategory": 40,
+        "newCount": 0,
+        "newPlaidCount": 0,
+        "newRevenue": 0,
+        "news": []
+      }
+    ],
+    "totals": {
+      "newProducts": 42,
+      "newPlaid": 4,
+      "newRevenue": 46436590
+    },
+    "label": "Мужская"
+  }
+]
