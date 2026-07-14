@@ -3,3 +3,6 @@ chrome/
 reports-output/
 .env
 *.log
+
+# raw downloaded WB slides (regenerable via fetch-slides.mjs; embedded in report.html/pdf)
+reports/**/slides/*.webp
