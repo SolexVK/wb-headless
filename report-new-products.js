@@ -13,6 +13,9 @@ import { analyzeQueries } from './lib/newProductsAnalysis.js';
 const DEFAULT_QUERIES = ['рубашка в клетку женская', 'рубашка в клетку мужская'];
 const queries = process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_QUERIES;
 const newWithinDays = Number(process.env.NEW_WITHIN_DAYS) || 60;
+// Фильтр ниши: длинный рукав + осень/зима (можно отключить FILTER=all).
+const filter = process.env.FILTER || 'long-autumn-winter';
+const FILTER_LABEL = filter === 'long-autumn-winter' ? 'длинный рукав · осень/зима' : filter;
 
 // Окно метрик = окно новинки: d2 = вчера (сегодня API 422), d1 = d2 − newWithinDays.
 // Так «продажи за период» покрывают те же ~2 месяца, что и порог новинки.
@@ -25,6 +28,13 @@ const rub = (v) => new Intl.NumberFormat('ru-RU').format(Math.round(Number(v) ||
 const pct = (v) => `${(Number(v) || 0).toFixed(1)}%`;
 const short = (s, n = 42) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s || '');
 const wbLink = (sku) => `https://www.wildberries.ru/catalog/${sku}/detail.aspx`;
+// Кликабельный бренд: витрина продавца (по supplierId), иначе поиск по бренду.
+const brandCell = (c) => {
+  const name = short(c.brand || '—', 18);
+  if (c.sellerUrl) return `[${name}](${c.sellerUrl})`;
+  if (c.brandUrl) return `[${name}](${c.brandUrl})`;
+  return name;
+};
 
 function funnelBlock(a) {
   // Агрегированная воронка ниши по модели WB (KB 01).
@@ -51,8 +61,11 @@ function querySection(a) {
   L.push('');
   L.push(`- **Период данных (продажи/выручка):** ${a.period.d1} … ${a.period.d2} (${a.newWithinDays} дн. ≈ 2 мес.)`);
   L.push(`- **Порог новинки:** карточка вышла на WB не раньше **${a.cutoff}**`);
-  L.push(`- **Карточек в выдаче по запросу:** ${a.counts.fetched} (топ, из ~${a.counts.total}), из них с продажами — ${a.counts.withSales}`);
-  L.push(`- **Новинок:** **${a.counts.news}** (с продажами — ${a.counts.newsWithSales}); «старых» карточек — ${a.counts.established}`);
+  if (a.filter) {
+    L.push(`- **Фильтр ниши:** ${FILTER_LABEL} — из ${a.counts.fetchedRaw} карточек топа оставлено **${a.counts.fetched}**, отсеяно ${a.counts.excluded} (короткий рукав / явное лето). Классификация по названию карточки.`);
+  }
+  L.push(`- **Карточек в отфильтрованной выдаче:** ${a.counts.fetched}, из них с продажами — ${a.counts.withSales}`);
+  L.push(`- **Новинок (после фильтра):** **${a.counts.news}** (с продажами — ${a.counts.newsWithSales}); «старых» карточек — ${a.counts.established}`);
   L.push('');
   L.push('### Доля новинок в нише (по запросу)');
   L.push('');
@@ -66,12 +79,26 @@ function querySection(a) {
   // 1. Продажи новинок
   L.push('### 1) 💰 Продажи новинок');
   L.push('');
-  L.push('| # | SKU | Название | Вышла | Цена ₽ | Продаж, шт | Продаж/день | Выручка ₽ | Выкуп % | Упущено % |');
-  L.push('|--:|---|---|---|--:|--:|--:|--:|--:|--:|');
+  L.push('| # | SKU (ссылка) | Название | Бренд (ссылка) | Рукав/сезон | Вышла | Цена ₽ | Продаж, шт | Выручка ₽ | Выкуп % |');
+  L.push('|--:|---|---|---|---|---|--:|--:|--:|--:|');
   a.news.forEach((c, i) => {
-    L.push(`| ${i + 1} | [${c.sku}](${wbLink(c.sku)}) | ${short(c.name)} | ${c.firstDate} | ${rub(c.price)} | ${rub(c.sales)} | ${c.salesPerDay.toFixed(1)} | ${rub(c.revenue)} | ${c.buyout || '—'} | ${c.lostProfitPct ? c.lostProfitPct.toFixed(0) : '—'} |`);
+    const cls = `${c.cls.sleeve === 'long' ? 'длин.' : c.cls.sleeve === 'short' ? 'кор.' : '—'}/${c.cls.season === 'winter' ? 'осень-зима' : c.cls.season === 'summer' ? 'лето' : '—'}`;
+    L.push(`| ${i + 1} | [${c.sku}](${c.cardUrl}) | ${short(c.name, 34)} | ${brandCell(c)} | ${cls} | ${c.firstDate} | ${rub(c.price)} | ${rub(c.sales)} | ${rub(c.revenue)} | ${c.buyout || '—'} |`);
   });
   L.push('');
+  if (a.excludedSample && a.excludedSample.length) {
+    L.push(`<details><summary>Отсеяно фильтром новинок: ${a.counts.excluded} карточек (короткий рукав / лето) — показать примеры</summary>`);
+    L.push('');
+    L.push('| SKU | Название | Причина |');
+    L.push('|---|---|---|');
+    for (const c of a.excludedSample) {
+      const reason = c.cls.sleeve === 'short' ? 'короткий рукав' : c.cls.season === 'summer' ? 'летняя' : '—';
+      L.push(`| [${c.sku}](${c.cardUrl}) | ${short(c.name, 40)} | ${reason} |`);
+    }
+    L.push('');
+    L.push('</details>');
+    L.push('');
+  }
 
   // Траектории выхода (кривая старта)
   const withTraj = a.trajectories.filter((t) => (t.daily || []).length);
@@ -128,14 +155,25 @@ function querySection(a) {
   L.push('');
   L.push('**Топ-10 продавцов по выручке:**');
   L.push('');
-  L.push('| # | Продавец | Карточек | Выручка ₽ | Доля |');
+  L.push('| # | Продавец (ссылка) | Карточек | Выручка ₽ | Доля |');
   L.push('|--:|---|--:|--:|--:|');
   a.competition.topSellers.forEach((s, i) => {
     const share = a.niche.revenue ? (s.revenue / a.niche.revenue) * 100 : 0;
-    L.push(`| ${i + 1} | ${short(s.key, 30)} | ${s.cards} | ${rub(s.revenue)} | ${pct(share)} |`);
+    const name = s.url ? `[${short(s.key, 30)}](${s.url})` : short(s.key, 30);
+    L.push(`| ${i + 1} | ${name} | ${s.cards} | ${rub(s.revenue)} | ${pct(share)} |`);
   });
   L.push('');
-  L.push('**Ценовые сегменты (по всей выдаче):**');
+  L.push('**Топ-10 брендов по выручке:**');
+  L.push('');
+  L.push('| # | Бренд (ссылка) | Карточек | Выручка ₽ | Доля |');
+  L.push('|--:|---|--:|--:|--:|');
+  a.competition.topBrands.forEach((s, i) => {
+    const share = a.niche.revenue ? (s.revenue / a.niche.revenue) * 100 : 0;
+    const name = s.url ? `[${short(s.key, 26)}](${s.url})` : short(s.key, 26);
+    L.push(`| ${i + 1} | ${name} | ${s.cards} | ${rub(s.revenue)} | ${pct(share)} |`);
+  });
+  L.push('');
+  L.push('**Ценовые сегменты (по отфильтрованной выдаче):**');
   L.push('');
   L.push('| Сегмент, ₽ | Карточек | Продаж, шт | Выручка ₽ |');
   L.push('|---|--:|--:|--:|');
@@ -145,11 +183,11 @@ function querySection(a) {
   L.push('');
   L.push('**Топ-12 карточек ниши (для сравнения новинок с лидерами):**');
   L.push('');
-  L.push('| # | SKU | Название | Вышла | Цена ₽ | Выручка ₽ | Рейтинг | Отзывов | 🆕 |');
-  L.push('|--:|---|---|---|--:|--:|--:|--:|:--:|');
+  L.push('| # | SKU (ссылка) | Название | Бренд (ссылка) | Вышла | Цена ₽ | Выручка ₽ | Отзывов | 🆕 |');
+  L.push('|--:|---|---|---|---|--:|--:|--:|:--:|');
   a.competition.topByRevenue.forEach((c, i) => {
     const isNew = c.firstDate && c.firstDate >= a.cutoff ? '🆕' : '';
-    L.push(`| ${i + 1} | [${c.sku}](${wbLink(c.sku)}) | ${short(c.name)} | ${c.firstDate} | ${rub(c.price)} | ${rub(c.revenue)} | ${c.rating || '—'} | ${rub(c.comments)} | ${isNew} |`);
+    L.push(`| ${i + 1} | [${c.sku}](${c.cardUrl}) | ${short(c.name, 30)} | ${brandCell(c)} | ${c.firstDate} | ${rub(c.price)} | ${rub(c.revenue)} | ${rub(c.comments)} | ${isNew} |`);
   });
   L.push('');
   L.push('---');
@@ -173,8 +211,8 @@ function hhiVerdict(h) {
 
 // ---- main ----
 const today = new Date().toISOString().slice(0, 10);
-console.error(`[new-products] запросы: ${queries.join(' | ')} · окно новинки: ${newWithinDays} дн.`);
-const analyses = await analyzeQueries(queries, { newWithinDays, d1: D1, d2: D2 });
+console.error(`[new-products] запросы: ${queries.join(' | ')} · окно новинки: ${newWithinDays} дн. · фильтр: ${filter}`);
+const analyses = await analyzeQueries(queries, { newWithinDays, d1: D1, d2: D2, filter });
 
 const outDir = `reports/new-products/${today}`;
 mkdirSync(outDir, { recursive: true });
@@ -186,13 +224,17 @@ head.push('');
 head.push(`> **Дата отчёта:** ${today} · **Источник:** MPStats API (оценочные данные) · **Метод:** топ-выдача по поисковому запросу.`);
 head.push('>');
 head.push(`> **Новинка** = карточка, впервые появившаяся на WB за последние **${newWithinDays} дней**. Продажи/выручка — за то же окно (≈2 мес.).`);
+if (analyses[0]?.filter) {
+  head.push('>');
+  head.push(`> 🧣 **Фильтр:** ${FILTER_LABEL}. Из топ-выдачи убраны карточки с коротким рукавом и явным «летним» позиционированием (классификация по названию).`);
+}
 head.push('');
 head.push('## 📊 Сводка по запросам');
 head.push('');
-head.push('| Запрос | Новинок | С продажами | Выручка новинок ₽ | Доля выручки | Медианная цена ниши ₽ |');
-head.push('|---|--:|--:|--:|--:|--:|');
+head.push('| Запрос | Отфильтровано | Новинок | С продажами | Выручка новинок ₽ | Доля выручки | Медианная цена ₽ |');
+head.push('|---|--:|--:|--:|--:|--:|--:|');
 for (const a of analyses) {
-  head.push(`| ${a.query} | ${a.counts.news} | ${a.counts.newsWithSales} | ${rub(a.newsShare.revenue)} | ${pct(a.newsShare.revenuePct)} | ${rub(a.niche.medianPrice)} |`);
+  head.push(`| ${a.query} | ${a.counts.fetched}/${a.counts.fetchedRaw} | ${a.counts.news} | ${a.counts.newsWithSales} | ${rub(a.newsShare.revenue)} | ${pct(a.newsShare.revenuePct)} | ${rub(a.niche.medianPrice)} |`);
 }
 head.push('');
 head.push('---');

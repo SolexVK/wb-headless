@@ -3,6 +3,10 @@
     "query": "рубашка в клетку женская",
     "sku": 1095824553,
     "name": "Рубашка в клетку оверсайз",
+    "cls": {
+      "sleeve": "unknown",
+      "season": "unknown"
+    },
     "firstDate": "2026-06-03",
     "price": 2060,
     "sales": 603,
@@ -10,6 +14,9 @@
     "pics": 16,
     "hasVideo": 0,
     "rating": 5,
+    "cardUrl": "https://www.wildberries.ru/catalog/1095824553/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/1371282",
+    "brand": "MONSAMI",
     "host": "42",
     "photoCount": 16,
     "description": "Рубашка оверсайз в клетку от бренда MONSAMI – это идеальный выбор для женщин, предпочитающих комфорт и стиль, она прекрасно подходит для создания стильного образа на каждый день. Созданная из фланели, эта красивая летняя рубашка обеспечивает идеальное сочетание мягкости и прочности, предлагая уникальное решение для вашего гардероба. Модель оверсайз обеспечивает свободу движений и удобство. Наша ткань фланель сочетает в себе комфорт и современный дизайн, отличается мягкостью и теплотой, создавая приятные ощущения при носке. Модный oversize фасон подойдет не только на лето, но и на сезон весна  ",
@@ -23,116 +30,40 @@
         "value": "оверсайз"
       }
     ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1095824553_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1095824553_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1095824553_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1095824553_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1095824553_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1095824553_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1095824553_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1095824553_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1095824553_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1095824553_tm_9.webp",
+      "reports/new-products/2026-07-14/slides/1095824553_tm_10.webp"
+    ],
     "slideUrls": [
       "https://basket-42.wbbasket.ru/vol10958/part1095824/1095824553/images/big/1.webp",
       "https://basket-42.wbbasket.ru/vol10958/part1095824/1095824553/images/big/2.webp",
       "https://basket-42.wbbasket.ru/vol10958/part1095824/1095824553/images/big/3.webp",
       "https://basket-42.wbbasket.ru/vol10958/part1095824/1095824553/images/big/4.webp",
-      "https://basket-42.wbbasket.ru/vol10958/part1095824/1095824553/images/big/5.webp"
-    ],
-    "files": [
-      "reports/new-products/2026-07-14/slides/1095824553_1.webp",
-      "reports/new-products/2026-07-14/slides/1095824553_2.webp",
-      "reports/new-products/2026-07-14/slides/1095824553_3.webp",
-      "reports/new-products/2026-07-14/slides/1095824553_4.webp",
-      "reports/new-products/2026-07-14/slides/1095824553_5.webp"
-    ]
-  },
-  {
-    "query": "рубашка в клетку женская",
-    "sku": 1052000593,
-    "name": "Рубашка в клетку хлопок на весну и лето",
-    "firstDate": "2026-06-08",
-    "price": 990,
-    "sales": 551,
-    "revenue": 462808,
-    "pics": 29,
-    "hasVideo": 0,
-    "rating": 5,
-    "host": "42",
-    "photoCount": 29,
-    "description": "Освежи свой наряд эффектной изюминкой! Эта весенняя рубашка - настоящая находка для тех, кто ценит простоту с характером. Она отлично впишется как в городские повседневные, так и в расслабленные выходные pinterest луки. Подойдет как школьная и офисная одежда! Это универсальный элемент для женщин, который можно комбинировать по-разному.\n\nЗа что Вы полюбите эту рубаху:\nХлопковый легкий трикотаж идеален для носки в течение всего дня или для дома. Материал тонкий, но плотный, дышащий и приятный к телу. Безопасный даже для чувствительной кожи.\nПрямой и свободный не оверсайз покрой выглядит аккуратн",
-    "characteristics": [
-      {
-        "name": "Состав",
-        "value": "100% хлопок"
-      },
-      {
-        "name": "Цвет",
-        "value": "серый; светло-розовый"
-      },
-      {
-        "name": "Размер на модели",
-        "value": "46"
-      },
-      {
-        "name": "Рост модели на фото",
-        "value": "163 см"
-      },
-      {
-        "name": "Параметры модели на фото (ОГ-ОТ-ОБ)",
-        "value": "ОГ-84 ОТ-64 ОБ-94"
-      },
-      {
-        "name": "Покрой",
-        "value": "прямой"
-      },
-      {
-        "name": "Вид застежки",
-        "value": "пуговицы"
-      },
-      {
-        "name": "Тип карманов",
-        "value": "накладные"
-      },
-      {
-        "name": "Фактура материала",
-        "value": "гладкая"
-      },
-      {
-        "name": "Декоративные элементы",
-        "value": "без элементов"
-      },
-      {
-        "name": "Особенности модели",
-        "value": "дышащий материал"
-      },
-      {
-        "name": "Пол",
-        "value": "Женский"
-      },
-      {
-        "name": "Уход за вещами",
-        "value": "стирка при t не более 30°C"
-      },
-      {
-        "name": "Комплектация",
-        "value": "Рубашка 1 шт"
-      },
-      {
-        "name": "Страна производства",
-        "value": "Россия"
-      }
-    ],
-    "slideUrls": [
-      "https://basket-42.wbbasket.ru/vol10520/part1052000/1052000593/images/big/1.webp",
-      "https://basket-42.wbbasket.ru/vol10520/part1052000/1052000593/images/big/2.webp",
-      "https://basket-42.wbbasket.ru/vol10520/part1052000/1052000593/images/big/3.webp",
-      "https://basket-42.wbbasket.ru/vol10520/part1052000/1052000593/images/big/4.webp",
-      "https://basket-42.wbbasket.ru/vol10520/part1052000/1052000593/images/big/5.webp"
-    ],
-    "files": [
-      "reports/new-products/2026-07-14/slides/1052000593_1.webp",
-      "reports/new-products/2026-07-14/slides/1052000593_2.webp",
-      "reports/new-products/2026-07-14/slides/1052000593_3.webp",
-      "reports/new-products/2026-07-14/slides/1052000593_4.webp",
-      "reports/new-products/2026-07-14/slides/1052000593_5.webp"
+      "https://basket-42.wbbasket.ru/vol10958/part1095824/1095824553/images/big/5.webp",
+      "https://basket-42.wbbasket.ru/vol10958/part1095824/1095824553/images/big/6.webp",
+      "https://basket-42.wbbasket.ru/vol10958/part1095824/1095824553/images/big/7.webp",
+      "https://basket-42.wbbasket.ru/vol10958/part1095824/1095824553/images/big/8.webp",
+      "https://basket-42.wbbasket.ru/vol10958/part1095824/1095824553/images/big/9.webp",
+      "https://basket-42.wbbasket.ru/vol10958/part1095824/1095824553/images/big/10.webp"
     ]
   },
   {
     "query": "рубашка в клетку женская",
     "sku": 1128812446,
     "name": "Рубашка в клетку оверсайз",
+    "cls": {
+      "sleeve": "unknown",
+      "season": "unknown"
+    },
     "firstDate": "2026-07-01",
     "price": 1468,
     "sales": 237,
@@ -140,6 +71,9 @@
     "pics": 17,
     "hasVideo": 1,
     "rating": 5,
+    "cardUrl": "https://www.wildberries.ru/catalog/1128812446/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/4279911",
+    "brand": "LallyRose",
     "host": "43",
     "photoCount": 17,
     "description": "Стильная женская рубашка оверсайз в клетку — универсальная модель для создания модных образов в любое время года. Лёгкая летняя рубашка женская отлично подойдёт для прохладных вечеров, прогулок, отдыха, путешествий и повседневной носки. Благодаря свободному крою oversize модель комфортно сидит по фигуре и легко сочетается с джинсами, шортами, юбками и базовыми топами.\n\nЭта рубашка женская в клетку станет отличным вариантом как для летнего гардероба, так и для переходного сезона. В жаркий сезон её можно носить как лёгкую накидку летнюю, поверх майки или топа, создавая расслабленный городской об",
@@ -189,59 +123,271 @@
         "value": "Киргизия"
       }
     ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1128812446_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1128812446_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1128812446_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1128812446_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1128812446_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1128812446_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1128812446_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1128812446_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1128812446_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1128812446_tm_9.webp",
+      "reports/new-products/2026-07-14/slides/1128812446_tm_10.webp"
+    ],
     "slideUrls": [
       "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812446/images/big/1.webp",
       "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812446/images/big/2.webp",
       "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812446/images/big/3.webp",
       "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812446/images/big/4.webp",
-      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812446/images/big/5.webp"
-    ],
-    "files": [
-      "reports/new-products/2026-07-14/slides/1128812446_1.webp",
-      "reports/new-products/2026-07-14/slides/1128812446_2.webp",
-      "reports/new-products/2026-07-14/slides/1128812446_3.webp",
-      "reports/new-products/2026-07-14/slides/1128812446_4.webp",
-      "reports/new-products/2026-07-14/slides/1128812446_5.webp"
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812446/images/big/5.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812446/images/big/6.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812446/images/big/7.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812446/images/big/8.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812446/images/big/9.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812446/images/big/10.webp"
     ]
   },
   {
     "query": "рубашка в клетку женская",
-    "sku": 1052000620,
-    "name": "Рубашка в клетку хлопок на весну и лето",
-    "firstDate": "2026-06-05",
-    "price": 990,
-    "sales": 365,
-    "revenue": 309946,
-    "pics": 30,
-    "hasVideo": 0,
+    "sku": 1128812448,
+    "name": "Рубашка в клетку оверсайз",
+    "cls": {
+      "sleeve": "unknown",
+      "season": "unknown"
+    },
+    "firstDate": "2026-06-24",
+    "price": 1512,
+    "sales": 128,
+    "revenue": 201390,
+    "pics": 16,
+    "hasVideo": 1,
     "rating": 5,
-    "host": "42",
-    "photoCount": 30,
-    "description": "Освежи свой наряд эффектной изюминкой! Эта весенняя рубашка - настоящая находка для тех, кто ценит простоту с характером. Она отлично впишется как в городские повседневные, так и в расслабленные выходные pinterest луки. Подойдет как школьная и офисная одежда! Это универсальный элемент для женщин, который можно комбинировать по-разному.\n\nЗа что Вы полюбите эту рубаху:\nХлопковый легкий трикотаж идеален для носки в течение всего дня или для дома. Материал тонкий, но плотный, дышащий и приятный к телу. Безопасный даже для чувствительной кожи.\nПрямой и свободный не оверсайз покрой выглядит аккуратн",
+    "cardUrl": "https://www.wildberries.ru/catalog/1128812448/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/4279911",
+    "brand": "LallyRose",
+    "host": "43",
+    "photoCount": 16,
+    "description": "Стильная женская рубашка оверсайз в клетку — универсальная модель для создания модных образов в любое время года. Лёгкая летняя рубашка женская отлично подойдёт для прохладных вечеров, прогулок, отдыха, путешествий и повседневной носки. Благодаря свободному крою oversize модель комфортно сидит по фигуре и легко сочетается с джинсами, шортами, юбками и базовыми топами.\n\nЭта рубашка женская в клетку станет отличным вариантом как для летнего гардероба, так и для переходного сезона. В жаркий сезон её можно носить как лёгкую накидку летнюю, поверх майки или топа, создавая расслабленный городской об",
     "characteristics": [
       {
         "name": "Состав",
-        "value": "100% хлопок"
+        "value": "хлопок"
       },
       {
         "name": "Цвет",
-        "value": "красный"
+        "value": "темно-зеленый"
       },
       {
         "name": "Размер на модели",
-        "value": "46"
+        "value": "42"
       },
       {
         "name": "Рост модели на фото",
-        "value": "163 см"
-      },
-      {
-        "name": "Параметры модели на фото (ОГ-ОТ-ОБ)",
-        "value": "ОГ-84 ОТ-64 ОБ-94"
+        "value": "170 см"
       },
       {
         "name": "Покрой",
-        "value": "прямой"
+        "value": "оверсайз"
+      },
+      {
+        "name": "Вид застежки",
+        "value": "пуговицы"
+      },
+      {
+        "name": "Тип карманов",
+        "value": "накладные"
+      },
+      {
+        "name": "Декоративные элементы",
+        "value": "без элементов"
+      },
+      {
+        "name": "Особенности модели",
+        "value": "удлиненная"
+      },
+      {
+        "name": "Пол",
+        "value": "Женский"
+      },
+      {
+        "name": "Страна производства",
+        "value": "Киргизия"
+      }
+    ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1128812448_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1128812448_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1128812448_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1128812448_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1128812448_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1128812448_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1128812448_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1128812448_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1128812448_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1128812448_tm_9.webp",
+      "reports/new-products/2026-07-14/slides/1128812448_tm_10.webp"
+    ],
+    "slideUrls": [
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812448/images/big/1.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812448/images/big/2.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812448/images/big/3.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812448/images/big/4.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812448/images/big/5.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812448/images/big/6.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812448/images/big/7.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812448/images/big/8.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812448/images/big/9.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812448/images/big/10.webp"
+    ]
+  },
+  {
+    "query": "рубашка в клетку женская",
+    "sku": 1021468812,
+    "name": "Рубашка в клетку",
+    "cls": {
+      "sleeve": "unknown",
+      "season": "unknown"
+    },
+    "firstDate": "2026-06-09",
+    "price": 1292,
+    "sales": 114,
+    "revenue": 150283,
+    "pics": 6,
+    "hasVideo": 0,
+    "rating": 5,
+    "cardUrl": "https://www.wildberries.ru/catalog/1021468812/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/3964794",
+    "brand": "",
+    "host": "41",
+    "photoCount": 6,
+    "description": "Розовая рубашка в клетку, которая покорит с первого надевания. Лёгкая дышащая фланель не даёт перегреться и остаётся приятной к коже даже в знойный день. Воротник стойка, пуговицы и нежные рюши придают силуэту женственность и игривость то, чего так хочется в тёплый сезон. Трендовая клетка и насыщенный коричневый оттенок делают образ стильным сочетаясь с большинством вещей. Отличный выбор для офиса и школы. Представлена в больших размерах  каждая найдёт подходящий вариант независимо от типа фигуры. Удлинённый оверсайз-крой визуально вытягивает и обеспечивает свободу движений весь день. Незамени",
+    "characteristics": [
+      {
+        "name": "Состав",
+        "value": "хлопок 60%; полиэстер 35%; шерсть 5%"
+      },
+      {
+        "name": "Цвет",
+        "value": "розовый"
+      },
+      {
+        "name": "Размер на модели",
+        "value": "S (42)"
+      },
+      {
+        "name": "Рост модели на фото",
+        "value": "168 см"
+      },
+      {
+        "name": "Параметры модели на фото (ОГ-ОТ-ОБ)",
+        "value": "89-61-98"
+      },
+      {
+        "name": "Покрой",
+        "value": "свободный"
+      },
+      {
+        "name": "Вид застежки",
+        "value": "пуговицы"
+      },
+      {
+        "name": "Тип карманов",
+        "value": "прорезные"
+      },
+      {
+        "name": "Фактура материала",
+        "value": "гладкая"
+      },
+      {
+        "name": "Декоративные элементы",
+        "value": "рубашка женская летняя"
+      },
+      {
+        "name": "Особенности модели",
+        "value": "оверсайз"
+      },
+      {
+        "name": "Пол",
+        "value": "Женский"
+      },
+      {
+        "name": "Уход за вещами",
+        "value": "стирка при t не более 30°C"
+      },
+      {
+        "name": "Комплектация",
+        "value": "Рубашка - 1шт"
+      },
+      {
+        "name": "Страна производства",
+        "value": "Киргизия"
+      }
+    ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1021468812_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1021468812_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1021468812_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1021468812_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1021468812_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1021468812_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1021468812_tm_6.webp"
+    ],
+    "slideUrls": [
+      "https://basket-41.wbbasket.ru/vol10214/part1021468/1021468812/images/big/1.webp",
+      "https://basket-41.wbbasket.ru/vol10214/part1021468/1021468812/images/big/2.webp",
+      "https://basket-41.wbbasket.ru/vol10214/part1021468/1021468812/images/big/3.webp",
+      "https://basket-41.wbbasket.ru/vol10214/part1021468/1021468812/images/big/4.webp",
+      "https://basket-41.wbbasket.ru/vol10214/part1021468/1021468812/images/big/5.webp",
+      "https://basket-41.wbbasket.ru/vol10214/part1021468/1021468812/images/big/6.webp"
+    ]
+  },
+  {
+    "query": "рубашка в клетку женская",
+    "sku": 1062578096,
+    "name": "Рубашка в клетку оверсайз",
+    "cls": {
+      "sleeve": "unknown",
+      "season": "unknown"
+    },
+    "firstDate": "2026-06-05",
+    "price": 5152,
+    "sales": 12,
+    "revenue": 58082,
+    "pics": 10,
+    "hasVideo": 1,
+    "rating": 5,
+    "cardUrl": "https://www.wildberries.ru/catalog/1062578096/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/199129",
+    "brand": "Six Reasons",
+    "host": "42",
+    "photoCount": 10,
+    "description": "",
+    "characteristics": [
+      {
+        "name": "Состав",
+        "value": "хлопок; полиэстер"
+      },
+      {
+        "name": "Цвет",
+        "value": "синий; голубино-синий"
+      },
+      {
+        "name": "Размер на модели",
+        "value": "40-42"
+      },
+      {
+        "name": "Рост модели на фото",
+        "value": "168 см"
+      },
+      {
+        "name": "Параметры модели на фото (ОГ-ОТ-ОБ)",
+        "value": "85-60-90"
+      },
+      {
+        "name": "Покрой",
+        "value": "оверсайз"
       },
       {
         "name": "Вид застежки",
@@ -254,6 +400,200 @@
       {
         "name": "Фактура материала",
         "value": "гладкая"
+      },
+      {
+        "name": "Декоративные элементы",
+        "value": "необработанная клетка"
+      },
+      {
+        "name": "Особенности модели",
+        "value": "дышащий материал"
+      },
+      {
+        "name": "Пол",
+        "value": "Женский"
+      },
+      {
+        "name": "Уход за вещами",
+        "value": "БЕРЕЖНАЯ СТИРКА 30С БЕЗ ОТЖИМА; Ручная бережная стирка 30C; стирка в мешке"
+      },
+      {
+        "name": "Комплектация",
+        "value": "Рубашка -1 шт"
+      },
+      {
+        "name": "Страна производства",
+        "value": "Киргизия"
+      }
+    ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1062578096_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1062578096_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1062578096_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1062578096_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1062578096_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1062578096_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1062578096_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1062578096_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1062578096_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1062578096_tm_9.webp",
+      "reports/new-products/2026-07-14/slides/1062578096_tm_10.webp"
+    ],
+    "slideUrls": [
+      "https://basket-42.wbbasket.ru/vol10625/part1062578/1062578096/images/big/1.webp",
+      "https://basket-42.wbbasket.ru/vol10625/part1062578/1062578096/images/big/2.webp",
+      "https://basket-42.wbbasket.ru/vol10625/part1062578/1062578096/images/big/3.webp",
+      "https://basket-42.wbbasket.ru/vol10625/part1062578/1062578096/images/big/4.webp",
+      "https://basket-42.wbbasket.ru/vol10625/part1062578/1062578096/images/big/5.webp",
+      "https://basket-42.wbbasket.ru/vol10625/part1062578/1062578096/images/big/6.webp",
+      "https://basket-42.wbbasket.ru/vol10625/part1062578/1062578096/images/big/7.webp",
+      "https://basket-42.wbbasket.ru/vol10625/part1062578/1062578096/images/big/8.webp",
+      "https://basket-42.wbbasket.ru/vol10625/part1062578/1062578096/images/big/9.webp",
+      "https://basket-42.wbbasket.ru/vol10625/part1062578/1062578096/images/big/10.webp"
+    ]
+  },
+  {
+    "query": "рубашка в клетку женская",
+    "sku": 1128812447,
+    "name": "Рубашка в клетку оверсайз",
+    "cls": {
+      "sleeve": "unknown",
+      "season": "unknown"
+    },
+    "firstDate": "2026-07-11",
+    "price": 1468,
+    "sales": 8,
+    "revenue": 11336,
+    "pics": 20,
+    "hasVideo": 0,
+    "rating": 5,
+    "cardUrl": "https://www.wildberries.ru/catalog/1128812447/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/4279911",
+    "brand": "LallyRose",
+    "host": "43",
+    "photoCount": 20,
+    "description": "Стильная рубашка женская LALLY ROSE в клетку станет универсальным дополнением гардероба на осень, зиму и межсезонье. Свободный крой oversize обеспечивает комфортную посадку, не сковывает движения и позволяет создавать современные повседневные и деловые образы. Клетчатый принт остается актуальным каждый сезон и легко сочетается с базовой одеждой.\n\nИзделие прекрасно подходит для учебы, офиса, университета, прогулок и встреч. Благодаря лаконичному дизайну его можно носить со школьной формой, классическими брюками, джинсами, юбками, легинсами или поверх футболки, топа, лонгслива и водолазки. Такая",
+    "characteristics": [
+      {
+        "name": "Состав",
+        "value": "хлопок"
+      },
+      {
+        "name": "Цвет",
+        "value": "коричневый"
+      },
+      {
+        "name": "Покрой",
+        "value": "оверсайз"
+      },
+      {
+        "name": "Вид застежки",
+        "value": "пуговицы"
+      },
+      {
+        "name": "Тип карманов",
+        "value": "накладные"
+      },
+      {
+        "name": "Декоративные элементы",
+        "value": "карман"
+      },
+      {
+        "name": "Особенности модели",
+        "value": "дышащий материал"
+      },
+      {
+        "name": "Пол",
+        "value": "Женский"
+      },
+      {
+        "name": "Страна производства",
+        "value": "Киргизия"
+      }
+    ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1128812447_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1128812447_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1128812447_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1128812447_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1128812447_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1128812447_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1128812447_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1128812447_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1128812447_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1128812447_tm_9.webp",
+      "reports/new-products/2026-07-14/slides/1128812447_tm_10.webp"
+    ],
+    "slideUrls": [
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812447/images/big/1.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812447/images/big/2.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812447/images/big/3.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812447/images/big/4.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812447/images/big/5.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812447/images/big/6.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812447/images/big/7.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812447/images/big/8.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812447/images/big/9.webp",
+      "https://basket-43.wbbasket.ru/vol11288/part1128812/1128812447/images/big/10.webp"
+    ]
+  },
+  {
+    "query": "рубашка в клетку женская",
+    "sku": 1141733096,
+    "name": "Рубашка в клетку оверсайз удлиненная",
+    "cls": {
+      "sleeve": "unknown",
+      "season": "unknown"
+    },
+    "firstDate": "2026-06-24",
+    "price": 1620,
+    "sales": 2,
+    "revenue": 3330,
+    "pics": 9,
+    "hasVideo": 1,
+    "rating": 5,
+    "cardUrl": "https://www.wildberries.ru/catalog/1141733096/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/4225160",
+    "brand": "arsshopp",
+    "host": "43",
+    "photoCount": 9,
+    "description": "Рубашка в клетку оверсайз удлиненная от бренда syrgishopp. Женская рубашка в клетку  - это то, что взбудоражит ваш гардероб и добавит яркий акцент к вашему повседневному образу. Это идеальное сочетание классического оверсайз стиля и современной моды. Это классика, которая никогда не выйдет из моды. Она легко сочетается с любыми стилями – от кэжуал до более современных образов. Эта вещь предназначена для женщин всех возрастов. Она подходит как для высоких, так и для невысоких представительниц прекрасного пола. Свободный силуэт и удлиненная модель делают её очень удобной. Свободный крой рубашки ",
+    "characteristics": [
+      {
+        "name": "Состав",
+        "value": "хлопок 80 % полиэстер 20%"
+      },
+      {
+        "name": "Цвет",
+        "value": "розовый"
+      },
+      {
+        "name": "Размер на модели",
+        "value": "42"
+      },
+      {
+        "name": "Рост модели на фото",
+        "value": "165 см"
+      },
+      {
+        "name": "Параметры модели на фото (ОГ-ОТ-ОБ)",
+        "value": "85-63-90"
+      },
+      {
+        "name": "Покрой",
+        "value": "оверсайз"
+      },
+      {
+        "name": "Вид застежки",
+        "value": "пуговицы"
+      },
+      {
+        "name": "Тип карманов",
+        "value": "в шве"
+      },
+      {
+        "name": "Фактура материала",
+        "value": "мягкая"
       },
       {
         "name": "Декоративные элементы",
@@ -273,260 +613,45 @@
       },
       {
         "name": "Комплектация",
-        "value": "Рубашка 1 шт"
+        "value": "Рубашка женская в клетку 1шт"
       },
       {
         "name": "Страна производства",
-        "value": "Россия"
+        "value": "Киргизия"
       }
     ],
-    "slideUrls": [
-      "https://basket-42.wbbasket.ru/vol10520/part1052000/1052000620/images/big/1.webp",
-      "https://basket-42.wbbasket.ru/vol10520/part1052000/1052000620/images/big/2.webp",
-      "https://basket-42.wbbasket.ru/vol10520/part1052000/1052000620/images/big/3.webp",
-      "https://basket-42.wbbasket.ru/vol10520/part1052000/1052000620/images/big/4.webp",
-      "https://basket-42.wbbasket.ru/vol10520/part1052000/1052000620/images/big/5.webp"
-    ],
-    "files": [
-      "reports/new-products/2026-07-14/slides/1052000620_1.webp",
-      "reports/new-products/2026-07-14/slides/1052000620_2.webp",
-      "reports/new-products/2026-07-14/slides/1052000620_3.webp",
-      "reports/new-products/2026-07-14/slides/1052000620_4.webp",
-      "reports/new-products/2026-07-14/slides/1052000620_5.webp"
-    ]
-  },
-  {
-    "query": "рубашка в клетку мужская",
-    "sku": 1016184515,
-    "name": "Рубашка в клетку с коротким рукавом",
-    "firstDate": "2026-05-16",
-    "price": 643,
-    "sales": 1908,
-    "revenue": 1404558,
-    "pics": 14,
-    "hasVideo": 0,
-    "rating": 5,
-    "host": "41",
-    "photoCount": 14,
-    "description": "Изысканная мужская рубашка от бренда ТВОЕ задаёт тон летнему гардеробу — это гармоничное сочетание практичности, комфорта и актуальных трендов для подростков и взрослых мужчин. Модель в клетку с коротким рукавом, отложным воротом и накладным карманом на груди подойдёт для самых разных ситуаций: от офисной работы до встреч с друзьями и прогулок по городу.\n\nНежный цвет в сочетании с чёткой клетчатой создаёт динамичный, запоминающийся образ, который остаётся универсальным — принт легко комбинируется с вещами разных оттенков, от нейтральных до ярких. Отложной ворот придаёт модели строгость и лакон",
-    "characteristics": [
-      {
-        "name": "Состав",
-        "value": "55% полиэстер; 45% хлопок"
-      },
-      {
-        "name": "Цвет",
-        "value": "белый"
-      },
-      {
-        "name": "Размер на модели",
-        "value": "L"
-      },
-      {
-        "name": "Рост модели на фото",
-        "value": "187 см"
-      },
-      {
-        "name": "Параметры модели на фото (ОГ-ОТ-ОБ)",
-        "value": "97-77-96"
-      },
-      {
-        "name": "Покрой",
-        "value": "прямой"
-      },
-      {
-        "name": "Вид застежки",
-        "value": "пуговицы"
-      },
-      {
-        "name": "Тип карманов",
-        "value": "накладные"
-      },
-      {
-        "name": "Фактура материала",
-        "value": "гладкая"
-      },
-      {
-        "name": "Декоративные элементы",
-        "value": "без элементов"
-      },
-      {
-        "name": "Особенности модели",
-        "value": "с кокеткой"
-      },
-      {
-        "name": "Пол",
-        "value": "Мужской"
-      },
-      {
-        "name": "Уход за вещами",
-        "value": "стирать изнанкой наружу; деликатный отжим"
-      },
-      {
-        "name": "Комплектация",
-        "value": "Рубашка - 1 шт."
-      },
-      {
-        "name": "Страна производства",
-        "value": "Китай"
-      }
+    "heroFile": "reports/new-products/2026-07-14/slides/1141733096_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1141733096_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1141733096_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1141733096_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1141733096_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1141733096_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1141733096_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1141733096_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1141733096_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1141733096_tm_9.webp"
     ],
     "slideUrls": [
-      "https://basket-41.wbbasket.ru/vol10161/part1016184/1016184515/images/big/1.webp",
-      "https://basket-41.wbbasket.ru/vol10161/part1016184/1016184515/images/big/2.webp",
-      "https://basket-41.wbbasket.ru/vol10161/part1016184/1016184515/images/big/3.webp",
-      "https://basket-41.wbbasket.ru/vol10161/part1016184/1016184515/images/big/4.webp",
-      "https://basket-41.wbbasket.ru/vol10161/part1016184/1016184515/images/big/5.webp"
-    ],
-    "files": [
-      "reports/new-products/2026-07-14/slides/1016184515_1.webp",
-      "reports/new-products/2026-07-14/slides/1016184515_3.webp",
-      "reports/new-products/2026-07-14/slides/1016184515_4.webp",
-      "reports/new-products/2026-07-14/slides/1016184515_5.webp"
-    ]
-  },
-  {
-    "query": "рубашка в клетку мужская",
-    "sku": 1013899289,
-    "name": "Рубашка мужская с коротким рукавом в клетку хлопок",
-    "firstDate": "2026-05-14",
-    "price": 2243,
-    "sales": 226,
-    "revenue": 619488,
-    "pics": 13,
-    "hasVideo": 1,
-    "rating": 5,
-    "host": "41",
-    "photoCount": 13,
-    "description": "Мужская рубашка 4FARTPEAK в клетку с коротким рукавом — это стильное и комфортное решение для любого случая, в том числе 1 сентября в школу. Изготовленная из высококачественного 100% хлопка, она обеспечивает комфорт и свежесть в течение всего дня. Прямой крой с короткими рукавами и классический воротник идеально подходят для офиса, школы или торжественных мероприятий, таких как выпускной. Она застегивается на пуговицы, что позволяет легко регулировать свободу и удобство посадки.\n\nРубашка доступна в больших размерах до 66-го, благодаря чему подойдет мужчинам любого телосложения. Летняя рубашка ",
-    "characteristics": [
-      {
-        "name": "Состав",
-        "value": "хлопок; 100% хлопок"
-      },
-      {
-        "name": "Цвет",
-        "value": "синий"
-      },
-      {
-        "name": "Размер на модели",
-        "value": "L"
-      },
-      {
-        "name": "Покрой",
-        "value": "прямой"
-      },
-      {
-        "name": "Вид застежки",
-        "value": "пуговицы"
-      },
-      {
-        "name": "Тип карманов",
-        "value": "накладные"
-      },
-      {
-        "name": "Особенности модели",
-        "value": "воздухопроницаемость; гипоаллергенный материал; дышащий материал"
-      },
-      {
-        "name": "Пол",
-        "value": "Мужской"
-      },
-      {
-        "name": "Уход за вещами",
-        "value": "стирка при t не более 30°C"
-      },
-      {
-        "name": "Комплектация",
-        "value": "1 шт"
-      }
-    ],
-    "slideUrls": [
-      "https://basket-41.wbbasket.ru/vol10138/part1013899/1013899289/images/big/1.webp",
-      "https://basket-41.wbbasket.ru/vol10138/part1013899/1013899289/images/big/2.webp",
-      "https://basket-41.wbbasket.ru/vol10138/part1013899/1013899289/images/big/3.webp",
-      "https://basket-41.wbbasket.ru/vol10138/part1013899/1013899289/images/big/4.webp",
-      "https://basket-41.wbbasket.ru/vol10138/part1013899/1013899289/images/big/5.webp"
-    ],
-    "files": [
-      "reports/new-products/2026-07-14/slides/1013899289_1.webp",
-      "reports/new-products/2026-07-14/slides/1013899289_2.webp",
-      "reports/new-products/2026-07-14/slides/1013899289_3.webp",
-      "reports/new-products/2026-07-14/slides/1013899289_4.webp",
-      "reports/new-products/2026-07-14/slides/1013899289_5.webp"
-    ]
-  },
-  {
-    "query": "рубашка в клетку мужская",
-    "sku": 804912364,
-    "name": "Базовая оверсайз рубашка в клетку с коротким рукавом",
-    "firstDate": "2026-06-04",
-    "price": 1485,
-    "sales": 357,
-    "revenue": 603825,
-    "pics": 8,
-    "hasVideo": 0,
-    "rating": 5,
-    "host": "37",
-    "photoCount": 8,
-    "description": "Свободная скейтерская рубашка basic collection — это та самая базовая вещь, прям как из pinterest, которую хочется носить каждый день. Мягкая, уютная, удобная и при этом стильная оверсайз рубашка y2k подойдёт для любого случая: от прогулки по городу до уютного вечера дома. Такая ретро с принтом клетка рубашка с карманом никогда не выходит из моды, а ткань изделия приятно ощущается на теле и хорошо сохраняет тепло, особенно в прохладное время года. Эта винтажная рубашка кежуал имеет свободный крой, который не сковывает движения, и застёгивается на пуговицы, поэтому ее можно носить как закрытой,",
-    "characteristics": [
-      {
-        "name": "Состав",
-        "value": "80% хлопок, 20% полиэстер"
-      },
-      {
-        "name": "Цвет",
-        "value": "красный; черный"
-      },
-      {
-        "name": "Покрой",
-        "value": "оверсайз"
-      },
-      {
-        "name": "Вид застежки",
-        "value": "пуговицы"
-      },
-      {
-        "name": "Тип карманов",
-        "value": "без карманов"
-      },
-      {
-        "name": "Декоративные элементы",
-        "value": "клетка"
-      },
-      {
-        "name": "Особенности модели",
-        "value": "без карманов"
-      },
-      {
-        "name": "Пол",
-        "value": "Мужской"
-      },
-      {
-        "name": "Страна производства",
-        "value": "Узбекистан"
-      }
-    ],
-    "slideUrls": [
-      "https://basket-37.wbbasket.ru/vol8049/part804912/804912364/images/big/1.webp",
-      "https://basket-37.wbbasket.ru/vol8049/part804912/804912364/images/big/2.webp",
-      "https://basket-37.wbbasket.ru/vol8049/part804912/804912364/images/big/3.webp",
-      "https://basket-37.wbbasket.ru/vol8049/part804912/804912364/images/big/4.webp",
-      "https://basket-37.wbbasket.ru/vol8049/part804912/804912364/images/big/5.webp"
-    ],
-    "files": [
-      "reports/new-products/2026-07-14/slides/804912364_1.webp",
-      "reports/new-products/2026-07-14/slides/804912364_2.webp",
-      "reports/new-products/2026-07-14/slides/804912364_3.webp",
-      "reports/new-products/2026-07-14/slides/804912364_4.webp",
-      "reports/new-products/2026-07-14/slides/804912364_5.webp"
+      "https://basket-43.wbbasket.ru/vol11417/part1141733/1141733096/images/big/1.webp",
+      "https://basket-43.wbbasket.ru/vol11417/part1141733/1141733096/images/big/2.webp",
+      "https://basket-43.wbbasket.ru/vol11417/part1141733/1141733096/images/big/3.webp",
+      "https://basket-43.wbbasket.ru/vol11417/part1141733/1141733096/images/big/4.webp",
+      "https://basket-43.wbbasket.ru/vol11417/part1141733/1141733096/images/big/5.webp",
+      "https://basket-43.wbbasket.ru/vol11417/part1141733/1141733096/images/big/6.webp",
+      "https://basket-43.wbbasket.ru/vol11417/part1141733/1141733096/images/big/7.webp",
+      "https://basket-43.wbbasket.ru/vol11417/part1141733/1141733096/images/big/8.webp",
+      "https://basket-43.wbbasket.ru/vol11417/part1141733/1141733096/images/big/9.webp"
     ]
   },
   {
     "query": "рубашка в клетку мужская",
     "sku": 993491957,
     "name": "Рубашка в клетку с длинным рукавом",
+    "cls": {
+      "sleeve": "long",
+      "season": "unknown"
+    },
     "firstDate": "2026-07-05",
     "price": 2243,
     "sales": 19,
@@ -534,6 +659,9 @@
     "pics": 9,
     "hasVideo": 0,
     "rating": 0,
+    "cardUrl": "https://www.wildberries.ru/catalog/993491957/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/46481",
+    "brand": "Malozemoff",
     "host": "41",
     "photoCount": 12,
     "description": "Мужская рубашка с длинным рукавом в классическую крупную клетку, выполненная из мягкого хлопка. Подойдет как для взрослых мужчин, так и для молодого парня. Модель прямого силуэта оверсайз прекрасно садится на любой тип фигуры и подойдет большинству мужчин.  Стильная клетчатая рубашка станет отличным выбором для весеннего и летнего гардероба благодаря натуральной хлопковой ткани, обеспечивающей комфорт даже в теплую погоду. Проста в уходе, не сильно мнется и не деформируется, она мягкая и при этом плотная. Рубашка популярная молодежная как в пинтерест! Бренд Malozemoff  ценит своего покупателя!",
@@ -595,19 +723,745 @@
         "value": "Россия"
       }
     ],
+    "heroFile": "reports/new-products/2026-07-14/slides/993491957_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/993491957_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/993491957_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/993491957_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/993491957_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/993491957_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/993491957_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/993491957_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/993491957_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/993491957_tm_9.webp",
+      "reports/new-products/2026-07-14/slides/993491957_tm_10.webp"
+    ],
     "slideUrls": [
       "https://basket-41.wbbasket.ru/vol9934/part993491/993491957/images/big/1.webp",
       "https://basket-41.wbbasket.ru/vol9934/part993491/993491957/images/big/2.webp",
       "https://basket-41.wbbasket.ru/vol9934/part993491/993491957/images/big/3.webp",
       "https://basket-41.wbbasket.ru/vol9934/part993491/993491957/images/big/4.webp",
-      "https://basket-41.wbbasket.ru/vol9934/part993491/993491957/images/big/5.webp"
+      "https://basket-41.wbbasket.ru/vol9934/part993491/993491957/images/big/5.webp",
+      "https://basket-41.wbbasket.ru/vol9934/part993491/993491957/images/big/6.webp",
+      "https://basket-41.wbbasket.ru/vol9934/part993491/993491957/images/big/7.webp",
+      "https://basket-41.wbbasket.ru/vol9934/part993491/993491957/images/big/8.webp",
+      "https://basket-41.wbbasket.ru/vol9934/part993491/993491957/images/big/9.webp",
+      "https://basket-41.wbbasket.ru/vol9934/part993491/993491957/images/big/10.webp"
+    ]
+  },
+  {
+    "query": "рубашка в клетку мужская",
+    "sku": 1073678723,
+    "name": "Рубашка в клетку классическая с длинным рукавом и рисунком",
+    "cls": {
+      "sleeve": "long",
+      "season": "unknown"
+    },
+    "firstDate": "2026-06-08",
+    "price": 1112,
+    "sales": 24,
+    "revenue": 29334,
+    "pics": 9,
+    "hasVideo": 0,
+    "rating": 5,
+    "cardUrl": "https://www.wildberries.ru/catalog/1073678723/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/250121848",
+    "brand": "PAOLA BOCCI x NIKOLA ROSSI",
+    "host": "42",
+    "photoCount": 9,
+    "description": "Рубашка в клетку с кашемиром от Paola Bocci x Palmary Leading — превосходный выбор для ценителей комфорта и стиля в повседневной одежде.\n\nЭта классическая модель на пуговицах с длинным рукавом выполнена из высококачественного хлопка с добавлением мягкой шерсти, что обеспечивает не только удобство ношения, но и долговечность. Оригинальная фурнитура придает образу элегантность и изысканность.\n\nБлагодаря выверенным лекалам, теплая сорочка отлично сидит при любом росте, являясь по-настоящему универсальным решением. Такое изделие станет прекрасным подарком для коллег или друзей, а также стильным ба",
+    "characteristics": [
+      {
+        "name": "Состав",
+        "value": "хлопок; стрейч"
+      },
+      {
+        "name": "Цвет",
+        "value": "серо-синий; синий; красный"
+      },
+      {
+        "name": "Размер на модели",
+        "value": "L"
+      },
+      {
+        "name": "Рост модели на фото",
+        "value": "184 см"
+      },
+      {
+        "name": "Параметры модели на фото (ОГ-ОТ-ОБ)",
+        "value": "106-85-97"
+      },
+      {
+        "name": "Покрой",
+        "value": "приталенный"
+      },
+      {
+        "name": "Вид застежки",
+        "value": "пуговицы"
+      },
+      {
+        "name": "Тип карманов",
+        "value": "без карманов"
+      },
+      {
+        "name": "Фактура материала",
+        "value": "плотная"
+      },
+      {
+        "name": "Декоративные элементы",
+        "value": "без элементов"
+      },
+      {
+        "name": "Особенности модели",
+        "value": "эластичный материал"
+      },
+      {
+        "name": "Пол",
+        "value": "Мужской"
+      },
+      {
+        "name": "Уход за вещами",
+        "value": "деликатная стирка"
+      },
+      {
+        "name": "Комплектация",
+        "value": "рубашка мужская 1шт."
+      },
+      {
+        "name": "Страна производства",
+        "value": "Турция"
+      }
     ],
-    "files": [
-      "reports/new-products/2026-07-14/slides/993491957_1.webp",
-      "reports/new-products/2026-07-14/slides/993491957_2.webp",
-      "reports/new-products/2026-07-14/slides/993491957_3.webp",
-      "reports/new-products/2026-07-14/slides/993491957_4.webp",
-      "reports/new-products/2026-07-14/slides/993491957_5.webp"
+    "heroFile": "reports/new-products/2026-07-14/slides/1073678723_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1073678723_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1073678723_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1073678723_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1073678723_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1073678723_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1073678723_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1073678723_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1073678723_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1073678723_tm_9.webp"
+    ],
+    "slideUrls": [
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678723/images/big/1.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678723/images/big/2.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678723/images/big/3.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678723/images/big/4.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678723/images/big/5.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678723/images/big/6.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678723/images/big/7.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678723/images/big/8.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678723/images/big/9.webp"
+    ]
+  },
+  {
+    "query": "рубашка в клетку мужская",
+    "sku": 1073678722,
+    "name": "Рубашка в клетку классическая с длинным рукавом и рисунком",
+    "cls": {
+      "sleeve": "long",
+      "season": "unknown"
+    },
+    "firstDate": "2026-06-08",
+    "price": 1112,
+    "sales": 19,
+    "revenue": 23773,
+    "pics": 9,
+    "hasVideo": 0,
+    "rating": 0,
+    "cardUrl": "https://www.wildberries.ru/catalog/1073678722/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/250121848",
+    "brand": "PAOLA BOCCI x NIKOLA ROSSI",
+    "host": "42",
+    "photoCount": 9,
+    "description": "Рубашка в клетку с кашемиром от Paola Bocci x Palmary Leading — превосходный выбор для ценителей комфорта и стиля в повседневной одежде.\n\nЭта классическая модель на пуговицах с длинным рукавом выполнена из высококачественного хлопка с добавлением мягкой шерсти, что обеспечивает не только удобство ношения, но и долговечность. Оригинальная фурнитура придает образу элегантность и изысканность.\n\nБлагодаря выверенным лекалам, теплая сорочка отлично сидит при любом росте, являясь по-настоящему универсальным решением. Такое изделие станет прекрасным подарком для коллег или друзей, а также стильным ба",
+    "characteristics": [
+      {
+        "name": "Состав",
+        "value": "хлопок; стрейч"
+      },
+      {
+        "name": "Цвет",
+        "value": "серо-синий; синий"
+      },
+      {
+        "name": "Размер на модели",
+        "value": "L"
+      },
+      {
+        "name": "Рост модели на фото",
+        "value": "184 см"
+      },
+      {
+        "name": "Параметры модели на фото (ОГ-ОТ-ОБ)",
+        "value": "106-85-97"
+      },
+      {
+        "name": "Покрой",
+        "value": "приталенный"
+      },
+      {
+        "name": "Вид застежки",
+        "value": "пуговицы"
+      },
+      {
+        "name": "Тип карманов",
+        "value": "без карманов"
+      },
+      {
+        "name": "Фактура материала",
+        "value": "плотная"
+      },
+      {
+        "name": "Декоративные элементы",
+        "value": "без элементов"
+      },
+      {
+        "name": "Особенности модели",
+        "value": "эластичный материал"
+      },
+      {
+        "name": "Пол",
+        "value": "Мужской"
+      },
+      {
+        "name": "Уход за вещами",
+        "value": "деликатная стирка"
+      },
+      {
+        "name": "Комплектация",
+        "value": "рубашка мужская 1шт."
+      },
+      {
+        "name": "Страна производства",
+        "value": "Турция"
+      }
+    ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1073678722_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1073678722_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1073678722_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1073678722_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1073678722_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1073678722_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1073678722_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1073678722_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1073678722_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1073678722_tm_9.webp"
+    ],
+    "slideUrls": [
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678722/images/big/1.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678722/images/big/2.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678722/images/big/3.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678722/images/big/4.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678722/images/big/5.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678722/images/big/6.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678722/images/big/7.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678722/images/big/8.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678722/images/big/9.webp"
+    ]
+  },
+  {
+    "query": "рубашка в клетку мужская",
+    "sku": 1094034210,
+    "name": "Рубашка с длинным рукавом на кнопках",
+    "cls": {
+      "sleeve": "long",
+      "season": "unknown"
+    },
+    "firstDate": "2026-06-24",
+    "price": 2109,
+    "sales": 10,
+    "revenue": 19390,
+    "pics": 9,
+    "hasVideo": 0,
+    "rating": 5,
+    "cardUrl": "https://www.wildberries.ru/catalog/1094034210/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/250148692",
+    "brand": "Стиль 46",
+    "host": "42",
+    "photoCount": 9,
+    "description": "Мужские рубашки на кнопках из эластичного хлопка (80% хлопок, 20% эластан) — универсальное решение для подростков и взрослых мужчин. Размерный ряд начинается с 44-го для юношей и подростков и доходит до больших размеров, 56. Благодаря 20% эластана ткань тянется во все стороны и идеально садится по фигуре, не создавая лишних складок — важно для растущего тела подростка и комфорта взрослого. Застежка на кнопках, а не классических пуговицах, застегивается одной рукой, не отрывается и не расстегивается сама по себе. Подростки оценят скорость, мужчины — надежность. Рубашка на кнопках подходит для ш",
+    "characteristics": [
+      {
+        "name": "Состав",
+        "value": "хлопок - 80%; эластан - 20%"
+      },
+      {
+        "name": "Цвет",
+        "value": "коричневый"
+      },
+      {
+        "name": "Покрой",
+        "value": "приталенный"
+      },
+      {
+        "name": "Вид застежки",
+        "value": "кнопки"
+      },
+      {
+        "name": "Тип карманов",
+        "value": "без карманов"
+      },
+      {
+        "name": "Фактура материала",
+        "value": "гладкая"
+      },
+      {
+        "name": "Декоративные элементы",
+        "value": "без элементов"
+      },
+      {
+        "name": "Особенности модели",
+        "value": "быстросохнущая; дышащий материал; немнущийся материал"
+      },
+      {
+        "name": "Пол",
+        "value": "Мужской"
+      },
+      {
+        "name": "Уход за вещами",
+        "value": "отбеливание запрещено; стирать изнанкой наружу; стирка при t не более 40°C"
+      },
+      {
+        "name": "Комплектация",
+        "value": "Рубашка - 1 шт"
+      },
+      {
+        "name": "Страна производства",
+        "value": "Китай"
+      }
+    ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1094034210_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1094034210_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1094034210_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1094034210_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1094034210_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1094034210_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1094034210_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1094034210_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1094034210_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1094034210_tm_9.webp"
+    ],
+    "slideUrls": [
+      "https://basket-42.wbbasket.ru/vol10940/part1094034/1094034210/images/big/1.webp",
+      "https://basket-42.wbbasket.ru/vol10940/part1094034/1094034210/images/big/2.webp",
+      "https://basket-42.wbbasket.ru/vol10940/part1094034/1094034210/images/big/3.webp",
+      "https://basket-42.wbbasket.ru/vol10940/part1094034/1094034210/images/big/4.webp",
+      "https://basket-42.wbbasket.ru/vol10940/part1094034/1094034210/images/big/5.webp",
+      "https://basket-42.wbbasket.ru/vol10940/part1094034/1094034210/images/big/6.webp",
+      "https://basket-42.wbbasket.ru/vol10940/part1094034/1094034210/images/big/7.webp",
+      "https://basket-42.wbbasket.ru/vol10940/part1094034/1094034210/images/big/8.webp",
+      "https://basket-42.wbbasket.ru/vol10940/part1094034/1094034210/images/big/9.webp"
+    ]
+  },
+  {
+    "query": "рубашка в клетку мужская",
+    "sku": 1074598125,
+    "name": "Рубашка в клетку классическая с длинным рукавом и рисунком",
+    "cls": {
+      "sleeve": "long",
+      "season": "unknown"
+    },
+    "firstDate": "2026-06-08",
+    "price": 1341,
+    "sales": 10,
+    "revenue": 15652,
+    "pics": 7,
+    "hasVideo": 0,
+    "rating": 0,
+    "cardUrl": "https://www.wildberries.ru/catalog/1074598125/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/250121848",
+    "brand": "PAOLA BOCCI x NIKOLA ROSSI",
+    "host": "42",
+    "photoCount": 7,
+    "description": "Рубашка в клетку с кашемиром от Paola Bocci x Palmary Leading — превосходный выбор для ценителей комфорта и стиля в повседневной одежде.\n\nЭта классическая модель на пуговицах с длинным рукавом выполнена из высококачественного хлопка с добавлением мягкой шерсти, что обеспечивает не только удобство ношения, но и долговечность. Оригинальная фурнитура придает образу элегантность и изысканность.\n\nБлагодаря выверенным лекалам, теплая сорочка отлично сидит при любом росте, являясь по-настоящему универсальным решением. Такое изделие станет прекрасным подарком для коллег или друзей, а также стильным ба",
+    "characteristics": [
+      {
+        "name": "Состав",
+        "value": "хлопок; стрейч"
+      },
+      {
+        "name": "Цвет",
+        "value": "серо-синий; синий"
+      },
+      {
+        "name": "Размер на модели",
+        "value": "L"
+      },
+      {
+        "name": "Рост модели на фото",
+        "value": "184 см"
+      },
+      {
+        "name": "Параметры модели на фото (ОГ-ОТ-ОБ)",
+        "value": "106-85-97"
+      },
+      {
+        "name": "Покрой",
+        "value": "приталенный"
+      },
+      {
+        "name": "Вид застежки",
+        "value": "пуговицы"
+      },
+      {
+        "name": "Тип карманов",
+        "value": "без карманов"
+      },
+      {
+        "name": "Фактура материала",
+        "value": "плотная"
+      },
+      {
+        "name": "Декоративные элементы",
+        "value": "без элементов"
+      },
+      {
+        "name": "Особенности модели",
+        "value": "эластичный материал"
+      },
+      {
+        "name": "Пол",
+        "value": "Мужской"
+      },
+      {
+        "name": "Уход за вещами",
+        "value": "деликатная стирка"
+      },
+      {
+        "name": "Комплектация",
+        "value": "рубашка мужская 1шт."
+      },
+      {
+        "name": "Страна производства",
+        "value": "Турция"
+      }
+    ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1074598125_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1074598125_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1074598125_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1074598125_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1074598125_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1074598125_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1074598125_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1074598125_tm_7.webp"
+    ],
+    "slideUrls": [
+      "https://basket-42.wbbasket.ru/vol10745/part1074598/1074598125/images/big/1.webp",
+      "https://basket-42.wbbasket.ru/vol10745/part1074598/1074598125/images/big/2.webp",
+      "https://basket-42.wbbasket.ru/vol10745/part1074598/1074598125/images/big/3.webp",
+      "https://basket-42.wbbasket.ru/vol10745/part1074598/1074598125/images/big/4.webp",
+      "https://basket-42.wbbasket.ru/vol10745/part1074598/1074598125/images/big/5.webp",
+      "https://basket-42.wbbasket.ru/vol10745/part1074598/1074598125/images/big/6.webp",
+      "https://basket-42.wbbasket.ru/vol10745/part1074598/1074598125/images/big/7.webp"
+    ]
+  },
+  {
+    "query": "рубашка в клетку мужская",
+    "sku": 1073678724,
+    "name": "Рубашка в клетку классическая с длинным рукавом и рисунком",
+    "cls": {
+      "sleeve": "long",
+      "season": "unknown"
+    },
+    "firstDate": "2026-06-08",
+    "price": 1126,
+    "sales": 9,
+    "revenue": 12295,
+    "pics": 11,
+    "hasVideo": 0,
+    "rating": 5,
+    "cardUrl": "https://www.wildberries.ru/catalog/1073678724/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/250121848",
+    "brand": "PAOLA BOCCI x NIKOLA ROSSI",
+    "host": "42",
+    "photoCount": 11,
+    "description": "Рубашка в клетку с кашемиром от Paola Bocci x Palmary Leading — превосходный выбор для ценителей комфорта и стиля в повседневной одежде.\n\nЭта классическая модель на пуговицах с длинным рукавом выполнена из высококачественного хлопка с добавлением мягкой шерсти, что обеспечивает не только удобство ношения, но и долговечность. Оригинальная фурнитура придает образу элегантность и изысканность.\n\nБлагодаря выверенным лекалам, теплая сорочка отлично сидит при любом росте, являясь по-настоящему универсальным решением. Такое изделие станет прекрасным подарком для коллег или друзей, а также стильным ба",
+    "characteristics": [
+      {
+        "name": "Состав",
+        "value": "хлопок; стрейч"
+      },
+      {
+        "name": "Цвет",
+        "value": "серо-синий; синий"
+      },
+      {
+        "name": "Размер на модели",
+        "value": "L"
+      },
+      {
+        "name": "Рост модели на фото",
+        "value": "184 см"
+      },
+      {
+        "name": "Параметры модели на фото (ОГ-ОТ-ОБ)",
+        "value": "106-85-97"
+      },
+      {
+        "name": "Покрой",
+        "value": "приталенный"
+      },
+      {
+        "name": "Вид застежки",
+        "value": "пуговицы"
+      },
+      {
+        "name": "Тип карманов",
+        "value": "без карманов"
+      },
+      {
+        "name": "Фактура материала",
+        "value": "плотная"
+      },
+      {
+        "name": "Декоративные элементы",
+        "value": "без элементов"
+      },
+      {
+        "name": "Особенности модели",
+        "value": "эластичный материал"
+      },
+      {
+        "name": "Пол",
+        "value": "Мужской"
+      },
+      {
+        "name": "Уход за вещами",
+        "value": "деликатная стирка"
+      },
+      {
+        "name": "Комплектация",
+        "value": "рубашка мужская 1шт."
+      },
+      {
+        "name": "Страна производства",
+        "value": "Турция"
+      }
+    ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1073678724_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1073678724_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1073678724_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1073678724_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1073678724_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1073678724_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1073678724_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1073678724_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1073678724_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1073678724_tm_9.webp",
+      "reports/new-products/2026-07-14/slides/1073678724_tm_10.webp"
+    ],
+    "slideUrls": [
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678724/images/big/1.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678724/images/big/2.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678724/images/big/3.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678724/images/big/4.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678724/images/big/5.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678724/images/big/6.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678724/images/big/7.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678724/images/big/8.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678724/images/big/9.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678724/images/big/10.webp"
+    ]
+  },
+  {
+    "query": "рубашка в клетку мужская",
+    "sku": 1073678721,
+    "name": "Рубашка в клетку классическая с длинным рукавом и рисунком",
+    "cls": {
+      "sleeve": "long",
+      "season": "unknown"
+    },
+    "firstDate": "2026-06-08",
+    "price": 1126,
+    "sales": 7,
+    "revenue": 9615,
+    "pics": 10,
+    "hasVideo": 0,
+    "rating": 4,
+    "cardUrl": "https://www.wildberries.ru/catalog/1073678721/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/250121848",
+    "brand": "PAOLA BOCCI x NIKOLA ROSSI",
+    "host": "42",
+    "photoCount": 10,
+    "description": "Рубашка в клетку с кашемиром от Paola Bocci x Palmary Leading — превосходный выбор для ценителей комфорта и стиля в повседневной одежде.\n\nЭта классическая модель на пуговицах с длинным рукавом выполнена из высококачественного хлопка с добавлением мягкой шерсти, что обеспечивает не только удобство ношения, но и долговечность. Оригинальная фурнитура придает образу элегантность и изысканность.\n\nБлагодаря выверенным лекалам, теплая сорочка отлично сидит при любом росте, являясь по-настоящему универсальным решением. Такое изделие станет прекрасным подарком для коллег или друзей, а также стильным ба",
+    "characteristics": [
+      {
+        "name": "Состав",
+        "value": "хлопок; стрейч"
+      },
+      {
+        "name": "Цвет",
+        "value": "серо-синий; синий"
+      },
+      {
+        "name": "Размер на модели",
+        "value": "L"
+      },
+      {
+        "name": "Рост модели на фото",
+        "value": "184 см"
+      },
+      {
+        "name": "Параметры модели на фото (ОГ-ОТ-ОБ)",
+        "value": "106-85-97"
+      },
+      {
+        "name": "Покрой",
+        "value": "приталенный"
+      },
+      {
+        "name": "Вид застежки",
+        "value": "пуговицы"
+      },
+      {
+        "name": "Тип карманов",
+        "value": "без карманов"
+      },
+      {
+        "name": "Фактура материала",
+        "value": "плотная"
+      },
+      {
+        "name": "Декоративные элементы",
+        "value": "без элементов"
+      },
+      {
+        "name": "Особенности модели",
+        "value": "эластичный материал"
+      },
+      {
+        "name": "Пол",
+        "value": "Мужской"
+      },
+      {
+        "name": "Уход за вещами",
+        "value": "деликатная стирка"
+      },
+      {
+        "name": "Комплектация",
+        "value": "рубашка мужская 1шт."
+      },
+      {
+        "name": "Страна производства",
+        "value": "Турция"
+      }
+    ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1073678721_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1073678721_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1073678721_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1073678721_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1073678721_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1073678721_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1073678721_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1073678721_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1073678721_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1073678721_tm_9.webp",
+      "reports/new-products/2026-07-14/slides/1073678721_tm_10.webp"
+    ],
+    "slideUrls": [
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678721/images/big/1.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678721/images/big/2.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678721/images/big/3.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678721/images/big/4.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678721/images/big/5.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678721/images/big/6.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678721/images/big/7.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678721/images/big/8.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678721/images/big/9.webp",
+      "https://basket-42.wbbasket.ru/vol10736/part1073678/1073678721/images/big/10.webp"
+    ]
+  },
+  {
+    "query": "рубашка в клетку мужская",
+    "sku": 1030860414,
+    "name": "Рубашка в клетку оверсайз, удобная, для повседневной носки",
+    "cls": {
+      "sleeve": "unknown",
+      "season": "unknown"
+    },
+    "firstDate": "2026-05-16",
+    "price": 1307,
+    "sales": 6,
+    "revenue": 8523,
+    "pics": 10,
+    "hasVideo": 0,
+    "rating": 0,
+    "cardUrl": "https://www.wildberries.ru/catalog/1030860414/detail.aspx",
+    "sellerUrl": "https://www.wildberries.ru/seller/250031303",
+    "brand": "YUEPTIANC",
+    "host": "41",
+    "photoCount": 10,
+    "description": "Описание товара:\nКлетчатая рубашка оверсайз — универсальная модель для повседневного гардероба, которая сочетает в себе комфорт, практичность и классический стиль. Благодаря свободному крою и мягкой ткани, она подходит для любых погодных условий, легко сочетается с джинсами, шортами и брюками. Рубашка идеально подходит для прогулок по городу, повседневных выходов, встреч с друзьями и отдыха на природе, позволяя создавать стильные образы в стиле casual и streetwear.\nМатериал и качество:\nРубашка выполнена из мягкой хлопковой ткани с приятной текстурой, которая не мнётся при носке, не выцветает н",
+    "characteristics": [
+      {
+        "name": "Состав",
+        "value": "полиэфирное волокно"
+      },
+      {
+        "name": "Цвет",
+        "value": "желтый"
+      },
+      {
+        "name": "Покрой",
+        "value": "Кэжуал"
+      },
+      {
+        "name": "Вид застежки",
+        "value": "Стандартные пуговицы"
+      },
+      {
+        "name": "Тип карманов",
+        "value": "накладной карман"
+      },
+      {
+        "name": "Фактура материала",
+        "value": "Полиэстер 100%"
+      },
+      {
+        "name": "Декоративные элементы",
+        "value": "клетчатый принт"
+      },
+      {
+        "name": "Пол",
+        "value": "Мужской"
+      },
+      {
+        "name": "Страна производства",
+        "value": "Китай"
+      }
+    ],
+    "heroFile": "reports/new-products/2026-07-14/slides/1030860414_c516x688_1.webp",
+    "stripFiles": [
+      "reports/new-products/2026-07-14/slides/1030860414_tm_1.webp",
+      "reports/new-products/2026-07-14/slides/1030860414_tm_2.webp",
+      "reports/new-products/2026-07-14/slides/1030860414_tm_3.webp",
+      "reports/new-products/2026-07-14/slides/1030860414_tm_4.webp",
+      "reports/new-products/2026-07-14/slides/1030860414_tm_5.webp",
+      "reports/new-products/2026-07-14/slides/1030860414_tm_6.webp",
+      "reports/new-products/2026-07-14/slides/1030860414_tm_7.webp",
+      "reports/new-products/2026-07-14/slides/1030860414_tm_8.webp",
+      "reports/new-products/2026-07-14/slides/1030860414_tm_9.webp",
+      "reports/new-products/2026-07-14/slides/1030860414_tm_10.webp"
+    ],
+    "slideUrls": [
+      "https://basket-41.wbbasket.ru/vol10308/part1030860/1030860414/images/big/1.webp",
+      "https://basket-41.wbbasket.ru/vol10308/part1030860/1030860414/images/big/2.webp",
+      "https://basket-41.wbbasket.ru/vol10308/part1030860/1030860414/images/big/3.webp",
+      "https://basket-41.wbbasket.ru/vol10308/part1030860/1030860414/images/big/4.webp",
+      "https://basket-41.wbbasket.ru/vol10308/part1030860/1030860414/images/big/5.webp",
+      "https://basket-41.wbbasket.ru/vol10308/part1030860/1030860414/images/big/6.webp",
+      "https://basket-41.wbbasket.ru/vol10308/part1030860/1030860414/images/big/7.webp",
+      "https://basket-41.wbbasket.ru/vol10308/part1030860/1030860414/images/big/8.webp",
+      "https://basket-41.wbbasket.ru/vol10308/part1030860/1030860414/images/big/9.webp",
+      "https://basket-41.wbbasket.ru/vol10308/part1030860/1030860414/images/big/10.webp"
     ]
   }
 ]

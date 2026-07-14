@@ -114,4 +114,24 @@ h1 .hl{ color:var(--m); }
 .legend i{ width:12px; height:12px; border-radius:3px; display:inline-block; vertical-align:-2px; margin-right:5px; }
 .legend .good{ background:var(--good); } .legend .a{ background:var(--accent); } .legend .warn{ background:var(--warn); }
 
-.foot{ margin-top:16px; padding-top:10px; border-top:1px solid var(--line); font-size:8.4px; color:var(--ink2); line-height:1.5; }
+/* filter bar + links */
+.filterbar{ display:inline-block; background:#F3ECE4; border:1px solid #E4D8C8; border-radius:7px;
+  padding:5px 11px; font-size:10px; color:#7A5A2E; margin:2px 0 10px; }
+.filterbar b{ color:#5A3E17; }
+a{ color:inherit; text-decoration:none; border-bottom:1px solid rgba(52,86,139,.35); }
+.nt a, .srow a, .cmeta a, .stitle a, .smeta a{ color:var(--accent); border-bottom:1px solid rgba(52,86,139,.3); }
+
+/* slide strips (10 слайдов) */
+.striprow{ border:1px solid var(--line); border-radius:9px; padding:9px 10px; margin-bottom:9px; break-inside:avoid; }
+.striphd{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:7px; flex-wrap:wrap; }
+.stitle{ font-size:10.5px; font-weight:700; }
+.smeta{ font-size:8.7px; color:var(--ink2); font-variant-numeric:tabular-nums; }
+.strip{ display:flex; gap:5px; }
+.th{ position:relative; flex:1; aspect-ratio:246/328; border-radius:4px; overflow:hidden; background:var(--soft); border:1px solid var(--line); }
+.th img{ width:100%; height:100%; object-fit:cover; display:block; }
+.th span{ position:absolute; left:3px; top:2px; font-size:7px; font-weight:700; color:#fff;
+  background:rgba(20,20,24,.55); border-radius:3px; padding:0 3px; line-height:1.5; }
+
+.foot{ padding-top:6px; font-size:9px; color:var(--ink2); line-height:1.55; }
+.foot .fh{ font-size:10px; font-weight:750; color:var(--ink); text-transform:uppercase; letter-spacing:.06em; margin:12px 0 5px; }
+.foot p{ margin-bottom:4px; }
