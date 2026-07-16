@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd-агент автозапуска planner на macOS.
+  ЗАМЕНИТЕ два места ниже перед установкой:
+    __REPO__      — абсолютный путь к репозиторию (например /Users/ivan/wb-headless)
+    __PASSWORD__  — пароль для входа (логин по умолчанию: admin)
+  Установка описана в planner/DEPLOY.md.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.wbheadless.planner</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO__/planner/deploy/start.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>PLANNER_PORT</key>
+        <string>8090</string>
+        <key>PLANNER_USER</key>
+        <string>admin</string>
+        <key>PLANNER_PASSWORD</key>
+        <string>__PASSWORD__</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__REPO__/planner/data/planner.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO__/planner/data/planner.err.log</string>
+</dict>
+</plist>
