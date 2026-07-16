@@ -31,8 +31,20 @@ cd ~
 git clone https://github.com/SolexVK/wb-headless.git
 cd wb-headless
 git checkout claude/production-plan-twv8ki   # ветка с инструментом
-npm install
 ```
+
+Устанавливаем зависимости **только для планировщика** (в подпапке `planner/`).
+Так не тянется тяжёлый `puppeteer` из корневого проекта — нужен лишь `express`:
+
+```bash
+cd planner
+npm install --ignore-scripts --no-audit --no-fund
+cd ..
+```
+
+> Не запускай `npm install` в корне репозитория на этом сервере — там в
+> зависимостях `puppeteer` (для другой части проекта), он качает Chromium и
+> может подвесить установку. Планировщику он не нужен.
 
 ## 3. Первый запуск (проверка)
 
