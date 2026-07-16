@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Производственный план — рубашки</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🧵 Производственный план</div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="gantt">Диаграмма Ганта</button>
+      <button class="tab" data-tab="dashboard">Дашборд</button>
+      <button class="tab" data-tab="data">Данные</button>
+    </nav>
+    <div class="actions">
+      <span id="status" class="status"></span>
+      <button id="btn-recalc" class="btn">Пересчитать</button>
+      <button id="btn-save" class="btn btn-primary">Сохранить</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ГАНТ -->
+    <section id="view-gantt" class="view active">
+      <div class="toolbar">
+        <label>Масштаб:
+          <input type="range" id="zoom" min="6" max="40" value="14" />
+        </label>
+        <span class="legend">
+          <i class="seg cut"></i>Крой
+          <i class="seg sew"></i>Пошив
+          <i class="seg iron"></i>Утюжка
+          <i class="seg otk"></i>ОТК
+          <i class="mark deadline"></i>Дедлайн WB
+        </span>
+        <span class="hint">Тяни блок мышью — сдвигаешь старт кроя. Двойной клик по блоку — сбросить ручной сдвиг.</span>
+      </div>
+      <div id="gantt" class="gantt-wrap"></div>
+    </section>
+
+    <!-- ДАШБОРД -->
+    <section id="view-dashboard" class="view">
+      <div id="dashboard"></div>
+    </section>
+
+    <!-- ДАННЫЕ -->
+    <section id="view-data" class="view">
+      <div id="data-forms"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

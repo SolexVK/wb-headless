@@ -3,3 +3,6 @@ chrome/
 reports-output/
 .env
 *.log
+
+# planner runtime data (пользовательское состояние)
+planner/data/
