@@ -18,6 +18,7 @@
   --g-frame: rgba(255,255,255,0.05);
   --g-grid: rgba(255,255,255,0.05);
   --g-label: #ffffff;
+  --fabric: #d0a15f;
 }
 
 /* Светлая тема — высокий контраст */
@@ -40,6 +41,7 @@
   --g-frame: rgba(20,40,70,0.06);
   --g-grid: rgba(20,40,70,0.10);
   --g-label: #ffffff;
+  --fabric: #9a6a1e;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -91,6 +93,7 @@ input, select { font: inherit; }
 .legend .seg.sew { background: var(--sew); }
 .legend .seg.iron { background: var(--iron); }
 .legend .seg.otk { background: var(--otk); }
+.legend .seg.fabric-line { background: repeating-linear-gradient(90deg, var(--fabric) 0 5px, transparent 5px 8px); height: 3px; border-radius: 0; }
 .legend .mark.deadline { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 11px solid var(--danger); display: inline-block; }
 .hint { font-size: 12px; color: var(--muted); }
 
@@ -177,6 +180,15 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .matrix-table tfoot td, .matrix-table tfoot th { background: rgba(52,211,153,.10); font-weight: 700; }
 .matrix-table .mx-vsego { background: rgba(52,211,153,.16); color: var(--accent-2); }
 .matrix-table .mx-grand { background: rgba(52,211,153,.22); color: var(--accent-2); font-size: 15px; }
+
+/* заказ ткани */
+.fab-summary { display: flex; gap: 32px; flex-wrap: wrap; }
+.fab-summary .k { color: var(--muted); font-size: 12px; }
+.fab-summary .v { font-size: 22px; font-weight: 700; margin: 2px 0; }
+.fab-summary .v.good { color: var(--accent-2); }
+.fab-thumb { width: 44px; height: 32px; object-fit: cover; border-radius: 5px; border: 1px solid var(--line); vertical-align: middle; margin-right: 6px; }
+.fab-up { font-size: 11px; color: var(--accent); cursor: pointer; white-space: nowrap; }
+.fab-up:hover { text-decoration: underline; }
 
 /* план продаж — сетка мини-таблиц */
 .sp-partia { margin: 0 0 14px; font-size: 15px; color: var(--accent-2); }

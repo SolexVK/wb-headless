@@ -154,9 +154,13 @@ function drawCycle(svg, c, row, ctx) {
     el('rect', { x: sx, y: laneY + 3 + i * trackH, width: sw, height: Math.max(2, trackH - 1), rx: 2, fill: OP_COLOR[op] }, g);
   });
 
-  // метки ткани (◇ на складе цеха) и прихода на WB (▣)
+  // период закупа ткани: пунктирная линия от даты заказа до прихода на склад цеха
+  const cy = laneY + barH / 2;
+  const fabOrderX = xOf(c.fabric.orderDate);
   const fabX = xOf(c.fabric.atWorkshop);
-  el('path', { d: diamond(fabX, laneY + barH / 2, 4), fill: 'var(--muted)', opacity: 0.8 }, g);
+  el('line', { x1: fabOrderX, y1: cy, x2: fabX, y2: cy, stroke: 'var(--fabric)', 'stroke-width': 2, 'stroke-dasharray': '5 3', opacity: 0.9 }, g);
+  el('circle', { cx: fabOrderX, cy, r: 3.5, fill: 'var(--fabric)' }, g); // заказ ткани
+  el('path', { d: diamond(fabX, cy, 4), fill: 'var(--fabric)' }, g);      // ткань на складе цеха
   const wbX = xOf(c.logistics.wbArrival);
   el('rect', { x: wbX - 3, y: laneY + barH / 2 - 3, width: 6, height: 6, fill: c.logistics.lateDays > 0 ? 'var(--danger)' : 'var(--accent-2)' }, g);
   el('line', { x1: x1, y1: laneY + barH / 2, x2: wbX, y2: laneY + barH / 2, stroke: 'var(--muted)', 'stroke-dasharray': '2 2', opacity: 0.5 }, g);

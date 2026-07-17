@@ -61,8 +61,114 @@ function renderCurrent() {
   if (activeTab === 'gantt') renderGantt(document.getElementById('gantt'), schedule, state, { pxPerDay, onOverride });
   else if (activeTab === 'matrix') renderMatrix();
   else if (activeTab === 'salesplan') renderSalesPlan();
+  else if (activeTab === 'fabric') renderFabricOrder();
   else if (activeTab === 'dashboard') renderDashboard();
   else if (activeTab === 'data') renderData();
+}
+
+// ---------- ЗАКАЗ ТКАНИ (консолидированный по этапу) ----------
+let fabricStageId = null;
+function colorUnits(a, stageId, color) {
+  const M = (a.matrix && a.matrix[stageId]) || {};
+  const row = M[color] || {};
+  let s = 0; for (const k in row) s += +row[k] || 0;
+  return Math.round(s);
+}
+function renderFabricOrder() {
+  const root = document.getElementById('fabric');
+  if (!state.stages.length || !state.articles.length) {
+    root.innerHTML = '<div class="panel"><div class="mini">Нет этапов или артикулов.</div></div>';
+    return;
+  }
+  if (!fabricStageId || !state.stages.find((s) => s.id === fabricStageId)) fabricStageId = state.stages[0].id;
+  const stage = state.stages.find((s) => s.id === fabricStageId);
+  const stageIdx = state.stages.findIndex((s) => s.id === stage.id) + 1;
+  const wastage = +(state.settings.fabric.wastagePct) || 0;
+  const meters = (units, perUnit) => Math.ceil(units * perUnit * (1 + wastage / 100));
+
+  const cyc = (schedule?.cycles || []).filter((c) => c.stageId === stage.id);
+  const earliest = cyc.map((c) => c.fabric.orderDate).sort()[0];
+
+  const arts = state.articles.filter((a) => articleStageTotal(a, stage.id) > 0);
+  let grand = 0;
+  const consolidated = {}; // планшет/№цвета -> метраж
+
+  const sections = arts.map((a) => {
+    a.fabricInfo = a.fabricInfo || {};
+    let sub = 0;
+    const rows = a.colors.map((c) => {
+      const u = colorUnits(a, stage.id, c);
+      if (u <= 0) return '';
+      const info = (a.fabricInfo[c] = a.fabricInfo[c] || {});
+      const m = meters(u, a.fabricPerUnit); sub += m; grand += m;
+      const key = (info.plansheet || info.colorNo) ? `${info.plansheet || '—'} / цвет ${info.colorNo || '—'}` : `${a.id} · ${c}`;
+      consolidated[key] = (consolidated[key] || 0) + m;
+      return `<tr>
+        <td>${c}</td>
+        <td>${info.image ? `<img class="fab-thumb" src="${info.image}" alt="">` : '<span class="mini">—</span>'}
+          <label class="fab-up">${info.image ? 'заменить' : '＋ образец'}<input type="file" accept="image/*" data-fab-img data-art="${a.id}" data-color="${encodeURIComponent(c)}" hidden></label></td>
+        <td><input data-fab data-art="${a.id}" data-color="${encodeURIComponent(c)}" data-f="plansheet" value="${info.plansheet || ''}" placeholder="№ планшета" style="width:100px"></td>
+        <td><input data-fab data-art="${a.id}" data-color="${encodeURIComponent(c)}" data-f="colorNo" value="${info.colorNo || ''}" placeholder="№ цвета" style="width:90px"></td>
+        <td class="num">${u.toLocaleString('ru')}</td>
+        <td class="num">${m.toLocaleString('ru')}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="panel">
+      <div class="subhead"><h3>${a.id} — ${a.name}</h3>
+        <label class="mini">расход ткани <input data-fab-per data-art="${a.id}" value="${a.fabricPerUnit}" style="width:60px;text-align:right"> м/шт</label></div>
+      <table><thead><tr><th>Цвет</th><th>Образец</th><th>Планшет поставщика</th><th>№ цвета</th><th class="num">Штук</th><th class="num">Метраж</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><th colspan="5">Итого по артикулу</th><th class="num">${sub.toLocaleString('ru')} м</th></tr></tfoot></table>
+    </div>`;
+  }).join('');
+
+  const consRows = Object.entries(consolidated).sort((a, b) => b[1] - a[1])
+    .map(([k, m]) => `<tr><td>${k}</td><td class="num">${m.toLocaleString('ru')} м</td></tr>`).join('');
+
+  root.innerHTML = `
+    <div class="panel">
+      <div class="matrix-controls">
+        <label>Партия:
+          <select id="fab-stage">${state.stages.map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>Партия ${state.stages.findIndex((x) => x.id === s.id) + 1} · ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
+        </label>
+        <span class="mini">Консолидированный заказ ткани на партию. Учитывается запас +${wastage}% (настраивается в «Данные»).</span>
+      </div>
+      <div class="fab-summary">
+        <div><div class="k">Разместить заказ</div><div class="v">${earliest ? fmt(earliest) : '—'}</div><div class="mini">самая ранняя дата из артикулов этапа${earliest ? '' : ' (нажми «Пересчитать»)'}</div></div>
+        <div><div class="k">Итого ткани на партию</div><div class="v good">${grand.toLocaleString('ru')} м</div></div>
+      </div>
+    </div>
+    ${sections || '<div class="panel"><div class="mini">На эту партию нет плана.</div></div>'}
+    ${consRows ? `<div class="panel"><h3>Консолидировано к заказу (по планшету/цвету)</h3>
+      <table><thead><tr><th>Планшет / цвет</th><th class="num">Метраж</th></tr></thead>
+      <tbody>${consRows}</tbody>
+      <tfoot><tr><th>ВСЕГО</th><th class="num">${grand.toLocaleString('ru')} м</th></tr></tfoot></table>
+      <div class="mini" style="margin-top:8px">Строки с общим планшетом и номером цвета суммируются в одну позицию заказа. Форму заказа доработаем позже.</div></div>` : ''}
+  `;
+
+  document.getElementById('fab-stage').addEventListener('change', (e) => { fabricStageId = e.target.value; renderFabricOrder(); });
+  root.querySelectorAll('input[data-fab]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const a = state.articles.find((x) => x.id === e.target.dataset.art);
+    const c = decodeURIComponent(e.target.dataset.color);
+    a.fabricInfo[c] = a.fabricInfo[c] || {};
+    a.fabricInfo[c][e.target.dataset.f] = e.target.value.trim();
+    dirty = true; setStatus();
+  }));
+  root.querySelectorAll('input[data-fab-per]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const a = state.articles.find((x) => x.id === e.target.dataset.art);
+    a.fabricPerUnit = +e.target.value > 0 ? +e.target.value : a.fabricPerUnit;
+    dirty = true; renderFabricOrder();
+  }));
+  root.querySelectorAll('input[data-fab-img]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (file.size > 1200000) { toast('Изображение слишком большое (макс ~1 МБ)', true); return; }
+    const a = state.articles.find((x) => x.id === e.target.dataset.art);
+    const c = decodeURIComponent(e.target.dataset.color);
+    const reader = new FileReader();
+    reader.onload = () => { a.fabricInfo[c] = a.fabricInfo[c] || {}; a.fabricInfo[c].image = reader.result; dirty = true; renderFabricOrder(); toast('Образец добавлен (не забудь «Сохранить»)'); };
+    reader.readAsDataURL(file);
+  }));
 }
 
 // ---------- ПЛАН ПРОДАЖ (сводка с выбором артикулов/этапов/цехов) ----------
@@ -173,6 +279,12 @@ function renderMatrix() {
   for (const c of a.colors) { M[c] = M[c] || {}; for (const s of a.sizes) if (M[c][s] == null) M[c][s] = 0; }
 
   const hasGrid = a.colors.length && a.sizes.length;
+  const asgKey = `${stage.id}:${a.id}`;
+  const assigned = (state.assignments || {})[asgKey] || '';
+  const cyc = (schedule?.cycles || []).filter((c) => c.articleId === a.id && c.stageId === stage.id);
+  const cycInfo = cyc.length
+    ? cyc.map((c) => `${c.workshopName} — ${c.units.toLocaleString('ru')} шт`).join(' · ')
+    : 'не назначено (пересчитай)';
   root.innerHTML = `
     <div class="panel">
       <div class="matrix-controls">
@@ -182,13 +294,25 @@ function renderMatrix() {
         <label>Артикул:
           <select id="mx-article">${state.articles.map((x) => `<option value="${x.id}"${x.id === a.id ? ' selected' : ''}>${x.id} — ${x.name}</option>`).join('')}</select>
         </label>
-        <span class="mini">Введи количество по размерам — итоги считаются автоматически. Затем нажми «Сохранить».</span>
+        <label>Цех:
+          <select id="mx-ws">
+            <option value="">Авто</option>
+            ${state.workshops.map((w) => `<option value="${w.id}"${w.id === assigned ? ' selected' : ''}>${w.name}${w.role === 'aux' ? ' (вспом.)' : ''}</option>`).join('')}
+          </select>
+        </label>
       </div>
+      <div class="mini" style="margin-bottom:12px">Сейчас отшивает: <b>${cycInfo}</b>. Выбор цеха вручную мгновенно пересчитывает план и Гант (авто-дробление добавит вспомогательный цех при нехватке мощности).</div>
       ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
     </div>`;
 
   document.getElementById('mx-stage').addEventListener('change', (e) => { matrixStageId = e.target.value; renderMatrix(); });
   document.getElementById('mx-article').addEventListener('change', (e) => { matrixArticleId = e.target.value; renderMatrix(); });
+  document.getElementById('mx-ws').addEventListener('change', (e) => {
+    state.assignments = state.assignments || {};
+    if (e.target.value) state.assignments[asgKey] = e.target.value;
+    else delete state.assignments[asgKey];
+    recalc(true).then(() => { renderMatrix(); toast('Цех обновлён, план и Гант пересчитаны'); }).catch((err) => toast('Ошибка: ' + err.message, true));
+  });
   root.querySelectorAll('input[data-mx]').forEach((inp) => inp.addEventListener('input', onMatrixInput));
 }
 
@@ -422,14 +546,15 @@ function dataArticlesPanel() {
 
 function dataWorkshopsPanel() {
   return `<div class="panel"><div class="subhead"><h3>Цеха</h3><button class="btn" id="btn-add-ws">+ Цех</button></div>
-    <table><thead><tr><th>Название</th><th>Роль</th><th class="num">Крой</th><th class="num">Пошив</th><th class="num">Утюжка</th><th class="num">ОТК</th><th></th></tr></thead>
+    <table><thead><tr><th>Название</th><th>Роль</th><th class="num">Крой</th><th class="num">Пошив</th><th class="num">Утюжка</th><th class="num">ОТК</th><th class="num" title="Смещение старта следующего цикла относительно конца пошива предыдущего, раб. дней (отрицательное = больше перекрытие)">Смещение цикла, дн</th><th></th></tr></thead>
     <tbody>${state.workshops.map((w, i) => `<tr>
       <td><input data-ws="${i}" data-f="name" value="${w.name}" style="width:110px"></td>
       <td><select data-ws="${i}" data-f="role"><option value="main"${w.role === 'main' ? ' selected' : ''}>основной</option><option value="aux"${w.role === 'aux' ? ' selected' : ''}>вспомог.</option></select></td>
       ${['cut', 'sew', 'iron', 'otk'].map((k) => `<td class="num"><input data-ws="${i}" data-cap="${k}" value="${w.capacities[k]}" style="width:70px;text-align:right"></td>`).join('')}
+      <td class="num"><input data-ws="${i}" data-f="cycleOffsetDays" value="${w.cycleOffsetDays || 0}" style="width:64px;text-align:right"></td>
       <td><button class="btn btn-danger" data-del-ws="${i}">✕</button></td>
     </tr>`).join('')}</tbody></table>
-    <div class="mini" style="margin-top:8px">Мощность указывается в штуках в день. Узкое горлышко — пошив.</div></div>`;
+    <div class="mini" style="margin-top:8px">Мощность — в штуках в день (узкое горлышко — пошив). «Смещение цикла» — на сколько раб. дней сдвигать старт следующего цикла относительно конца пошива предыдущего: 0 — впритык, отрицательное — больше перекрытие, положительное — с запасом.</div></div>`;
 }
 
 function dataStagesPanel() {
@@ -486,6 +611,7 @@ function bindDataEvents() {
   root.querySelectorAll('input[data-ws],select[data-ws]').forEach((inp) => inp.addEventListener('change', (e) => {
     const w = state.workshops[+e.target.dataset.ws];
     if (e.target.dataset.cap) w.capacities[e.target.dataset.cap] = Math.max(1, +e.target.value || 1);
+    else if (e.target.dataset.f === 'cycleOffsetDays') w.cycleOffsetDays = Math.round(+e.target.value || 0);
     else w[e.target.dataset.f] = e.target.value; mark();
   }));
   root.querySelectorAll('[data-del-ws]').forEach((b) => b.addEventListener('click', () => { state.workshops.splice(+b.dataset.delWs, 1); mark(); renderData(); }));

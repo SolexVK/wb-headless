@@ -110,51 +110,66 @@ export function buildSchedule(state) {
 
     // список под-партий: { article, units, workshopId, primary }
     const subBatches = [];
+    const roleRank = (w) => (w.role === 'main' ? 0 : 1);
+    const freeUnits = (w) => Math.max(0, (capacityWD - loadWD[w.id]) * w.capacities.sew);
+    const fitsWhole = (w, units) => loadWD[w.id] + sewDaysNeeded(units, w) <= capacityWD;
+    const pushBatch = (article, units, w, primary, overflow) => {
+      subBatches.push({ article, units: Math.round(units), workshopId: w.id, primary, overflow });
+      loadWD[w.id] += sewDaysNeeded(units, w);
+    };
 
     for (const job of jobs) {
-      const pinned = (state.assignments || {})[`${stage.id}:${job.article.id}`];
-      let remainingUnits = job.units;
-      const eligible = state.workshops.filter((w) => !pinned || w.id === pinned);
+      const preferredId = (state.assignments || {})[`${stage.id}:${job.article.id}`] || null;
+      const preferred = preferredId ? wsById[preferredId] : null;
 
-      // цех целиком тянет партию в оставшийся месяц?
-      const wholeCandidates = eligible
-        .map((w) => ({ w, end: loadWD[w.id] + sewDaysNeeded(remainingUnits, w) }))
-        .filter((c) => c.end <= capacityWD)
-        .sort((a, b) => a.end - b.end || (a.w.role === b.w.role ? 0 : a.w.role === 'main' ? -1 : 1));
-
-      if (wholeCandidates.length) {
-        const w = wholeCandidates[0].w;
-        subBatches.push({ article: job.article, units: remainingUnits, workshopId: w.id, primary: true });
-        loadWD[w.id] += sewDaysNeeded(remainingUnits, w);
-        continue;
+      // 2a) цельная партия в один цех.
+      // Приоритет: если задан цех вручную и он тянет партию — ставим туда.
+      if (preferred && fitsWhole(preferred, job.units)) {
+        pushBatch(job.article, job.units, preferred, true); continue;
+      }
+      if (!preferred) {
+        // авто: цех, который освободится раньше (догружаем простаивающие)
+        const whole = state.workshops.filter((w) => fitsWhole(w, job.units))
+          .sort((a, b) => (loadWD[a.id] + sewDaysNeeded(job.units, a)) - (loadWD[b.id] + sewDaysNeeded(job.units, b))
+            || roleRank(a) - roleRank(b))[0];
+        if (whole) { pushBatch(job.article, job.units, whole, true); continue; }
       }
 
-      // не помещается ни в один цех целиком — делим между цехами.
-      // Заполняем цеха по возрастанию текущей загрузки, каждому даём столько,
-      // сколько он успеет отшить до конца месяца.
-      const pool = [...eligible].sort((a, b) => loadWD[a.id] - loadWD[b.id]
-        || (a.role === b.role ? 0 : a.role === 'main' ? -1 : 1));
-      let primaryAssigned = false;
+      // 2b) не влезает целиком — делим между МИНИМАЛЬНЫМ числом цехов
+      // (обычно 2: основной + вспомогательный; 3-й только если двух не хватает),
+      // пропорционально свободной мощности — без мелких хвостов.
+      let pool = state.workshops.filter((w) => !preferred || w.id !== preferred.id)
+        .sort((a, b) => roleRank(a) - roleRank(b) || freeUnits(b) - freeUnits(a));
+      if (preferred) pool = [preferred, ...pool];
+
+      const chosen = [];
+      let cum = 0;
       for (const w of pool) {
-        if (remainingUnits <= 0) break;
-        const freeWD = capacityWD - loadWD[w.id];
-        if (freeWD <= 0) continue;
-        const take = Math.min(remainingUnits, freeWD * w.capacities.sew);
-        if (take < 1) continue;
-        const units = Math.round(take);
-        subBatches.push({ article: job.article, units, workshopId: w.id, primary: !primaryAssigned });
-        loadWD[w.id] += sewDaysNeeded(units, w);
-        remainingUnits -= units;
-        primaryAssigned = true;
+        if (freeUnits(w) <= 0) continue;
+        chosen.push(w); cum += freeUnits(w);
+        if (cum >= job.units) break;
       }
-      if (remainingUnits > 0.5) {
-        // суммарной мощности цехов не хватает на месяц — перелив
-        const w = pool[pool.length - 1];
-        subBatches.push({ article: job.article, units: Math.round(remainingUnits), workshopId: w.id, primary: !primaryAssigned, overflow: true });
-        loadWD[w.id] += sewDaysNeeded(remainingUnits, w);
+      const totalFree = chosen.reduce((s, w) => s + freeUnits(w), 0) || 1;
+      const overflow = totalFree < job.units;
+
+      // распределяем пропорционально свободной мощности выбранных цехов
+      const pieces = chosen.map((w) => ({ w, units: Math.round(job.units * freeUnits(w) / totalFree) }));
+      const assigned = pieces.reduce((s, p) => s + p.units, 0);
+      if (pieces.length) {
+        const big = pieces.reduce((m, p) => (p.units > m.units ? p : m), pieces[0]);
+        big.units += Math.round(job.units) - assigned; // остаток округления — в самый крупный кусок
+      }
+      const primaryPiece = preferred
+        ? (pieces.find((p) => p.w.id === preferred.id) || pieces.reduce((m, p) => (p.units > m.units ? p : m), pieces[0]))
+        : pieces.reduce((m, p) => (p.units > m.units ? p : m), pieces[0]);
+      for (const p of pieces) {
+        if (p.units <= 0) continue;
+        pushBatch(job.article, p.units, p.w, p === primaryPiece, overflow);
+      }
+      if (overflow) {
         warnings.push({
           level: 'error', stage: stage.id, article: job.article.id,
-          message: `Этап «${stage.name}»: суммарной мощности цехов не хватает на артикул ${job.article.id} — ${Math.round(remainingUnits)} шт не помещаются в месяц.`,
+          message: `Этап «${stage.name}»: суммарной мощности цехов не хватает на артикул ${job.article.id} (${job.units} шт) — план не помещается в месяц.`,
         });
       }
     }
@@ -199,8 +214,9 @@ export function buildSchedule(state) {
         const readyDate = dates.otk.end;
 
         // сдвигаем курсор цеха: следующий крой — по концу пошива этого цикла
-        if (!ovr || !ovr.cutStart) cursorWD = f.sew.end;
-        else cursorWD = f.sew.end; // и при ручном якоре держим плотность после него
+        // плюс настраиваемое per-цех смещение цикла (раб. дней; <0 = больше перекрытие)
+        const cycleOffset = Number(w.cycleOffsetDays) || 0;
+        cursorWD = Math.max(0, f.sew.end + cycleOffset);
 
         // ткань
         const fabricMeters = Math.ceil(sb.units * sb.article.fabricPerUnit * (1 + (fabricCfg.wastagePct || 0) / 100));

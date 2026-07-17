@@ -142,6 +142,7 @@ export function normalizeState(input) {
     w.role = w.role === 'aux' ? 'aux' : 'main';
     w.capacities = { cut: 1, sew: 1, iron: 1, otk: 1, ...(w.capacities || {}) };
     for (const k of ['cut', 'sew', 'iron', 'otk']) w.capacities[k] = Math.max(1, +w.capacities[k] || 1);
+    w.cycleOffsetDays = Number.isFinite(+w.cycleOffsetDays) ? +w.cycleOffsetDays : 0;
   }
   for (const a of s.articles) {
     a.plan = a.plan && typeof a.plan === 'object' ? a.plan : {};
@@ -149,6 +150,8 @@ export function normalizeState(input) {
     a.fabricPerUnit = +a.fabricPerUnit > 0 ? +a.fabricPerUnit : 1.6;
     a.colors = Array.isArray(a.colors) ? a.colors : [];
     a.sizes = Array.isArray(a.sizes) ? a.sizes : [];
+    // метаданные ткани по цвету: { цвет: { plansheet, colorNo, image(dataURL) } }
+    a.fabricInfo = a.fabricInfo && typeof a.fabricInfo === 'object' ? a.fabricInfo : {};
     // держим plan[stage] в синхроне с суммой матрицы (если матрица задана)
     for (const stageId of Object.keys(a.matrix)) {
       const sum = sumMatrixStage(a.matrix[stageId]);
