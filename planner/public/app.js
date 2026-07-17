@@ -484,8 +484,28 @@ function bindDataEvents() {
 }
 function num(v) { const n = +v; return Number.isFinite(n) ? n : v; }
 
+// ---------- тема ----------
+function applyTheme(t) {
+  const theme = t === 'dark' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', theme);
+  try { localStorage.setItem('planner-theme', theme); } catch (e) {}
+  const btn = document.getElementById('btn-theme');
+  if (btn) btn.textContent = theme === 'light' ? '🌙' : '☀️';
+  if (activeTab === 'gantt' && schedule) renderCurrent(); // перерисовать SVG под тему
+}
+function initTheme() {
+  let saved = 'light';
+  try { saved = localStorage.getItem('planner-theme') || 'light'; } catch (e) {}
+  applyTheme(saved);
+  document.getElementById('btn-theme').addEventListener('click', () => {
+    const cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    applyTheme(cur === 'light' ? 'dark' : 'light');
+  });
+}
+
 // ---------- инициализация ----------
 async function init() {
+  initTheme();
   document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
   document.getElementById('btn-recalc').addEventListener('click', () => recalc(false).then(() => toast('Пересчитано')));
   document.getElementById('btn-save').addEventListener('click', () => recalc(true).then(() => toast('Сохранено и пересчитано')).catch((e) => toast('Ошибка: ' + e.message, true)));

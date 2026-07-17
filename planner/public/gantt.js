@@ -78,7 +78,7 @@ export function renderGantt(container, schedule, state, opts = {}) {
 
   // фон строк
   rows.forEach((r, i) => {
-    el('rect', { class: 'g-row-bg', x: 0, y: r._y, width: totalW, height: r._h, fill: i % 2 ? 'rgba(255,255,255,0.02)' : 'transparent' }, svg);
+    el('rect', { class: 'g-row-bg', x: 0, y: r._y, width: totalW, height: r._h, fill: i % 2 ? 'var(--g-row-alt)' : 'transparent' }, svg);
   });
 
   // сетка по месяцам + недельные линии
@@ -90,7 +90,7 @@ export function renderGantt(container, schedule, state, opts = {}) {
     const isMonthStart = d.getUTCDate() === 1;
     const isWeek = d.getUTCDay() === 1; // понедельник
     if (isMonthStart || isWeek) {
-      el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: isMonthStart ? 'var(--line)' : 'rgba(255,255,255,0.04)', 'stroke-width': isMonthStart ? 1.4 : 1 }, svg);
+      el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: isMonthStart ? 'var(--line)' : 'var(--g-grid)', 'stroke-width': isMonthStart ? 1.4 : 1 }, svg);
     }
     if (isMonthStart) {
       el('rect', { x, y: 0, width: 1, height: HEADER_H, fill: 'var(--line)' }, svg);
@@ -143,7 +143,7 @@ function drawCycle(svg, c, row, ctx) {
   const w = Math.max(6, x1 - x0);
 
   // рамка блока
-  el('rect', { class: 'g-frame', x: x0, y: laneY, width: w, height: barH, rx: 5, fill: 'rgba(255,255,255,0.05)', stroke: 'var(--line)' }, g);
+  el('rect', { class: 'g-frame', x: x0, y: laneY, width: w, height: barH, rx: 5, fill: 'var(--g-frame)', stroke: 'var(--line)' }, g);
 
   // операции — отдельными дорожками (видно перекрытие потока «лесенкой»)
   const trackH = Math.max(3, (barH - 6) / OPS.length);

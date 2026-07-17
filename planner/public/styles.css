@@ -1,4 +1,4 @@
-:root {
+:root, :root[data-theme="dark"] {
   --bg: #0f1720;
   --panel: #16202b;
   --panel-2: #1d2a38;
@@ -14,6 +14,32 @@
   --danger: #ef4444;
   --warn: #f59e0b;
   --radius: 10px;
+  --g-row-alt: rgba(255,255,255,0.03);
+  --g-frame: rgba(255,255,255,0.05);
+  --g-grid: rgba(255,255,255,0.05);
+  --g-label: #ffffff;
+}
+
+/* Светлая тема — высокий контраст */
+:root[data-theme="light"] {
+  --bg: #eef1f6;
+  --panel: #ffffff;
+  --panel-2: #f2f5fa;
+  --line: #c7d0dc;
+  --text: #16202b;
+  --muted: #5a6b7b;
+  --accent: #2563eb;
+  --accent-2: #0f9d76;
+  --cut: #c2740a;
+  --sew: #2563eb;
+  --iron: #7c3aed;
+  --otk: #0f9d76;
+  --danger: #dc2626;
+  --warn: #b45309;
+  --g-row-alt: rgba(20,40,70,0.05);
+  --g-frame: rgba(20,40,70,0.06);
+  --g-grid: rgba(20,40,70,0.10);
+  --g-label: #ffffff;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -46,6 +72,7 @@ input, select { font: inherit; }
 }
 .btn:hover { border-color: var(--accent); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-icon { padding: 6px 10px; line-height: 1; }
 .btn-danger { background: transparent; border-color: var(--danger); color: var(--danger); }
 
 /* views */
