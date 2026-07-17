@@ -59,8 +59,99 @@ function switchTab(tab) {
 }
 function renderCurrent() {
   if (activeTab === 'gantt') renderGantt(document.getElementById('gantt'), schedule, state, { pxPerDay, onOverride });
+  else if (activeTab === 'matrix') renderMatrix();
   else if (activeTab === 'dashboard') renderDashboard();
   else if (activeTab === 'data') renderData();
+}
+
+// ---------- матрица размер×цвет ----------
+function sumMatrix(M) { let s = 0; for (const c in M) { const r = M[c] || {}; for (const k in r) s += +r[k] || 0; } return Math.round(s); }
+function cell(M, c, s) { return +((M[c] || {})[s]) || 0; }
+function articleStageTotal(a, stageId) {
+  const m = a.matrix && a.matrix[stageId];
+  const fromMatrix = m ? sumMatrix(m) : 0;
+  if (fromMatrix > 0) return fromMatrix;
+  return Math.max(0, Math.round(+(a.plan?.[stageId]) || 0));
+}
+
+let matrixStageId = null, matrixArticleId = null;
+
+function renderMatrix() {
+  const root = document.getElementById('matrix');
+  if (!state.articles.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет артикулов. Добавь их во вкладке «Данные».</div></div>'; return; }
+  if (!matrixArticleId || !state.articles.find((a) => a.id === matrixArticleId)) matrixArticleId = state.articles[0].id;
+  if (!matrixStageId || !state.stages.find((s) => s.id === matrixStageId)) matrixStageId = state.stages[0]?.id;
+
+  const a = state.articles.find((x) => x.id === matrixArticleId);
+  const stage = state.stages.find((s) => s.id === matrixStageId);
+  a.matrix = a.matrix || {};
+  const M = (a.matrix[stage.id] = a.matrix[stage.id] || {});
+  for (const c of a.colors) { M[c] = M[c] || {}; for (const s of a.sizes) if (M[c][s] == null) M[c][s] = 0; }
+
+  const hasGrid = a.colors.length && a.sizes.length;
+  root.innerHTML = `
+    <div class="panel">
+      <div class="matrix-controls">
+        <label>Партия:
+          <select id="mx-stage">${state.stages.map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
+        </label>
+        <label>Артикул:
+          <select id="mx-article">${state.articles.map((x) => `<option value="${x.id}"${x.id === a.id ? ' selected' : ''}>${x.id} — ${x.name}</option>`).join('')}</select>
+        </label>
+        <span class="mini">Введи количество по размерам — итоги считаются автоматически. Затем нажми «Сохранить».</span>
+      </div>
+      ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
+    </div>`;
+
+  document.getElementById('mx-stage').addEventListener('change', (e) => { matrixStageId = e.target.value; renderMatrix(); });
+  document.getElementById('mx-article').addEventListener('change', (e) => { matrixArticleId = e.target.value; renderMatrix(); });
+  root.querySelectorAll('input[data-mx]').forEach((inp) => inp.addEventListener('input', onMatrixInput));
+}
+
+function matrixTable(a, M) {
+  return `
+  <div class="matrix-scroll">
+  <table class="matrix-table">
+    <thead>
+      <tr><th class="mx-corner">Размер \\ Цвет</th>
+        ${a.colors.map((c) => `<th class="mx-color">${c}</th>`).join('')}
+        <th class="mx-rowtot-h">Итого по размеру</th></tr>
+    </thead>
+    <tbody>
+      ${a.sizes.map((s) => `<tr>
+        <th class="mx-size">${s}</th>
+        ${a.colors.map((c) => `<td><input data-mx data-c="${encodeURIComponent(c)}" data-s="${encodeURIComponent(s)}" type="number" min="0" value="${cell(M, c, s)}"></td>`).join('')}
+        <td class="num mx-rowtot" data-rowtot="${encodeURIComponent(s)}">${a.colors.reduce((n, c) => n + cell(M, c, s), 0)}</td>
+      </tr>`).join('')}
+    </tbody>
+    <tfoot>
+      <tr><th class="mx-size mx-vsego">ВСЕГО</th>
+        ${a.colors.map((c) => `<td class="num mx-coltot" data-coltot="${encodeURIComponent(c)}">${a.sizes.reduce((n, s) => n + cell(M, c, s), 0)}</td>`).join('')}
+        <td class="num mx-grand" data-grand>${sumMatrix(M)}</td>
+      </tr>
+    </tfoot>
+  </table>
+  </div>`;
+}
+
+function onMatrixInput(e) {
+  const a = state.articles.find((x) => x.id === matrixArticleId);
+  const stageId = matrixStageId;
+  const c = decodeURIComponent(e.target.dataset.c);
+  const s = decodeURIComponent(e.target.dataset.s);
+  const v = Math.max(0, Math.round(+e.target.value || 0));
+  a.matrix[stageId] = a.matrix[stageId] || {};
+  a.matrix[stageId][c] = a.matrix[stageId][c] || {};
+  a.matrix[stageId][c][s] = v;
+  a.plan = a.plan || {};
+  a.plan[stageId] = sumMatrix(a.matrix[stageId]); // держим суммарный план в синхроне
+  dirty = true; setStatus();
+
+  const M = a.matrix[stageId];
+  const root = document.getElementById('matrix');
+  root.querySelectorAll('[data-coltot]').forEach((el) => { const col = decodeURIComponent(el.dataset.coltot); el.textContent = a.sizes.reduce((n, sz) => n + cell(M, col, sz), 0); });
+  root.querySelectorAll('[data-rowtot]').forEach((el) => { const sz = decodeURIComponent(el.dataset.rowtot); el.textContent = a.colors.reduce((n, col) => n + cell(M, col, sz), 0); });
+  const g = root.querySelector('[data-grand]'); if (g) g.textContent = sumMatrix(M);
 }
 
 async function onOverride(cycleId, cutStart) {
@@ -147,7 +238,7 @@ function renderDashboard() {
 }
 
 function articleStageCell(a, s) {
-  const units = Math.round(+(a.plan?.[s.id]) || 0);
+  const units = articleStageTotal(a, s.id);
   if (!units) return '<td class="mini">—</td>';
   const cs = schedule.cycles.filter((c) => c.articleId === a.id && c.stageId === s.id);
   const ready = cs.map((c) => c.readyDate).sort().pop();
@@ -201,12 +292,12 @@ function renderData() {
 }
 
 function dataPlanPanel() {
-  return `<div class="panel"><div class="subhead"><h3>План продаж (штук по этапам)</h3><span class="mini">суммарно по артикулу на этап</span></div>
+  return `<div class="panel"><div class="subhead"><h3>План продаж по этапам (сводка)</h3><span class="mini">суммы из матрицы; правка количеств — во вкладке «План по размерам»</span></div>
     <table><thead><tr><th>Артикул</th>${state.stages.map((s) => `<th class="num">${s.name}</th>`).join('')}<th class="num">Итого</th></tr></thead>
-    <tbody>${state.articles.map((a, ai) => `<tr>
+    <tbody>${state.articles.map((a) => `<tr>
       <td><b>${a.id}</b> <span class="mini">${a.name}</span></td>
-      ${state.stages.map((s) => `<td class="num"><input data-plan="${ai}" data-stage="${s.id}" value="${Math.round(+(a.plan?.[s.id]) || 0)}" style="width:80px;text-align:right"></td>`).join('')}
-      <td class="num"><b>${state.stages.reduce((sum, s) => sum + (Math.round(+(a.plan?.[s.id]) || 0)), 0).toLocaleString('ru')}</b></td>
+      ${state.stages.map((s) => `<td class="num">${articleStageTotal(a, s.id).toLocaleString('ru')}</td>`).join('')}
+      <td class="num"><b>${state.stages.reduce((sum, s) => sum + articleStageTotal(a, s.id), 0).toLocaleString('ru')}</b></td>
     </tr>`).join('')}</tbody></table></div>`;
 }
 
@@ -278,10 +369,6 @@ function bindDataEvents() {
   const root = document.getElementById('data-forms');
   const mark = () => { dirty = true; setStatus(); };
 
-  root.querySelectorAll('input[data-plan]').forEach((inp) => inp.addEventListener('change', (e) => {
-    const a = state.articles[+e.target.dataset.plan];
-    a.plan = a.plan || {}; a.plan[e.target.dataset.stage] = Math.max(0, Math.round(+e.target.value || 0)); mark();
-  }));
   root.querySelectorAll('input[data-art]').forEach((inp) => inp.addEventListener('change', (e) => {
     const a = state.articles[+e.target.dataset.art]; const f = e.target.dataset.f;
     if (f === 'colors') a.colors = e.target.value.split(',').map((x) => x.trim()).filter(Boolean);

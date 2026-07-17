@@ -11,6 +11,7 @@
     <div class="brand">🧵 Производственный план</div>
     <nav class="tabs">
       <button class="tab active" data-tab="gantt">Диаграмма Ганта</button>
+      <button class="tab" data-tab="matrix">План по размерам</button>
       <button class="tab" data-tab="dashboard">Дашборд</button>
       <button class="tab" data-tab="data">Данные</button>
     </nav>
@@ -38,6 +39,11 @@
         <span class="hint">Тяни блок мышью — сдвигаешь старт кроя. Двойной клик по блоку — сбросить ручной сдвиг.</span>
       </div>
       <div id="gantt" class="gantt-wrap"></div>
+    </section>
+
+    <!-- ПЛАН ПО РАЗМЕРАМ (матрица размер×цвет) -->
+    <section id="view-matrix" class="view">
+      <div id="matrix"></div>
     </section>
 
     <!-- ДАШБОРД -->

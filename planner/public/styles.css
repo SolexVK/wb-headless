@@ -131,6 +131,26 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; margin: 0 6px 6px 0; font-size: 12px; }
 .chip button { background: none; border: none; color: var(--muted); padding: 0; }
 
+/* матрица размер×цвет */
+.matrix-controls { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
+.matrix-controls label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.matrix-controls select { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 7px; padding: 6px 9px; }
+.matrix-scroll { overflow-x: auto; }
+.matrix-table { width: auto; min-width: 100%; border-collapse: collapse; }
+.matrix-table th, .matrix-table td { border: 1px solid var(--line); padding: 6px 10px; text-align: center; }
+.matrix-table thead th { background: var(--panel-2); color: var(--text); font-weight: 600; }
+.matrix-table .mx-corner { text-align: left; color: var(--muted); font-weight: 500; white-space: nowrap; }
+.matrix-table .mx-color { min-width: 92px; }
+.matrix-table .mx-rowtot-h { color: var(--muted); }
+.matrix-table .mx-size { background: rgba(245,158,11,.12); color: var(--cut); font-weight: 700; text-align: center; }
+.matrix-table tbody input { width: 68px; text-align: right; background: transparent; border: 1px solid transparent; color: var(--text); border-radius: 6px; padding: 5px 7px; font-variant-numeric: tabular-nums; }
+.matrix-table tbody input:hover { border-color: var(--line); }
+.matrix-table tbody input:focus { outline: none; border-color: var(--accent); background: var(--panel-2); }
+.matrix-table .mx-rowtot { background: rgba(255,255,255,.03); color: var(--muted); font-weight: 600; }
+.matrix-table tfoot td, .matrix-table tfoot th { background: rgba(52,211,153,.10); font-weight: 700; }
+.matrix-table .mx-vsego { background: rgba(52,211,153,.16); color: var(--accent-2); }
+.matrix-table .mx-grand { background: rgba(52,211,153,.22); color: var(--accent-2); font-size: 15px; }
+
 /* toast */
 .toast {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);

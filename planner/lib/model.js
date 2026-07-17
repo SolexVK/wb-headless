@@ -59,13 +59,52 @@ function seedWorkshops() {
 }
 
 // ---- сид: артикулы (реальные номера/цвета из Google-таблицы, суммы по этапам — из неё же) ----
+// Распределить суммарное кол-во total по цветам×размерам (детерминированно):
+// размеры — колоколом (средние ходовее), цвета — примерно поровну.
+// Возвращает { color: { size: qty } } с точной суммой = total.
+export function buildMatrix(total, colors, sizes) {
+  const nc = colors.length, ns = sizes.length;
+  const m = {};
+  if (!nc || !ns || total <= 0) {
+    for (const c of colors) { m[c] = {}; for (const s of sizes) m[c][s] = 0; }
+    return m;
+  }
+  const mid = (ns - 1) / 2;
+  const sizeW = sizes.map((_, i) => 1 + (1 - Math.abs(i - mid) / (mid + 1)));
+  const sizeSum = sizeW.reduce((a, b) => a + b, 0);
+  const colW = colors.map((_, i) => 1 + ((i % 3) * 0.12)); // лёгкая неравномерность
+  const colSum = colW.reduce((a, b) => a + b, 0);
+  const cells = [];
+  let assigned = 0;
+  colors.forEach((c, ci) => {
+    m[c] = {};
+    sizes.forEach((s, si) => {
+      const q = Math.round(total * (colW[ci] / colSum) * (sizeW[si] / sizeSum));
+      m[c][s] = q; assigned += q; cells.push([c, s]);
+    });
+  });
+  // добить остаток ±1 по ячейкам, чтобы сумма точно совпала
+  let diff = total - assigned, idx = 0, guard = 0;
+  while (diff !== 0 && guard++ < cells.length * 6) {
+    const [c, s] = cells[idx % cells.length]; idx++;
+    if (diff > 0) { m[c][s] += 1; diff--; }
+    else if (m[c][s] > 0) { m[c][s] -= 1; diff++; }
+  }
+  return m;
+}
+
 function seedArticles() {
   const S = ['S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'];
-  // plan: суммарное кол-во штук по этапам (stageId -> units)
-  const mk = (id, name, colors, sizes, fabricPerUnit, totals) => ({
-    id, name, colors, sizes, fabricPerUnit,
-    plan: { stage1: totals[0], stage2: totals[1], stage3: totals[2], stage4: totals[3] },
-  });
+  // matrix: этап -> цвет -> размер -> штук; plan (сумма по этапу) выводится из matrix
+  const mk = (id, name, colors, sizes, fabricPerUnit, totals) => {
+    const stageIds = ['stage1', 'stage2', 'stage3', 'stage4'];
+    const matrix = {}; const plan = {};
+    stageIds.forEach((sid, i) => {
+      matrix[sid] = buildMatrix(totals[i], colors, sizes);
+      plan[sid] = totals[i];
+    });
+    return { id, name, colors, sizes, fabricPerUnit, matrix, plan };
+  };
   return [
     mk('026', 'Рубашка мужская 026', ['розовый-серый', 'белый-серый', 'голубой', 'синий'], S, 1.6, [1403, 1413, 1711, 1978]),
     mk('027', 'Рубашка мужская 027', ['голубой', 'белая', 'серый'], S, 1.6, [1674, 1769, 2017, 2399]),
@@ -106,11 +145,30 @@ export function normalizeState(input) {
   }
   for (const a of s.articles) {
     a.plan = a.plan && typeof a.plan === 'object' ? a.plan : {};
+    a.matrix = a.matrix && typeof a.matrix === 'object' ? a.matrix : {};
     a.fabricPerUnit = +a.fabricPerUnit > 0 ? +a.fabricPerUnit : 1.6;
     a.colors = Array.isArray(a.colors) ? a.colors : [];
     a.sizes = Array.isArray(a.sizes) ? a.sizes : [];
+    // держим plan[stage] в синхроне с суммой матрицы (если матрица задана)
+    for (const stageId of Object.keys(a.matrix)) {
+      const sum = sumMatrixStage(a.matrix[stageId]);
+      if (sum > 0) a.plan[stageId] = sum;
+    }
   }
   return s;
+}
+
+// сумма всех ячеек матрицы одного этапа { цвет: { размер: qty } }
+export function sumMatrixStage(stageMatrix) {
+  if (!stageMatrix || typeof stageMatrix !== 'object') return 0;
+  let s = 0;
+  for (const color of Object.keys(stageMatrix)) {
+    const row = stageMatrix[color];
+    if (row && typeof row === 'object') {
+      for (const size of Object.keys(row)) s += +row[size] || 0;
+    }
+  }
+  return Math.round(s);
 }
 
 function deepMergeSettings(base, over) {
@@ -125,7 +183,11 @@ function deepMergeSettings(base, over) {
   return out;
 }
 
-// суммарный объём этапа по артикулу
+// суммарный объём этапа по артикулу.
+// Источник истины — матрица размер×цвет; если её нет, берём plan[stageId].
 export function stageUnits(article, stageId) {
+  const m = article.matrix && article.matrix[stageId];
+  const fromMatrix = m ? sumMatrixStage(m) : 0;
+  if (fromMatrix > 0) return fromMatrix;
   return Math.max(0, Math.round(+((article.plan || {})[stageId]) || 0));
 }
