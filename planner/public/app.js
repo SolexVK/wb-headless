@@ -80,35 +80,38 @@ function renderSalesPlan() {
   spStages = new Set([...spStages].filter((id) => state.stages.some((s) => s.id === id)));
   spArticles = new Set([...spArticles].filter((id) => state.articles.some((a) => a.id === id)));
 
+  const stageIndex = Object.fromEntries(state.stages.map((s, i) => [s.id, i + 1]));
   const stages = state.stages.filter((s) => spStages.has(s.id));
   const arts = state.articles.filter((a) => spArticles.has(a.id));
 
-  const colTotal = (s) => arts.reduce((n, a) => n + articleStageTotal(a, s.id), 0);
-  const grand = stages.reduce((n, s) => n + colTotal(s), 0);
-
-  root.innerHTML = `
+  const filtersHtml = `
     <div class="panel">
-      <div class="subhead"><h3>План продаж (штук по этапам)</h3><span class="mini">выбери артикулы и этапы для просмотра</span></div>
+      <div class="subhead"><h3>План продаж — детально по партиям и артикулам</h3><span class="mini">выбери партии и артикулы для просмотра</span></div>
       <div class="sp-filters">
         <div class="sp-group">
-          <div class="sp-title">Этапы <button class="sp-all" data-all="stages">все</button> <button class="sp-all" data-none="stages">снять</button></div>
-          <div class="sp-chips">${state.stages.map((s) => `<label class="sp-chip${spStages.has(s.id) ? ' on' : ''}"><input type="checkbox" data-sp-stage="${s.id}"${spStages.has(s.id) ? ' checked' : ''}> ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</label>`).join('')}</div>
+          <div class="sp-title">Партии (этапы) <button class="sp-all" data-all="stages">все</button> <button class="sp-all" data-none="stages">снять</button></div>
+          <div class="sp-chips">${state.stages.map((s) => `<label class="sp-chip${spStages.has(s.id) ? ' on' : ''}"><input type="checkbox" data-sp-stage="${s.id}"${spStages.has(s.id) ? ' checked' : ''}> Партия ${stageIndex[s.id]} · ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</label>`).join('')}</div>
         </div>
         <div class="sp-group">
           <div class="sp-title">Артикулы <button class="sp-all" data-all="articles">все</button> <button class="sp-all" data-none="articles">снять</button></div>
           <div class="sp-chips">${state.articles.map((a) => `<label class="sp-chip${spArticles.has(a.id) ? ' on' : ''}"><input type="checkbox" data-sp-article="${a.id}"${spArticles.has(a.id) ? ' checked' : ''}> ${a.id}</label>`).join('')}</div>
         </div>
       </div>
-      ${stages.length && arts.length ? `
-      <table><thead><tr><th>Артикул</th>${stages.map((s) => `<th class="num">${s.name}<div class="mini">${s.salesMonths || ''}</div></th>`).join('')}<th class="num">Итого</th></tr></thead>
-      <tbody>${arts.map((a) => `<tr>
-        <td><b>${a.id}</b> <span class="mini">${a.name}</span></td>
-        ${stages.map((s) => { const v = articleStageTotal(a, s.id); return `<td class="num">${v ? v.toLocaleString('ru') : '<span class="mini">—</span>'}</td>`; }).join('')}
-        <td class="num"><b>${stages.reduce((n, s) => n + articleStageTotal(a, s.id), 0).toLocaleString('ru')}</b></td>
-      </tr>`).join('')}</tbody>
-      <tfoot><tr><th>ВСЕГО</th>${stages.map((s) => `<th class="num">${colTotal(s).toLocaleString('ru')}</th>`).join('')}<th class="num">${grand.toLocaleString('ru')}</th></tr></tfoot>
-      </table>` : '<div class="mini">Выбери хотя бы один этап и один артикул.</div>'}
     </div>`;
+
+  let body = '';
+  if (!stages.length || !arts.length) {
+    body = '<div class="panel"><div class="mini">Выбери хотя бы одну партию и один артикул.</div></div>';
+  } else {
+    for (const s of stages) {
+      const cards = arts.map((a) => spMiniTable(a, s)).filter(Boolean).join('');
+      body += `<div class="panel">
+        <h3 class="sp-partia">Партия ${stageIndex[s.id]} · ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</h3>
+        ${cards ? `<div class="mini-grid">${cards}</div>` : '<div class="mini">По выбранным артикулам нет плана на эту партию.</div>'}
+      </div>`;
+    }
+  }
+  root.innerHTML = filtersHtml + body;
 
   root.querySelectorAll('input[data-sp-stage]').forEach((inp) => inp.addEventListener('change', (e) => {
     const id = e.target.dataset.spStage; e.target.checked ? spStages.add(id) : spStages.delete(id); renderSalesPlan();
@@ -167,6 +170,22 @@ function renderMatrix() {
   document.getElementById('mx-stage').addEventListener('change', (e) => { matrixStageId = e.target.value; renderMatrix(); });
   document.getElementById('mx-article').addEventListener('change', (e) => { matrixArticleId = e.target.value; renderMatrix(); });
   root.querySelectorAll('input[data-mx]').forEach((inp) => inp.addEventListener('input', onMatrixInput));
+}
+
+// мини-таблица (только чтение) для одного артикула на одной партии/этапе
+function spMiniTable(a, stage) {
+  if (!a.colors.length || !a.sizes.length) return '';
+  const M = (a.matrix && a.matrix[stage.id]) || {};
+  const total = sumMatrix(M);
+  if (total <= 0) return ''; // нет плана — не показываем карточку
+  return `<div class="mini-card">
+    <div class="mini-head"><b>${a.id}</b> — ${a.name}</div>
+    <div class="matrix-scroll"><table class="matrix-table mini">
+      <thead><tr><th class="mx-corner">Размер</th>${a.colors.map((c) => `<th class="mx-color">${c}</th>`).join('')}<th class="mx-rowtot-h">Σ</th></tr></thead>
+      <tbody>${a.sizes.map((s) => `<tr><th class="mx-size">${s}</th>${a.colors.map((c) => { const v = cell(M, c, s); return `<td class="num">${v || '<span class="mini">·</span>'}</td>`; }).join('')}<td class="num mx-rowtot">${a.colors.reduce((n, c) => n + cell(M, c, s), 0)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><th class="mx-vsego">ВСЕГО</th>${a.colors.map((c) => `<td class="num mx-coltot">${a.sizes.reduce((n, s) => n + cell(M, c, s), 0)}</td>`).join('')}<td class="num mx-grand">${total.toLocaleString('ru')}</td></tr></tfoot>
+    </table></div>
+  </div>`;
 }
 
 function matrixTable(a, M) {

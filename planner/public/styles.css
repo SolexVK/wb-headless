@@ -151,6 +151,15 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .matrix-table .mx-vsego { background: rgba(52,211,153,.16); color: var(--accent-2); }
 .matrix-table .mx-grand { background: rgba(52,211,153,.22); color: var(--accent-2); font-size: 15px; }
 
+/* план продаж — сетка мини-таблиц */
+.sp-partia { margin: 0 0 14px; font-size: 15px; color: var(--accent-2); }
+.mini-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+.mini-card { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel-2); }
+.mini-head { padding: 9px 12px; background: rgba(76,141,255,.12); border-bottom: 1px solid var(--line); font-size: 13px; }
+.matrix-table.mini th, .matrix-table.mini td { padding: 4px 8px; font-size: 12px; }
+.matrix-table.mini .mx-color { min-width: 60px; }
+.matrix-table.mini tbody td { font-variant-numeric: tabular-nums; }
+
 /* фильтры плана продаж */
 .sp-filters { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
 .sp-group { min-width: 220px; }
