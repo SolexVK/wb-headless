@@ -5,6 +5,19 @@ export function genId(prefix = 'id') {
   return `${prefix}_${(_idCounter++).toString(36)}${Date.now().toString(36).slice(-4)}`;
 }
 
+// смещение операции (раб. дней): целое ≥0 или null (тогда движок посчитает по умолчанию)
+function cleanOffset(v) {
+  return (Number.isFinite(+v) && v !== '' && v != null) ? Math.max(0, Math.round(+v)) : null;
+}
+// смещения по умолчанию для цеха, исходя из мощностей и типовых порогов потока
+function defaultFlowOffsets(caps) {
+  return {
+    sew: Math.max(1, Math.ceil(250 / caps.cut)),   // пошив от кроя
+    iron: Math.max(1, Math.ceil(300 / caps.sew)),  // утюжка от пошива
+    otk: Math.max(1, Math.ceil(1000 / caps.iron)), // ОТК от утюжки
+  };
+}
+
 // ---- значения по умолчанию ----
 export function defaultSettings() {
   return {
@@ -48,7 +61,7 @@ function seedStages() {
 
 // ---- сид: цеха (4 основных + 2 вспомогательных) ----
 function seedWorkshops() {
-  return [
+  const list = [
     { id: 'w_choro',  name: 'Чоро',   role: 'main', capacities: { cut: 500, sew: 250, iron: 500, otk: 1000 } },
     { id: 'w_ala',    name: 'Ала',    role: 'main', capacities: { cut: 500, sew: 240, iron: 500, otk: 1000 } },
     { id: 'w_naryn',  name: 'Нарын',  role: 'main', capacities: { cut: 450, sew: 220, iron: 450, otk: 900 } },
@@ -56,6 +69,8 @@ function seedWorkshops() {
     { id: 'w_talas',  name: 'Талас',  role: 'aux',  capacities: { cut: 300, sew: 130, iron: 300, otk: 600 } },
     { id: 'w_batken', name: 'Баткен', role: 'aux',  capacities: { cut: 250, sew: 110, iron: 250, otk: 500 } },
   ];
+  for (const w of list) w.flowOffsets = defaultFlowOffsets(w.capacities);
+  return list;
 }
 
 // ---- сид: артикулы (реальные номера/цвета из Google-таблицы, суммы по этапам — из неё же) ----
@@ -142,7 +157,12 @@ export function normalizeState(input) {
     w.role = w.role === 'aux' ? 'aux' : 'main';
     w.capacities = { cut: 1, sew: 1, iron: 1, otk: 1, ...(w.capacities || {}) };
     for (const k of ['cut', 'sew', 'iron', 'otk']) w.capacities[k] = Math.max(1, +w.capacities[k] || 1);
-    w.cycleOffsetDays = Number.isFinite(+w.cycleOffsetDays) ? +w.cycleOffsetDays : 0;
+    // смещения операций внутри цикла (раб. дней): пошив от кроя, утюжка от пошива, ОТК от утюжки
+    const fo = w.flowOffsets && typeof w.flowOffsets === 'object' ? w.flowOffsets : {};
+    w.flowOffsets = {
+      sew: cleanOffset(fo.sew), iron: cleanOffset(fo.iron), otk: cleanOffset(fo.otk),
+    };
+    delete w.cycleOffsetDays; // устаревшее поле
   }
   for (const a of s.articles) {
     a.plan = a.plan && typeof a.plan === 'object' ? a.plan : {};

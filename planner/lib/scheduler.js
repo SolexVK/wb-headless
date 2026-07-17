@@ -33,12 +33,26 @@ function opDurationWD(units, rate) {
   return Math.max(1, Math.ceil(units / rate));
 }
 
-// Рассчитать поток одного цикла в рабочих днях, где cutStartWD — смещение
-// начала кроя (в раб.днях) от «нуля» цеха. Возвращает WD-смещения операций.
-function computeFlowWD(units, caps, flow, cutStartWD) {
-  const offCut = Math.max(1, Math.ceil((flow.sewAfterCut || 250) / caps.cut));
-  const offSew = Math.max(1, Math.ceil((flow.ironAfterSew || 300) / caps.sew));
-  const offIron = Math.max(1, Math.ceil((flow.otkAfterIron || 1000) / caps.iron));
+// Разрешить смещения операций внутри цикла для цеха (в рабочих днях).
+// Приоритет — явные per-цех значения w.flowOffsets {sew,iron,otk};
+// иначе — вычисляем из глобальных порогов (шт) и мощности цеха.
+export function resolveFlowOffsets(w, flow) {
+  const fo = (w && w.flowOffsets) || {};
+  const caps = w.capacities;
+  const pick = (v, fallback) => (Number.isFinite(+v) && v !== '' && v != null ? Math.max(0, Math.round(+v)) : fallback);
+  return {
+    sew: pick(fo.sew, Math.max(1, Math.ceil((flow.sewAfterCut || 250) / caps.cut))),
+    iron: pick(fo.iron, Math.max(1, Math.ceil((flow.ironAfterSew || 300) / caps.sew))),
+    otk: pick(fo.otk, Math.max(1, Math.ceil((flow.otkAfterIron || 1000) / caps.iron))),
+  };
+}
+
+// Рассчитать поток одного цикла в рабочих днях. offsets {sew,iron,otk} —
+// смещения старта операции относительно предыдущей (раб. дней).
+function computeFlowWD(units, caps, offsets, cutStartWD) {
+  const offCut = offsets.sew;   // сдвиг пошива относительно кроя
+  const offSew = offsets.iron;  // сдвиг утюжки относительно пошива
+  const offIron = offsets.otk;  // сдвиг ОТК относительно утюжки
 
   const cut = { start: cutStartWD, dur: opDurationWD(units, caps.cut) };
   cut.end = cut.start + cut.dur;
@@ -202,7 +216,8 @@ export function buildSchedule(state) {
           cutStartWD = 0; // якорь — сама дата
         }
 
-        const f = computeFlowWD(sb.units, w.capacities, flow, cutStartWD);
+        const wsOffsets = resolveFlowOffsets(w, flow);
+        const f = computeFlowWD(sb.units, w.capacities, wsOffsets, cutStartWD);
 
         const toDate = (wd) => cal.addWorkingDays(anchorFirstWork, wd);
         const dates = {};
@@ -214,9 +229,7 @@ export function buildSchedule(state) {
         const readyDate = dates.otk.end;
 
         // сдвигаем курсор цеха: следующий крой — по концу пошива этого цикла
-        // плюс настраиваемое per-цех смещение цикла (раб. дней; <0 = больше перекрытие)
-        const cycleOffset = Number(w.cycleOffsetDays) || 0;
-        cursorWD = Math.max(0, f.sew.end + cycleOffset);
+        cursorWD = f.sew.end;
 
         // ткань
         const fabricMeters = Math.ceil(sb.units * sb.article.fabricPerUnit * (1 + (fabricCfg.wastagePct || 0) / 100));

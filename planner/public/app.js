@@ -546,15 +546,21 @@ function dataArticlesPanel() {
 
 function dataWorkshopsPanel() {
   return `<div class="panel"><div class="subhead"><h3>Цеха</h3><button class="btn" id="btn-add-ws">+ Цех</button></div>
-    <table><thead><tr><th>Название</th><th>Роль</th><th class="num">Крой</th><th class="num">Пошив</th><th class="num">Утюжка</th><th class="num">ОТК</th><th class="num" title="Смещение старта следующего цикла относительно конца пошива предыдущего, раб. дней (отрицательное = больше перекрытие)">Смещение цикла, дн</th><th></th></tr></thead>
+    <table><thead><tr>
+      <th>Название</th><th>Роль</th>
+      <th class="num">Крой</th><th class="num">Пошив</th><th class="num">Утюжка</th><th class="num">ОТК</th>
+      <th class="num" title="На сколько раб. дней старт пошива смещён относительно старта кроя">Сдвиг пошива</th>
+      <th class="num" title="На сколько раб. дней старт утюжки смещён относительно старта пошива">Сдвиг утюжки</th>
+      <th class="num" title="На сколько раб. дней старт ОТК смещён относительно старта утюжки">Сдвиг ОТК</th>
+      <th></th></tr></thead>
     <tbody>${state.workshops.map((w, i) => `<tr>
       <td><input data-ws="${i}" data-f="name" value="${w.name}" style="width:110px"></td>
       <td><select data-ws="${i}" data-f="role"><option value="main"${w.role === 'main' ? ' selected' : ''}>основной</option><option value="aux"${w.role === 'aux' ? ' selected' : ''}>вспомог.</option></select></td>
-      ${['cut', 'sew', 'iron', 'otk'].map((k) => `<td class="num"><input data-ws="${i}" data-cap="${k}" value="${w.capacities[k]}" style="width:70px;text-align:right"></td>`).join('')}
-      <td class="num"><input data-ws="${i}" data-f="cycleOffsetDays" value="${w.cycleOffsetDays || 0}" style="width:64px;text-align:right"></td>
+      ${['cut', 'sew', 'iron', 'otk'].map((k) => `<td class="num"><input data-ws="${i}" data-cap="${k}" value="${w.capacities[k]}" style="width:66px;text-align:right"></td>`).join('')}
+      ${['sew', 'iron', 'otk'].map((k) => `<td class="num"><input data-ws="${i}" data-off="${k}" value="${(w.flowOffsets && w.flowOffsets[k] != null) ? w.flowOffsets[k] : ''}" placeholder="авто" style="width:62px;text-align:right"></td>`).join('')}
       <td><button class="btn btn-danger" data-del-ws="${i}">✕</button></td>
     </tr>`).join('')}</tbody></table>
-    <div class="mini" style="margin-top:8px">Мощность — в штуках в день (узкое горлышко — пошив). «Смещение цикла» — на сколько раб. дней сдвигать старт следующего цикла относительно конца пошива предыдущего: 0 — впритык, отрицательное — больше перекрытие, положительное — с запасом.</div></div>`;
+    <div class="mini" style="margin-top:8px">Мощность — штук в день (узкое горлышко — пошив). Сдвиги (раб. дней) задают перекрытие операций внутри цикла: на сколько дней старт пошива смещён от кроя, утюжки — от пошива, ОТК — от утюжки. Пусто = «авто» (движок посчитает по мощности). У каждого цеха свои значения.</div></div>`;
 }
 
 function dataStagesPanel() {
@@ -611,8 +617,11 @@ function bindDataEvents() {
   root.querySelectorAll('input[data-ws],select[data-ws]').forEach((inp) => inp.addEventListener('change', (e) => {
     const w = state.workshops[+e.target.dataset.ws];
     if (e.target.dataset.cap) w.capacities[e.target.dataset.cap] = Math.max(1, +e.target.value || 1);
-    else if (e.target.dataset.f === 'cycleOffsetDays') w.cycleOffsetDays = Math.round(+e.target.value || 0);
-    else w[e.target.dataset.f] = e.target.value; mark();
+    else if (e.target.dataset.off) {
+      w.flowOffsets = w.flowOffsets || {};
+      const v = e.target.value.trim();
+      w.flowOffsets[e.target.dataset.off] = v === '' ? null : Math.max(0, Math.round(+v || 0));
+    } else w[e.target.dataset.f] = e.target.value; mark();
   }));
   root.querySelectorAll('[data-del-ws]').forEach((b) => b.addEventListener('click', () => { state.workshops.splice(+b.dataset.delWs, 1); mark(); renderData(); }));
   root.querySelector('#btn-add-ws')?.addEventListener('click', () => {
