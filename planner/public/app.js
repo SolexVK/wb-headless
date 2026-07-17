@@ -64,6 +64,39 @@ function renderCurrent() {
   else if (activeTab === 'fabric') renderFabricOrder();
   else if (activeTab === 'dashboard') renderDashboard();
   else if (activeTab === 'data') renderData();
+  applyCollapsibles();
+}
+
+// ---------- сворачиваемые блоки (панели) ----------
+const collapsed = new Set(); // ключи свёрнутых блоков (в рамках сессии)
+function panelHead(panel) {
+  return panel.querySelector(':scope > h3, :scope > .subhead');
+}
+function applyCollapsibles() {
+  const view = document.querySelector('.view.active');
+  if (!view) return;
+  view.querySelectorAll('.panel').forEach((panel, idx) => {
+    const head = panelHead(panel);
+    if (!head) return; // блоки без заголовка не сворачиваем
+    panel.classList.add('collapsible');
+    const title = (head.querySelector('h3')?.textContent || head.textContent || '').trim().slice(0, 80);
+    const key = `${activeTab}|${idx}|${title}`;
+    panel.dataset.collapseKey = key;
+    panel.classList.toggle('collapsed', collapsed.has(key));
+  });
+}
+function initCollapsibles() {
+  document.querySelector('main').addEventListener('click', (e) => {
+    // не сворачивать при клике по интерактивным элементам
+    if (e.target.closest('button, input, select, textarea, a, label')) return;
+    const head = e.target.closest('.panel.collapsible > h3, .panel.collapsible > .subhead');
+    if (!head) return;
+    const panel = head.closest('.panel');
+    const key = panel.dataset.collapseKey;
+    const nowCollapsed = !panel.classList.contains('collapsed');
+    panel.classList.toggle('collapsed', nowCollapsed);
+    if (key) { nowCollapsed ? collapsed.add(key) : collapsed.delete(key); }
+  });
 }
 
 // ---------- ЗАКАЗ ТКАНИ (консолидированный по этапу) ----------
@@ -169,6 +202,7 @@ function renderFabricOrder() {
     reader.onload = () => { a.fabricInfo[c] = a.fabricInfo[c] || {}; a.fabricInfo[c].image = reader.result; dirty = true; renderFabricOrder(); toast('Образец добавлен (не забудь «Сохранить»)'); };
     reader.readAsDataURL(file);
   }));
+  applyCollapsibles();
 }
 
 // ---------- ПЛАН ПРОДАЖ (сводка с выбором артикулов/этапов/цехов) ----------
@@ -252,6 +286,7 @@ function renderSalesPlan() {
     else if (b.dataset.none === 'ws') spWorkshops = new Set();
     renderSalesPlan();
   }));
+  applyCollapsibles();
 }
 
 // ---------- матрица размер×цвет ----------
@@ -314,6 +349,7 @@ function renderMatrix() {
     recalc(true).then(() => { renderMatrix(); toast('Цех обновлён, план и Гант пересчитаны'); }).catch((err) => toast('Ошибка: ' + err.message, true));
   });
   root.querySelectorAll('input[data-mx]').forEach((inp) => inp.addEventListener('input', onMatrixInput));
+  applyCollapsibles();
 }
 
 // строка с цехом(ами), отшивающими артикул на данном этапе
@@ -525,6 +561,7 @@ function renderData() {
     <div class="panel"><button class="btn btn-danger" id="btn-reset">Сбросить к примеру</button></div>
   `;
   bindDataEvents();
+  applyCollapsibles();
 }
 
 function dataArticlesPanel() {
@@ -673,6 +710,7 @@ function initTheme() {
 // ---------- инициализация ----------
 async function init() {
   initTheme();
+  initCollapsibles();
   document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
   document.getElementById('btn-recalc').addEventListener('click', () => recalc(false).then(() => toast('Пересчитано')));
   document.getElementById('btn-save').addEventListener('click', () => recalc(true).then(() => toast('Сохранено и пересчитано')).catch((e) => toast('Ошибка: ' + e.message, true)));

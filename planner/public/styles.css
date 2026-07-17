@@ -124,6 +124,19 @@ input, select { font: inherit; }
 
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; }
 .panel h3 { margin: 0 0 12px; font-size: 15px; }
+
+/* сворачиваемые блоки */
+.panel.collapsible > h3, .panel.collapsible > .subhead { cursor: pointer; padding-left: 20px; position: relative; user-select: none; }
+.panel.collapsible > h3::before, .panel.collapsible > .subhead::before {
+  content: '▾'; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  color: var(--muted); font-size: 11px; transition: transform .15s;
+}
+.panel.collapsible > .subhead::before { top: 10px; transform: none; }
+.panel.collapsed > h3::before, .panel.collapsed > .subhead::before { content: '▸'; }
+.panel.collapsed > h3 { margin-bottom: 0; }
+.panel.collapsed > *:not(h3):not(.subhead) { display: none; }
+.panel.collapsed { padding-bottom: 12px; }
+.panel.collapsible > h3:hover, .panel.collapsible > .subhead:hover { color: var(--accent); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 600; }
