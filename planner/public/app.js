@@ -149,9 +149,9 @@ function renderFabricOrder() {
       if (!consolidated[key].image && info.image) consolidated[key].image = info.image;
       return `<tr>
         <td>${c}</td>
-        <td><input data-fab data-art="${a.id}" data-color="${encodeURIComponent(c)}" data-f="plansheet" value="${info.plansheet || ''}" placeholder="№ планшета" style="width:100px"></td>
-        <td>${info.image ? `<img class="fab-thumb" src="${info.image}" alt="">` : '<span class="mini" title="Загрузить образец можно в «Данные»">—</span>'}</td>
-        <td><input data-fab data-art="${a.id}" data-color="${encodeURIComponent(c)}" data-f="colorNo" value="${info.colorNo || ''}" placeholder="№ цвета" style="width:90px"></td>
+        <td>${info.plansheet ? info.plansheet : '<span class="mini">—</span>'}</td>
+        <td>${info.image ? `<img class="fab-thumb" src="${info.image}" alt="">` : '<span class="mini">—</span>'}</td>
+        <td>${info.colorNo ? info.colorNo : '<span class="mini">—</span>'}</td>
         <td class="num">${u.toLocaleString('ru')}</td>
         <td class="num">${m.toLocaleString('ru')}</td>
       </tr>`;
@@ -174,7 +174,7 @@ function renderFabricOrder() {
         <label>Партия:
           <select id="fab-stage">${state.stages.map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>Партия ${state.stages.findIndex((x) => x.id === s.id) + 1} · ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
         </label>
-        <span class="mini">Консолидированный заказ ткани на партию. Учитывается запас +${wastage}% (настраивается в «Данные»).</span>
+        <span class="mini">Консолидированный заказ на партию, запас +${wastage}%. Образец, № планшета и № цвета берутся из «Данных».</span>
       </div>
       <div class="fab-summary">
         <div><div class="k">Разместить заказ</div><div class="v">${earliest ? fmt(earliest) : '—'}</div><div class="mini">самая ранняя дата из артикулов этапа${earliest ? '' : ' (нажми «Пересчитать»)'}</div></div>
@@ -190,13 +190,6 @@ function renderFabricOrder() {
   `;
 
   document.getElementById('fab-stage').addEventListener('change', (e) => { fabricStageId = e.target.value; renderFabricOrder(); });
-  root.querySelectorAll('input[data-fab]').forEach((inp) => inp.addEventListener('change', (e) => {
-    const a = state.articles.find((x) => x.id === e.target.dataset.art);
-    const c = decodeURIComponent(e.target.dataset.color);
-    a.fabricInfo[c] = a.fabricInfo[c] || {};
-    a.fabricInfo[c][e.target.dataset.f] = e.target.value.trim();
-    dirty = true; setStatus();
-  }));
   root.querySelectorAll('input[data-fab-per]').forEach((inp) => inp.addEventListener('change', (e) => {
     const a = state.articles.find((x) => x.id === e.target.dataset.art);
     a.fabricPerUnit = +e.target.value > 0 ? +e.target.value : a.fabricPerUnit;
@@ -579,13 +572,17 @@ function dataArticlesPanel() {
           <div class="field" style="flex:2"><label>Цвета (через запятую)</label><input data-art="${i}" data-f="colors" value="${(a.colors || []).join(', ')}"></div>
         </div>
         <div class="field"><label>Размерный ряд (через запятую)</label><input data-art="${i}" data-f="sizes" value="${(a.sizes || []).join(', ')}"></div>
-        <div class="field"><label>Образцы ткани по цветам (80×40)</label>
-          <div class="swatch-row">${(a.colors || []).map((c) => `<div class="swatch-item">
-            ${fabricImgSrc(a, c) ? `<img class="swatch" src="${fabricImgSrc(a, c)}" alt="">` : '<div class="swatch swatch-empty">нет</div>'}
+        <div class="field"><label>Образцы ткани по цветам (образец 80×40, № планшета, № цвета)</label>
+          <div class="swatch-row">${(a.colors || []).map((c) => { const fi = (a.fabricInfo && a.fabricInfo[c]) || {}; return `<div class="swatch-item">
+            ${fabricImgSrc(a, c) ? `<img class="swatch" src="${fabricImgSrc(a, c)}" alt="">` : '<div class="swatch swatch-empty">нет образца</div>'}
             <div class="swatch-name" title="${c}">${c}</div>
-            <label class="fab-up">${fabricImgSrc(a, c) ? 'заменить' : '＋ загрузить'}<input type="file" accept="image/*" data-artimg data-art="${i}" data-color="${encodeURIComponent(c)}" hidden></label>
-            ${fabricImgSrc(a, c) ? `<button class="swatch-del" data-artimg-del data-art="${i}" data-color="${encodeURIComponent(c)}" title="удалить образец">✕</button>` : ''}
-          </div>`).join('') || '<span class="mini">Сначала укажи цвета выше.</span>'}</div>
+            <input class="swatch-meta" data-fabmeta data-art="${i}" data-color="${encodeURIComponent(c)}" data-f="plansheet" value="${(fi.plansheet || '').replace(/"/g, '&quot;')}" placeholder="№ планшета">
+            <input class="swatch-meta" data-fabmeta data-art="${i}" data-color="${encodeURIComponent(c)}" data-f="colorNo" value="${(fi.colorNo || '').replace(/"/g, '&quot;')}" placeholder="№ цвета">
+            <div class="swatch-actions">
+              <label class="fab-up">${fabricImgSrc(a, c) ? 'заменить' : '＋ образец'}<input type="file" accept="image/*" data-artimg data-art="${i}" data-color="${encodeURIComponent(c)}" hidden></label>
+              ${fabricImgSrc(a, c) ? `<button class="swatch-del" data-artimg-del data-art="${i}" data-color="${encodeURIComponent(c)}" title="удалить образец">✕</button>` : ''}
+            </div>
+          </div>`; }).join('') || '<span class="mini">Сначала укажи цвета выше.</span>'}</div>
         </div>
         <button class="btn btn-danger" data-del-art="${i}">Удалить</button>
       </div>`).join('')}</div></div>`;
@@ -671,6 +668,13 @@ function bindDataEvents() {
     const c = decodeURIComponent(b.dataset.color);
     if (a.fabricInfo && a.fabricInfo[c]) delete a.fabricInfo[c].image;
     mark(); renderData();
+  }));
+  root.querySelectorAll('input[data-fabmeta]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const a = state.articles[+e.target.dataset.art];
+    const c = decodeURIComponent(e.target.dataset.color);
+    a.fabricInfo = a.fabricInfo || {}; a.fabricInfo[c] = a.fabricInfo[c] || {};
+    a.fabricInfo[c][e.target.dataset.f] = e.target.value.trim();
+    mark();
   }));
   root.querySelectorAll('[data-del-art]').forEach((b) => b.addEventListener('click', () => { state.articles.splice(+b.dataset.delArt, 1); mark(); renderData(); }));
   root.querySelector('#btn-add-article')?.addEventListener('click', () => {

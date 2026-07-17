@@ -206,11 +206,14 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* образцы ткани (swatch) */
 .swatch { display: inline-block; object-fit: cover; border-radius: 5px; border: 1px solid var(--line); vertical-align: middle; }
 .swatch-row { display: flex; flex-wrap: wrap; gap: 12px; }
-.swatch-item { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 90px; position: relative; }
-.swatch-item .swatch { width: 80px; height: 40px; }
-.swatch-empty { display: flex; align-items: center; justify-content: center; width: 80px; height: 40px; color: var(--muted); font-size: 11px; background: var(--panel-2); }
-.swatch-name { font-size: 11px; color: var(--text); text-align: center; max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.swatch-del { position: absolute; top: -6px; right: 8px; background: var(--panel); border: 1px solid var(--line); color: var(--danger); border-radius: 50%; width: 18px; height: 18px; line-height: 1; font-size: 11px; padding: 0; }
+.swatch-item { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 116px; position: relative; padding: 8px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.swatch-item .swatch { width: 100px; height: 40px; }
+.swatch-empty { display: flex; align-items: center; justify-content: center; width: 100px; height: 40px; color: var(--muted); font-size: 11px; background: var(--panel); }
+.swatch-name { font-size: 12px; font-weight: 600; color: var(--text); text-align: center; max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swatch-meta { width: 100px; text-align: center; font-size: 11px; padding: 3px 4px; background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 5px; }
+.swatch-meta:focus { outline: none; border-color: var(--accent); }
+.swatch-actions { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+.swatch-del { background: var(--panel); border: 1px solid var(--line); color: var(--danger); border-radius: 50%; width: 18px; height: 18px; line-height: 1; font-size: 11px; padding: 0; }
 .matrix-table .mx-color .swatch { width: 60px; height: 30px; margin-bottom: 3px; }
 
 /* план продаж — сетка мини-таблиц */
