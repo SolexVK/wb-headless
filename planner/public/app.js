@@ -150,8 +150,7 @@ function renderFabricOrder() {
       return `<tr>
         <td>${c}</td>
         <td><input data-fab data-art="${a.id}" data-color="${encodeURIComponent(c)}" data-f="plansheet" value="${info.plansheet || ''}" placeholder="№ планшета" style="width:100px"></td>
-        <td>${info.image ? `<img class="fab-thumb" src="${info.image}" alt="">` : '<span class="mini">—</span>'}
-          <label class="fab-up">${info.image ? 'заменить' : '＋ образец'}<input type="file" accept="image/*" data-fab-img data-art="${a.id}" data-color="${encodeURIComponent(c)}" hidden></label></td>
+        <td>${info.image ? `<img class="fab-thumb" src="${info.image}" alt="">` : '<span class="mini" title="Загрузить образец можно в «Данные»">—</span>'}</td>
         <td><input data-fab data-art="${a.id}" data-color="${encodeURIComponent(c)}" data-f="colorNo" value="${info.colorNo || ''}" placeholder="№ цвета" style="width:90px"></td>
         <td class="num">${u.toLocaleString('ru')}</td>
         <td class="num">${m.toLocaleString('ru')}</td>
@@ -202,16 +201,6 @@ function renderFabricOrder() {
     const a = state.articles.find((x) => x.id === e.target.dataset.art);
     a.fabricPerUnit = +e.target.value > 0 ? +e.target.value : a.fabricPerUnit;
     dirty = true; renderFabricOrder();
-  }));
-  root.querySelectorAll('input[data-fab-img]').forEach((inp) => inp.addEventListener('change', (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    if (file.size > 1200000) { toast('Изображение слишком большое (макс ~1 МБ)', true); return; }
-    const a = state.articles.find((x) => x.id === e.target.dataset.art);
-    const c = decodeURIComponent(e.target.dataset.color);
-    const reader = new FileReader();
-    reader.onload = () => { a.fabricInfo[c] = a.fabricInfo[c] || {}; a.fabricInfo[c].image = reader.result; dirty = true; renderFabricOrder(); toast('Образец добавлен (не забудь «Сохранить»)'); };
-    reader.readAsDataURL(file);
   }));
   applyCollapsibles();
 }
