@@ -151,6 +151,17 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .matrix-table .mx-vsego { background: rgba(52,211,153,.16); color: var(--accent-2); }
 .matrix-table .mx-grand { background: rgba(52,211,153,.22); color: var(--accent-2); font-size: 15px; }
 
+/* фильтры плана продаж */
+.sp-filters { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
+.sp-group { min-width: 220px; }
+.sp-title { color: var(--muted); font-size: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.sp-all { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 6px; padding: 1px 8px; font-size: 11px; }
+.sp-all:hover { border-color: var(--accent); color: var(--text); }
+.sp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sp-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer; color: var(--muted); }
+.sp-chip.on { color: var(--text); border-color: var(--accent); }
+.sp-chip input { accent-color: var(--accent); }
+
 /* toast */
 .toast {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);

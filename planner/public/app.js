@@ -60,8 +60,69 @@ function switchTab(tab) {
 function renderCurrent() {
   if (activeTab === 'gantt') renderGantt(document.getElementById('gantt'), schedule, state, { pxPerDay, onOverride });
   else if (activeTab === 'matrix') renderMatrix();
+  else if (activeTab === 'salesplan') renderSalesPlan();
   else if (activeTab === 'dashboard') renderDashboard();
   else if (activeTab === 'data') renderData();
+}
+
+// ---------- ПЛАН ПРОДАЖ (сводка с выбором артикулов/этапов) ----------
+let spStages = null, spArticles = null; // выбранные (Set id); null = все
+
+function renderSalesPlan() {
+  const root = document.getElementById('salesplan');
+  if (!state.articles.length || !state.stages.length) {
+    root.innerHTML = '<div class="panel"><div class="mini">Нет артикулов или этапов. Заполни во вкладке «Данные».</div></div>';
+    return;
+  }
+  if (!spStages) spStages = new Set(state.stages.map((s) => s.id));
+  if (!spArticles) spArticles = new Set(state.articles.map((a) => a.id));
+  // подчистить от удалённых
+  spStages = new Set([...spStages].filter((id) => state.stages.some((s) => s.id === id)));
+  spArticles = new Set([...spArticles].filter((id) => state.articles.some((a) => a.id === id)));
+
+  const stages = state.stages.filter((s) => spStages.has(s.id));
+  const arts = state.articles.filter((a) => spArticles.has(a.id));
+
+  const colTotal = (s) => arts.reduce((n, a) => n + articleStageTotal(a, s.id), 0);
+  const grand = stages.reduce((n, s) => n + colTotal(s), 0);
+
+  root.innerHTML = `
+    <div class="panel">
+      <div class="subhead"><h3>План продаж (штук по этапам)</h3><span class="mini">выбери артикулы и этапы для просмотра</span></div>
+      <div class="sp-filters">
+        <div class="sp-group">
+          <div class="sp-title">Этапы <button class="sp-all" data-all="stages">все</button> <button class="sp-all" data-none="stages">снять</button></div>
+          <div class="sp-chips">${state.stages.map((s) => `<label class="sp-chip${spStages.has(s.id) ? ' on' : ''}"><input type="checkbox" data-sp-stage="${s.id}"${spStages.has(s.id) ? ' checked' : ''}> ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</label>`).join('')}</div>
+        </div>
+        <div class="sp-group">
+          <div class="sp-title">Артикулы <button class="sp-all" data-all="articles">все</button> <button class="sp-all" data-none="articles">снять</button></div>
+          <div class="sp-chips">${state.articles.map((a) => `<label class="sp-chip${spArticles.has(a.id) ? ' on' : ''}"><input type="checkbox" data-sp-article="${a.id}"${spArticles.has(a.id) ? ' checked' : ''}> ${a.id}</label>`).join('')}</div>
+        </div>
+      </div>
+      ${stages.length && arts.length ? `
+      <table><thead><tr><th>Артикул</th>${stages.map((s) => `<th class="num">${s.name}<div class="mini">${s.salesMonths || ''}</div></th>`).join('')}<th class="num">Итого</th></tr></thead>
+      <tbody>${arts.map((a) => `<tr>
+        <td><b>${a.id}</b> <span class="mini">${a.name}</span></td>
+        ${stages.map((s) => { const v = articleStageTotal(a, s.id); return `<td class="num">${v ? v.toLocaleString('ru') : '<span class="mini">—</span>'}</td>`; }).join('')}
+        <td class="num"><b>${stages.reduce((n, s) => n + articleStageTotal(a, s.id), 0).toLocaleString('ru')}</b></td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr><th>ВСЕГО</th>${stages.map((s) => `<th class="num">${colTotal(s).toLocaleString('ru')}</th>`).join('')}<th class="num">${grand.toLocaleString('ru')}</th></tr></tfoot>
+      </table>` : '<div class="mini">Выбери хотя бы один этап и один артикул.</div>'}
+    </div>`;
+
+  root.querySelectorAll('input[data-sp-stage]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const id = e.target.dataset.spStage; e.target.checked ? spStages.add(id) : spStages.delete(id); renderSalesPlan();
+  }));
+  root.querySelectorAll('input[data-sp-article]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const id = e.target.dataset.spArticle; e.target.checked ? spArticles.add(id) : spArticles.delete(id); renderSalesPlan();
+  }));
+  root.querySelectorAll('.sp-all').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.all === 'stages') spStages = new Set(state.stages.map((s) => s.id));
+    else if (b.dataset.none === 'stages') spStages = new Set();
+    else if (b.dataset.all === 'articles') spArticles = new Set(state.articles.map((a) => a.id));
+    else if (b.dataset.none === 'articles') spArticles = new Set();
+    renderSalesPlan();
+  }));
 }
 
 // ---------- матрица размер×цвет ----------
@@ -281,7 +342,7 @@ function workingDaysInMonth(ym) {
 function renderData() {
   const root = document.getElementById('data-forms');
   root.innerHTML = `
-    ${dataPlanPanel()}
+    <div class="panel"><div class="mini">Ввод количеств по размерам — вкладка «План по размерам». Сводка плана — вкладка «План продаж».</div></div>
     ${dataArticlesPanel()}
     ${dataWorkshopsPanel()}
     ${dataStagesPanel()}
@@ -289,16 +350,6 @@ function renderData() {
     <div class="panel"><button class="btn btn-danger" id="btn-reset">Сбросить к примеру</button></div>
   `;
   bindDataEvents();
-}
-
-function dataPlanPanel() {
-  return `<div class="panel"><div class="subhead"><h3>План продаж по этапам (сводка)</h3><span class="mini">суммы из матрицы; правка количеств — во вкладке «План по размерам»</span></div>
-    <table><thead><tr><th>Артикул</th>${state.stages.map((s) => `<th class="num">${s.name}</th>`).join('')}<th class="num">Итого</th></tr></thead>
-    <tbody>${state.articles.map((a) => `<tr>
-      <td><b>${a.id}</b> <span class="mini">${a.name}</span></td>
-      ${state.stages.map((s) => `<td class="num">${articleStageTotal(a, s.id).toLocaleString('ru')}</td>`).join('')}
-      <td class="num"><b>${state.stages.reduce((sum, s) => sum + articleStageTotal(a, s.id), 0).toLocaleString('ru')}</b></td>
-    </tr>`).join('')}</tbody></table></div>`;
 }
 
 function dataArticlesPanel() {
