@@ -371,6 +371,7 @@ function spMiniTable(a, stage, cycles) {
   if (total <= 0) return ''; // нет плана — не показываем карточку
   return `<div class="mini-card${cycles && cycles.length > 1 ? ' mini-split' : ''}">
     <div class="mini-head"><b>${a.id}</b> — ${a.name}</div>
+    ${a.comment ? `<div class="mini-comment">💬 ${a.comment}</div>` : ''}
     ${workshopLine(cycles)}
     <div class="matrix-scroll"><table class="matrix-table mini">
       <thead><tr><th class="mx-corner">Размер</th>${a.colors.map((c) => `<th class="mx-color">${c}</th>`).join('')}<th class="mx-rowtot-h">Σ</th></tr></thead>
@@ -572,6 +573,7 @@ function dataArticlesPanel() {
           <div class="field"><label>Артикул</label><input data-art="${i}" data-f="id" value="${a.id}"></div>
           <div class="field" style="flex:2"><label>Название</label><input data-art="${i}" data-f="name" value="${a.name}"></div>
         </div>
+        <div class="field"><label>Комментарий (кратко об особенностях)</label><input data-art="${i}" data-f="comment" value="${(a.comment || '').replace(/"/g, '&quot;')}" placeholder="напр.: твид, приталенная, отложной воротник"></div>
         <div class="row-flex">
           <div class="field"><label>Расход ткани, м/шт</label><input data-art="${i}" data-f="fabricPerUnit" value="${a.fabricPerUnit}" style="width:90px"></div>
           <div class="field" style="flex:2"><label>Цвета (через запятую)</label><input data-art="${i}" data-f="colors" value="${(a.colors || []).join(', ')}"></div>
@@ -648,7 +650,7 @@ function bindDataEvents() {
   }));
   root.querySelectorAll('[data-del-art]').forEach((b) => b.addEventListener('click', () => { state.articles.splice(+b.dataset.delArt, 1); mark(); renderData(); }));
   root.querySelector('#btn-add-article')?.addEventListener('click', () => {
-    state.articles.push({ id: uid('art').slice(0, 6), name: 'Новый артикул', fabricPerUnit: 1.6, colors: ['белый'], sizes: ['S', 'M', 'L', 'XL'], plan: {} }); mark(); renderData();
+    state.articles.push({ id: uid('art').slice(0, 6), name: 'Новый артикул', comment: '', fabricPerUnit: 1.6, colors: ['белый'], sizes: ['S', 'M', 'L', 'XL'], plan: {} }); mark(); renderData();
   });
 
   root.querySelectorAll('input[data-ws],select[data-ws]').forEach((inp) => inp.addEventListener('change', (e) => {
