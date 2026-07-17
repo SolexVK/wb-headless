@@ -65,8 +65,8 @@ function renderCurrent() {
   else if (activeTab === 'data') renderData();
 }
 
-// ---------- ПЛАН ПРОДАЖ (сводка с выбором артикулов/этапов) ----------
-let spStages = null, spArticles = null; // выбранные (Set id); null = все
+// ---------- ПЛАН ПРОДАЖ (сводка с выбором артикулов/этапов/цехов) ----------
+let spStages = null, spArticles = null, spWorkshops = null; // выбранные (Set id); null = все
 
 function renderSalesPlan() {
   const root = document.getElementById('salesplan');
@@ -76,17 +76,23 @@ function renderSalesPlan() {
   }
   if (!spStages) spStages = new Set(state.stages.map((s) => s.id));
   if (!spArticles) spArticles = new Set(state.articles.map((a) => a.id));
+  if (!spWorkshops) spWorkshops = new Set(state.workshops.map((w) => w.id));
   // подчистить от удалённых
   spStages = new Set([...spStages].filter((id) => state.stages.some((s) => s.id === id)));
   spArticles = new Set([...spArticles].filter((id) => state.articles.some((a) => a.id === id)));
+  spWorkshops = new Set([...spWorkshops].filter((id) => state.workshops.some((w) => w.id === id)));
 
   const stageIndex = Object.fromEntries(state.stages.map((s, i) => [s.id, i + 1]));
   const stages = state.stages.filter((s) => spStages.has(s.id));
   const arts = state.articles.filter((a) => spArticles.has(a.id));
 
+  // какие цеха отшивают каждый артикул на каждом этапе — из расписания
+  const cycleMap = {};
+  for (const c of (schedule?.cycles || [])) (cycleMap[c.articleId + '|' + c.stageId] ||= []).push(c);
+
   const filtersHtml = `
     <div class="panel">
-      <div class="subhead"><h3>План продаж — детально по партиям и артикулам</h3><span class="mini">выбери партии и артикулы для просмотра</span></div>
+      <div class="subhead"><h3>План продаж — детально по партиям и артикулам</h3><span class="mini">выбери партии, артикулы и цеха для просмотра</span></div>
       <div class="sp-filters">
         <div class="sp-group">
           <div class="sp-title">Партии (этапы) <button class="sp-all" data-all="stages">все</button> <button class="sp-all" data-none="stages">снять</button></div>
@@ -96,6 +102,10 @@ function renderSalesPlan() {
           <div class="sp-title">Артикулы <button class="sp-all" data-all="articles">все</button> <button class="sp-all" data-none="articles">снять</button></div>
           <div class="sp-chips">${state.articles.map((a) => `<label class="sp-chip${spArticles.has(a.id) ? ' on' : ''}"><input type="checkbox" data-sp-article="${a.id}"${spArticles.has(a.id) ? ' checked' : ''}> ${a.id}</label>`).join('')}</div>
         </div>
+        <div class="sp-group">
+          <div class="sp-title">Цеха <button class="sp-all" data-all="ws">все</button> <button class="sp-all" data-none="ws">снять</button></div>
+          <div class="sp-chips">${state.workshops.map((w) => `<label class="sp-chip${spWorkshops.has(w.id) ? ' on' : ''}"><input type="checkbox" data-sp-ws="${w.id}"${spWorkshops.has(w.id) ? ' checked' : ''}> ${w.name}${w.role === 'aux' ? ' (вспом.)' : ''}</label>`).join('')}</div>
+        </div>
       </div>
     </div>`;
 
@@ -104,10 +114,15 @@ function renderSalesPlan() {
     body = '<div class="panel"><div class="mini">Выбери хотя бы одну партию и один артикул.</div></div>';
   } else {
     for (const s of stages) {
-      const cards = arts.map((a) => spMiniTable(a, s)).filter(Boolean).join('');
+      const cards = arts.map((a) => {
+        const cyc = cycleMap[a.id + '|' + s.id] || [];
+        // если у артикул-этапа есть назначенные цеха, но ни один не выбран — скрыть карточку
+        if (cyc.length && !cyc.some((c) => spWorkshops.has(c.workshopId))) return '';
+        return spMiniTable(a, s, cyc);
+      }).filter(Boolean).join('');
       body += `<div class="panel">
         <h3 class="sp-partia">Партия ${stageIndex[s.id]} · ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</h3>
-        ${cards ? `<div class="mini-grid">${cards}</div>` : '<div class="mini">По выбранным артикулам нет плана на эту партию.</div>'}
+        ${cards ? `<div class="mini-grid">${cards}</div>` : '<div class="mini">По выбранным артикулам и цехам нет плана на эту партию.</div>'}
       </div>`;
     }
   }
@@ -119,11 +134,16 @@ function renderSalesPlan() {
   root.querySelectorAll('input[data-sp-article]').forEach((inp) => inp.addEventListener('change', (e) => {
     const id = e.target.dataset.spArticle; e.target.checked ? spArticles.add(id) : spArticles.delete(id); renderSalesPlan();
   }));
+  root.querySelectorAll('input[data-sp-ws]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const id = e.target.dataset.spWs; e.target.checked ? spWorkshops.add(id) : spWorkshops.delete(id); renderSalesPlan();
+  }));
   root.querySelectorAll('.sp-all').forEach((b) => b.addEventListener('click', () => {
     if (b.dataset.all === 'stages') spStages = new Set(state.stages.map((s) => s.id));
     else if (b.dataset.none === 'stages') spStages = new Set();
     else if (b.dataset.all === 'articles') spArticles = new Set(state.articles.map((a) => a.id));
     else if (b.dataset.none === 'articles') spArticles = new Set();
+    else if (b.dataset.all === 'ws') spWorkshops = new Set(state.workshops.map((w) => w.id));
+    else if (b.dataset.none === 'ws') spWorkshops = new Set();
     renderSalesPlan();
   }));
 }
@@ -172,14 +192,26 @@ function renderMatrix() {
   root.querySelectorAll('input[data-mx]').forEach((inp) => inp.addEventListener('input', onMatrixInput));
 }
 
+// строка с цехом(ами), отшивающими артикул на данном этапе
+function workshopLine(cycles) {
+  if (!cycles || !cycles.length) return '<div class="mini-ws none">🏭 Цех не назначен — нажми «Пересчитать»</div>';
+  if (cycles.length === 1) {
+    const c = cycles[0];
+    return `<div class="mini-ws">🏭 Цех: <b>${c.workshopName}</b> — ${c.units.toLocaleString('ru')} шт${c.workshopRole === 'aux' ? ' <span class="mini">(вспом.)</span>' : ''}</div>`;
+  }
+  const ordered = [...cycles].sort((x, y) => (y.primary === true) - (x.primary === true) || y.units - x.units);
+  return `<div class="mini-ws split">🏭 Дробление между цехами:<br>${ordered.map((c) => `<b>${c.workshopName}</b> — ${c.units.toLocaleString('ru')} шт${c.primary ? '' : ' <span class="mini">(доп.)</span>'}`).join(' · ')}</div>`;
+}
+
 // мини-таблица (только чтение) для одного артикула на одной партии/этапе
-function spMiniTable(a, stage) {
+function spMiniTable(a, stage, cycles) {
   if (!a.colors.length || !a.sizes.length) return '';
   const M = (a.matrix && a.matrix[stage.id]) || {};
   const total = sumMatrix(M);
   if (total <= 0) return ''; // нет плана — не показываем карточку
-  return `<div class="mini-card">
+  return `<div class="mini-card${cycles && cycles.length > 1 ? ' mini-split' : ''}">
     <div class="mini-head"><b>${a.id}</b> — ${a.name}</div>
+    ${workshopLine(cycles)}
     <div class="matrix-scroll"><table class="matrix-table mini">
       <thead><tr><th class="mx-corner">Размер</th>${a.colors.map((c) => `<th class="mx-color">${c}</th>`).join('')}<th class="mx-rowtot-h">Σ</th></tr></thead>
       <tbody>${a.sizes.map((s) => `<tr><th class="mx-size">${s}</th>${a.colors.map((c) => { const v = cell(M, c, s); return `<td class="num">${v || '<span class="mini">·</span>'}</td>`; }).join('')}<td class="num mx-rowtot">${a.colors.reduce((n, c) => n + cell(M, c, s), 0)}</td></tr>`).join('')}</tbody>
