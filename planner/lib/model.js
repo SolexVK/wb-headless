@@ -179,7 +179,14 @@ export function normalizeState(input) {
       if (sum > 0) a.plan[stageId] = sum;
     }
   }
+  // автосортировка артикулов по номеру, от меньшего к большему (числовая)
+  s.articles.sort(compareArticleId);
   return s;
+}
+
+// сравнение id артикулов по номеру (числовое, «004» < «026»)
+export function compareArticleId(a, b) {
+  return String(a.id).localeCompare(String(b.id), undefined, { numeric: true, sensitivity: 'base' });
 }
 
 // сумма всех ячеек матрицы одного этапа { цвет: { размер: qty } }

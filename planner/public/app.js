@@ -2,6 +2,9 @@
 import { renderGantt } from './gantt.js';
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+// сортировка артикулов по номеру, от меньшего к большему (числовая: 004 < 026)
+const cmpArticleId = (a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true, sensitivity: 'base' });
+const articlesSorted = () => [...state.articles].sort(cmpArticleId);
 const fmt = (s) => { if (!s) return '—'; const [y, m, d] = s.slice(0, 10).split('-'); return `${+d} ${MONTHS[+m - 1]}`; };
 const uid = (p) => `${p}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -131,7 +134,7 @@ function renderFabricOrder() {
   const cyc = (schedule?.cycles || []).filter((c) => c.stageId === stage.id);
   const earliest = cyc.map((c) => c.fabric.orderDate).sort()[0];
 
-  const arts = state.articles.filter((a) => articleStageTotal(a, stage.id) > 0);
+  const arts = articlesSorted().filter((a) => articleStageTotal(a, stage.id) > 0);
   let grand = 0;
   const consolidated = {}; // планшет/№цвета -> метраж
 
@@ -320,7 +323,7 @@ function renderMatrix() {
           <select id="mx-stage">${state.stages.map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
         </label>
         <label>Артикул:
-          <select id="mx-article">${state.articles.map((x) => `<option value="${x.id}"${x.id === a.id ? ' selected' : ''}>${x.id} — ${x.name}</option>`).join('')}</select>
+          <select id="mx-article">${articlesSorted().map((x) => `<option value="${x.id}"${x.id === a.id ? ' selected' : ''}>${x.id} — ${x.name}</option>`).join('')}</select>
         </label>
         <label>Цех:
           <select id="mx-ws">
