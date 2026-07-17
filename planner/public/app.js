@@ -99,6 +99,15 @@ function initCollapsibles() {
   });
 }
 
+// ---------- образцы ткани (общий помощник) ----------
+function fabricImgSrc(a, color) {
+  return (a && a.fabricInfo && a.fabricInfo[color] && a.fabricInfo[color].image) || '';
+}
+function swatchTag(a, color, w = 80, h = 40) {
+  const s = fabricImgSrc(a, color);
+  return s ? `<img class="swatch" src="${s}" alt="" style="width:${w}px;height:${h}px">` : '';
+}
+
 // ---------- ЗАКАЗ ТКАНИ (консолидированный по этапу) ----------
 let fabricStageId = null;
 function colorUnits(a, stageId, color) {
@@ -135,12 +144,14 @@ function renderFabricOrder() {
       const info = (a.fabricInfo[c] = a.fabricInfo[c] || {});
       const m = meters(u, a.fabricPerUnit); sub += m; grand += m;
       const key = (info.plansheet || info.colorNo) ? `${info.plansheet || '—'} / цвет ${info.colorNo || '—'}` : `${a.id} · ${c}`;
-      consolidated[key] = (consolidated[key] || 0) + m;
+      if (!consolidated[key]) consolidated[key] = { meters: 0, image: info.image || '' };
+      consolidated[key].meters += m;
+      if (!consolidated[key].image && info.image) consolidated[key].image = info.image;
       return `<tr>
         <td>${c}</td>
+        <td><input data-fab data-art="${a.id}" data-color="${encodeURIComponent(c)}" data-f="plansheet" value="${info.plansheet || ''}" placeholder="№ планшета" style="width:100px"></td>
         <td>${info.image ? `<img class="fab-thumb" src="${info.image}" alt="">` : '<span class="mini">—</span>'}
           <label class="fab-up">${info.image ? 'заменить' : '＋ образец'}<input type="file" accept="image/*" data-fab-img data-art="${a.id}" data-color="${encodeURIComponent(c)}" hidden></label></td>
-        <td><input data-fab data-art="${a.id}" data-color="${encodeURIComponent(c)}" data-f="plansheet" value="${info.plansheet || ''}" placeholder="№ планшета" style="width:100px"></td>
         <td><input data-fab data-art="${a.id}" data-color="${encodeURIComponent(c)}" data-f="colorNo" value="${info.colorNo || ''}" placeholder="№ цвета" style="width:90px"></td>
         <td class="num">${u.toLocaleString('ru')}</td>
         <td class="num">${m.toLocaleString('ru')}</td>
@@ -149,14 +160,14 @@ function renderFabricOrder() {
     return `<div class="panel">
       <div class="subhead"><h3>${a.id} — ${a.name}</h3>
         <label class="mini">расход ткани <input data-fab-per data-art="${a.id}" value="${a.fabricPerUnit}" style="width:60px;text-align:right"> м/шт</label></div>
-      <table><thead><tr><th>Цвет</th><th>Образец</th><th>Планшет поставщика</th><th>№ цвета</th><th class="num">Штук</th><th class="num">Метраж</th></tr></thead>
+      <table><thead><tr><th>Цвет</th><th>Планшет поставщика</th><th>Образец</th><th>№ цвета</th><th class="num">Штук</th><th class="num">Метраж</th></tr></thead>
       <tbody>${rows}</tbody>
       <tfoot><tr><th colspan="5">Итого по артикулу</th><th class="num">${sub.toLocaleString('ru')} м</th></tr></tfoot></table>
     </div>`;
   }).join('');
 
-  const consRows = Object.entries(consolidated).sort((a, b) => b[1] - a[1])
-    .map(([k, m]) => `<tr><td>${k}</td><td class="num">${m.toLocaleString('ru')} м</td></tr>`).join('');
+  const consRows = Object.entries(consolidated).sort((a, b) => b[1].meters - a[1].meters)
+    .map(([k, v]) => `<tr><td>${v.image ? `<img class="fab-thumb" src="${v.image}" alt="">` : ''}</td><td>${k}</td><td class="num">${v.meters.toLocaleString('ru')} м</td></tr>`).join('');
 
   root.innerHTML = `
     <div class="panel">
@@ -173,9 +184,9 @@ function renderFabricOrder() {
     </div>
     ${sections || '<div class="panel"><div class="mini">На эту партию нет плана.</div></div>'}
     ${consRows ? `<div class="panel"><h3>Консолидировано к заказу (по планшету/цвету)</h3>
-      <table><thead><tr><th>Планшет / цвет</th><th class="num">Метраж</th></tr></thead>
+      <table><thead><tr><th>Образец</th><th>Планшет / цвет</th><th class="num">Метраж</th></tr></thead>
       <tbody>${consRows}</tbody>
-      <tfoot><tr><th>ВСЕГО</th><th class="num">${grand.toLocaleString('ru')} м</th></tr></tfoot></table>
+      <tfoot><tr><th colspan="2">ВСЕГО</th><th class="num">${grand.toLocaleString('ru')} м</th></tr></tfoot></table>
       <div class="mini" style="margin-top:8px">Строки с общим планшетом и номером цвета суммируются в одну позицию заказа. Форму заказа доработаем позже.</div></div>` : ''}
   `;
 
@@ -374,7 +385,7 @@ function spMiniTable(a, stage, cycles) {
     ${a.comment ? `<div class="mini-comment">💬 ${a.comment}</div>` : ''}
     ${workshopLine(cycles)}
     <div class="matrix-scroll"><table class="matrix-table mini">
-      <thead><tr><th class="mx-corner">Размер</th>${a.colors.map((c) => `<th class="mx-color">${c}</th>`).join('')}<th class="mx-rowtot-h">Σ</th></tr></thead>
+      <thead><tr><th class="mx-corner">Размер</th>${a.colors.map((c) => `<th class="mx-color">${swatchTag(a, c, 60, 30)}<div>${c}</div></th>`).join('')}<th class="mx-rowtot-h">Σ</th></tr></thead>
       <tbody>${a.sizes.map((s) => `<tr><th class="mx-size">${s}</th>${a.colors.map((c) => { const v = cell(M, c, s); return `<td class="num">${v || '<span class="mini">·</span>'}</td>`; }).join('')}<td class="num mx-rowtot">${a.colors.reduce((n, c) => n + cell(M, c, s), 0)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><th class="mx-vsego">ВСЕГО</th>${a.colors.map((c) => `<td class="num mx-coltot">${a.sizes.reduce((n, s) => n + cell(M, c, s), 0)}</td>`).join('')}<td class="num mx-grand">${total.toLocaleString('ru')}</td></tr></tfoot>
     </table></div>
@@ -387,7 +398,7 @@ function matrixTable(a, M) {
   <table class="matrix-table">
     <thead>
       <tr><th class="mx-corner">Размер \\ Цвет</th>
-        ${a.colors.map((c) => `<th class="mx-color">${c}</th>`).join('')}
+        ${a.colors.map((c) => `<th class="mx-color">${swatchTag(a, c, 72, 34)}<div>${c}</div></th>`).join('')}
         <th class="mx-rowtot-h">Итого по размеру</th></tr>
     </thead>
     <tbody>
@@ -579,6 +590,14 @@ function dataArticlesPanel() {
           <div class="field" style="flex:2"><label>Цвета (через запятую)</label><input data-art="${i}" data-f="colors" value="${(a.colors || []).join(', ')}"></div>
         </div>
         <div class="field"><label>Размерный ряд (через запятую)</label><input data-art="${i}" data-f="sizes" value="${(a.sizes || []).join(', ')}"></div>
+        <div class="field"><label>Образцы ткани по цветам (80×40)</label>
+          <div class="swatch-row">${(a.colors || []).map((c) => `<div class="swatch-item">
+            ${fabricImgSrc(a, c) ? `<img class="swatch" src="${fabricImgSrc(a, c)}" alt="">` : '<div class="swatch swatch-empty">нет</div>'}
+            <div class="swatch-name" title="${c}">${c}</div>
+            <label class="fab-up">${fabricImgSrc(a, c) ? 'заменить' : '＋ загрузить'}<input type="file" accept="image/*" data-artimg data-art="${i}" data-color="${encodeURIComponent(c)}" hidden></label>
+            ${fabricImgSrc(a, c) ? `<button class="swatch-del" data-artimg-del data-art="${i}" data-color="${encodeURIComponent(c)}" title="удалить образец">✕</button>` : ''}
+          </div>`).join('') || '<span class="mini">Сначала укажи цвета выше.</span>'}</div>
+        </div>
         <button class="btn btn-danger" data-del-art="${i}">Удалить</button>
       </div>`).join('')}</div></div>`;
 }
@@ -643,10 +662,26 @@ function bindDataEvents() {
 
   root.querySelectorAll('input[data-art]').forEach((inp) => inp.addEventListener('change', (e) => {
     const a = state.articles[+e.target.dataset.art]; const f = e.target.dataset.f;
-    if (f === 'colors') a.colors = e.target.value.split(',').map((x) => x.trim()).filter(Boolean);
+    if (f === 'colors') { a.colors = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); mark(); renderData(); return; }
     else if (f === 'sizes') a.sizes = e.target.value.split(',').map((x) => x.trim()).filter(Boolean);
     else if (f === 'fabricPerUnit') a.fabricPerUnit = +e.target.value || 1.6;
     else a[f] = e.target.value; mark();
+  }));
+  root.querySelectorAll('input[data-artimg]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (file.size > 1200000) { toast('Изображение слишком большое (макс ~1 МБ)', true); return; }
+    const a = state.articles[+e.target.dataset.art];
+    const c = decodeURIComponent(e.target.dataset.color);
+    const reader = new FileReader();
+    reader.onload = () => { a.fabricInfo = a.fabricInfo || {}; a.fabricInfo[c] = a.fabricInfo[c] || {}; a.fabricInfo[c].image = reader.result; mark(); renderData(); toast('Образец добавлен (не забудь «Сохранить»)'); };
+    reader.readAsDataURL(file);
+  }));
+  root.querySelectorAll('[data-artimg-del]').forEach((b) => b.addEventListener('click', () => {
+    const a = state.articles[+b.dataset.art];
+    const c = decodeURIComponent(b.dataset.color);
+    if (a.fabricInfo && a.fabricInfo[c]) delete a.fabricInfo[c].image;
+    mark(); renderData();
   }));
   root.querySelectorAll('[data-del-art]').forEach((b) => b.addEventListener('click', () => { state.articles.splice(+b.dataset.delArt, 1); mark(); renderData(); }));
   root.querySelector('#btn-add-article')?.addEventListener('click', () => {
