@@ -111,21 +111,21 @@ export function buildMatrix(total, colors, sizes) {
 function seedArticles() {
   const S = ['S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'];
   // matrix: этап -> цвет -> размер -> штук; plan (сумма по этапу) выводится из matrix
-  const mk = (id, name, comment, colors, sizes, fabricPerUnit, totals) => {
+  const mk = (id, name, comment, colors, sizes, fabricPerUnit, price, totals) => {
     const stageIds = ['stage1', 'stage2', 'stage3', 'stage4'];
     const matrix = {}; const plan = {};
     stageIds.forEach((sid, i) => {
       matrix[sid] = buildMatrix(totals[i], colors, sizes);
       plan[sid] = totals[i];
     });
-    return { id, name, comment, colors, sizes, fabricPerUnit, matrix, plan };
+    return { id, name, comment, colors, sizes, fabricPerUnit, fabricPricePerMeter: price, matrix, plan };
   };
   return [
-    mk('026', 'Рубашка мужская 026', 'клетка, приталенная', ['розовый-серый', 'белый-серый', 'голубой', 'синий'], S, 1.6, [1403, 1413, 1711, 1978]),
-    mk('027', 'Рубашка мужская 027', 'однотонная, классика', ['голубой', 'белая', 'серый'], S, 1.6, [1674, 1769, 2017, 2399]),
-    mk('031', 'Рубашка мужская 031', 'твид, отложной воротник', ['чёрный', 'синяя', 'коричневая', 'зелёный', 'белая'], S, 1.7, [1008, 1219, 1476, 1706]),
-    mk('035', 'Рубашка мужская 035', 'лён, свободный крой', ['розовый', 'серый', 'шоколад'], S, 1.6, [2087, 2502, 3301, 3800]),
-    mk('004', 'Рубашка мужская 004', 'оксфорд, на пуговицах', ['голубой', 'серый', 'чёрный'], S, 1.6, [1245, 1404, 2600, 3692]),
+    mk('026', 'Рубашка мужская 026', 'клетка, приталенная', ['розовый-серый', 'белый-серый', 'голубой', 'синий'], S, 1.6, 3.5, [1403, 1413, 1711, 1978]),
+    mk('027', 'Рубашка мужская 027', 'однотонная, классика', ['голубой', 'белая', 'серый'], S, 1.6, 3.2, [1674, 1769, 2017, 2399]),
+    mk('031', 'Рубашка мужская 031', 'твид, отложной воротник', ['чёрный', 'синяя', 'коричневая', 'зелёный', 'белая'], S, 1.7, 4.8, [1008, 1219, 1476, 1706]),
+    mk('035', 'Рубашка мужская 035', 'лён, свободный крой', ['розовый', 'серый', 'шоколад'], S, 1.6, 4.1, [2087, 2502, 3301, 3800]),
+    mk('004', 'Рубашка мужская 004', 'оксфорд, на пуговицах', ['голубой', 'серый', 'чёрный'], S, 1.6, 3.6, [1245, 1404, 2600, 3692]),
   ];
 }
 
@@ -169,6 +169,7 @@ export function normalizeState(input) {
     a.matrix = a.matrix && typeof a.matrix === 'object' ? a.matrix : {};
     a.comment = typeof a.comment === 'string' ? a.comment : '';
     a.fabricPerUnit = +a.fabricPerUnit > 0 ? +a.fabricPerUnit : 1.6;
+    a.fabricPricePerMeter = +a.fabricPricePerMeter >= 0 ? +a.fabricPricePerMeter : 0; // $/м
     a.colors = Array.isArray(a.colors) ? a.colors : [];
     a.sizes = Array.isArray(a.sizes) ? a.sizes : [];
     // метаданные ткани по цвету: { цвет: { plansheet, colorNo, image(dataURL) } }

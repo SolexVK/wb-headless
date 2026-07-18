@@ -134,21 +134,24 @@ function renderFabricOrder() {
   const cyc = (schedule?.cycles || []).filter((c) => c.stageId === stage.id);
   const earliest = cyc.map((c) => c.fabric.orderDate).sort()[0];
 
+  const money = (v) => '$' + Math.round(v || 0).toLocaleString('ru');
   const arts = articlesSorted().filter((a) => articleStageTotal(a, stage.id) > 0);
-  let grand = 0;
-  const consolidated = {}; // планшет/№цвета -> метраж
+  let grand = 0, grandCost = 0;
+  const consolidated = {}; // планшет/№цвета -> { meters, image, cost }
 
   const sections = arts.map((a) => {
     a.fabricInfo = a.fabricInfo || {};
-    let sub = 0;
+    const price = +a.fabricPricePerMeter || 0;
+    let sub = 0, subCost = 0;
     const rows = a.colors.map((c) => {
       const u = colorUnits(a, stage.id, c);
       if (u <= 0) return '';
       const info = (a.fabricInfo[c] = a.fabricInfo[c] || {});
       const m = meters(u, a.fabricPerUnit); sub += m; grand += m;
+      const cost = m * price; subCost += cost; grandCost += cost;
       const key = (info.plansheet || info.colorNo) ? `${info.plansheet || '—'} / цвет ${info.colorNo || '—'}` : `${a.id} · ${c}`;
-      if (!consolidated[key]) consolidated[key] = { meters: 0, image: info.image || '' };
-      consolidated[key].meters += m;
+      if (!consolidated[key]) consolidated[key] = { meters: 0, image: info.image || '', cost: 0 };
+      consolidated[key].meters += m; consolidated[key].cost += cost;
       if (!consolidated[key].image && info.image) consolidated[key].image = info.image;
       return `<tr>
         <td>${c}</td>
@@ -157,19 +160,20 @@ function renderFabricOrder() {
         <td>${info.colorNo ? info.colorNo : '<span class="mini">—</span>'}</td>
         <td class="num">${u.toLocaleString('ru')}</td>
         <td class="num">${m.toLocaleString('ru')}</td>
+        <td class="num">${price ? money(cost) : '<span class="mini">—</span>'}</td>
       </tr>`;
     }).join('');
     return `<div class="panel">
       <div class="subhead"><h3>${a.id} — ${a.name}</h3>
-        <label class="mini">расход ткани <input data-fab-per data-art="${a.id}" value="${a.fabricPerUnit}" style="width:60px;text-align:right"> м/шт</label></div>
-      <table><thead><tr><th>Цвет</th><th>Планшет поставщика</th><th>Образец</th><th>№ цвета</th><th class="num">Штук</th><th class="num">Метраж</th></tr></thead>
+        <span class="mini">расход ${a.fabricPerUnit} м/шт · цена ${price ? '$' + price + '/м' : '— (задай в «Данные»)'}</span></div>
+      <table><thead><tr><th>Цвет</th><th>Планшет поставщика</th><th>Образец</th><th>№ цвета</th><th class="num">Штук</th><th class="num">Метраж</th><th class="num">Стоимость</th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><th colspan="5">Итого по артикулу</th><th class="num">${sub.toLocaleString('ru')} м</th></tr></tfoot></table>
+      <tfoot><tr><th colspan="5">Итого по артикулу</th><th class="num">${sub.toLocaleString('ru')} м</th><th class="num">${price ? money(subCost) : '—'}</th></tr></tfoot></table>
     </div>`;
   }).join('');
 
   const consRows = Object.entries(consolidated).sort((a, b) => b[1].meters - a[1].meters)
-    .map(([k, v]) => `<tr><td>${v.image ? `<img class="fab-thumb" src="${v.image}" alt="">` : ''}</td><td>${k}</td><td class="num">${v.meters.toLocaleString('ru')} м</td></tr>`).join('');
+    .map(([k, v]) => `<tr><td>${v.image ? `<img class="fab-thumb" src="${v.image}" alt="">` : ''}</td><td>${k}</td><td class="num">${v.meters.toLocaleString('ru')} м</td><td class="num">${v.cost ? money(v.cost) : '<span class="mini">—</span>'}</td></tr>`).join('');
 
   root.innerHTML = `
     <div class="panel">
@@ -177,27 +181,23 @@ function renderFabricOrder() {
         <label>Партия:
           <select id="fab-stage">${state.stages.map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>Партия ${state.stages.findIndex((x) => x.id === s.id) + 1} · ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
         </label>
-        <span class="mini">Консолидированный заказ на партию, запас +${wastage}%. Образец, № планшета и № цвета берутся из «Данных».</span>
+        <span class="mini">Консолидированный заказ на партию, запас +${wastage}%. Образец, № планшета, № цвета и цена ткани берутся из «Данных».</span>
       </div>
       <div class="fab-summary">
         <div><div class="k">Разместить заказ</div><div class="v">${earliest ? fmt(earliest) : '—'}</div><div class="mini">самая ранняя дата из артикулов этапа${earliest ? '' : ' (нажми «Пересчитать»)'}</div></div>
         <div><div class="k">Итого ткани на партию</div><div class="v good">${grand.toLocaleString('ru')} м</div></div>
+        <div><div class="k">Стоимость ткани на партию</div><div class="v good">${money(grandCost)}</div></div>
       </div>
     </div>
     ${sections || '<div class="panel"><div class="mini">На эту партию нет плана.</div></div>'}
     ${consRows ? `<div class="panel"><h3>Консолидировано к заказу (по планшету/цвету)</h3>
-      <table><thead><tr><th>Образец</th><th>Планшет / цвет</th><th class="num">Метраж</th></tr></thead>
+      <table><thead><tr><th>Образец</th><th>Планшет / цвет</th><th class="num">Метраж</th><th class="num">Стоимость</th></tr></thead>
       <tbody>${consRows}</tbody>
-      <tfoot><tr><th colspan="2">ВСЕГО</th><th class="num">${grand.toLocaleString('ru')} м</th></tr></tfoot></table>
+      <tfoot><tr><th colspan="2">ВСЕГО</th><th class="num">${grand.toLocaleString('ru')} м</th><th class="num">${money(grandCost)}</th></tr></tfoot></table>
       <div class="mini" style="margin-top:8px">Строки с общим планшетом и номером цвета суммируются в одну позицию заказа. Форму заказа доработаем позже.</div></div>` : ''}
   `;
 
   document.getElementById('fab-stage').addEventListener('change', (e) => { fabricStageId = e.target.value; renderFabricOrder(); });
-  root.querySelectorAll('input[data-fab-per]').forEach((inp) => inp.addEventListener('change', (e) => {
-    const a = state.articles.find((x) => x.id === e.target.dataset.art);
-    a.fabricPerUnit = +e.target.value > 0 ? +e.target.value : a.fabricPerUnit;
-    dirty = true; renderFabricOrder();
-  }));
   applyCollapsibles();
 }
 
@@ -572,6 +572,7 @@ function dataArticlesPanel() {
         <div class="field"><label>Комментарий (кратко об особенностях)</label><input data-art="${i}" data-f="comment" value="${(a.comment || '').replace(/"/g, '&quot;')}" placeholder="напр.: твид, приталенная, отложной воротник"></div>
         <div class="row-flex">
           <div class="field"><label>Расход ткани, м/шт</label><input data-art="${i}" data-f="fabricPerUnit" value="${a.fabricPerUnit}" style="width:90px"></div>
+          <div class="field"><label>Цена ткани, $/м</label><input data-art="${i}" data-f="fabricPricePerMeter" value="${a.fabricPricePerMeter || 0}" style="width:90px"></div>
           <div class="field" style="flex:2"><label>Цвета (через запятую)</label><input data-art="${i}" data-f="colors" value="${(a.colors || []).join(', ')}"></div>
         </div>
         <div class="field"><label>Размерный ряд (через запятую)</label><input data-art="${i}" data-f="sizes" value="${(a.sizes || []).join(', ')}"></div>
@@ -654,6 +655,7 @@ function bindDataEvents() {
     if (f === 'colors') { a.colors = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); mark(); renderData(); return; }
     else if (f === 'sizes') a.sizes = e.target.value.split(',').map((x) => x.trim()).filter(Boolean);
     else if (f === 'fabricPerUnit') a.fabricPerUnit = +e.target.value || 1.6;
+    else if (f === 'fabricPricePerMeter') a.fabricPricePerMeter = Math.max(0, +e.target.value || 0);
     else a[f] = e.target.value; mark();
   }));
   root.querySelectorAll('input[data-artimg]').forEach((inp) => inp.addEventListener('change', (e) => {
@@ -681,7 +683,7 @@ function bindDataEvents() {
   }));
   root.querySelectorAll('[data-del-art]').forEach((b) => b.addEventListener('click', () => { state.articles.splice(+b.dataset.delArt, 1); mark(); renderData(); }));
   root.querySelector('#btn-add-article')?.addEventListener('click', () => {
-    state.articles.push({ id: uid('art').slice(0, 6), name: 'Новый артикул', comment: '', fabricPerUnit: 1.6, colors: ['белый'], sizes: ['S', 'M', 'L', 'XL'], plan: {} }); mark(); renderData();
+    state.articles.push({ id: uid('art').slice(0, 6), name: 'Новый артикул', comment: '', fabricPerUnit: 1.6, fabricPricePerMeter: 0, colors: ['белый'], sizes: ['S', 'M', 'L', 'XL'], plan: {} }); mark(); renderData();
   });
 
   root.querySelectorAll('input[data-ws],select[data-ws]').forEach((inp) => inp.addEventListener('change', (e) => {
@@ -741,9 +743,19 @@ function initTheme() {
 }
 
 // ---------- инициализация ----------
+function initScrollTop() {
+  const btn = document.getElementById('scroll-top');
+  if (!btn) return;
+  const onScroll = () => btn.classList.toggle('show', (window.scrollY || document.documentElement.scrollTop) > 300);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  onScroll();
+}
+
 async function init() {
   initTheme();
   initCollapsibles();
+  initScrollTop();
   document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
   document.getElementById('btn-recalc').addEventListener('click', () => recalc(false).then(() => toast('Пересчитано')));
   document.getElementById('btn-save').addEventListener('click', () => recalc(true).then(() => toast('Сохранено и пересчитано')).catch((e) => toast('Ошибка: ' + e.message, true)));
