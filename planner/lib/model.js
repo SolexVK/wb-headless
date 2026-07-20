@@ -232,12 +232,14 @@ function ensurePartias(s) {
   }
   // выкинуть партии с несуществующими артикулом/этапом
   s.partias = s.partias.filter((p) => articleIds.has(p.articleId) && stageIds.has(p.stageId));
-  // нормализация полей
+  // нормализация полей + чистка матриц от «осиротевших» цветов/размеров
+  const artById = Object.fromEntries(s.articles.map((a) => [a.id, a]));
   for (const p of s.partias) {
     p.id = p.id || genPartiaId();
     p.workshopId = typeof p.workshopId === 'string' ? p.workshopId : '';
-    p.planMatrix = p.planMatrix && typeof p.planMatrix === 'object' ? p.planMatrix : {};
-    p.factMatrix = p.factMatrix && typeof p.factMatrix === 'object' ? p.factMatrix : {};
+    const a = artById[p.articleId];
+    p.planMatrix = pruneMatrix(p.planMatrix, a);
+    p.factMatrix = pruneMatrix(p.factMatrix, a);
     p.status = PARTIA_STATUSES.includes(p.status) ? p.status : 'plan';
     p.historical = !!p.historical;
   }
@@ -285,6 +287,23 @@ export function stagePlanUnits(state, articleId, stageId) {
 // сравнение id артикулов по номеру (числовое, «004» < «026»)
 export function compareArticleId(a, b) {
   return String(a.id).localeCompare(String(b.id), undefined, { numeric: true, sensitivity: 'base' });
+}
+
+// оставить в матрице только цвета/размеры, реально существующие у артикула
+// (убирает «осиротевшие» ключи после удаления/переименования — иначе суммы расходятся)
+export function pruneMatrix(M, article) {
+  if (!M || typeof M !== 'object') return {};
+  if (!article) return M; // артикул не найден — не трогаем
+  const cset = new Set(article.colors || []);
+  const sset = new Set(article.sizes || []);
+  const out = {};
+  for (const c of Object.keys(M)) {
+    if (!cset.has(c)) continue;
+    const row = M[c] || {};
+    out[c] = {};
+    for (const sz of Object.keys(row)) if (sset.has(sz)) out[c][sz] = Math.max(0, Math.round(+row[sz] || 0));
+  }
+  return out;
 }
 
 // сумма всех ячеек матрицы одного этапа { цвет: { размер: qty } }

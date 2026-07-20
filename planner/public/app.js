@@ -461,6 +461,26 @@ function renderSalesPlan() {
 // ---------- матрица размер×цвет ----------
 function sumMatrix(M) { let s = 0; for (const c in M) { const r = M[c] || {}; for (const k in r) s += +r[k] || 0; } return Math.round(s); }
 function cell(M, c, s) { return +((M[c] || {})[s]) || 0; }
+// удалить из матрицы ключи цветов/размеров, которых больше нет у артикула (иначе они «прячутся»
+// в общей сумме, но не попадают в итоги по строкам/столбцам → расхождение сумм)
+function pruneMatrix(M, a) {
+  if (!M || typeof M !== 'object' || !a) return M || {};
+  const cset = new Set(a.colors || []), sset = new Set(a.sizes || []);
+  const out = {};
+  for (const c in M) {
+    if (!cset.has(c)) continue;
+    const row = M[c] || {}; out[c] = {};
+    for (const sz in row) if (sset.has(sz)) out[c][sz] = Math.max(0, Math.round(+row[sz] || 0));
+  }
+  return out;
+}
+// привести все партии артикула к его текущим цветам/размерам
+function pruneArticlePartias(a) {
+  for (const p of (state.partias || []).filter((x) => x.articleId === a.id)) {
+    p.planMatrix = pruneMatrix(p.planMatrix, a);
+    p.factMatrix = pruneMatrix(p.factMatrix, a);
+  }
+}
 
 // ---- партии (клиент) ----
 const PARTIA_STATUS_RU = { plan: 'план', cutting: 'крой', sewing: 'пошив', done: 'готово', shipped: 'отгружено' };
@@ -1020,8 +1040,8 @@ function bindDataEvents() {
 
   root.querySelectorAll('input[data-art]').forEach((inp) => inp.addEventListener('change', (e) => {
     const a = state.articles[+e.target.dataset.art]; const f = e.target.dataset.f;
-    if (f === 'colors') { a.colors = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); mark(); renderData(); return; }
-    else if (f === 'sizes') a.sizes = e.target.value.split(',').map((x) => x.trim()).filter(Boolean);
+    if (f === 'colors') { a.colors = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); pruneArticlePartias(a); mark(); renderData(); return; }
+    else if (f === 'sizes') { a.sizes = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); pruneArticlePartias(a); mark(); renderData(); return; }
     else if (f === 'fabricPerUnit') a.fabricPerUnit = +e.target.value || 1.6;
     else if (f === 'fabricPricePerMeter') a.fabricPricePerMeter = Math.max(0, +e.target.value || 0);
     else a[f] = e.target.value; mark();
