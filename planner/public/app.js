@@ -60,9 +60,41 @@ function switchTab(tab) {
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${tab}`));
   renderCurrent();
 }
+// ---------- сезоны (мультисезон) ----------
+let activeSeasonId = '';
+function seasonStages() { return activeSeasonId ? state.stages.filter((s) => s.seasonId === activeSeasonId) : state.stages.slice(); }
+function stageInSeason(stageId) { if (!activeSeasonId) return true; const st = state.stages.find((s) => s.id === stageId); return !!st && st.seasonId === activeSeasonId; }
+function refreshSeasonFilter() {
+  const sel = document.getElementById('season-filter');
+  if (!sel) return;
+  const seasons = state.seasons || [];
+  if (activeSeasonId && !seasons.find((se) => se.id === activeSeasonId)) activeSeasonId = '';
+  sel.innerHTML = `<option value="">Все сезоны</option>` + seasons.map((se) => `<option value="${se.id}"${se.id === activeSeasonId ? ' selected' : ''}>${se.name}</option>`).join('');
+}
+const addMonthYM = (ym, k) => { let [y, m] = ym.split('-').map(Number); m += k; y += Math.floor((m - 1) / 12); m = ((m - 1) % 12 + 12) % 12 + 1; return `${y}-${String(m).padStart(2, '0')}`; };
+function addSeason() {
+  state.seasons = state.seasons || [];
+  const n = state.seasons.length + 1;
+  const id = 'season_' + Math.random().toString(36).slice(2, 8);
+  state.seasons.push({ id, name: 'Сезон ' + n });
+  // продолжаем календарь: 4 этапа сразу после последнего месяца отшива (бесшовно)
+  let lastYM = null;
+  for (const s of state.stages) { if (s.productionMonth && (!lastYM || s.productionMonth > lastYM)) lastYM = s.productionMonth; }
+  const base = lastYM || '2026-06';
+  for (let i = 0; i < 4; i++) {
+    const pm = addMonthYM(base, i + 1);
+    state.stages.push({ id: uid('stage'), name: `Этап ${i + 1}`, seasonId: id, salesMonths: '', productionMonth: pm, deadline: addMonthYM(pm, 1) + '-01' });
+  }
+  activeSeasonId = id;
+}
+
 function renderCurrent() {
   recomputePartiaNumbers(); // держим номера партий (по цехам) актуальными для отображения
-  if (activeTab === 'gantt') renderGantt(document.getElementById('gantt'), schedule, state, { pxPerDay, onOverride });
+  refreshSeasonFilter();
+  if (activeTab === 'gantt') {
+    const sch = { ...schedule, cycles: (schedule?.cycles || []).filter((c) => stageInSeason(c.stageId)) };
+    renderGantt(document.getElementById('gantt'), sch, state, { pxPerDay, onOverride });
+  }
   else if (activeTab === 'matrix') renderMatrix();
   else if (activeTab === 'salesplan') renderSalesPlan();
   else if (activeTab === 'fact') renderFact();
@@ -79,16 +111,18 @@ function renderFact() {
   const root = document.getElementById('fact');
   const all = state.partias || [];
   if (!all.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет партий. Создай план на «План по размерам».</div></div>'; return; }
-  // фильтры: этап / артикул / цех
-  const matchP = (x) => (!factFilterStage || x.stageId === factFilterStage)
+  // фильтры: этап / артикул / цех (+ активный сезон)
+  const matchP = (x) => stageInSeason(x.stageId)
+    && (!factFilterStage || x.stageId === factFilterStage)
     && (!factFilterArticle || x.articleId === factFilterArticle)
     && (!factFilterWs || (factFilterWs === '__auto__' ? !x.workshopId : x.workshopId === factFilterWs));
   const stageOrder = {}; state.stages.forEach((s, i) => { stageOrder[s.id] = i; });
   const parts = all.filter(matchP).sort((x, y) => (stageOrder[x.stageId] - stageOrder[y.stageId]) || (x.workshopId || '').localeCompare(y.workshopId || '') || x.no - y.no);
+  const gIdx = (id) => state.stages.findIndex((z) => z.id === id) + 1;
 
   const filtersHtml = `
     <div class="matrix-controls">
-      <label>Этап: <select id="ff-stage"><option value="">все</option>${state.stages.map((s, i) => `<option value="${s.id}"${s.id === factFilterStage ? ' selected' : ''}>Этап ${i + 1}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select></label>
+      <label>Этап: <select id="ff-stage"><option value="">все</option>${seasonStages().map((s) => `<option value="${s.id}"${s.id === factFilterStage ? ' selected' : ''}>Этап ${gIdx(s.id)}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select></label>
       <label>Артикул: <select id="ff-article"><option value="">все</option>${articlesSorted().map((x) => `<option value="${x.id}"${x.id === factFilterArticle ? ' selected' : ''}>${x.id}</option>`).join('')}</select></label>
       <label>Цех: <select id="ff-ws"><option value="">все</option><option value="__auto__"${factFilterWs === '__auto__' ? ' selected' : ''}>авто (не назначен)</option>${state.workshops.map((w) => `<option value="${w.id}"${w.id === factFilterWs ? ' selected' : ''}>${w.name}</option>`).join('')}</select></label>
       <label>Партия: <select id="fact-partia">${parts.map((x) => { const wn = state.workshops.find((w) => w.id === x.workshopId)?.name || 'авто'; const si = state.stages.findIndex((z) => z.id === x.stageId) + 1; return `<option value="${x.id}"${x.id === factPartiaId ? ' selected' : ''}>${wn} · Партия ${x.no} · ${x.articleId} · Этап ${si}</option>`; }).join('') || '<option>нет партий</option>'}</select></label>
@@ -239,8 +273,10 @@ function renderFabricOrder() {
     root.innerHTML = '<div class="panel"><div class="mini">Нет этапов или артикулов.</div></div>';
     return;
   }
-  if (!fabricStageId || !state.stages.find((s) => s.id === fabricStageId)) fabricStageId = state.stages[0].id;
+  const sStages = seasonStages();
+  if (!fabricStageId || !sStages.find((s) => s.id === fabricStageId)) fabricStageId = sStages[0]?.id;
   const stage = state.stages.find((s) => s.id === fabricStageId);
+  if (!stage) { document.getElementById('fabric').innerHTML = '<div class="panel"><div class="mini">В выбранном сезоне нет этапов.</div></div>'; return; }
   const stageIdx = state.stages.findIndex((s) => s.id === stage.id) + 1;
   const wastage = +(state.settings.fabric.wastagePct) || 0;
   const meters = (units, perUnit) => Math.ceil(units * perUnit * (1 + wastage / 100));
@@ -293,7 +329,7 @@ function renderFabricOrder() {
     <div class="panel">
       <div class="matrix-controls">
         <label>Партия:
-          <select id="fab-stage">${state.stages.map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>Партия ${state.stages.findIndex((x) => x.id === s.id) + 1} · ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
+          <select id="fab-stage">${seasonStages().map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>Этап ${state.stages.findIndex((x) => x.id === s.id) + 1}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
         </label>
         <span class="mini">Консолидированный заказ на партию, запас +${wastage}%. Образец, № планшета, № цвета и цена ткани берутся из «Данных».</span>
       </div>
@@ -333,7 +369,7 @@ function renderSalesPlan() {
   spWorkshops = new Set([...spWorkshops].filter((id) => state.workshops.some((w) => w.id === id)));
 
   const stageIndex = Object.fromEntries(state.stages.map((s, i) => [s.id, i + 1]));
-  const stages = state.stages.filter((s) => spStages.has(s.id));
+  const stages = seasonStages().filter((s) => spStages.has(s.id));
   const arts = state.articles.filter((a) => spArticles.has(a.id));
 
   // какие цеха отшивают каждый артикул на каждом этапе — из расписания
@@ -345,8 +381,8 @@ function renderSalesPlan() {
       <div class="subhead"><h3>План продаж — детально по партиям и артикулам</h3><span class="mini">выбери партии, артикулы и цеха для просмотра</span></div>
       <div class="sp-filters">
         <div class="sp-group">
-          <div class="sp-title">Партии (этапы) <button class="sp-all" data-all="stages">все</button> <button class="sp-all" data-none="stages">снять</button></div>
-          <div class="sp-chips">${state.stages.map((s) => `<label class="sp-chip${spStages.has(s.id) ? ' on' : ''}"><input type="checkbox" data-sp-stage="${s.id}"${spStages.has(s.id) ? ' checked' : ''}> Партия ${stageIndex[s.id]} · ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</label>`).join('')}</div>
+          <div class="sp-title">Этапы <button class="sp-all" data-all="stages">все</button> <button class="sp-all" data-none="stages">снять</button></div>
+          <div class="sp-chips">${seasonStages().map((s) => `<label class="sp-chip${spStages.has(s.id) ? ' on' : ''}"><input type="checkbox" data-sp-stage="${s.id}"${spStages.has(s.id) ? ' checked' : ''}> Этап ${stageIndex[s.id]}${s.salesMonths ? ' · ' + s.salesMonths : ''}</label>`).join('')}</div>
         </div>
         <div class="sp-group">
           <div class="sp-title">Артикулы <button class="sp-all" data-all="articles">все</button> <button class="sp-all" data-none="articles">снять</button></div>
@@ -453,10 +489,12 @@ function renderMatrix() {
   const root = document.getElementById('matrix');
   if (!state.articles.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет артикулов. Добавь их во вкладке «Данные».</div></div>'; return; }
   if (!matrixArticleId || !state.articles.find((a) => a.id === matrixArticleId)) matrixArticleId = state.articles[0].id;
-  if (!matrixStageId || !state.stages.find((s) => s.id === matrixStageId)) matrixStageId = state.stages[0]?.id;
+  const sStages = seasonStages();
+  if (!matrixStageId || !sStages.find((s) => s.id === matrixStageId)) matrixStageId = sStages[0]?.id;
 
   const a = state.articles.find((x) => x.id === matrixArticleId);
   const stage = state.stages.find((s) => s.id === matrixStageId);
+  if (!stage) { root.innerHTML = '<div class="panel"><div class="mini">В выбранном сезоне нет этапов.</div></div>'; return; }
   const stIdx = state.stages.findIndex((s) => s.id === stage.id) + 1;
   const parts = partiasOf(a.id, stage.id);
   // выбранная партия
@@ -466,7 +504,7 @@ function renderMatrix() {
   const controls = `
     <div class="matrix-controls">
       <label>Этап (период):
-        <select id="mx-stage">${state.stages.map((s, i) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>Этап ${i + 1}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
+        <select id="mx-stage">${sStages.map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>Этап ${state.stages.findIndex((z) => z.id === s.id) + 1}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
       </label>
       <label>Артикул:
         <select id="mx-article">${articlesSorted().map((x) => `<option value="${x.id}"${x.id === a.id ? ' selected' : ''}>${x.id} — ${x.name}</option>`).join('')}</select>
@@ -663,11 +701,11 @@ function renderDashboard() {
     </div>
 
     <div class="panel"><h3>Артикулы и этапы (готовность / приход на WB)</h3>
-      <table><thead><tr><th>Артикул</th><th>Цвета</th>${state.stages.map((s) => `<th>${s.name}<div class="mini">${s.salesMonths}</div></th>`).join('')}</tr></thead>
+      <table><thead><tr><th>Артикул</th><th>Цвета</th>${seasonStages().map((s) => `<th>${s.name}<div class="mini">${s.salesMonths}</div></th>`).join('')}</tr></thead>
       <tbody>${state.articles.map((a) => `<tr>
         <td><b>${a.id}</b><div class="mini">${a.name}</div></td>
         <td class="mini">${(a.colors || []).length} цв.</td>
-        ${state.stages.map((s) => articleStageCell(a, s)).join('')}
+        ${seasonStages().map((s) => articleStageCell(a, s)).join('')}
       </tr>`).join('')}</tbody></table>
     </div>
 
@@ -745,6 +783,7 @@ function renderData() {
     <div class="panel"><div class="mini">Ввод количеств по размерам — вкладка «План по размерам». Сводка плана — вкладка «План продаж».</div></div>
     ${dataArticlesPanel()}
     ${dataWorkshopsPanel()}
+    ${dataSeasonsPanel()}
     ${dataStagesPanel()}
     ${dataSettingsPanel()}
     <div class="panel"><button class="btn btn-danger" id="btn-reset">Сбросить к примеру</button></div>
@@ -803,10 +842,22 @@ function dataWorkshopsPanel() {
     <div class="mini" style="margin-top:8px">Мощность — штук в день (узкое горлышко — пошив). Сдвиги (раб. дней) задают перекрытие операций внутри цикла: на сколько дней старт пошива смещён от кроя, утюжки — от пошива, ОТК — от утюжки. Пусто = «авто» (движок посчитает по мощности). У каждого цеха свои значения.</div></div>`;
 }
 
+function dataSeasonsPanel() {
+  return `<div class="panel"><div class="subhead"><h3>Сезоны</h3><button class="btn" id="btn-add-season">+ Сезон</button></div>
+    <table><thead><tr><th>Название сезона</th><th class="num">Этапов</th><th></th></tr></thead>
+    <tbody>${(state.seasons || []).map((se, i) => `<tr>
+      <td><input data-season="${i}" value="${(se.name || '').replace(/"/g, '&quot;')}" style="width:220px"></td>
+      <td class="num">${state.stages.filter((s) => s.seasonId === se.id).length}</td>
+      <td>${(state.seasons.length > 1) ? `<button class="btn btn-danger" data-del-season="${i}">✕</button>` : '<span class="mini">послед.</span>'}</td>
+    </tr>`).join('')}</tbody></table>
+    <div class="mini" style="margin-top:8px">Сезон — контейнер над этапами (напр. «Осень-Зима 2026»). Селектор сезона в шапке фильтрует все листы. Новый сезон добавляет свои 4 этапа, продолжающие календарь предыдущего.</div></div>`;
+}
+
 function dataStagesPanel() {
   return `<div class="panel"><div class="subhead"><h3>Этапы производства</h3><button class="btn" id="btn-add-stage">+ Этап</button></div>
-    <table><thead><tr><th>Название</th><th>Месяцы продаж</th><th>Месяц отшива (YYYY-MM)</th><th>Дедлайн WB (YYYY-MM-DD)</th><th></th></tr></thead>
+    <table><thead><tr><th>Сезон</th><th>Название</th><th>Месяцы продаж</th><th>Месяц отшива (YYYY-MM)</th><th>Дедлайн WB (YYYY-MM-DD)</th><th></th></tr></thead>
     <tbody>${state.stages.map((s, i) => `<tr>
+      <td><select data-stage-i="${i}" data-f="seasonId">${(state.seasons || []).map((se) => `<option value="${se.id}"${se.id === s.seasonId ? ' selected' : ''}>${se.name}</option>`).join('')}</select></td>
       <td><input data-stage-i="${i}" data-f="name" value="${s.name}" style="width:90px"></td>
       <td><input data-stage-i="${i}" data-f="salesMonths" value="${s.salesMonths || ''}" style="width:110px"></td>
       <td><input data-stage-i="${i}" data-f="productionMonth" value="${s.productionMonth || ''}" style="width:110px"></td>
@@ -924,14 +975,32 @@ function bindDataEvents() {
     state.workshops.push({ id: uid('w'), name: 'Новый цех', role: 'aux', capacities: { cut: 300, sew: 150, iron: 300, otk: 600 } }); mark(); renderData();
   });
 
-  root.querySelectorAll('input[data-stage-i]').forEach((inp) => inp.addEventListener('change', (e) => {
+  root.querySelectorAll('[data-stage-i]').forEach((inp) => inp.addEventListener('change', (e) => {
     state.stages[+e.target.dataset.stageI][e.target.dataset.f] = e.target.value; mark();
+    if (e.target.dataset.f === 'seasonId') renderData();
   }));
   root.querySelectorAll('[data-del-stage]').forEach((b) => b.addEventListener('click', () => { state.stages.splice(+b.dataset.delStage, 1); mark(); renderData(); }));
   root.querySelector('#btn-add-stage')?.addEventListener('click', () => {
     const n = state.stages.length + 1;
-    state.stages.push({ id: uid('stage'), name: `Этап ${n}`, salesMonths: '', productionMonth: '', deadline: '' }); mark(); renderData();
+    state.stages.push({ id: uid('stage'), name: `Этап ${n}`, seasonId: (state.seasons[state.seasons.length - 1] || {}).id, salesMonths: '', productionMonth: '', deadline: '' }); mark(); renderData();
   });
+
+  // сезоны
+  root.querySelectorAll('input[data-season]').forEach((inp) => inp.addEventListener('change', (e) => {
+    state.seasons[+e.target.dataset.season].name = e.target.value.trim() || 'Сезон'; mark(); renderData();
+  }));
+  root.querySelectorAll('[data-del-season]').forEach((b) => b.addEventListener('click', () => {
+    const se = state.seasons[+b.dataset.delSeason];
+    const hasStages = state.stages.some((s) => s.seasonId === se.id);
+    if (hasStages && !confirm(`Удалить сезон «${se.name}» и его этапы вместе с партиями?`)) return;
+    // удалить этапы сезона и их партии
+    const stageIds = new Set(state.stages.filter((s) => s.seasonId === se.id).map((s) => s.id));
+    state.stages = state.stages.filter((s) => s.seasonId !== se.id);
+    state.partias = (state.partias || []).filter((p) => !stageIds.has(p.stageId));
+    state.seasons.splice(+b.dataset.delSeason, 1);
+    mark(); renderData();
+  }));
+  root.querySelector('#btn-add-season')?.addEventListener('click', () => { addSeason(); mark(); renderData(); });
 
   root.querySelectorAll('input[data-set]').forEach((inp) => inp.addEventListener('change', (e) => {
     const [grp, key] = e.target.dataset.set.split('.');
@@ -984,6 +1053,11 @@ async function init() {
   document.getElementById('btn-recalc').addEventListener('click', () => recalc(false).then(() => toast('Пересчитано')));
   document.getElementById('btn-save').addEventListener('click', () => recalc(true).then(() => toast('Сохранено и пересчитано')).catch((e) => toast('Ошибка: ' + e.message, true)));
   document.getElementById('zoom').addEventListener('input', (e) => { pxPerDay = +e.target.value; if (activeTab === 'gantt') renderCurrent(); });
+  document.getElementById('season-filter').addEventListener('change', (e) => {
+    activeSeasonId = e.target.value;
+    matrixStageId = null; fabricStageId = null; factFilterStage = '';
+    renderCurrent();
+  });
 
   try {
     await loadAll();

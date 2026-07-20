@@ -47,15 +47,20 @@ export function defaultSettings() {
   };
 }
 
+// ---- сид: сезоны (контейнер над этапами) ----
+function seedSeasons() {
+  return [{ id: 'season1', name: 'Сезон 2026/27' }];
+}
+
 // ---- сид: этапы (2 месяца продаж → 1 месяц производства) ----
 function seedStages() {
   // productionMonth: 'YYYY-MM' — календарный месяц отшива.
   // deadline: дата, к которой партия должна быть на складе WB (старт продаж).
   return [
-    { id: 'stage1', name: 'Этап 1', salesMonths: 'Авг–Сен', productionMonth: '2026-07', deadline: '2026-08-01' },
-    { id: 'stage2', name: 'Этап 2', salesMonths: 'Окт–Ноя', productionMonth: '2026-08', deadline: '2026-10-01' },
-    { id: 'stage3', name: 'Этап 3', salesMonths: 'Дек–Янв', productionMonth: '2026-09', deadline: '2026-12-01' },
-    { id: 'stage4', name: 'Этап 4', salesMonths: 'Фев–Мар', productionMonth: '2026-10', deadline: '2027-02-01' },
+    { id: 'stage1', name: 'Этап 1', seasonId: 'season1', salesMonths: 'Авг–Сен', productionMonth: '2026-07', deadline: '2026-08-01' },
+    { id: 'stage2', name: 'Этап 2', seasonId: 'season1', salesMonths: 'Окт–Ноя', productionMonth: '2026-08', deadline: '2026-10-01' },
+    { id: 'stage3', name: 'Этап 3', seasonId: 'season1', salesMonths: 'Дек–Янв', productionMonth: '2026-09', deadline: '2026-12-01' },
+    { id: 'stage4', name: 'Этап 4', seasonId: 'season1', salesMonths: 'Фев–Мар', productionMonth: '2026-10', deadline: '2027-02-01' },
   ];
 }
 
@@ -133,6 +138,7 @@ export function defaultState() {
   const state = {
     version: 1,
     settings: defaultSettings(),
+    seasons: seedSeasons(),
     stages: seedStages(),
     workshops: seedWorkshops(),
     articles: seedArticles(),
@@ -150,6 +156,7 @@ export function normalizeState(input) {
   if (!input || typeof input !== 'object') return base;
   const s = { ...base, ...input };
   s.settings = deepMergeSettings(base.settings, input.settings || {});
+  s.seasons = Array.isArray(input.seasons) && input.seasons.length ? input.seasons : base.seasons;
   s.stages = Array.isArray(input.stages) ? input.stages : base.stages;
   s.workshops = Array.isArray(input.workshops) ? input.workshops : base.workshops;
   s.articles = Array.isArray(input.articles) ? input.articles : base.articles;
@@ -157,6 +164,11 @@ export function normalizeState(input) {
   s.partias = Array.isArray(input.partias) ? input.partias : [];
   s.overrides = input.overrides && typeof input.overrides === 'object' ? input.overrides : {};
   s.assignments = input.assignments && typeof input.assignments === 'object' ? input.assignments : {};
+  // сезоны: гарантировать id/имя и привязку каждого этапа к существующему сезону
+  if (!Array.isArray(s.seasons) || !s.seasons.length) s.seasons = seedSeasons();
+  for (const se of s.seasons) { se.id = se.id || genId('season'); se.name = se.name || 'Сезон'; }
+  const seasonIds = new Set(s.seasons.map((x) => x.id));
+  for (const st of s.stages) { if (!st.seasonId || !seasonIds.has(st.seasonId)) st.seasonId = s.seasons[0].id; }
   // подчистка мощностей
   for (const w of s.workshops) {
     w.role = w.role === 'aux' ? 'aux' : 'main';
