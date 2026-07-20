@@ -223,6 +223,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .swatch-item .swatch { width: 100px; height: 40px; }
 .swatch-empty { display: flex; align-items: center; justify-content: center; width: 100px; height: 40px; color: var(--muted); font-size: 11px; background: var(--panel); }
 .swatch-name { font-size: 12px; font-weight: 600; color: var(--text); text-align: center; max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swatch-name-input { width: 100px; text-align: center; font-size: 12px; font-weight: 600; padding: 3px 4px; background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 5px; }
+.swatch-name-input:focus { outline: none; border-color: var(--accent); }
+.swatch-add { align-self: center; height: 40px; padding: 0 14px; }
 .swatch-meta { width: 100px; text-align: center; font-size: 11px; padding: 3px 4px; background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 5px; }
 .swatch-meta:focus { outline: none; border-color: var(--accent); }
 .swatch-actions { display: flex; gap: 8px; align-items: center; margin-top: 2px; }

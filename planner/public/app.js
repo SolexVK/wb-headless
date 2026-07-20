@@ -110,6 +110,17 @@ function swatchTag(a, color, w = 80, h = 40) {
   const s = fabricImgSrc(a, color);
   return s ? `<img class="swatch" src="${s}" alt="" style="width:${w}px;height:${h}px">` : '';
 }
+// перенести данные цвета (количества во всех этапах + метаданные ткани) на новое имя
+function renameColorKeys(a, oldName, newName) {
+  if (oldName === newName) return;
+  for (const stageId of Object.keys(a.matrix || {})) {
+    const sm = a.matrix[stageId];
+    if (sm && Object.prototype.hasOwnProperty.call(sm, oldName)) { sm[newName] = sm[oldName]; delete sm[oldName]; }
+  }
+  if (a.fabricInfo && Object.prototype.hasOwnProperty.call(a.fabricInfo, oldName)) {
+    a.fabricInfo[newName] = a.fabricInfo[oldName]; delete a.fabricInfo[oldName];
+  }
+}
 
 // ---------- ЗАКАЗ ТКАНИ (консолидированный по этапу) ----------
 let fabricStageId = null;
@@ -331,8 +342,9 @@ function renderMatrix() {
             ${state.workshops.map((w) => `<option value="${w.id}"${w.id === assigned ? ' selected' : ''}>${w.name}${w.role === 'aux' ? ' (вспом.)' : ''}</option>`).join('')}
           </select>
         </label>
+        <button id="mx-save" class="btn btn-primary">Сохранить план</button>
       </div>
-      <div class="mini" style="margin-bottom:12px">Сейчас отшивает: <b>${cycInfo}</b>. Выбор цеха вручную мгновенно пересчитывает план и Гант (авто-дробление добавит вспомогательный цех при нехватке мощности).</div>
+      <div class="mini" style="margin-bottom:12px">Введи количества по размерам и нажми <b>«Сохранить план»</b> — только после сохранения данные учитываются в системе (Гант, дашборд, заказ ткани). Сейчас отшивает: <b>${cycInfo}</b>.</div>
       ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
     </div>`;
 
@@ -343,6 +355,9 @@ function renderMatrix() {
     if (e.target.value) state.assignments[asgKey] = e.target.value;
     else delete state.assignments[asgKey];
     recalc(true).then(() => { renderMatrix(); toast('Цех обновлён, план и Гант пересчитаны'); }).catch((err) => toast('Ошибка: ' + err.message, true));
+  });
+  document.getElementById('mx-save').addEventListener('click', () => {
+    recalc(true).then(() => { renderMatrix(); toast('План сохранён и пересчитан'); }).catch((err) => toast('Ошибка: ' + err.message, true));
   });
   root.querySelectorAll('input[data-mx]').forEach((inp) => inp.addEventListener('input', onMatrixInput));
   applyCollapsibles();
@@ -573,20 +588,20 @@ function dataArticlesPanel() {
         <div class="row-flex">
           <div class="field"><label>Расход ткани, м/шт</label><input data-art="${i}" data-f="fabricPerUnit" value="${a.fabricPerUnit}" style="width:90px"></div>
           <div class="field"><label>Цена ткани, $/м</label><input data-art="${i}" data-f="fabricPricePerMeter" value="${a.fabricPricePerMeter || 0}" style="width:90px"></div>
-          <div class="field" style="flex:2"><label>Цвета (через запятую)</label><input data-art="${i}" data-f="colors" value="${(a.colors || []).join(', ')}"></div>
         </div>
         <div class="field"><label>Размерный ряд (через запятую)</label><input data-art="${i}" data-f="sizes" value="${(a.sizes || []).join(', ')}"></div>
-        <div class="field"><label>Образцы ткани по цветам (образец 80×40, № планшета, № цвета)</label>
-          <div class="swatch-row">${(a.colors || []).map((c) => { const fi = (a.fabricInfo && a.fabricInfo[c]) || {}; return `<div class="swatch-item">
+        <div class="field"><label>Цвета и образцы ткани (название · образец 80×40 · № планшета · № цвета)</label>
+          <div class="swatch-row">${(a.colors || []).map((c, ci) => { const fi = (a.fabricInfo && a.fabricInfo[c]) || {}; return `<div class="swatch-item">
             ${fabricImgSrc(a, c) ? `<img class="swatch" src="${fabricImgSrc(a, c)}" alt="">` : '<div class="swatch swatch-empty">нет образца</div>'}
-            <div class="swatch-name" title="${c}">${c}</div>
+            <input class="swatch-name-input" data-colorname data-art="${i}" data-idx="${ci}" value="${String(c).replace(/"/g, '&quot;')}" placeholder="цвет" title="переименование сохранит количества и образец">
             <input class="swatch-meta" data-fabmeta data-art="${i}" data-color="${encodeURIComponent(c)}" data-f="plansheet" value="${(fi.plansheet || '').replace(/"/g, '&quot;')}" placeholder="№ планшета">
             <input class="swatch-meta" data-fabmeta data-art="${i}" data-color="${encodeURIComponent(c)}" data-f="colorNo" value="${(fi.colorNo || '').replace(/"/g, '&quot;')}" placeholder="№ цвета">
             <div class="swatch-actions">
               <label class="fab-up">${fabricImgSrc(a, c) ? 'заменить' : '＋ образец'}<input type="file" accept="image/*" data-artimg data-art="${i}" data-color="${encodeURIComponent(c)}" hidden></label>
-              ${fabricImgSrc(a, c) ? `<button class="swatch-del" data-artimg-del data-art="${i}" data-color="${encodeURIComponent(c)}" title="удалить образец">✕</button>` : ''}
+              <button class="swatch-del" data-color-del data-art="${i}" data-idx="${ci}" title="удалить цвет">✕</button>
             </div>
-          </div>`; }).join('') || '<span class="mini">Сначала укажи цвета выше.</span>'}</div>
+          </div>`; }).join('') || '<span class="mini">Цветов пока нет.</span>'}
+          <button class="btn swatch-add" data-color-add="${i}">＋ цвет</button></div>
         </div>
         <button class="btn btn-danger" data-del-art="${i}">Удалить</button>
       </div>`).join('')}</div></div>`;
@@ -672,6 +687,35 @@ function bindDataEvents() {
     const a = state.articles[+b.dataset.art];
     const c = decodeURIComponent(b.dataset.color);
     if (a.fabricInfo && a.fabricInfo[c]) delete a.fabricInfo[c].image;
+    mark(); renderData();
+  }));
+  // переименование цвета — с переносом количеств (матрица всех этапов) и образца
+  root.querySelectorAll('input[data-colorname]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const a = state.articles[+e.target.dataset.art];
+    const idx = +e.target.dataset.idx;
+    const oldName = a.colors[idx];
+    const newName = e.target.value.trim();
+    if (!newName) { toast('Название цвета не может быть пустым', true); renderData(); return; }
+    if (newName === oldName) return;
+    if (a.colors.includes(newName)) { toast('Такой цвет уже есть у артикула', true); renderData(); return; }
+    renameColorKeys(a, oldName, newName);
+    a.colors[idx] = newName;
+    mark(); renderData();
+  }));
+  root.querySelectorAll('[data-color-del]').forEach((b) => b.addEventListener('click', () => {
+    const a = state.articles[+b.dataset.art];
+    const idx = +b.dataset.idx;
+    const color = a.colors[idx];
+    a.colors.splice(idx, 1);
+    for (const stageId of Object.keys(a.matrix || {})) { if (a.matrix[stageId]) delete a.matrix[stageId][color]; }
+    if (a.fabricInfo) delete a.fabricInfo[color];
+    mark(); renderData();
+  }));
+  root.querySelectorAll('[data-color-add]').forEach((b) => b.addEventListener('click', () => {
+    const a = state.articles[+b.dataset.colorAdd];
+    let n = 1, name;
+    do { name = 'цвет ' + n++; } while (a.colors.includes(name));
+    a.colors.push(name);
     mark(); renderData();
   }));
   root.querySelectorAll('input[data-fabmeta]').forEach((inp) => inp.addEventListener('change', (e) => {
