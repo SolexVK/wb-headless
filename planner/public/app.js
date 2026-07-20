@@ -109,22 +109,37 @@ let factPartiaId = null;
 let factFilterStage = '', factFilterArticle = '', factFilterWs = '';
 function renderFact() {
   const root = document.getElementById('fact');
-  const all = state.partias || [];
-  if (!all.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет партий. Создай план на «План по размерам».</div></div>'; return; }
-  // фильтры: этап / артикул / цех (+ активный сезон)
-  const matchP = (x) => stageInSeason(x.stageId)
-    && (!factFilterStage || x.stageId === factFilterStage)
-    && (!factFilterArticle || x.articleId === factFilterArticle)
-    && (!factFilterWs || (factFilterWs === '__auto__' ? !x.workshopId : x.workshopId === factFilterWs));
+  // база: только сохранённые партии со сформированным планом (сумма>0) в активном сезоне
+  const base = (state.partias || []).filter((p) => stageInSeason(p.stageId) && partiaPlanUnits(p) > 0);
+  if (!base.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет сформированных планов. Заполни количества на «План по размерам».</div></div>'; return; }
+
+  // перекрёстное сужение: каждый список зависит от ВСЕХ остальных выбранных фильтров.
+  const passStage = (p) => !factFilterStage || p.stageId === factFilterStage;
+  const passArticle = (p) => !factFilterArticle || p.articleId === factFilterArticle;
+  const passWs = (p) => !factFilterWs || (factFilterWs === '__auto__' ? !p.workshopId : p.workshopId === factFilterWs);
+  let stageOpts, artOpts, wsOpts, guard = 0, changed = true;
+  while (changed && guard++ < 6) {
+    changed = false;
+    stageOpts = new Set(base.filter((p) => passArticle(p) && passWs(p)).map((p) => p.stageId));
+    artOpts = new Set(base.filter((p) => passStage(p) && passWs(p)).map((p) => p.articleId));
+    wsOpts = new Set(base.filter((p) => passStage(p) && passArticle(p)).map((p) => p.workshopId || '__auto__'));
+    if (factFilterStage && !stageOpts.has(factFilterStage)) { factFilterStage = ''; changed = true; }
+    if (factFilterArticle && !artOpts.has(factFilterArticle)) { factFilterArticle = ''; changed = true; }
+    if (factFilterWs && !wsOpts.has(factFilterWs)) { factFilterWs = ''; changed = true; }
+  }
   const stageOrder = {}; state.stages.forEach((s, i) => { stageOrder[s.id] = i; });
-  const parts = all.filter(matchP).sort((x, y) => (stageOrder[x.stageId] - stageOrder[y.stageId]) || (x.workshopId || '').localeCompare(y.workshopId || '') || x.no - y.no);
+  const parts = base.filter((p) => passStage(p) && passArticle(p) && passWs(p))
+    .sort((x, y) => (stageOrder[x.stageId] - stageOrder[y.stageId]) || (x.workshopId || '').localeCompare(y.workshopId || '') || x.no - y.no);
   const gIdx = (id) => state.stages.findIndex((z) => z.id === id) + 1;
+  const stageList = seasonStages().filter((s) => stageOpts.has(s.id));
+  const artList = articlesSorted().filter((a) => artOpts.has(a.id));
+  const wsList = state.workshops.filter((w) => wsOpts.has(w.id));
 
   const filtersHtml = `
     <div class="matrix-controls">
-      <label>Этап: <select id="ff-stage"><option value="">все</option>${seasonStages().map((s) => `<option value="${s.id}"${s.id === factFilterStage ? ' selected' : ''}>Этап ${gIdx(s.id)}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select></label>
-      <label>Артикул: <select id="ff-article"><option value="">все</option>${articlesSorted().map((x) => `<option value="${x.id}"${x.id === factFilterArticle ? ' selected' : ''}>${x.id}</option>`).join('')}</select></label>
-      <label>Цех: <select id="ff-ws"><option value="">все</option><option value="__auto__"${factFilterWs === '__auto__' ? ' selected' : ''}>авто (не назначен)</option>${state.workshops.map((w) => `<option value="${w.id}"${w.id === factFilterWs ? ' selected' : ''}>${w.name}</option>`).join('')}</select></label>
+      <label>Этап: <select id="ff-stage"><option value="">все</option>${stageList.map((s) => `<option value="${s.id}"${s.id === factFilterStage ? ' selected' : ''}>Этап ${gIdx(s.id)}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select></label>
+      <label>Артикул: <select id="ff-article"><option value="">все</option>${artList.map((x) => `<option value="${x.id}"${x.id === factFilterArticle ? ' selected' : ''}>${x.id}</option>`).join('')}</select></label>
+      <label>Цех: <select id="ff-ws"><option value="">все</option>${wsOpts.has('__auto__') ? `<option value="__auto__"${factFilterWs === '__auto__' ? ' selected' : ''}>авто (не назначен)</option>` : ''}${wsList.map((w) => `<option value="${w.id}"${w.id === factFilterWs ? ' selected' : ''}>${w.name}</option>`).join('')}</select></label>
       <label>Партия: <select id="fact-partia">${parts.map((x) => { const wn = state.workshops.find((w) => w.id === x.workshopId)?.name || 'авто'; const si = state.stages.findIndex((z) => z.id === x.stageId) + 1; return `<option value="${x.id}"${x.id === factPartiaId ? ' selected' : ''}>${wn} · Партия ${x.no} · ${x.articleId} · Этап ${si}</option>`; }).join('') || '<option>нет партий</option>'}</select></label>
     </div>`;
 
