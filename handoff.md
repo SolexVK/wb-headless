@@ -55,6 +55,12 @@
     № цвета), автопоказ в «План по размерам», «План продаж», «Заказ ткани» (там только показ).
 13. **Автосортировка артикулов по номеру** (числовая, 004<026): сервер при save/load;
     список в «План по размерам»; блоки в «Заказ ткани».
+14. **Кнопка «вверх»** (появляется при прокрутке >300px) на всех листах.
+15. **Липкое верхнее меню** (sticky) — остаётся видимым при прокрутке.
+16. **Стоимость ткани ($/м)** — поле в Данные→Артикулы; в «Заказ ткани» расчёт
+    стоимости: колонка по цвету, итог по артикулу, KPI «Стоимость ткани на партию»,
+    стоимость в консолидированном блоке (расход и цена берутся из «Данных», в
+    «Заказе ткани» только показ; убран редактируемый расход data-fab-per).
 
 ## Что пробовали и НЕ сработало (грабли — важно!)
 - **Развёртывание на Mac mini: `npm install` намертво зависал.** Долго грешили на puppeteer
@@ -80,6 +86,12 @@
   поэтому смена темы перекрашивает Гант автоматически.
 - Пользователь несколько раз не видел новые вкладки → код на сервере был старый (`git pull`
   не проходил). Проверка: `curl -s localhost:8477/ | grep -c 'data-tab="salesplan"'` → 1.
+- **`position: sticky` для верхнего меню НЕ работал** — меню уезжало вверх (замер
+  `topbar.getBoundingClientRect().top` = -276 при прокрутке). Причина: `html, body
+  { height: 100% }` в styles.css ломает sticky. **Фикс:** убрать `height: 100%`,
+  заменить на `body { min-height: 100vh }`. После — top:0 при прокрутке (липкое).
+  Важно: скриншоты puppeteer снимаются от начала ДОКУМЕНТА, а не вьюпорта, поэтому
+  проверять липкость надо замером getBoundingClientRect().top, а не скриншотом.
 
 ## Команды для проверки
 Локально (dev-контейнер; зависимости в корне уже стоят от прошлых сессий):
@@ -91,6 +103,9 @@ node --check planner/server.js && node --check planner/lib/scheduler.js \
 
 # прогон планировщика на сиде (ожидаем: cycles 20 warnings 0)
 node -e 'import("./planner/lib/model.js").then(async({defaultState})=>{const{buildSchedule}=await import("./planner/lib/scheduler.js");const s=buildSchedule(defaultState());console.log("cycles",s.cycles.length,"warnings",s.warnings.length)})'
+
+# цена ткани в сиде (ожидаем: у 004 fabricPricePerMeter = 3.6)
+node -e 'import("./planner/lib/model.js").then(({defaultState,normalizeState})=>{const a=normalizeState(defaultState()).articles.find(x=>x.id==="004");console.log("004 цена $/м:",a.fabricPricePerMeter)})'
 
 # сортировка артикулов (ожидаем: 004 → 026 → 027 → 031 → 035)
 node -e 'import("./planner/lib/model.js").then(({defaultState,normalizeState})=>{console.log(normalizeState(defaultState()).articles.map(a=>a.id).join(" → "))})'
