@@ -130,15 +130,18 @@ function seedArticles() {
 }
 
 export function defaultState() {
-  return {
+  const state = {
     version: 1,
     settings: defaultSettings(),
     stages: seedStages(),
     workshops: seedWorkshops(),
     articles: seedArticles(),
+    partias: [], // партии (план-заявки/производство) — источник истины по количествам
     overrides: {}, // ручные правки Ганта: cycleId -> { cutStart?, workshopId? }
-    assignments: {}, // фиксация цеха под артикул/этап (если задано вручную)
+    assignments: {}, // (устар.) фиксация цеха; теперь цех задаётся в партии
   };
+  ensurePartias(state); // построить партии из сид-матриц
+  return state;
 }
 
 // ---- нормализация/валидация пришедшего состояния ----
@@ -150,6 +153,8 @@ export function normalizeState(input) {
   s.stages = Array.isArray(input.stages) ? input.stages : base.stages;
   s.workshops = Array.isArray(input.workshops) ? input.workshops : base.workshops;
   s.articles = Array.isArray(input.articles) ? input.articles : base.articles;
+  // партии: берём из input; если их нет — ensurePartias мигрирует из article.matrix
+  s.partias = Array.isArray(input.partias) ? input.partias : [];
   s.overrides = input.overrides && typeof input.overrides === 'object' ? input.overrides : {};
   s.assignments = input.assignments && typeof input.assignments === 'object' ? input.assignments : {};
   // подчистка мощностей
@@ -174,15 +179,82 @@ export function normalizeState(input) {
     a.sizes = Array.isArray(a.sizes) ? a.sizes : [];
     // метаданные ткани по цвету: { цвет: { plansheet, colorNo, image(dataURL) } }
     a.fabricInfo = a.fabricInfo && typeof a.fabricInfo === 'object' ? a.fabricInfo : {};
-    // держим plan[stage] в синхроне с суммой матрицы (если матрица задана)
-    for (const stageId of Object.keys(a.matrix)) {
-      const sum = sumMatrixStage(a.matrix[stageId]);
-      if (sum > 0) a.plan[stageId] = sum;
-    }
   }
   // автосортировка артикулов по номеру, от меньшего к большему (числовая)
   s.articles.sort(compareArticleId);
+  // партии — источник истины по количествам (миграция из article.matrix при первом запуске)
+  ensurePartias(s);
   return s;
+}
+
+// ---- ПАРТИИ (сквозной учёт план-заявок/производства) ----
+export const PARTIA_STATUSES = ['plan', 'cutting', 'sewing', 'done', 'shipped'];
+export const PARTIA_STATUS_RU = {
+  plan: 'план', cutting: 'крой', sewing: 'пошив', done: 'готово', shipped: 'отгружено',
+};
+
+function genPartiaId() {
+  return `p_${(_idCounter++).toString(36)}${Math.floor(_idCounter * 7).toString(36)}`;
+}
+
+// Гарантировать наличие и корректность s.partias.
+// Если партий нет — мигрируем из article.matrix (1 партия на артикул+этап).
+function ensurePartias(s) {
+  if (!Array.isArray(s.partias)) s.partias = [];
+  const articleIds = new Set(s.articles.map((a) => a.id));
+  const stageIds = new Set(s.stages.map((st) => st.id));
+
+  if (s.partias.length === 0) {
+    for (const a of s.articles) {
+      const m = a.matrix && typeof a.matrix === 'object' ? a.matrix : {};
+      for (const stageId of Object.keys(m)) {
+        if (!stageIds.has(stageId)) continue;
+        if (sumMatrixStage(m[stageId]) <= 0) continue;
+        s.partias.push({
+          id: genPartiaId(), no: 0, articleId: a.id, stageId,
+          workshopId: (s.assignments || {})[`${stageId}:${a.id}`] || '',
+          planMatrix: m[stageId], factMatrix: {}, status: 'plan', historical: false,
+        });
+      }
+    }
+  }
+  // выкинуть партии с несуществующими артикулом/этапом
+  s.partias = s.partias.filter((p) => articleIds.has(p.articleId) && stageIds.has(p.stageId));
+  // нормализация полей
+  let maxNo = 0;
+  for (const p of s.partias) { const n = +p.no || 0; if (n > maxNo) maxNo = n; }
+  for (const p of s.partias) {
+    p.id = p.id || genPartiaId();
+    p.workshopId = typeof p.workshopId === 'string' ? p.workshopId : '';
+    p.planMatrix = p.planMatrix && typeof p.planMatrix === 'object' ? p.planMatrix : {};
+    p.factMatrix = p.factMatrix && typeof p.factMatrix === 'object' ? p.factMatrix : {};
+    p.status = PARTIA_STATUSES.includes(p.status) ? p.status : 'plan';
+    p.historical = !!p.historical;
+    if (!(+p.no > 0)) p.no = ++maxNo;
+  }
+  s.partias.sort((a, b) => (+a.no) - (+b.no));
+  // article.matrix больше не источник истины — не храним, чтобы не расходилось
+  for (const a of s.articles) delete a.matrix;
+}
+
+// суммарные штуки партии по плану / факту
+export function partiaPlanUnits(p) { return sumMatrixStage(p && p.planMatrix); }
+export function partiaFactUnits(p) { return sumMatrixStage(p && p.factMatrix); }
+// эффективная матрица для логистики: факт если введён, иначе план
+export function partiaEffectiveMatrix(p) {
+  return partiaFactUnits(p) > 0 ? p.factMatrix : (p.planMatrix || {});
+}
+export function partiaEffectiveUnits(p) {
+  const f = partiaFactUnits(p);
+  return f > 0 ? f : partiaPlanUnits(p);
+}
+// партии артикула на этапе
+export function partiasOf(state, articleId, stageId) {
+  return (state.partias || []).filter((p) => p.articleId === articleId && p.stageId === stageId);
+}
+// суммарный план артикула на этапе (сумма планов всех его партий)
+export function stagePlanUnits(state, articleId, stageId) {
+  return partiasOf(state, articleId, stageId).reduce((s, p) => s + partiaPlanUnits(p), 0);
 }
 
 // сравнение id артикулов по номеру (числовое, «004» < «026»)
@@ -213,13 +285,4 @@ function deepMergeSettings(base, over) {
     }
   }
   return out;
-}
-
-// суммарный объём этапа по артикулу.
-// Источник истины — матрица размер×цвет; если её нет, берём plan[stageId].
-export function stageUnits(article, stageId) {
-  const m = article.matrix && article.matrix[stageId];
-  const fromMatrix = m ? sumMatrixStage(m) : 0;
-  if (fromMatrix > 0) return fromMatrix;
-  return Math.max(0, Math.round(+((article.plan || {})[stageId]) || 0));
 }

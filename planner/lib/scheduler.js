@@ -13,7 +13,7 @@
 //    логистику до WB (недельный карго + 10–15 дней), сверяем с дедлайном.
 
 import { makeCalendar, addDays, diffDays, parseISO, toISO, dayOfWeek } from './calendar.js';
-import { stageUnits } from './model.js';
+import { partiasOf, partiaPlanUnits, partiaEffectiveUnits, PARTIA_STATUS_RU } from './model.js';
 
 const OPS = ['cut', 'sew', 'iron', 'otk'];
 const OP_RU = { cut: 'Крой', sew: 'Пошив', iron: 'Утюжка', otk: 'ОТК' };
@@ -99,11 +99,15 @@ export function buildSchedule(state) {
     const monthFirstWork = cal.nextWorkingDay(monthStartISO(ym));
     const wdInMonth = cal.workingDaysInMonth(y, mIdx - 1);
 
-    // 1) собрать работы этапа
+    // 1) собрать работы этапа — по ПАРТИЯМ (каждая партия = задание)
+    const articleById = Object.fromEntries(state.articles.map((a) => [a.id, a]));
     const jobs = [];
-    for (const a of state.articles) {
-      const units = stageUnits(a, stage.id);
-      if (units > 0) jobs.push({ article: a, units });
+    for (const p of state.partias) {
+      if (p.stageId !== stage.id) continue;
+      const article = articleById[p.articleId];
+      if (!article) continue;
+      const units = partiaPlanUnits(p);
+      if (units > 0) jobs.push({ partia: p, article, units });
     }
     // крупные — первыми (лучше распределяются)
     jobs.sort((x, y2) => y2.units - x.units);
@@ -127,26 +131,26 @@ export function buildSchedule(state) {
     const roleRank = (w) => (w.role === 'main' ? 0 : 1);
     const freeUnits = (w) => Math.max(0, (capacityWD - loadWD[w.id]) * w.capacities.sew);
     const fitsWhole = (w, units) => loadWD[w.id] + sewDaysNeeded(units, w) <= capacityWD;
-    const pushBatch = (article, units, w, primary, overflow) => {
-      subBatches.push({ article, units: Math.round(units), workshopId: w.id, primary, overflow });
+    const pushBatch = (job, units, w, primary, overflow) => {
+      subBatches.push({ article: job.article, partia: job.partia, units: Math.round(units), workshopId: w.id, primary, overflow });
       loadWD[w.id] += sewDaysNeeded(units, w);
     };
 
     for (const job of jobs) {
-      const preferredId = (state.assignments || {})[`${stage.id}:${job.article.id}`] || null;
+      const preferredId = (job.partia && job.partia.workshopId) || null;
       const preferred = preferredId ? wsById[preferredId] : null;
 
       // 2a) цельная партия в один цех.
-      // Приоритет: если задан цех вручную и он тянет партию — ставим туда.
+      // Приоритет: если у партии задан цех и он тянет объём — ставим туда.
       if (preferred && fitsWhole(preferred, job.units)) {
-        pushBatch(job.article, job.units, preferred, true); continue;
+        pushBatch(job, job.units, preferred, true); continue;
       }
       if (!preferred) {
         // авто: цех, который освободится раньше (догружаем простаивающие)
         const whole = state.workshops.filter((w) => fitsWhole(w, job.units))
           .sort((a, b) => (loadWD[a.id] + sewDaysNeeded(job.units, a)) - (loadWD[b.id] + sewDaysNeeded(job.units, b))
             || roleRank(a) - roleRank(b))[0];
-        if (whole) { pushBatch(job.article, job.units, whole, true); continue; }
+        if (whole) { pushBatch(job, job.units, whole, true); continue; }
       }
 
       // 2b) не влезает целиком — делим между МИНИМАЛЬНЫМ числом цехов
@@ -178,7 +182,7 @@ export function buildSchedule(state) {
         : pieces.reduce((m, p) => (p.units > m.units ? p : m), pieces[0]);
       for (const p of pieces) {
         if (p.units <= 0) continue;
-        pushBatch(job.article, p.units, p.w, p === primaryPiece, overflow);
+        pushBatch(job, p.units, p.w, p === primaryPiece, overflow);
       }
       if (overflow) {
         warnings.push({
@@ -188,10 +192,10 @@ export function buildSchedule(state) {
       }
     }
 
-    // сколько цехов получил каждый артикул на этом этапе (для метки «дроблёно»)
-    const wsCountByArticle = {};
+    // на сколько цехов дроблена каждая партия (для метки «дроблёно»)
+    const wsCountByPartia = {};
     for (const sb of subBatches) {
-      (wsCountByArticle[sb.article.id] ||= new Set()).add(sb.workshopId);
+      (wsCountByPartia[sb.partia.id] ||= new Set()).add(sb.workshopId);
     }
 
     // 3) даты по каждому цеху (без простоя): сортируем под-партии цеха и гоним поток
@@ -206,7 +210,8 @@ export function buildSchedule(state) {
 
       for (let i = 0; i < batches.length; i++) {
         const sb = batches[i];
-        const ovr = (state.overrides || {})[cycleId(stage.id, sb.article.id, wsId, i)];
+        const cid = cycleId(sb.partia.id, wsId, i);
+        const ovr = (state.overrides || {})[cid];
 
         let cutStartWD = Math.max(cursorWD, 0);
         let anchorFirstWork = monthFirstWork;
@@ -260,7 +265,12 @@ export function buildSchedule(state) {
         }
 
         cycles.push({
-          id: cycleId(stage.id, sb.article.id, wsId, i),
+          id: cid,
+          partiaId: sb.partia.id,
+          partiaNo: sb.partia.no,
+          status: sb.partia.status,
+          statusRu: PARTIA_STATUS_RU[sb.partia.status] || sb.partia.status,
+          historical: !!sb.partia.historical,
           stageId: stage.id,
           stageName: stage.name,
           articleId: sb.article.id,
@@ -270,7 +280,7 @@ export function buildSchedule(state) {
           workshopRole: w.role,
           units: sb.units,
           primary: sb.primary,
-          split: (wsCountByArticle[sb.article.id]?.size || 1) > 1,
+          split: (wsCountByPartia[sb.partia.id]?.size || 1) > 1,
           overflow: !!sb.overflow,
           manual: !!(ovr && ovr.cutStart),
           ops: dates,
@@ -290,8 +300,8 @@ export function buildSchedule(state) {
   return { cycles, warnings, fabricOrders, generatedFor: state.stages.map((s) => s.id) };
 }
 
-function cycleId(stageId, articleId, wsId, idx) {
-  return `${stageId}::${articleId}::${wsId}::${idx}`;
+function cycleId(partiaId, wsId, idx) {
+  return `${partiaId}::${wsId}::${idx}`;
 }
 
 function buildMilestones(m) {

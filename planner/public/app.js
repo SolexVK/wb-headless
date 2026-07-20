@@ -110,12 +110,13 @@ function swatchTag(a, color, w = 80, h = 40) {
   const s = fabricImgSrc(a, color);
   return s ? `<img class="swatch" src="${s}" alt="" style="width:${w}px;height:${h}px">` : '';
 }
-// перенести данные цвета (количества во всех этапах + метаданные ткани) на новое имя
+// перенести данные цвета (количества во всех партиях + метаданные ткани) на новое имя
 function renameColorKeys(a, oldName, newName) {
   if (oldName === newName) return;
-  for (const stageId of Object.keys(a.matrix || {})) {
-    const sm = a.matrix[stageId];
-    if (sm && Object.prototype.hasOwnProperty.call(sm, oldName)) { sm[newName] = sm[oldName]; delete sm[oldName]; }
+  for (const p of (state.partias || []).filter((x) => x.articleId === a.id)) {
+    for (const mx of [p.planMatrix, p.factMatrix]) {
+      if (mx && Object.prototype.hasOwnProperty.call(mx, oldName)) { mx[newName] = mx[oldName]; delete mx[oldName]; }
+    }
   }
   if (a.fabricInfo && Object.prototype.hasOwnProperty.call(a.fabricInfo, oldName)) {
     a.fabricInfo[newName] = a.fabricInfo[oldName]; delete a.fabricInfo[oldName];
@@ -125,7 +126,7 @@ function renameColorKeys(a, oldName, newName) {
 // ---------- ЗАКАЗ ТКАНИ (консолидированный по этапу) ----------
 let fabricStageId = null;
 function colorUnits(a, stageId, color) {
-  const M = (a.matrix && a.matrix[stageId]) || {};
+  const M = articleStageMatrix(a, stageId);
   const row = M[color] || {};
   let s = 0; for (const k in row) s += +row[k] || 0;
   return Math.round(s);
@@ -256,20 +257,28 @@ function renderSalesPlan() {
       </div>
     </div>`;
 
+  // циклы по партии
+  const cycByPartia = {};
+  for (const c of (schedule?.cycles || [])) (cycByPartia[c.partiaId] ||= []).push(c);
+
   let body = '';
   if (!stages.length || !arts.length) {
     body = '<div class="panel"><div class="mini">Выбери хотя бы одну партию и один артикул.</div></div>';
   } else {
     for (const s of stages) {
-      const cards = arts.map((a) => {
-        const cyc = cycleMap[a.id + '|' + s.id] || [];
-        // если у артикул-этапа есть назначенные цеха, но ни один не выбран — скрыть карточку
-        if (cyc.length && !cyc.some((c) => spWorkshops.has(c.workshopId))) return '';
-        return spMiniTable(a, s, cyc);
-      }).filter(Boolean).join('');
+      const cards = [];
+      for (const a of arts) {
+        for (const p of partiasOf(a.id, s.id)) {
+          const cyc = cycByPartia[p.id] || [];
+          // фильтр по цехам: если у партии есть назначенные цеха, но ни один не выбран — скрыть
+          if (cyc.length && !cyc.some((c) => spWorkshops.has(c.workshopId))) continue;
+          const card = spMiniTable(p, a, cyc);
+          if (card) cards.push(card);
+        }
+      }
       body += `<div class="panel">
-        <h3 class="sp-partia">Партия ${stageIndex[s.id]} · ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</h3>
-        ${cards ? `<div class="mini-grid">${cards}</div>` : '<div class="mini">По выбранным артикулам и цехам нет плана на эту партию.</div>'}
+        <h3 class="sp-partia">Этап ${stageIndex[s.id]} · ${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</h3>
+        ${cards.length ? `<div class="mini-grid">${cards.join('')}</div>` : '<div class="mini">По выбранным артикулам и цехам нет плана на этот этап.</div>'}
       </div>`;
     }
   }
@@ -299,14 +308,38 @@ function renderSalesPlan() {
 // ---------- матрица размер×цвет ----------
 function sumMatrix(M) { let s = 0; for (const c in M) { const r = M[c] || {}; for (const k in r) s += +r[k] || 0; } return Math.round(s); }
 function cell(M, c, s) { return +((M[c] || {})[s]) || 0; }
+
+// ---- партии (клиент) ----
+const PARTIA_STATUS_RU = { plan: 'план', cutting: 'крой', sewing: 'пошив', done: 'готово', shipped: 'отгружено' };
+const PARTIA_STATUS_LIST = ['plan', 'cutting', 'sewing', 'done', 'shipped'];
+function partiasOf(articleId, stageId) {
+  return (state.partias || []).filter((p) => p.articleId === articleId && p.stageId === stageId).sort((a, b) => a.no - b.no);
+}
+function partiaPlanUnits(p) { return sumMatrix(p.planMatrix); }
+function partiaFactUnits(p) { return sumMatrix(p.factMatrix); }
+function partiaEffMatrix(p) { return partiaFactUnits(p) > 0 ? p.factMatrix : (p.planMatrix || {}); }
+// суммарный план артикула на этапе (по всем его партиям)
 function articleStageTotal(a, stageId) {
-  const m = a.matrix && a.matrix[stageId];
-  const fromMatrix = m ? sumMatrix(m) : 0;
-  if (fromMatrix > 0) return fromMatrix;
-  return Math.max(0, Math.round(+(a.plan?.[stageId]) || 0));
+  return partiasOf(a.id, stageId).reduce((s, p) => s + partiaPlanUnits(p), 0);
+}
+// агрегированная план-матрица артикул+этап (сумма по партиям) — для листов, где нужен свод
+function articleStageMatrix(a, stageId) {
+  const out = {};
+  for (const p of partiasOf(a.id, stageId)) {
+    const M = p.planMatrix || {};
+    for (const c in M) { out[c] = out[c] || {}; for (const s in M[c]) out[c][s] = (out[c][s] || 0) + (+M[c][s] || 0); }
+  }
+  return out;
+}
+function genPartiaIdClient() { return 'p_' + Math.random().toString(36).slice(2, 9); }
+function nextPartiaNo() {
+  return (state.partias || []).reduce((m, p) => Math.max(m, +p.no || 0), 0) + 1;
+}
+function newPartia(articleId, stageId, workshopId = '') {
+  return { id: genPartiaIdClient(), no: nextPartiaNo(), articleId, stageId, workshopId, planMatrix: {}, factMatrix: {}, status: 'plan', historical: false };
 }
 
-let matrixStageId = null, matrixArticleId = null;
+let matrixStageId = null, matrixArticleId = null, matrixPartiaId = null;
 
 function renderMatrix() {
   const root = document.getElementById('matrix');
@@ -316,51 +349,90 @@ function renderMatrix() {
 
   const a = state.articles.find((x) => x.id === matrixArticleId);
   const stage = state.stages.find((s) => s.id === matrixStageId);
-  a.matrix = a.matrix || {};
-  const M = (a.matrix[stage.id] = a.matrix[stage.id] || {});
-  for (const c of a.colors) { M[c] = M[c] || {}; for (const s of a.sizes) if (M[c][s] == null) M[c][s] = 0; }
+  const stIdx = state.stages.findIndex((s) => s.id === stage.id) + 1;
+  const parts = partiasOf(a.id, stage.id);
+  // выбранная партия
+  let p = parts.find((x) => x.id === matrixPartiaId);
+  if (!p) { p = parts[0] || null; matrixPartiaId = p ? p.id : null; }
 
+  const controls = `
+    <div class="matrix-controls">
+      <label>Этап (период):
+        <select id="mx-stage">${state.stages.map((s, i) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>Этап ${i + 1}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
+      </label>
+      <label>Артикул:
+        <select id="mx-article">${articlesSorted().map((x) => `<option value="${x.id}"${x.id === a.id ? ' selected' : ''}>${x.id} — ${x.name}</option>`).join('')}</select>
+      </label>
+      <label>Партия:
+        <select id="mx-partia">${parts.map((x) => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>Партия ${x.no}${x.workshopId ? ' · ' + (state.workshops.find((w) => w.id === x.workshopId)?.name || '') : ' · авто'} · ${partiaPlanUnits(x)} шт</option>`).join('') || '<option>нет партий</option>'}</select>
+      </label>
+      <button id="mx-add-partia" class="btn">＋ партия</button>
+    </div>`;
+
+  if (!p) {
+    root.innerHTML = `<div class="panel">${controls}
+      <div class="mini" style="margin:10px 0">На этот артикул и этап партий пока нет. Нажми <b>«＋ партия»</b>, чтобы создать план-заявку.</div></div>`;
+    bindMatrixControls(a, stage);
+    document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a, stage));
+    applyCollapsibles();
+    return;
+  }
+
+  const M = (p.planMatrix = p.planMatrix || {});
+  for (const c of a.colors) { M[c] = M[c] || {}; for (const s of a.sizes) if (M[c][s] == null) M[c][s] = 0; }
   const hasGrid = a.colors.length && a.sizes.length;
-  const asgKey = `${stage.id}:${a.id}`;
-  const assigned = (state.assignments || {})[asgKey] || '';
-  const cyc = (schedule?.cycles || []).filter((c) => c.articleId === a.id && c.stageId === stage.id);
-  const cycInfo = cyc.length
-    ? cyc.map((c) => `${c.workshopName} — ${c.units.toLocaleString('ru')} шт`).join(' · ')
-    : 'не назначено (пересчитай)';
+  const cyc = (schedule?.cycles || []).filter((c) => c.partiaId === p.id);
+  const cycInfo = cyc.length ? cyc.map((c) => `${c.workshopName} — ${c.units.toLocaleString('ru')} шт`).join(' · ') : 'не назначено (сохрани и пересчитай)';
+
   root.innerHTML = `
     <div class="panel">
-      <div class="matrix-controls">
-        <label>Партия:
-          <select id="mx-stage">${state.stages.map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>${s.name}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
-        </label>
-        <label>Артикул:
-          <select id="mx-article">${articlesSorted().map((x) => `<option value="${x.id}"${x.id === a.id ? ' selected' : ''}>${x.id} — ${x.name}</option>`).join('')}</select>
-        </label>
+      ${controls}
+      <div class="partia-bar">
+        <span class="partia-badge">Партия ${p.no}</span>
         <label>Цех:
-          <select id="mx-ws">
-            <option value="">Авто</option>
-            ${state.workshops.map((w) => `<option value="${w.id}"${w.id === assigned ? ' selected' : ''}>${w.name}${w.role === 'aux' ? ' (вспом.)' : ''}</option>`).join('')}
+          <select id="mx-ws"><option value="">Авто (распределит система)</option>
+            ${state.workshops.map((w) => `<option value="${w.id}"${w.id === p.workshopId ? ' selected' : ''}>${w.name}${w.role === 'aux' ? ' (вспом.)' : ''}</option>`).join('')}
           </select>
         </label>
+        <label>Статус:
+          <select id="mx-status">${PARTIA_STATUS_LIST.map((s) => `<option value="${s}"${s === p.status ? ' selected' : ''}>${PARTIA_STATUS_RU[s]}</option>`).join('')}</select>
+        </label>
+        <label class="mini"><input type="checkbox" id="mx-hist"${p.historical ? ' checked' : ''}> прошлый период</label>
+        <button id="mx-del-partia" class="btn btn-danger">Удалить партию</button>
         <button id="mx-save" class="btn btn-primary">Сохранить план</button>
       </div>
-      <div class="mini" style="margin-bottom:12px">Введи количества по размерам и нажми <b>«Сохранить план»</b> — только после сохранения данные учитываются в системе (Гант, дашборд, заказ ткани). Сейчас отшивает: <b>${cycInfo}</b>.</div>
+      <div class="mini" style="margin-bottom:12px">Введи количества и нажми <b>«Сохранить план»</b> — только после сохранения данные учитываются в системе. Сейчас отшивает: <b>${cycInfo}</b>.</div>
       ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
     </div>`;
 
-  document.getElementById('mx-stage').addEventListener('change', (e) => { matrixStageId = e.target.value; renderMatrix(); });
-  document.getElementById('mx-article').addEventListener('change', (e) => { matrixArticleId = e.target.value; renderMatrix(); });
-  document.getElementById('mx-ws').addEventListener('change', (e) => {
-    state.assignments = state.assignments || {};
-    if (e.target.value) state.assignments[asgKey] = e.target.value;
-    else delete state.assignments[asgKey];
-    recalc(true).then(() => { renderMatrix(); toast('Цех обновлён, план и Гант пересчитаны'); }).catch((err) => toast('Ошибка: ' + err.message, true));
+  bindMatrixControls(a, stage);
+  document.getElementById('mx-partia').addEventListener('change', (e) => { matrixPartiaId = e.target.value; renderMatrix(); });
+  document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a, stage));
+  document.getElementById('mx-ws').addEventListener('change', (e) => { p.workshopId = e.target.value; dirty = true; setStatus(); });
+  document.getElementById('mx-status').addEventListener('change', (e) => { p.status = e.target.value; dirty = true; setStatus(); });
+  document.getElementById('mx-hist').addEventListener('change', (e) => { p.historical = e.target.checked; dirty = true; setStatus(); });
+  document.getElementById('mx-del-partia').addEventListener('click', () => {
+    if (!confirm(`Удалить Партию ${p.no}?`)) return;
+    state.partias = state.partias.filter((x) => x.id !== p.id);
+    matrixPartiaId = null; dirty = true; renderMatrix();
   });
   document.getElementById('mx-save').addEventListener('click', () => {
     recalc(true).then(() => { renderMatrix(); toast('План сохранён и пересчитан'); }).catch((err) => toast('Ошибка: ' + err.message, true));
   });
   root.querySelectorAll('input[data-mx]').forEach((inp) => inp.addEventListener('input', onMatrixInput));
   applyCollapsibles();
+}
+
+function bindMatrixControls(a, stage) {
+  document.getElementById('mx-stage').addEventListener('change', (e) => { matrixStageId = e.target.value; matrixPartiaId = null; renderMatrix(); });
+  document.getElementById('mx-article').addEventListener('change', (e) => { matrixArticleId = e.target.value; matrixPartiaId = null; renderMatrix(); });
+}
+function addPartia(a, stage) {
+  const parts = partiasOf(a.id, stage.id);
+  const np = newPartia(a.id, stage.id);
+  state.partias.push(np);
+  matrixPartiaId = np.id; dirty = true; renderMatrix();
+  toast(`Создана Партия ${np.no}`);
 }
 
 // строка с цехом(ами), отшивающими артикул на данном этапе
@@ -374,14 +446,14 @@ function workshopLine(cycles) {
   return `<div class="mini-ws split">🏭 Дробление между цехами:<br>${ordered.map((c) => `<b>${c.workshopName}</b> — ${c.units.toLocaleString('ru')} шт${c.primary ? '' : ' <span class="mini">(доп.)</span>'}`).join(' · ')}</div>`;
 }
 
-// мини-таблица (только чтение) для одного артикула на одной партии/этапе
-function spMiniTable(a, stage, cycles) {
+// мини-таблица (только чтение) для одной ПАРТИИ
+function spMiniTable(partia, a, cycles) {
   if (!a.colors.length || !a.sizes.length) return '';
-  const M = (a.matrix && a.matrix[stage.id]) || {};
+  const M = partia.planMatrix || {};
   const total = sumMatrix(M);
-  if (total <= 0) return ''; // нет плана — не показываем карточку
-  return `<div class="mini-card${cycles && cycles.length > 1 ? ' mini-split' : ''}">
-    <div class="mini-head"><b>${a.id}</b> — ${a.name}</div>
+  if (total <= 0) return '';
+  return `<div class="mini-card${cycles && cycles.length > 1 ? ' mini-split' : ''}${['done', 'shipped'].includes(partia.status) ? ' mini-done' : ''}">
+    <div class="mini-head"><span class="partia-badge">Партия ${partia.no}</span> <b>${a.id}</b> — ${a.name} ${statusBadge(partia.status)}</div>
     ${a.comment ? `<div class="mini-comment">💬 ${a.comment}</div>` : ''}
     ${workshopLine(cycles)}
     <div class="matrix-scroll"><table class="matrix-table mini">
@@ -390,6 +462,10 @@ function spMiniTable(a, stage, cycles) {
       <tfoot><tr><th class="mx-vsego">ВСЕГО</th>${a.colors.map((c) => `<td class="num mx-coltot">${a.sizes.reduce((n, s) => n + cell(M, c, s), 0)}</td>`).join('')}<td class="num mx-grand">${total.toLocaleString('ru')}</td></tr></tfoot>
     </table></div>
   </div>`;
+}
+function statusBadge(status) {
+  const cls = { plan: 'st-plan', cutting: 'st-prog', sewing: 'st-prog', done: 'st-done', shipped: 'st-ship' }[status] || 'st-plan';
+  return `<span class="st-badge ${cls}">${PARTIA_STATUS_RU[status] || status}</span>`;
 }
 
 function matrixTable(a, M) {
@@ -420,18 +496,17 @@ function matrixTable(a, M) {
 
 function onMatrixInput(e) {
   const a = state.articles.find((x) => x.id === matrixArticleId);
-  const stageId = matrixStageId;
+  const p = (state.partias || []).find((x) => x.id === matrixPartiaId);
+  if (!p) return;
   const c = decodeURIComponent(e.target.dataset.c);
   const s = decodeURIComponent(e.target.dataset.s);
   const v = Math.max(0, Math.round(+e.target.value || 0));
-  a.matrix[stageId] = a.matrix[stageId] || {};
-  a.matrix[stageId][c] = a.matrix[stageId][c] || {};
-  a.matrix[stageId][c][s] = v;
-  a.plan = a.plan || {};
-  a.plan[stageId] = sumMatrix(a.matrix[stageId]); // держим суммарный план в синхроне
+  p.planMatrix = p.planMatrix || {};
+  p.planMatrix[c] = p.planMatrix[c] || {};
+  p.planMatrix[c][s] = v;
   dirty = true; setStatus();
 
-  const M = a.matrix[stageId];
+  const M = p.planMatrix;
   const root = document.getElementById('matrix');
   root.querySelectorAll('[data-coltot]').forEach((el) => { const col = decodeURIComponent(el.dataset.coltot); el.textContent = a.sizes.reduce((n, sz) => n + cell(M, col, sz), 0); });
   root.querySelectorAll('[data-rowtot]').forEach((el) => { const sz = decodeURIComponent(el.dataset.rowtot); el.textContent = a.colors.reduce((n, col) => n + cell(M, col, sz), 0); });
@@ -707,7 +782,10 @@ function bindDataEvents() {
     const idx = +b.dataset.idx;
     const color = a.colors[idx];
     a.colors.splice(idx, 1);
-    for (const stageId of Object.keys(a.matrix || {})) { if (a.matrix[stageId]) delete a.matrix[stageId][color]; }
+    for (const p of (state.partias || []).filter((x) => x.articleId === a.id)) {
+      if (p.planMatrix) delete p.planMatrix[color];
+      if (p.factMatrix) delete p.factMatrix[color];
+    }
     if (a.fabricInfo) delete a.fabricInfo[color];
     mark(); renderData();
   }));
