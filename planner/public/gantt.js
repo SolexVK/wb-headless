@@ -136,14 +136,15 @@ function drawCycle(svg, c, row, ctx) {
   const { xOf, pxPerDay, LANE_H, ROW_PAD, tip, onOverride } = ctx;
   const laneY = row._y + ROW_PAD + c._lane * LANE_H;
   const barH = LANE_H - 8;
-  const g = el('g', { class: 'g-cycle' + (c.logistics.lateDays > 0 ? ' g-late' : '') + (c.manual ? ' g-manual' : '') }, svg);
+  const isDone = c.status === 'done' || c.status === 'shipped';
+  const g = el('g', { class: 'g-cycle' + (c.logistics.lateDays > 0 ? ' g-late' : '') + (c.manual ? ' g-manual' : '') + (isDone ? ' g-done' : '') }, svg);
 
   const x0 = xOf(c.ops.cut.start);
   const x1 = xOf(c.ops.otk.end);
   const w = Math.max(6, x1 - x0);
 
-  // рамка блока
-  el('rect', { class: 'g-frame', x: x0, y: laneY, width: w, height: barH, rx: 5, fill: 'var(--g-frame)', stroke: 'var(--line)' }, g);
+  // рамка блока (выполненные — зелёная рамка + галочка)
+  el('rect', { class: 'g-frame', x: x0, y: laneY, width: w, height: barH, rx: 5, fill: isDone ? 'rgba(52,211,153,.14)' : 'var(--g-frame)', stroke: isDone ? 'var(--accent-2)' : 'var(--line)', 'stroke-width': isDone ? 2 : 1 }, g);
 
   // операции — отдельными дорожками (видно перекрытие потока «лесенкой»)
   const trackH = Math.max(3, (barH - 6) / OPS.length);
@@ -151,8 +152,12 @@ function drawCycle(svg, c, row, ctx) {
     const sx = xOf(c.ops[op].start);
     const ex = xOf(c.ops[op].end);
     const sw = Math.max(3, ex - sx);
-    el('rect', { x: sx, y: laneY + 3 + i * trackH, width: sw, height: Math.max(2, trackH - 1), rx: 2, fill: OP_COLOR[op] }, g);
+    el('rect', { x: sx, y: laneY + 3 + i * trackH, width: sw, height: Math.max(2, trackH - 1), rx: 2, fill: OP_COLOR[op], opacity: isDone ? 0.55 : 1 }, g);
   });
+  if (isDone) {
+    const chk = el('text', { x: x1 - 12, y: laneY + 13, 'font-size': 13, fill: 'var(--accent-2)', 'font-weight': 700 }, g);
+    chk.textContent = c.status === 'shipped' ? '📦' : '✓';
+  }
 
   // период закупа ткани: пунктирная линия от даты заказа до прихода на склад цеха
   const cy = laneY + barH / 2;
@@ -166,7 +171,7 @@ function drawCycle(svg, c, row, ctx) {
   el('line', { x1: x1, y1: laneY + barH / 2, x2: wbX, y2: laneY + barH / 2, stroke: 'var(--muted)', 'stroke-dasharray': '2 2', opacity: 0.5 }, g);
 
   // подпись (с тёмной обводкой для читаемости поверх дорожек)
-  const label = `${c.articleId} · ${c.units}${c.split ? ' ⚡' : ''}`;
+  const label = `П${c.partiaNo} · ${c.articleId} · ${c.units}${c.split ? ' ⚡' : ''}`;
   const t = el('text', {
     x: x0 + 6, y: laneY + barH / 2 + 4, fill: '#fff', 'font-size': 11, 'font-weight': 700,
     stroke: 'rgba(0,0,0,0.75)', 'stroke-width': 2.5, 'paint-order': 'stroke', 'stroke-linejoin': 'round',
@@ -226,8 +231,8 @@ function showTip(tip, e, c) {
   tip.style.top = (e.clientY + 14) + 'px';
   const late = c.logistics.lateDays > 0 ? `<div class="row" style="color:var(--danger)">⚠ Опоздание на WB: ${c.logistics.lateDays} дн</div>` : '';
   tip.innerHTML = `
-    <div><b>${c.articleName}</b> — ${c.workshopName} ${c.split ? '⚡ дробление' : ''}</div>
-    <div class="row">${c.stageName} · ${c.units} шт · ${c.workshopRole === 'main' ? 'основной' : 'вспом.'} цех</div>
+    <div><b>Партия ${c.partiaNo}</b> · ${c.articleName} — ${c.workshopName} ${c.split ? '⚡ дробление' : ''}</div>
+    <div class="row">${c.stageName} · ${c.units} шт · ${c.workshopRole === 'main' ? 'основной' : 'вспом.'} цех · статус: <b>${c.statusRu || '—'}</b></div>
     <div class="row">Крой: ${fmt(c.ops.cut.start)} — Пошив: ${fmt(c.ops.sew.start)}</div>
     <div class="row">Готовность: <b>${fmt(c.readyDate)}</b></div>
     <div class="row">Ткань: заказ ${fmt(c.fabric.orderDate)} → склад ${fmt(c.fabric.atWorkshop)} (${c.fabric.meters} м)</div>
