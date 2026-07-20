@@ -221,8 +221,6 @@ function ensurePartias(s) {
   // выкинуть партии с несуществующими артикулом/этапом
   s.partias = s.partias.filter((p) => articleIds.has(p.articleId) && stageIds.has(p.stageId));
   // нормализация полей
-  let maxNo = 0;
-  for (const p of s.partias) { const n = +p.no || 0; if (n > maxNo) maxNo = n; }
   for (const p of s.partias) {
     p.id = p.id || genPartiaId();
     p.workshopId = typeof p.workshopId === 'string' ? p.workshopId : '';
@@ -230,11 +228,26 @@ function ensurePartias(s) {
     p.factMatrix = p.factMatrix && typeof p.factMatrix === 'object' ? p.factMatrix : {};
     p.status = PARTIA_STATUSES.includes(p.status) ? p.status : 'plan';
     p.historical = !!p.historical;
-    if (!(+p.no > 0)) p.no = ++maxNo;
   }
-  s.partias.sort((a, b) => (+a.no) - (+b.no));
+  assignPartiaNumbers(s.partias, s.stages);
   // article.matrix больше не источник истины — не храним, чтобы не расходилось
   for (const a of s.articles) delete a.matrix;
+}
+
+// Нумерация партий: у КАЖДОГО цеха своя сквозная нумерация (1,2,3…).
+// Порядок внутри цеха — по этапам, затем по порядку добавления. Авто-партии
+// (без назначенного цеха) нумеруются в отдельной группе.
+export function assignPartiaNumbers(partias, stages) {
+  const stageOrder = {};
+  stages.forEach((st, i) => { stageOrder[st.id] = i; });
+  const indexed = partias.map((p, idx) => ({ p, idx }));
+  indexed.sort((A, B) => (stageOrder[A.p.stageId] ?? 99) - (stageOrder[B.p.stageId] ?? 99) || A.idx - B.idx);
+  const counters = {};
+  for (const { p } of indexed) {
+    const key = p.workshopId || '__auto__';
+    counters[key] = (counters[key] || 0) + 1;
+    p.no = counters[key];
+  }
 }
 
 // суммарные штуки партии по плану / факту

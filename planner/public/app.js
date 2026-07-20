@@ -61,6 +61,7 @@ function switchTab(tab) {
   renderCurrent();
 }
 function renderCurrent() {
+  recomputePartiaNumbers(); // держим номера партий (по цехам) актуальными для отображения
   if (activeTab === 'gantt') renderGantt(document.getElementById('gantt'), schedule, state, { pxPerDay, onOverride });
   else if (activeTab === 'matrix') renderMatrix();
   else if (activeTab === 'salesplan') renderSalesPlan();
@@ -73,14 +74,27 @@ function renderCurrent() {
 
 // ---------- ФАКТ (фактические количества по партиям) ----------
 let factPartiaId = null;
+let factStageId = null;
 function renderFact() {
   const root = document.getElementById('fact');
-  const parts = (state.partias || []).slice().sort((a, b) => a.no - b.no);
-  if (!parts.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет партий. Создай план на «План по размерам».</div></div>'; return; }
+  if (!(state.partias || []).length) { root.innerHTML = '<div class="panel"><div class="mini">Нет партий. Создай план на «План по размерам».</div></div>'; return; }
+  if (!factStageId || !state.stages.find((s) => s.id === factStageId)) factStageId = state.stages[0]?.id;
+  const stageSel = state.stages.find((s) => s.id === factStageId);
+  // партии выбранного этапа
+  const parts = (state.partias || []).filter((x) => x.stageId === factStageId)
+    .sort((a, b) => (a.workshopId || '').localeCompare(b.workshopId || '') || a.no - b.no);
+  const stageSelHtml = `<label>Этап производства:
+    <select id="fact-stage">${state.stages.map((s, i) => `<option value="${s.id}"${s.id === factStageId ? ' selected' : ''}>Этап ${i + 1}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select></label>`;
+  if (!parts.length) {
+    root.innerHTML = `<div class="panel"><div class="matrix-controls">${stageSelHtml}</div><div class="mini">На этом этапе партий нет. Создай план на «План по размерам».</div></div>`;
+    document.getElementById('fact-stage').addEventListener('change', (e) => { factStageId = e.target.value; factPartiaId = null; renderFact(); });
+    applyCollapsibles();
+    return;
+  }
   let p = parts.find((x) => x.id === factPartiaId) || parts[0];
   factPartiaId = p.id;
   const a = state.articles.find((x) => x.id === p.articleId);
-  const stage = state.stages.find((s) => s.id === p.stageId);
+  const stage = stageSel;
   if (!a || !stage) { root.innerHTML = '<div class="panel"><div class="mini">Партия ссылается на удалённый артикул/этап.</div></div>'; return; }
   const stIdx = state.stages.findIndex((s) => s.id === stage.id) + 1;
   const ws = state.workshops.find((w) => w.id === p.workshopId);
@@ -98,9 +112,14 @@ function renderFact() {
   root.innerHTML = `
     <div class="panel">
       <div class="matrix-controls">
+        ${stageSelHtml}
         <label>Партия:
-          <select id="fact-partia">${parts.map((x) => { const aa = state.articles.find((z) => z.id === x.articleId); const si = state.stages.findIndex((z) => z.id === x.stageId) + 1; return `<option value="${x.id}"${x.id === p.id ? ' selected' : ''}>Партия ${x.no} · ${x.articleId}${aa ? '' : ''} · Этап ${si} · ${PARTIA_STATUS_RU[x.status] || ''}</option>`; }).join('')}</select>
+          <select id="fact-partia">${parts.map((x) => { const wn = state.workshops.find((w) => w.id === x.workshopId)?.name || 'авто'; return `<option value="${x.id}"${x.id === p.id ? ' selected' : ''}>${wn} · Партия ${x.no} · ${x.articleId} · ${PARTIA_STATUS_RU[x.status] || ''}</option>`; }).join('')}</select>
         </label>
+        <label>Статус:
+          <select id="fact-status">${PARTIA_STATUS_LIST.map((s) => `<option value="${s}"${s === p.status ? ' selected' : ''}>${PARTIA_STATUS_RU[s]}</option>`).join('')}</select>
+        </label>
+        <label class="mini"><input type="checkbox" id="fact-hist"${p.historical ? ' checked' : ''}> прошлый период</label>
         <button id="fact-copy" class="btn">Скопировать план → факт</button>
         <button id="fact-save" class="btn btn-primary">Сохранить факт</button>
       </div>
@@ -117,7 +136,10 @@ function renderFact() {
       </table></div>` : '<div class="mini">У артикула нет цветов/размеров.</div>'}
     </div>`;
 
+  document.getElementById('fact-stage').addEventListener('change', (e) => { factStageId = e.target.value; factPartiaId = null; renderFact(); });
   document.getElementById('fact-partia').addEventListener('change', (e) => { factPartiaId = e.target.value; renderFact(); });
+  document.getElementById('fact-status').addEventListener('change', (e) => { p.status = e.target.value; dirty = true; renderFact(); });
+  document.getElementById('fact-hist').addEventListener('change', (e) => { p.historical = e.target.checked; dirty = true; setStatus(); });
   document.getElementById('fact-copy').addEventListener('click', () => {
     p.factMatrix = JSON.parse(JSON.stringify(p.planMatrix || {}));
     dirty = true; renderFact(); toast('План скопирован в факт');
@@ -401,11 +423,17 @@ function articleStageMatrix(a, stageId) {
   return out;
 }
 function genPartiaIdClient() { return 'p_' + Math.random().toString(36).slice(2, 9); }
-function nextPartiaNo() {
-  return (state.partias || []).reduce((m, p) => Math.max(m, +p.no || 0), 0) + 1;
-}
 function newPartia(articleId, stageId, workshopId = '') {
-  return { id: genPartiaIdClient(), no: nextPartiaNo(), articleId, stageId, workshopId, planMatrix: {}, factMatrix: {}, status: 'plan', historical: false };
+  return { id: genPartiaIdClient(), no: 0, articleId, stageId, workshopId, planMatrix: {}, factMatrix: {}, status: 'plan', historical: false };
+}
+// нумерация партий: у каждого цеха своя (1,2,3…); авто-партии — отдельная группа
+function recomputePartiaNumbers() {
+  const parts = state.partias || [];
+  const stageOrder = {}; state.stages.forEach((st, i) => { stageOrder[st.id] = i; });
+  const indexed = parts.map((p, idx) => ({ p, idx }));
+  indexed.sort((A, B) => (stageOrder[A.p.stageId] ?? 99) - (stageOrder[B.p.stageId] ?? 99) || A.idx - B.idx);
+  const counters = {};
+  for (const { p } of indexed) { const k = p.workshopId || '__auto__'; counters[k] = (counters[k] || 0) + 1; p.no = counters[k]; }
 }
 
 let matrixStageId = null, matrixArticleId = null, matrixPartiaId = null;
@@ -457,29 +485,23 @@ function renderMatrix() {
     <div class="panel">
       ${controls}
       <div class="partia-bar">
-        <span class="partia-badge">Партия ${p.no}</span>
+        <span class="partia-badge">Партия ${p.no}${p.workshopId ? '' : ' (авто)'}</span>
         <label>Цех:
           <select id="mx-ws"><option value="">Авто (распределит система)</option>
             ${state.workshops.map((w) => `<option value="${w.id}"${w.id === p.workshopId ? ' selected' : ''}>${w.name}${w.role === 'aux' ? ' (вспом.)' : ''}</option>`).join('')}
           </select>
         </label>
-        <label>Статус:
-          <select id="mx-status">${PARTIA_STATUS_LIST.map((s) => `<option value="${s}"${s === p.status ? ' selected' : ''}>${PARTIA_STATUS_RU[s]}</option>`).join('')}</select>
-        </label>
-        <label class="mini"><input type="checkbox" id="mx-hist"${p.historical ? ' checked' : ''}> прошлый период</label>
         <button id="mx-del-partia" class="btn btn-danger">Удалить партию</button>
         <button id="mx-save" class="btn btn-primary">Сохранить план</button>
       </div>
-      <div class="mini" style="margin-bottom:12px">Введи количества и нажми <b>«Сохранить план»</b> — только после сохранения данные учитываются в системе. Сейчас отшивает: <b>${cycInfo}</b>.</div>
+      <div class="mini" style="margin-bottom:12px">Введи количества и нажми <b>«Сохранить план»</b>. Номер партии — свой у каждого цеха. Статус производства и факт — на вкладке «Факт». Сейчас отшивает: <b>${cycInfo}</b>.</div>
       ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
     </div>`;
 
   bindMatrixControls(a, stage);
   document.getElementById('mx-partia').addEventListener('change', (e) => { matrixPartiaId = e.target.value; renderMatrix(); });
   document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a, stage));
-  document.getElementById('mx-ws').addEventListener('change', (e) => { p.workshopId = e.target.value; dirty = true; setStatus(); });
-  document.getElementById('mx-status').addEventListener('change', (e) => { p.status = e.target.value; dirty = true; setStatus(); });
-  document.getElementById('mx-hist').addEventListener('change', (e) => { p.historical = e.target.checked; dirty = true; setStatus(); });
+  document.getElementById('mx-ws').addEventListener('change', (e) => { p.workshopId = e.target.value; recomputePartiaNumbers(); dirty = true; renderMatrix(); });
   document.getElementById('mx-del-partia').addEventListener('click', () => {
     if (!confirm(`Удалить Партию ${p.no}?`)) return;
     state.partias = state.partias.filter((x) => x.id !== p.id);
