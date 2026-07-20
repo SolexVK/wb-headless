@@ -237,6 +237,7 @@ function showTip(tip, e, c) {
     <div class="row">Готовность: <b>${fmt(c.readyDate)}</b></div>
     <div class="row">Ткань: заказ ${fmt(c.fabric.orderDate)} → склад ${fmt(c.fabric.atWorkshop)} (${c.fabric.meters} м)</div>
     <div class="row">Отгрузка ${fmt(c.logistics.shipment)} → WB ${fmt(c.logistics.wbArrival)} (дедлайн ${fmt(c.logistics.deadline)})</div>
+    <div class="row">На WB: <b>${(c.hasFact ? c.wbUnits : c.units).toLocaleString('ru')} шт</b>${c.hasFact ? ` <span style="color:var(--accent-2)">(факт)</span>` : ' (план)'}</div>
     ${late}`;
 }
 function hideTip(tip) { tip.style.display = 'none'; }

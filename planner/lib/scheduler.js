@@ -13,7 +13,7 @@
 //    логистику до WB (недельный карго + 10–15 дней), сверяем с дедлайном.
 
 import { makeCalendar, addDays, diffDays, parseISO, toISO, dayOfWeek } from './calendar.js';
-import { partiasOf, partiaPlanUnits, partiaEffectiveUnits, PARTIA_STATUS_RU } from './model.js';
+import { partiasOf, partiaPlanUnits, partiaFactUnits, partiaEffectiveUnits, PARTIA_STATUS_RU } from './model.js';
 
 const OPS = ['cut', 'sew', 'iron', 'otk'];
 const OP_RU = { cut: 'Крой', sew: 'Пошив', iron: 'Утюжка', otk: 'ОТК' };
@@ -246,6 +246,11 @@ export function buildSchedule(state) {
         // логистика: ближайший вывоз карго после готовности + срок доставки
         const shipment = nextWeekday(readyDate, logi.cargoPickupWeekday ?? 1);
         const wbArrival = addDays(shipment, Math.round(((logi.minDays || 10) + (logi.maxDays || 15)) / 2));
+        // количество, уезжающее на WB: факт (если введён по партии), иначе план
+        const pPlan = partiaPlanUnits(sb.partia);
+        const pFact = partiaFactUnits(sb.partia);
+        const hasFact = pFact > 0;
+        const wbUnits = hasFact && pPlan > 0 ? Math.round(pFact * sb.units / pPlan) : sb.units;
 
         // проверки
         const monthEnd = monthEndISO(ym);
@@ -279,6 +284,7 @@ export function buildSchedule(state) {
           workshopName: w.name,
           workshopRole: w.role,
           units: sb.units,
+          wbUnits, hasFact,
           primary: sb.primary,
           split: (wsCountByPartia[sb.partia.id]?.size || 1) > 1,
           overflow: !!sb.overflow,

@@ -64,9 +64,78 @@ function renderCurrent() {
   if (activeTab === 'gantt') renderGantt(document.getElementById('gantt'), schedule, state, { pxPerDay, onOverride });
   else if (activeTab === 'matrix') renderMatrix();
   else if (activeTab === 'salesplan') renderSalesPlan();
+  else if (activeTab === 'fact') renderFact();
   else if (activeTab === 'fabric') renderFabricOrder();
   else if (activeTab === 'dashboard') renderDashboard();
   else if (activeTab === 'data') renderData();
+  applyCollapsibles();
+}
+
+// ---------- ФАКТ (фактические количества по партиям) ----------
+let factPartiaId = null;
+function renderFact() {
+  const root = document.getElementById('fact');
+  const parts = (state.partias || []).slice().sort((a, b) => a.no - b.no);
+  if (!parts.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет партий. Создай план на «План по размерам».</div></div>'; return; }
+  let p = parts.find((x) => x.id === factPartiaId) || parts[0];
+  factPartiaId = p.id;
+  const a = state.articles.find((x) => x.id === p.articleId);
+  const stage = state.stages.find((s) => s.id === p.stageId);
+  if (!a || !stage) { root.innerHTML = '<div class="panel"><div class="mini">Партия ссылается на удалённый артикул/этап.</div></div>'; return; }
+  const stIdx = state.stages.findIndex((s) => s.id === stage.id) + 1;
+  const ws = state.workshops.find((w) => w.id === p.workshopId);
+  p.factMatrix = p.factMatrix || {};
+  const F = p.factMatrix, PM = p.planMatrix || {};
+  for (const c of a.colors) { F[c] = F[c] || {}; for (const s of a.sizes) if (F[c][s] == null) F[c][s] = 0; }
+  const planTotal = sumMatrix(PM), factTotal = sumMatrix(F);
+  const diff = factTotal - planTotal;
+
+  const rows = a.sizes.map((s) => `<tr><th class="mx-size">${s}</th>${a.colors.map((c) => {
+    const pv = cell(PM, c, s);
+    return `<td><input data-fact data-c="${encodeURIComponent(c)}" data-s="${encodeURIComponent(s)}" type="number" min="0" value="${cell(F, c, s)}" placeholder="${pv || 0}" title="план: ${pv}"></td>`;
+  }).join('')}<td class="num mx-rowtot" data-frowtot="${encodeURIComponent(s)}">${a.colors.reduce((n, c) => n + cell(F, c, s), 0)}</td></tr>`).join('');
+
+  root.innerHTML = `
+    <div class="panel">
+      <div class="matrix-controls">
+        <label>Партия:
+          <select id="fact-partia">${parts.map((x) => { const aa = state.articles.find((z) => z.id === x.articleId); const si = state.stages.findIndex((z) => z.id === x.stageId) + 1; return `<option value="${x.id}"${x.id === p.id ? ' selected' : ''}>Партия ${x.no} · ${x.articleId}${aa ? '' : ''} · Этап ${si} · ${PARTIA_STATUS_RU[x.status] || ''}</option>`; }).join('')}</select>
+        </label>
+        <button id="fact-copy" class="btn">Скопировать план → факт</button>
+        <button id="fact-save" class="btn btn-primary">Сохранить факт</button>
+      </div>
+      <div class="mini" style="margin-bottom:10px">Партия ${p.no} · <b>${a.id}</b> ${a.name} · Этап ${stIdx} ${stage.salesMonths ? '(' + stage.salesMonths + ')' : ''} · цех ${ws ? ws.name : 'авто'} · статус ${statusBadge(p.status)}. Введи фактически произведённое — оно уедет на склад WB (план остаётся для производства).</div>
+      <div class="fab-summary">
+        <div><div class="k">План</div><div class="v">${planTotal.toLocaleString('ru')} шт</div></div>
+        <div><div class="k">Факт</div><div class="v ${factTotal > 0 ? 'good' : ''}">${factTotal.toLocaleString('ru')} шт</div></div>
+        <div><div class="k">Разница</div><div class="v ${diff < 0 ? 'bad' : ''}" id="fact-diff">${diff > 0 ? '+' : ''}${diff.toLocaleString('ru')} шт</div></div>
+      </div>
+      ${a.colors.length && a.sizes.length ? `<div class="matrix-scroll" style="margin-top:12px"><table class="matrix-table">
+        <thead><tr><th class="mx-corner">Размер \\ Цвет</th>${a.colors.map((c) => `<th class="mx-color">${swatchTag(a, c, 60, 30)}<div>${c}</div></th>`).join('')}<th class="mx-rowtot-h">Факт Σ</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><th class="mx-size mx-vsego">ВСЕГО</th>${a.colors.map((c) => `<td class="num mx-coltot" data-fcoltot="${encodeURIComponent(c)}">${a.sizes.reduce((n, s) => n + cell(F, c, s), 0)}</td>`).join('')}<td class="num mx-grand" data-fgrand>${factTotal.toLocaleString('ru')}</td></tr></tfoot>
+      </table></div>` : '<div class="mini">У артикула нет цветов/размеров.</div>'}
+    </div>`;
+
+  document.getElementById('fact-partia').addEventListener('change', (e) => { factPartiaId = e.target.value; renderFact(); });
+  document.getElementById('fact-copy').addEventListener('click', () => {
+    p.factMatrix = JSON.parse(JSON.stringify(p.planMatrix || {}));
+    dirty = true; renderFact(); toast('План скопирован в факт');
+  });
+  document.getElementById('fact-save').addEventListener('click', () => {
+    recalc(true).then(() => { renderFact(); toast('Факт сохранён, логистика пересчитана'); }).catch((err) => toast('Ошибка: ' + err.message, true));
+  });
+  root.querySelectorAll('input[data-fact]').forEach((inp) => inp.addEventListener('input', (e) => {
+    const c = decodeURIComponent(e.target.dataset.c), s = decodeURIComponent(e.target.dataset.s);
+    const v = Math.max(0, Math.round(+e.target.value || 0));
+    p.factMatrix[c] = p.factMatrix[c] || {}; p.factMatrix[c][s] = v;
+    dirty = true; setStatus();
+    root.querySelectorAll('[data-fcoltot]').forEach((el) => { const col = decodeURIComponent(el.dataset.fcoltot); el.textContent = a.sizes.reduce((n, sz) => n + cell(p.factMatrix, col, sz), 0); });
+    root.querySelectorAll('[data-frowtot]').forEach((el) => { const sz = decodeURIComponent(el.dataset.frowtot); el.textContent = a.colors.reduce((n, col) => n + cell(p.factMatrix, col, sz), 0); });
+    const ft = sumMatrix(p.factMatrix);
+    const g = root.querySelector('[data-fgrand]'); if (g) g.textContent = ft.toLocaleString('ru');
+    const d = root.querySelector('#fact-diff'); if (d) { const df = ft - sumMatrix(p.planMatrix); d.textContent = (df > 0 ? '+' : '') + df.toLocaleString('ru') + ' шт'; d.className = 'v ' + (df < 0 ? 'bad' : ''); }
+  }));
   applyCollapsibles();
 }
 
