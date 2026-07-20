@@ -74,27 +74,40 @@ function renderCurrent() {
 
 // ---------- ФАКТ (фактические количества по партиям) ----------
 let factPartiaId = null;
-let factStageId = null;
+let factFilterStage = '', factFilterArticle = '', factFilterWs = '';
 function renderFact() {
   const root = document.getElementById('fact');
-  if (!(state.partias || []).length) { root.innerHTML = '<div class="panel"><div class="mini">Нет партий. Создай план на «План по размерам».</div></div>'; return; }
-  if (!factStageId || !state.stages.find((s) => s.id === factStageId)) factStageId = state.stages[0]?.id;
-  const stageSel = state.stages.find((s) => s.id === factStageId);
-  // партии выбранного этапа
-  const parts = (state.partias || []).filter((x) => x.stageId === factStageId)
-    .sort((a, b) => (a.workshopId || '').localeCompare(b.workshopId || '') || a.no - b.no);
-  const stageSelHtml = `<label>Этап производства:
-    <select id="fact-stage">${state.stages.map((s, i) => `<option value="${s.id}"${s.id === factStageId ? ' selected' : ''}>Этап ${i + 1}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select></label>`;
+  const all = state.partias || [];
+  if (!all.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет партий. Создай план на «План по размерам».</div></div>'; return; }
+  // фильтры: этап / артикул / цех
+  const matchP = (x) => (!factFilterStage || x.stageId === factFilterStage)
+    && (!factFilterArticle || x.articleId === factFilterArticle)
+    && (!factFilterWs || (factFilterWs === '__auto__' ? !x.workshopId : x.workshopId === factFilterWs));
+  const stageOrder = {}; state.stages.forEach((s, i) => { stageOrder[s.id] = i; });
+  const parts = all.filter(matchP).sort((x, y) => (stageOrder[x.stageId] - stageOrder[y.stageId]) || (x.workshopId || '').localeCompare(y.workshopId || '') || x.no - y.no);
+
+  const filtersHtml = `
+    <div class="matrix-controls">
+      <label>Этап: <select id="ff-stage"><option value="">все</option>${state.stages.map((s, i) => `<option value="${s.id}"${s.id === factFilterStage ? ' selected' : ''}>Этап ${i + 1}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select></label>
+      <label>Артикул: <select id="ff-article"><option value="">все</option>${articlesSorted().map((x) => `<option value="${x.id}"${x.id === factFilterArticle ? ' selected' : ''}>${x.id}</option>`).join('')}</select></label>
+      <label>Цех: <select id="ff-ws"><option value="">все</option><option value="__auto__"${factFilterWs === '__auto__' ? ' selected' : ''}>авто (не назначен)</option>${state.workshops.map((w) => `<option value="${w.id}"${w.id === factFilterWs ? ' selected' : ''}>${w.name}</option>`).join('')}</select></label>
+      <label>Партия: <select id="fact-partia">${parts.map((x) => { const wn = state.workshops.find((w) => w.id === x.workshopId)?.name || 'авто'; const si = state.stages.findIndex((z) => z.id === x.stageId) + 1; return `<option value="${x.id}"${x.id === factPartiaId ? ' selected' : ''}>${wn} · Партия ${x.no} · ${x.articleId} · Этап ${si}</option>`; }).join('') || '<option>нет партий</option>'}</select></label>
+    </div>`;
+
+  const bindFilters = () => {
+    document.getElementById('ff-stage').addEventListener('change', (e) => { factFilterStage = e.target.value; factPartiaId = null; renderFact(); });
+    document.getElementById('ff-article').addEventListener('change', (e) => { factFilterArticle = e.target.value; factPartiaId = null; renderFact(); });
+    document.getElementById('ff-ws').addEventListener('change', (e) => { factFilterWs = e.target.value; factPartiaId = null; renderFact(); });
+  };
+
   if (!parts.length) {
-    root.innerHTML = `<div class="panel"><div class="matrix-controls">${stageSelHtml}</div><div class="mini">На этом этапе партий нет. Создай план на «План по размерам».</div></div>`;
-    document.getElementById('fact-stage').addEventListener('change', (e) => { factStageId = e.target.value; factPartiaId = null; renderFact(); });
-    applyCollapsibles();
-    return;
+    root.innerHTML = `<div class="panel">${filtersHtml}<div class="mini">Нет партий по выбранным фильтрам.</div></div>`;
+    bindFilters(); applyCollapsibles(); return;
   }
   let p = parts.find((x) => x.id === factPartiaId) || parts[0];
   factPartiaId = p.id;
   const a = state.articles.find((x) => x.id === p.articleId);
-  const stage = stageSel;
+  const stage = state.stages.find((s) => s.id === p.stageId);
   if (!a || !stage) { root.innerHTML = '<div class="panel"><div class="mini">Партия ссылается на удалённый артикул/этап.</div></div>'; return; }
   const stIdx = state.stages.findIndex((s) => s.id === stage.id) + 1;
   const ws = state.workshops.find((w) => w.id === p.workshopId);
@@ -111,11 +124,9 @@ function renderFact() {
 
   root.innerHTML = `
     <div class="panel">
-      <div class="matrix-controls">
-        ${stageSelHtml}
-        <label>Партия:
-          <select id="fact-partia">${parts.map((x) => { const wn = state.workshops.find((w) => w.id === x.workshopId)?.name || 'авто'; return `<option value="${x.id}"${x.id === p.id ? ' selected' : ''}>${wn} · Партия ${x.no} · ${x.articleId} · ${PARTIA_STATUS_RU[x.status] || ''}</option>`; }).join('')}</select>
-        </label>
+      ${filtersHtml}
+      <div class="partia-bar">
+        <span class="partia-badge">Партия ${p.no}</span>
         <label>Статус:
           <select id="fact-status">${PARTIA_STATUS_LIST.map((s) => `<option value="${s}"${s === p.status ? ' selected' : ''}>${PARTIA_STATUS_RU[s]}</option>`).join('')}</select>
         </label>
@@ -136,7 +147,7 @@ function renderFact() {
       </table></div>` : '<div class="mini">У артикула нет цветов/размеров.</div>'}
     </div>`;
 
-  document.getElementById('fact-stage').addEventListener('change', (e) => { factStageId = e.target.value; factPartiaId = null; renderFact(); });
+  bindFilters();
   document.getElementById('fact-partia').addEventListener('change', (e) => { factPartiaId = e.target.value; renderFact(); });
   document.getElementById('fact-status').addEventListener('change', (e) => { p.status = e.target.value; dirty = true; renderFact(); });
   document.getElementById('fact-hist').addEventListener('change', (e) => { p.historical = e.target.checked; dirty = true; setStatus(); });
