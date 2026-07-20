@@ -194,6 +194,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .matrix-controls { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
 .matrix-controls label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
 .matrix-controls select { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 7px; padding: 6px 9px; }
+.matrix-io { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 10px; }
+.matrix-io .btn { padding: 5px 10px; }
 .matrix-scroll { overflow-x: auto; }
 .matrix-table { width: auto; min-width: 100%; border-collapse: collapse; }
 .matrix-table th, .matrix-table td { border: 1px solid var(--line); padding: 6px 10px; text-align: center; }

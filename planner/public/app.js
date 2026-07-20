@@ -558,11 +558,20 @@ function renderMatrix() {
         <button id="mx-del-partia" class="btn btn-danger">Удалить партию</button>
         <button id="mx-save" class="btn btn-primary">Сохранить план</button>
       </div>
+      <div class="matrix-io">
+        <span class="mini">Ввод: вручную · <b>вставка из буфера</b> (встань на ячейку и Ctrl+V — блок из Excel/Sheets) · через шаблон:</span>
+        <button id="mx-tpl-one" class="btn">⤓ шаблон: ${a.id}</button>
+        <button id="mx-tpl-all" class="btn">⤓ шаблон: все</button>
+        <label class="btn">⤒ загрузить из файла<input type="file" accept=".tsv,.txt,.csv" id="mx-import" hidden></label>
+      </div>
       <div class="mini" style="margin-bottom:12px">Введи количества и нажми <b>«Сохранить план»</b>. Номер партии — свой у каждого цеха. Статус производства и факт — на вкладке «Факт». Сейчас отшивает: <b>${cycInfo}</b>.</div>
       ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
     </div>`;
 
   bindMatrixControls(a, stage);
+  document.getElementById('mx-tpl-one').addEventListener('click', () => downloadText(`plan_${a.id}.tsv`, buildPlanTemplate([a.id])));
+  document.getElementById('mx-tpl-all').addEventListener('click', () => downloadText('plan_all.tsv', buildPlanTemplate(state.articles.map((x) => x.id))));
+  document.getElementById('mx-import').addEventListener('change', (e) => importPlanFile(e.target.files && e.target.files[0]));
   document.getElementById('mx-partia').addEventListener('change', (e) => { matrixPartiaId = e.target.value; renderMatrix(); });
   document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a, stage));
   document.getElementById('mx-ws').addEventListener('change', (e) => { p.workshopId = e.target.value; recomputePartiaNumbers(); dirty = true; renderMatrix(); });
@@ -574,8 +583,109 @@ function renderMatrix() {
   document.getElementById('mx-save').addEventListener('click', () => {
     recalc(true).then(() => { renderMatrix(); toast('План сохранён и пересчитан'); }).catch((err) => toast('Ошибка: ' + err.message, true));
   });
-  root.querySelectorAll('input[data-mx]').forEach((inp) => inp.addEventListener('input', onMatrixInput));
+  root.querySelectorAll('input[data-mx]').forEach((inp) => { inp.addEventListener('input', onMatrixInput); inp.addEventListener('paste', onMatrixPaste); });
   applyCollapsibles();
+}
+
+// вставка блока из буфера, начиная с активной ячейки (строки×столбцы = размеры×цвета)
+function onMatrixPaste(e) {
+  const text = (e.clipboardData || window.clipboardData).getData('text');
+  if (!text || !/[\t\n]/.test(text)) return; // одиночное значение — обычная вставка
+  e.preventDefault();
+  const a = state.articles.find((x) => x.id === matrixArticleId);
+  const p = (state.partias || []).find((x) => x.id === matrixPartiaId);
+  if (!a || !p) return;
+  const r0 = a.sizes.indexOf(decodeURIComponent(e.target.dataset.s));
+  const c0 = a.colors.indexOf(decodeURIComponent(e.target.dataset.c));
+  const grid = text.replace(/\r/g, '').replace(/\n+$/, '').split('\n').map((r) => r.split('\t'));
+  p.planMatrix = p.planMatrix || {};
+  grid.forEach((cells, ri) => {
+    const s = a.sizes[r0 + ri]; if (!s) return;
+    cells.forEach((val, ci) => {
+      const c = a.colors[c0 + ci]; if (!c) return;
+      p.planMatrix[c] = p.planMatrix[c] || {};
+      p.planMatrix[c][s] = parseQty(val);
+    });
+  });
+  dirty = true; renderMatrix(); toast('Вставлено из буфера');
+}
+function parseQty(v) { return Math.max(0, Math.round(parseFloat(String(v).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0)); }
+
+// ---- шаблон плана (TSV): экспорт/импорт ----
+function buildPlanTemplate(articleIds) {
+  const lines = [
+    '# Шаблон плана по размерам (TSV, разделитель — табуляция).',
+    '# Заполни количества и загрузи обратно. Строки ARTICLE/STAGE не удаляй.',
+    '# В блоке: шапка — цвета, первый столбец — размеры.',
+  ];
+  const stages = seasonStages();
+  for (const aid of articleIds) {
+    const a = state.articles.find((x) => x.id === aid);
+    if (!a || !a.colors.length || !a.sizes.length) continue;
+    lines.push('', ['ARTICLE', a.id, a.name].join('\t'));
+    for (const st of stages) {
+      lines.push(['STAGE', st.id, st.name + (st.salesMonths ? ' ' + st.salesMonths : '')].join('\t'));
+      lines.push(['', ...a.colors].join('\t'));
+      const M = (partiasOf(a.id, st.id)[0] || {}).planMatrix || {};
+      for (const s of a.sizes) lines.push([s, ...a.colors.map((c) => cell(M, c, s) || '')].join('\t'));
+    }
+  }
+  return lines.join('\n');
+}
+function parsePlanTemplate(text) {
+  const res = {}; let curA = null, curStage = null, curColors = null;
+  for (const raw of text.replace(/\r/g, '').split('\n')) {
+    if (!raw.trim() || raw.startsWith('#')) continue;
+    const cells = raw.split('\t');
+    const key = (cells[0] || '').trim();
+    if (key === 'ARTICLE') { curA = (cells[1] || '').trim(); curStage = null; curColors = null; continue; }
+    if (key === 'STAGE') { curStage = (cells[1] || '').trim(); curColors = null; continue; }
+    if (key === '') { curColors = cells.slice(1).map((x) => x.trim()); continue; } // шапка цветов
+    if (curA && curStage && curColors) {
+      const size = key;
+      cells.slice(1).forEach((val, i) => {
+        const color = curColors[i]; if (!color) return;
+        ((res[curA] ||= {})[curStage] ||= {})[color] ||= {};
+        res[curA][curStage][color][size] = parseQty(val);
+      });
+    }
+  }
+  return res;
+}
+function applyPlanImport(parsed) {
+  let filled = 0, skipped = 0;
+  for (const [aid, byStage] of Object.entries(parsed)) {
+    const a = state.articles.find((x) => x.id === aid);
+    if (!a) { skipped++; continue; }
+    for (const [stageId, matrix] of Object.entries(byStage)) {
+      if (!state.stages.find((s) => s.id === stageId)) { skipped++; continue; }
+      let p = partiasOf(a.id, stageId)[0];
+      if (!p) { p = newPartia(a.id, stageId); state.partias.push(p); }
+      const nm = {};
+      for (const c of a.colors) { nm[c] = {}; for (const s of a.sizes) nm[c][s] = (matrix[c] && matrix[c][s]) || 0; }
+      p.planMatrix = nm; filled++;
+    }
+  }
+  return { filled, skipped };
+}
+function importPlanFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = parsePlanTemplate(String(reader.result).replace(/^﻿/, ''));
+      const { filled, skipped } = applyPlanImport(parsed);
+      dirty = true;
+      recalc(true).then(() => { renderMatrix(); toast(`Загружено: ${filled} блоков${skipped ? `, пропущено ${skipped}` : ''}`); }).catch((err) => toast('Ошибка: ' + err.message, true));
+    } catch (err) { toast('Не удалось разобрать файл: ' + err.message, true); }
+  };
+  reader.readAsText(file, 'utf-8');
+}
+function downloadText(filename, text) {
+  const blob = new Blob(['﻿' + text], { type: 'text/tab-separated-values;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const el = document.createElement('a'); el.href = url; el.download = filename; document.body.appendChild(el); el.click();
+  setTimeout(() => { URL.revokeObjectURL(url); el.remove(); }, 1000);
 }
 
 function bindMatrixControls(a, stage) {
