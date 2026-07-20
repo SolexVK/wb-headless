@@ -81,27 +81,31 @@ export function renderGantt(container, schedule, state, opts = {}) {
     el('rect', { class: 'g-row-bg', x: 0, y: r._y, width: totalW, height: r._h, fill: i % 2 ? 'var(--g-row-alt)' : 'transparent' }, svg);
   });
 
-  // сетка по месяцам + недельные линии
+  // сетка по месяцам + подписи дат (частота зависит от масштаба)
+  // шаг подписей: минимум ~24px между числами, но не реже раза в неделю
+  const labelStep = Math.min(7, Math.max(1, Math.ceil(24 / pxPerDay)));
   let cur = parse(minD);
   const endT = parse(maxD);
+  let dayOffset = 0;
   while (cur <= endT) {
     const d = new Date(cur);
     const x = xOf(iso(cur));
     const isMonthStart = d.getUTCDate() === 1;
-    const isWeek = d.getUTCDay() === 1; // понедельник
-    if (isMonthStart || isWeek) {
+    const isLabelDay = isMonthStart || (dayOffset % labelStep === 0);
+    if (isMonthStart || isLabelDay) {
       el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: isMonthStart ? 'var(--line)' : 'var(--g-grid)', 'stroke-width': isMonthStart ? 1.4 : 1 }, svg);
     }
     if (isMonthStart) {
       el('rect', { x, y: 0, width: 1, height: HEADER_H, fill: 'var(--line)' }, svg);
-      const t = el('text', { x: x + 6, y: 18, fill: 'var(--text)', 'font-size': 12, 'font-weight': 600 }, svg);
+      const t = el('text', { x: x + 6, y: 16, fill: 'var(--text)', 'font-size': 12, 'font-weight': 600 }, svg);
       t.textContent = `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
     }
-    if (d.getUTCDay() === 1) {
-      const t = el('text', { x: x + 2, y: 38, fill: 'var(--muted)', 'font-size': 10 }, svg);
+    if (isLabelDay) {
+      // выходной (вс) — красноватый, чтобы легче ориентироваться
+      const t = el('text', { x: x + 2, y: 38, fill: d.getUTCDay() === 0 ? 'var(--danger)' : 'var(--muted)', 'font-size': 10 }, svg);
       t.textContent = d.getUTCDate();
     }
-    cur += MS;
+    cur += MS; dayOffset++;
   }
 
   // дедлайны этапов (вертикальные красные линии)
