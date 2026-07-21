@@ -63,12 +63,13 @@ export function buildParamsFromArgs(a = {}) {
   // Убираем undefined, чтобы не перетирать DEFAULTS ядра.
   for (const k of Object.keys(plan)) if (plan[k] === undefined) delete plan[k];
 
-  // Режим A — линейка из groups.json.
+  // Режим A — линейка из groups.json. С `--path` собираем BULK (1 запрос),
+  // без него — fallback per-SKU (дорого по лимиту).
   if (a.group) {
     const groups = loadGroups();
     const wbList = groups[a.group];
     if (!wbList) throw new Error(`Неизвестная группа «${a.group}». Есть: ${Object.keys(groups).join(', ')}`);
-    return { ...period, label: a.group, group: wbList.map((wb) => ({ wb })), plan };
+    return { ...period, label: a.group, group: wbList.map((wb) => ({ wb })), path: a.path, plan };
   }
 
   // Режим B — сборка из предмета (path) с фильтрацией.
@@ -115,6 +116,10 @@ function printSummary(report) {
   console.log('\n=== План продаж на сезон ===');
   console.log(`Линейка/предмет:   ${report.label}`);
   console.log(`Период истории:    ${report.period.d1} … ${report.period.d2}`);
+  const methodLabel = report.method === 'category-bulk'
+    ? 'bulk (графики категории)'
+    : 'per-SKU (дорого по лимиту)';
+  console.log(`Способ сбора:      ${methodLabel} — запросов к MPStats: ${report.requests}`);
   if (report.groupInfo) {
     console.log(`Предмет:           ${report.groupInfo.path}`);
     console.log(`Отобрано в группу: ${report.groupInfo.kept} из ${report.groupInfo.fetched} (всего в предмете ${report.groupInfo.total})`);
