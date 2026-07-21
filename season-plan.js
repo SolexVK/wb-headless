@@ -191,7 +191,7 @@ function printSummary(report) {
   }
 
   console.log('\n— Ранг сезонности —');
-  console.log(`  ${p.rank.rank} (амплитуда p90/p50 = ${p.rank.amplitude}; медиана ${p.rank.p50}, пик ${p.rank.p90}, провал ${p.rank.p10})`);
+  console.log(`  ${p.rank.rank} (амплитуда p90/p50 = ${p.rank.amplitude}; медиана ${p.rank.p50}, пик ${p.rank.p90}${p.rank.p10 != null ? `, провал ${p.rank.p10}` : ''})`);
 
   const ds = p.dataSufficiency;
   if (ds) {
@@ -229,11 +229,12 @@ function printSummary(report) {
   const baseLabel = {
     blend: `бленд ${Math.round((bi.competitorWeight ?? 0.9) * 100)}% конкуренты / ${Math.round((1 - (bi.competitorWeight ?? 0.9)) * 100)}% свои: конкуренты ${fmt(bi.competitorLevel)} + свои ${fmt(bi.ownBaseDaily)} → ${fmt(bi.blendedBaseDaily)} зак/день`,
     competitor: `100% конкуренты (${bi.reason}): ${fmt(bi.competitorPerItemDaily)}/товар × ${bi.ownSkuCount} SKU = ${fmt(bi.estimatedBaseDaily)}`,
+    'competitor-per-item': `план на 1 карточку — средний конкурент ${fmt(bi.competitorPerItemDaily)} зак/день (${bi.analogCount} аналогов). Для бленда 90/10 задайте свою линейку --group.`,
     own: `от собственных продаж линейки (${fmt(bi.ownBaseDaily)} зак/день)`,
     target: 'от цели по штукам',
     group: 'рыночный уровень группы',
     override: 'заданная база',
-  }[p.baseSource] || p.baseSource;
+  }[p.baseSource || bi.source] || (p.baseSource || bi.source);
   console.log(`  Уровень базы: ${baseLabel}`);
   console.log(`  База плана: ${fmt(p.baseDaily)} зак/день (форма — от аналогов).`);
 

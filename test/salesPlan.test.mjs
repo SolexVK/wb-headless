@@ -82,18 +82,22 @@ test('detectPhases: пик по МЕСЯЧНОМУ объёму, а не по р
   assert.equal(ph.peak.month, 2, `ожидали пик в феврале, получили месяц ${ph.peak.month}`);
 });
 
-test('applyOOSCorrection: восстанавливает спрос в дни простоя по среднему в наличии', () => {
+test('applyOOSCorrection: восстанавливает ВНУТРЕННИЙ простой; хвостовые/предзапускные нули не трогает', () => {
   const daily = [
-    { date: '2024-01-01', sales: 10, balance: 5, price: 100, revenue: 1000 },
-    { date: '2024-01-02', sales: 20, balance: 5, price: 100, revenue: 2000 },
-    { date: '2024-01-03', sales: 0, balance: 0, price: 0, revenue: 0 }, // OOS
+    { date: '2024-01-01', sales: 0, balance: 0, price: 0, revenue: 0 }, // до запуска — НЕ трогаем
+    { date: '2024-01-02', sales: 10, balance: 5, price: 100, revenue: 1000 },
+    { date: '2024-01-03', sales: 0, balance: 0, price: 0, revenue: 0 }, // внутренний простой
+    { date: '2024-01-04', sales: 20, balance: 5, price: 100, revenue: 2000 },
+    { date: '2024-01-05', sales: 0, balance: 0, price: 0, revenue: 0 }, // после снятия — НЕ трогаем
   ];
   const c = applyOOSCorrection(daily);
-  // Средние продажи в наличии = (10+20)/2 = 15 → восстанавливаем в день простоя.
+  // Средние продажи в наличии = (10+20)/2 = 15 → восстанавливаем только внутренний простой.
   assert.equal(c[2].sales, 15);
   assert.equal(c[2].oosRestored, true);
-  assert.equal(c[2].price, 100); // цена = средняя по дням с продажами
-  assert.equal(c[0].sales, 10); // дни в наличии не трогаем
+  assert.equal(c[2].price, 100);
+  assert.equal(c[0].sales, 0); // предзапускной ноль не трогаем
+  assert.equal(c[4].sales, 0); // хвостовой ноль не трогаем
+  assert.equal(c[1].sales, 10); // дни в наличии не трогаем
 });
 
 test('computeWeeklyProfile: ловит внутринедельную «пилу», нормирован к 1', () => {
