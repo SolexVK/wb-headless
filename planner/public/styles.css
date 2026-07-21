@@ -291,3 +291,47 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .toast.show { opacity: 1; }
 .toast.err { border-color: var(--danger); }
+
+/* ---------- Ранг сезонности ---------- */
+.season-builder, .season-store { margin-bottom: 16px; }
+.season-warn { background: rgba(249,115,22,.12); border: 1px solid var(--danger); color: var(--text); padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
+.season-warn code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+.season-form { display: flex; flex-direction: column; gap: 12px; }
+.season-form .row-flex { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.season-form .field { display: flex; flex-direction: column; gap: 4px; }
+.season-form .field.grow { flex: 1; min-width: 180px; }
+.season-form label { font-size: 12px; color: var(--muted); }
+.season-form input, .season-form select { padding: 6px 8px; background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 6px; font-size: 13px; }
+.season-form input:focus, .season-form select:focus { outline: none; border-color: var(--accent); }
+.se-path-row { display: flex; gap: 8px; align-items: center; }
+.se-path-row #se-path { flex: 1; min-width: 220px; }
+.se-path-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 220px; overflow: auto; }
+.se-path-opt { text-align: left; font-weight: 400; justify-content: flex-start; }
+.se-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+.season-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.se-view-pick { flex-direction: row; align-items: flex-end; gap: 12px; }
+
+.se-summary { margin: 8px 0 14px; }
+.se-cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
+.se-card { flex: 1; min-width: 160px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.se-card .k { font-size: 12px; color: var(--muted); }
+.se-card .v { font-size: 20px; font-weight: 700; margin: 2px 0; }
+.se-card .v.good { color: var(--accent); }
+.se-phases { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.se-phase-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text); }
+.se-phase-chip i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+
+.se-charts { display: flex; flex-direction: column; gap: 18px; margin: 10px 0 18px; }
+.se-chart { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.se-chart-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.se-svg-wrap { width: 100%; overflow-x: auto; }
+.se-svg { width: 100%; height: auto; min-width: 640px; display: block; }
+.se-axis { fill: var(--muted); font-size: 10px; }
+.se-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.se-legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+
+.se-table-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 6px 0; flex-wrap: wrap; }
+.se-gran-group { display: inline-flex; gap: 4px; }
+.se-gran.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.se-plan-table td, .se-plan-table th { padding: 5px 10px; }
+.se-plan-table tbody tr { transition: none; }

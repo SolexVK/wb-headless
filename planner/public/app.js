@@ -100,6 +100,7 @@ function renderCurrent() {
   else if (activeTab === 'fact') renderFact();
   else if (activeTab === 'fabric') renderFabricOrder();
   else if (activeTab === 'dashboard') renderDashboard();
+  else if (activeTab === 'season') renderSeason();
   else if (activeTab === 'data') renderData();
   applyCollapsibles();
 }
@@ -996,6 +997,314 @@ function workingDaysInMonth(ym) {
   let c = 0;
   for (let d = 1; d <= last; d++) if (new Date(Date.UTC(y, m - 1, d)).getUTCDay() !== 0) c++;
   return c;
+}
+
+// ---------- РАНГ СЕЗОННОСТИ (план продаж по сезонности) ----------
+// Цвета этапов — как в скилле seasonality-sales-plan (references/outputs.md).
+const PHASE_COLORS = {
+  'вход':              { band: '#38bdf8', row: 'rgba(56,189,248,.16)' },
+  'разгон':            { band: '#22c55e', row: 'rgba(34,197,94,.16)' },
+  'старт сезона':      { band: '#eab308', row: 'rgba(234,179,8,.18)' },
+  'пик сезона':        { band: '#f97316', row: 'rgba(249,115,22,.18)' },
+  'начало распродажи': { band: '#ec4899', row: 'rgba(236,72,153,.16)' },
+  'конец распродажи':  { band: '#a78bfa', row: 'rgba(167,139,250,.18)' },
+  'межсезонье':        { band: '#94a3b8', row: 'rgba(148,163,184,.12)' },
+};
+const FAVORABLE_BAND = 'rgba(250,204,21,.30)';
+const seEsc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+const seFmtD = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
+const SE_MON = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+const seMonthLabel = (ym) => `${SE_MON[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}`;
+
+let seasonBuildArticle = null;   // артикул в форме построения
+let seasonSelArticle = null;     // артикул в накопителе (просмотр)
+let seasonGran = 'day';          // день/неделя/месяц в таблице
+let seasonBuilding = false;
+let seasonPlansIndex = [];
+let seasonHasToken = null;
+
+async function renderSeason() {
+  const root = document.getElementById('season');
+  if (seasonHasToken === null) {
+    try { seasonHasToken = (await api('/api/season/status')).hasToken; } catch { seasonHasToken = false; }
+  }
+  try { seasonPlansIndex = (await api('/api/season/plans')).plans || []; } catch { seasonPlansIndex = []; }
+  root.innerHTML = seasonBuilderPanel() + seasonStorePanel();
+  bindSeasonBuilder();
+  bindSeasonStore();
+  if (seasonSelArticle) renderSeasonView(seasonSelArticle);
+}
+
+// ── Часть 1 — конструктор ──
+function seasonBuilderPanel() {
+  const arts = articlesSorted();
+  if (!arts.length) return '<div class="panel"><h3>Часть 1 — Построение плана продаж</h3><div class="mini">Сначала добавь артикулы во вкладке «Данные».</div></div>';
+  const aid = (seasonBuildArticle && arts.find((a) => a.id === seasonBuildArticle)) ? seasonBuildArticle : arts[0].id;
+  seasonBuildArticle = aid;
+  const a = arts.find((x) => x.id === aid);
+  const f = a.seasonFilter || {};
+  const warn = seasonHasToken ? ''
+    : '<div class="season-warn">⚠ Не задан <b>MPSTATS_TOKEN</b> в окружении службы — построение недоступно. Добавь токен в <code>planner/data/.env</code> на Mac mini (см. DEPLOY.md) и перезапусти службу.</div>';
+  return `<div class="panel season-builder">
+    <div class="subhead"><h3>Часть 1 — Построение плана продаж (по конкурентам)</h3></div>
+    ${warn}
+    <div class="season-form">
+      <div class="field"><label>Артикул</label><select id="se-article">${arts.map((x) => `<option value="${x.id}"${x.id === aid ? ' selected' : ''}>${x.id} — ${seEsc(x.name)}</option>`).join('')}</select></div>
+      <div class="field grow"><label>Путь предмета WB</label>
+        <div class="se-path-row">
+          <input id="se-path" value="${seEsc(f.path || '')}" placeholder="Женщинам/Блузки и рубашки/Рубашка">
+          <input id="se-path-q" placeholder="поиск по слову" title="напр. рубаш">
+          <button class="btn" id="se-path-find" type="button">найти путь</button>
+        </div>
+        <div id="se-path-list" class="se-path-list"></div>
+      </div>
+      <div class="row-flex">
+        <div class="field grow"><label>Слова в названии (любое из)</label><input id="se-words" value="${seEsc(f.words || '')}" placeholder="рубашка"></div>
+        <div class="field grow"><label>Доп. слова-признаки</label><input id="se-allwords" value="${seEsc(f.allWords || '')}" placeholder="оверсайз, длинный рукав"></div>
+        <div class="field grow"><label>Исключить слова</label><input id="se-exclude" value="${seEsc(f.exclude || '')}" placeholder="детск, мужск, блузка"></div>
+      </div>
+      <div class="row-flex">
+        <div class="field"><label>Цена от, ₽</label><input id="se-pmin" type="number" value="${f.priceMin ?? ''}" style="width:90px"></div>
+        <div class="field"><label>Цена до, ₽</label><input id="se-pmax" type="number" value="${f.priceMax ?? ''}" style="width:90px"></div>
+        <div class="field"><label>Мин. продаж/мес</label><input id="se-minsales" type="number" value="${f.minSales ?? ''}" style="width:120px"></div>
+        <div class="field"><label>Мин. выручка/мес, ₽</label><input id="se-minrev" type="number" value="${f.minRevenue ?? ''}" style="width:140px"></div>
+        <div class="field"><label>Размер группы</label><input id="se-limit" type="number" value="${f.limit ?? 60}" style="width:100px"></div>
+      </div>
+      <div class="row-flex">
+        <div class="field"><label>Прогноз с</label><input id="se-from" type="date" value="${seEsc(f.from || '')}"></div>
+        <div class="field"><label>Прогноз по</label><input id="se-to" type="date" value="${seEsc(f.to || '')}"></div>
+        <label class="se-check"><input type="checkbox" id="se-oos"${f.oos !== false ? ' checked' : ''}> OOS-поправка</label>
+        <label class="se-check"><input type="checkbox" id="se-weekly"${f.weekly !== false ? ' checked' : ''}> недельный профиль</label>
+      </div>
+      <div class="season-actions">
+        <button class="btn btn-primary" id="se-build"${seasonHasToken && !seasonBuilding ? '' : ' disabled'}>${seasonBuilding ? '⏳ Строю план…' : '▶ Построить план'}</button>
+        <span class="mini">Данные берутся из MPStats по конкурентам-аналогам (несколько секунд, ~3–4 запроса). Готовый план сохранится в накопитель ниже.</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function collectSeasonForm() {
+  const v = (id) => (document.getElementById(id)?.value || '').trim();
+  return {
+    articleId: seasonBuildArticle,
+    path: v('se-path'), words: v('se-words'), allWords: v('se-allwords'), exclude: v('se-exclude'),
+    priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
+    limit: v('se-limit'), from: v('se-from'), to: v('se-to'),
+    oos: document.getElementById('se-oos')?.checked !== false,
+    weekly: document.getElementById('se-weekly')?.checked !== false,
+  };
+}
+
+function bindSeasonBuilder() {
+  const g = (id) => document.getElementById(id);
+  g('se-article')?.addEventListener('change', (e) => { seasonBuildArticle = e.target.value; renderSeason(); });
+  g('se-path-find')?.addEventListener('click', async () => {
+    const q = g('se-path-q').value.trim();
+    const box = g('se-path-list');
+    if (!q) { box.innerHTML = '<span class="mini">Введи слово для поиска пути (напр. рубаш).</span>'; return; }
+    box.innerHTML = '<span class="mini">Ищу…</span>';
+    try {
+      const r = await api('/api/season/categories?q=' + encodeURIComponent(q));
+      box.innerHTML = (r.paths || []).length
+        ? r.paths.map((p) => `<button class="btn se-path-opt" type="button" data-path="${seEsc(p)}">${seEsc(p)}</button>`).join('')
+        : '<span class="mini">Ничего не найдено.</span>';
+      box.querySelectorAll('.se-path-opt').forEach((b) => b.addEventListener('click', () => { g('se-path').value = b.dataset.path; box.innerHTML = ''; }));
+    } catch (e) { box.innerHTML = '<span class="mini bad">Ошибка: ' + e.message + '</span>'; }
+  });
+  g('se-build')?.addEventListener('click', async () => {
+    const cfg = collectSeasonForm();
+    if (!cfg.path) { toast('Укажи путь предмета WB', true); return; }
+    if (!cfg.from || !cfg.to) { toast('Укажи прогнозный период (с … по)', true); return; }
+    seasonBuilding = true; renderSeason();
+    try {
+      await api('/api/season/build', { method: 'POST', body: JSON.stringify(cfg) });
+      // запомнить фильтр в артикуле, чтобы перестраивать в один клик
+      const a = state.articles.find((x) => x.id === cfg.articleId);
+      if (a) {
+        a.seasonFilter = { path: cfg.path, words: cfg.words, allWords: cfg.allWords, exclude: cfg.exclude,
+          priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
+          limit: cfg.limit, from: cfg.from, to: cfg.to, oos: cfg.oos, weekly: cfg.weekly };
+        await recalc(true).catch(() => {});
+      }
+      seasonSelArticle = cfg.articleId;
+      toast('План построен и сохранён');
+    } catch (e) {
+      toast('Ошибка построения: ' + e.message, true);
+    } finally {
+      seasonBuilding = false; renderSeason();
+    }
+  });
+}
+
+// ── Часть 2 — накопитель ──
+function seasonStorePanel() {
+  const plans = seasonPlansIndex;
+  const opts = plans.map((p) => `<option value="${p.articleId}"${p.articleId === seasonSelArticle ? ' selected' : ''}>${p.articleId}${p.label ? ' — ' + seEsc(p.label) : ''}${p.forecastPeriod ? ` (${p.forecastPeriod.from}…${p.forecastPeriod.to})` : ''}</option>`).join('');
+  return `<div class="panel season-store">
+    <div class="subhead"><h3>Часть 2 — Сохранённые планы (накопитель)</h3></div>
+    ${plans.length ? `<div class="season-form se-view-pick">
+        <div class="field grow"><label>Артикул с построенным планом</label>
+          <select id="se-view-article"><option value="">— выбери артикул —</option>${opts}</select></div>
+        <button class="btn btn-danger" id="se-del" type="button" title="удалить сохранённый план">✕ удалить план</button>
+      </div>`
+      : '<div class="mini">Пока нет сохранённых планов. Построй план в Части 1 — он появится здесь.</div>'}
+    <div id="se-view"></div>
+  </div>`;
+}
+
+function bindSeasonStore() {
+  const sel = document.getElementById('se-view-article');
+  sel?.addEventListener('change', (e) => { seasonSelArticle = e.target.value || null; renderSeasonView(seasonSelArticle); });
+  document.getElementById('se-del')?.addEventListener('click', async () => {
+    if (!seasonSelArticle) { toast('Сначала выбери артикул', true); return; }
+    try {
+      await api('/api/season/plan?articleId=' + encodeURIComponent(seasonSelArticle), { method: 'DELETE' });
+      toast('План удалён'); seasonSelArticle = null; renderSeason();
+    } catch (e) { toast('Ошибка: ' + e.message, true); }
+  });
+}
+
+async function renderSeasonView(articleId) {
+  const box = document.getElementById('se-view');
+  if (!box) return;
+  if (!articleId) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="mini">Загрузка плана…</div>';
+  let rec;
+  try { rec = await api('/api/season/plan?articleId=' + encodeURIComponent(articleId)); }
+  catch (e) { box.innerHTML = '<div class="mini bad">Не удалось загрузить: ' + e.message + '</div>'; return; }
+  const rep = rec.report, p = rep.plan || {};
+  box.innerHTML = seasonSummary(rep, p) + seasonChartsBlock(p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  bindSeasonView(p);
+}
+
+function seasonPhaseLegend() {
+  return `<div class="se-phases">${Object.entries(PHASE_COLORS).map(([name, c]) => `<span class="se-phase-chip"><i style="background:${c.band}"></i>${name}</span>`).join('')}<span class="se-phase-chip"><i style="background:${FAVORABLE_BAND}"></i>благоприятный период</span></div>`;
+}
+
+function seasonSummary(rep, p) {
+  const rank = p.rank || {};
+  const fd = p.forecastDaily || [];
+  const total = Math.round(fd.reduce((s, d) => s + (+d.plannedOrders || 0), 0));
+  const prices = fd.map((d) => +d.price || 0).filter((x) => x > 0);
+  const pmin = prices.length ? Math.min(...prices) : 0, pmax = prices.length ? Math.max(...prices) : 0;
+  const favM = (p.favorable && p.favorable.months || []).map((m) => SE_MON[m - 1]).join(', ');
+  const gen = rep.generatedAt ? rep.generatedAt.slice(0, 10) : '';
+  return `<div class="se-summary">
+    <div class="se-cards">
+      <div class="se-card"><div class="k">Ранг сезонности</div><div class="v">${rank.rank || '—'}</div><div class="mini">амплитуда p90/p50 = ${rank.amplitude ?? '—'}</div></div>
+      <div class="se-card"><div class="k">Прогноз, штук</div><div class="v good">${total.toLocaleString('ru')}</div><div class="mini">${rep.forecastPeriod ? rep.forecastPeriod.from + ' … ' + rep.forecastPeriod.to : ''}</div></div>
+      <div class="se-card"><div class="k">Цена, ₽</div><div class="v">${pmin ? pmin.toLocaleString('ru') + '–' + pmax.toLocaleString('ru') : '—'}</div><div class="mini">среднерыночный якорь</div></div>
+      <div class="se-card"><div class="k">Благоприятные месяцы</div><div class="v">${favM || '—'}</div><div class="mini">спрос выше среднего, остатки ниже</div></div>
+    </div>
+    <div class="mini">Группа-аналогов: ${rep.itemsWithData ?? '—'} из ${rep.groupSize ?? '—'} · сбор: ${rep.method || '—'} (${rep.requests ?? '—'} запр.) · построено ${gen}</div>
+    ${seasonPhaseLegend()}
+  </div>`;
+}
+
+function seasonChartsBlock(p) {
+  return `<div class="se-charts">
+    ${seasonChartSVG('Прогноз спроса, цены и остатков — на запрошенный период', p.forecastDaily || [], 'plannedOrders')}
+    ${seasonChartSVG('История за 2 года (реальные данные аналогов)', p.historyDaily || [], 'sales')}
+  </div>`;
+}
+
+// сглаживание MA(k) для линии спроса (шумный дневной ряд)
+function seMA(arr, k = 7) {
+  if (arr.length < k) return arr.slice();
+  const out = new Array(arr.length); const h = Math.floor(k / 2);
+  for (let i = 0; i < arr.length; i++) {
+    let s = 0, n = 0;
+    for (let j = Math.max(0, i - h); j <= Math.min(arr.length - 1, i + h); j++) { s += arr[j]; n++; }
+    out[i] = s / n;
+  }
+  return out;
+}
+
+function seasonChartSVG(title, rows, valueKey) {
+  if (!rows || !rows.length) return `<div class="se-chart"><div class="se-chart-title">${title}</div><div class="mini">нет данных</div></div>`;
+  const W = 980, H = 300, padL = 46, padR = 14, padT = 24, padB = 40;
+  const n = rows.length;
+  const x = (i) => padL + (n > 1 ? i * (W - padL - padR) / (n - 1) : 0);
+  const raw = (key) => rows.map((r) => +r[key] || 0);
+  const demandRaw = raw(valueKey), price = raw('price'), stock = raw('stock');
+  const demand = seMA(demandRaw, 7);
+  const norm = (arr) => { const mn = Math.min(...arr), mx = Math.max(...arr), span = (mx - mn) || 1; return { mn, mx, y: (v) => padT + (H - padT - padB) * (1 - (v - mn) / span) }; };
+  const nd = norm(demand), np = norm(price), ns = norm(stock);
+  const poly = (arr, ny) => arr.map((v, i) => `${x(i).toFixed(1)},${ny.y(v).toFixed(1)}`).join(' ');
+  const bandH = (H - padT - padB).toFixed(1);
+  // полосы этапов
+  let bands = '', i = 0;
+  while (i < n) { let j = i; const st = rows[i].stage; while (j + 1 < n && rows[j + 1].stage === st) j++; const c = PHASE_COLORS[st]; if (c) bands += `<rect x="${x(i).toFixed(1)}" y="${padT}" width="${Math.max(1, x(j) - x(i) + (j === i ? 2 : 0)).toFixed(1)}" height="${bandH}" fill="${c.band}" fill-opacity="0.16"/>`; i = j + 1; }
+  // полосы благоприятных периодов
+  let fav = ''; i = 0;
+  while (i < n) { if (rows[i].favorable) { let j = i; while (j + 1 < n && rows[j + 1].favorable) j++; fav += `<rect x="${x(i).toFixed(1)}" y="${padT}" width="${Math.max(1, x(j) - x(i) + 2).toFixed(1)}" height="${bandH}" fill="${FAVORABLE_BAND}"/>`; i = j + 1; } else i++; }
+  // сетка по месяцам
+  let ticks = '', lastM = null;
+  rows.forEach((r, idx) => { const m = r.date.slice(0, 7); if (m !== lastM) { lastM = m; ticks += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--line)" stroke-dasharray="2 3" opacity="0.45"/><text x="${x(idx).toFixed(1)}" y="${H - padB + 14}" class="se-axis" text-anchor="middle">${SE_MON[+r.date.slice(5, 7) - 1]} ${r.date.slice(2, 4)}</text>`; } });
+  const axisY = `<text x="${padL - 6}" y="${padT + 6}" class="se-axis" text-anchor="end">${Math.round(nd.mx)}</text><text x="${padL - 6}" y="${H - padB}" class="se-axis" text-anchor="end">${Math.round(nd.mn)}</text>`;
+  return `<div class="se-chart"><div class="se-chart-title">${title}</div>
+    <div class="se-svg-wrap"><svg viewBox="0 0 ${W} ${H}" class="se-svg" preserveAspectRatio="xMidYMid meet">
+      ${bands}${fav}${ticks}
+      <polyline points="${poly(stock, ns)}" fill="none" stroke="#a78bfa" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.85"/>
+      <polyline points="${poly(price, np)}" fill="none" stroke="#ef4444" stroke-width="1.3" stroke-dasharray="5 3" opacity="0.9"/>
+      <polyline points="${poly(demand, nd)}" fill="none" stroke="#3b82f6" stroke-width="1.9"/>
+      ${axisY}
+    </svg></div>
+    <div class="se-legend">
+      <span><i style="background:#3b82f6"></i>спрос, шт/день (${Math.round(nd.mn)}–${Math.round(nd.mx)})</span>
+      <span><i style="background:#ef4444"></i>цена ₽ (${Math.round(np.mn).toLocaleString('ru')}–${Math.round(np.mx).toLocaleString('ru')})</span>
+      <span><i style="background:#a78bfa"></i>остатки, шт (${Math.round(ns.mn).toLocaleString('ru')}–${Math.round(ns.mx).toLocaleString('ru')})</span>
+    </div>
+  </div>`;
+}
+
+// агрегирование дневного ряда прогноза до день/неделя/месяц
+function seasonAgg(rows, gran) {
+  if (gran === 'day') return rows.map((r) => ({ label: seFmtD(r.date), stage: r.stage, favorable: !!r.favorable, units: Math.round(+r.plannedOrders || 0), price: Math.round(+r.price || 0) }));
+  const buckets = new Map();
+  for (const r of rows) {
+    let key, label;
+    if (gran === 'month') { key = r.date.slice(0, 7); label = seMonthLabel(key); }
+    else { const d = new Date(r.date + 'T00:00:00Z'); const dow = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - dow); key = d.toISOString().slice(0, 10); label = 'нед. ' + seFmtD(key); }
+    let b = buckets.get(key);
+    if (!b) { b = { label, units: 0, priceSum: 0, priceDays: 0, favorable: false, stages: {} }; buckets.set(key, b); }
+    b.units += +r.plannedOrders || 0;
+    const pr = +r.price || 0; if (pr > 0) { b.priceSum += pr; b.priceDays++; }
+    if (r.favorable) b.favorable = true;
+    b.stages[r.stage] = (b.stages[r.stage] || 0) + 1;
+  }
+  return [...buckets.values()].map((b) => ({
+    label: b.label,
+    stage: Object.entries(b.stages).sort((a, c) => c[1] - a[1])[0]?.[0] || '',
+    favorable: b.favorable,
+    units: Math.round(b.units),
+    price: b.priceDays ? Math.round(b.priceSum / b.priceDays) : 0,
+  }));
+}
+
+function seasonTableBlock(p) {
+  const rows = seasonAgg(p.forecastDaily || [], seasonGran);
+  const total = rows.reduce((s, r) => s + r.units, 0);
+  const gbtn = (g, t) => `<button class="btn se-gran${seasonGran === g ? ' active' : ''}" type="button" data-gran="${g}">${t}</button>`;
+  return `<div class="se-table-head">
+      <b>План продаж по ${seasonGran === 'day' ? 'дням' : seasonGran === 'week' ? 'неделям' : 'месяцам'}</b>
+      <span class="se-gran-group">${gbtn('day', 'дни')}${gbtn('week', 'недели')}${gbtn('month', 'месяцы')}</span>
+    </div>
+    <div class="matrix-scroll"><table class="matrix-table se-plan-table">
+      <thead><tr><th>Период</th><th>Этап сезона</th><th class="num">План продаж, шт</th><th class="num">Цена, ₽</th><th>Благопр.</th></tr></thead>
+      <tbody>${rows.map((r) => { const c = PHASE_COLORS[r.stage]; return `<tr style="background:${c ? c.row : 'transparent'}"><td>${r.label}</td><td>${r.stage || '—'}</td><td class="num">${r.units.toLocaleString('ru')}</td><td class="num">${r.price ? r.price.toLocaleString('ru') : '—'}</td><td>${r.favorable ? '⭐' : ''}</td></tr>`; }).join('')}</tbody>
+      <tfoot><tr><th colspan="2">ИТОГО</th><th class="num">${total.toLocaleString('ru')}</th><th colspan="2"></th></tr></tfoot>
+    </table></div>`;
+}
+
+function bindSeasonView(p) {
+  document.querySelectorAll('.se-gran').forEach((b) => b.addEventListener('click', () => {
+    seasonGran = b.dataset.gran;
+    const box = document.getElementById('se-table');
+    if (box) box.innerHTML = seasonTableBlock(p);
+    bindSeasonView(p);
+  }));
 }
 
 // ---------- ДАННЫЕ (формы) ----------
