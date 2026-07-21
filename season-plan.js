@@ -75,7 +75,8 @@ export function buildParamsFromArgs(a = {}) {
     excludeBrands: list(a['exclude-brands']),
     priceMin: num(a['price-min']),
     priceMax: num(a['price-max']),
-    minSales: num(a['min-sales']),
+    minSalesPerMonth: num(a['min-sales']), // порог продаж В МЕСЯЦ
+    minRevenuePerMonth: num(a['min-revenue']), // порог выручки В МЕСЯЦ, ₽
   };
   for (const k of Object.keys(filter)) if (filter[k] === undefined) delete filter[k];
   const hasFilter = Object.keys(filter).length > 0;
@@ -289,7 +290,8 @@ async function promptParams(preset = {}) {
   a['exclude-brands'] = await ask('Исключить бренды', preset['exclude-brands']);
   a['price-min'] = await ask('Цена от, ₽', preset['price-min']);
   a['price-max'] = await ask('Цена до, ₽', preset['price-max']);
-  a['min-sales'] = await ask('Минимум продаж за период (отсечь мёртвые)', preset['min-sales'] || '3');
+  a['min-sales'] = await ask('Минимум продаж В МЕСЯЦ (отсечь мёртвые)', preset['min-sales']);
+  a['min-revenue'] = await ask('Минимум выручки В МЕСЯЦ, ₽ (альтернатива продажам)', preset['min-revenue']);
   a.limit = await ask('Сколько аналогов брать в группу', preset.limit || '60');
   a.from = await ask('ПРОГНОЗ: начало запрашиваемого периода (YYYY-MM-DD), пусто — без прогноза', preset.from);
   if (a.from) a.to = await ask('ПРОГНОЗ: конец периода (YYYY-MM-DD)', preset.to);
