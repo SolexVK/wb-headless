@@ -80,6 +80,8 @@ export function buildParamsFromArgs(a = {}) {
   for (const k of Object.keys(filter)) if (filter[k] === undefined) delete filter[k];
   const hasFilter = Object.keys(filter).length > 0;
   const baseSourceArg = a['base-source']; // 'own' | 'market' | 'target'
+  // Прогнозный период (Правило 3): --from/--to (будущее). История берётся за 2 года.
+  const forecast = (a.from && a.to) ? { from: a.from, to: a.to } : null;
 
   if (a.group) {
     const groups = loadGroups();
@@ -96,6 +98,7 @@ export function buildParamsFromArgs(a = {}) {
         subject: { path: a.path, filter, limit: num(a.limit), maxPages: num(a['max-pages']) },
         baseSource: baseSourceArg || 'own',
         own: { group: ownGroup, path: a.path },
+        forecast,
         plan,
       };
     }
@@ -106,6 +109,7 @@ export function buildParamsFromArgs(a = {}) {
       group: ownGroup,
       path: a.path,
       baseSource: baseSourceArg || 'market', // база = собственный уровень группы
+      forecast,
       plan,
     };
   }
@@ -116,6 +120,7 @@ export function buildParamsFromArgs(a = {}) {
       ...period,
       label: a.label || a.path,
       subject: { path: a.path, filter, limit: num(a.limit), maxPages: num(a['max-pages']) },
+      forecast,
       baseSource: baseSourceArg || (plan.targetPeriodUnits ? 'target' : 'market'),
       plan,
     };
@@ -131,7 +136,9 @@ function slug(s) {
 function writeOutputs(report) {
   const dir = path.join(__dirname, 'reports-output');
   fs.mkdirSync(dir, { recursive: true });
-  const base = `season-${slug(report.label)}-${report.period.d1}_${report.period.d2}`;
+  const per = report.mode === 'forecast' ? report.forecastPeriod : report.period;
+  const tag = report.mode === 'forecast' ? 'forecast' : 'season';
+  const base = `${tag}-${slug(report.label)}-${(per?.from || per?.d1)}_${(per?.to || per?.d2)}`;
   const csvPath = path.join(dir, `${base}.csv`);
   const jsonPath = path.join(dir, `${base}.json`);
   const xlsxPath = path.join(dir, `${base}.xlsx`);
@@ -151,9 +158,15 @@ function writeOutputs(report) {
 
 function printSummary(report) {
   const p = report.plan;
-  console.log('\n=== План продаж на сезон ===');
+  const isForecast = report.mode === 'forecast';
+  console.log('\n=== ' + (isForecast ? 'ПРОГНОЗ продаж на период' : 'План продаж на сезон') + ' ===');
   console.log(`Линейка/предмет:   ${report.label}`);
-  console.log(`Период истории:    ${report.period.d1} … ${report.period.d2}`);
+  if (isForecast) {
+    console.log(`Прогноз на период: ${report.forecastPeriod.from} … ${report.forecastPeriod.to}`);
+    console.log(`История (2 года):  ${report.historyPeriod.d1} … ${report.historyPeriod.d2}`);
+  } else {
+    console.log(`Период истории:    ${report.period.d1} … ${report.period.d2}`);
+  }
   const methodLabel = report.method === 'category-bulk'
     ? 'bulk (графики категории)'
     : 'per-SKU (дорого по лимиту)';
@@ -221,11 +234,29 @@ function printSummary(report) {
     override: 'заданная база',
   }[p.baseSource] || p.baseSource;
   console.log(`  Уровень базы: ${baseLabel}`);
-  console.log(`  База плана: ${fmt(p.baseDaily)} зак/день (форма — от аналогов). Пример по фазам:`);
-  const pick = (date) => p.daily.find((r) => r.date === date);
-  for (const o of [ph?.ramp, ph?.peak, ph?.sale].filter(Boolean)) {
-    const r = pick(o.date);
-    if (r) console.log(`  ${o.label.padEnd(18)} ${o.date}: ${fmt(r.plannedOrders)} зак/день`);
+  console.log(`  База плана: ${fmt(p.baseDaily)} зак/день (форма — от аналогов).`);
+
+  if (isForecast) {
+    const adj = p.adjustments || {};
+    console.log('\n— Корректировка текущего года (конкуренты за 60 дн.) —');
+    console.log(`  Цена ×${adj.priceAdj} (${fmt(adj.priorPrice)}→${fmt(adj.recentPrice)} ₽), объём ×${adj.volumeAdj} (${adj.priorAvgDaily}→${adj.recentAvgDaily} шт/день)`);
+    if (p.favorable?.months?.length) {
+      const mn = ['', 'янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+      console.log(`  Благоприятные месяцы (спрос > предложения): ${p.favorable.months.map((m) => mn[m]).join(', ')} · ${Math.round(p.favorable.share * 100)}% дней прогноза`);
+    }
+    console.log('\n— Прогноз по дням (выборка) —');
+    const fd = p.forecastDaily || [];
+    const sample = [fd[0], fd[Math.floor(fd.length / 2)], fd[fd.length - 1]].filter(Boolean);
+    for (const r of sample) console.log(`  ${r.date} [${r.stage}]${r.favorable ? ' ★' : ''}: ${fmt(r.plannedOrders)} шт/день по ${fmt(r.price)} ₽`);
+    const totalUnits = fd.reduce((s, r) => s + (r.plannedOrders || 0), 0);
+    console.log(`  ИТОГО за период: ≈ ${fmt(totalUnits)} шт`);
+  } else {
+    console.log('  Пример по фазам:');
+    const pick = (date) => p.daily.find((r) => r.date === date);
+    for (const o of [ph?.ramp, ph?.peak, ph?.sale].filter(Boolean)) {
+      const r = pick(o.date);
+      if (r) console.log(`  ${o.label.padEnd(18)} ${o.date}: ${fmt(r.plannedOrders)} зак/день`);
+    }
   }
   if (p.weeklyProfile) {
     const wd = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -260,8 +291,10 @@ async function promptParams(preset = {}) {
   a['price-max'] = await ask('Цена до, ₽', preset['price-max']);
   a['min-sales'] = await ask('Минимум продаж за период (отсечь мёртвые)', preset['min-sales'] || '3');
   a.limit = await ask('Сколько аналогов брать в группу', preset.limit || '60');
-  a.d1 = await ask('Начало периода (YYYY-MM-DD), пусто — последние 2 года', preset.d1);
-  a.d2 = await ask('Конец периода (YYYY-MM-DD)', preset.d2);
+  a.from = await ask('ПРОГНОЗ: начало запрашиваемого периода (YYYY-MM-DD), пусто — без прогноза', preset.from);
+  if (a.from) a.to = await ask('ПРОГНОЗ: конец периода (YYYY-MM-DD)', preset.to);
+  a.d1 = await ask('История: начало (YYYY-MM-DD), пусто — последние 2 года', preset.d1);
+  a.d2 = await ask('История: конец (YYYY-MM-DD)', preset.d2);
   a['base-source'] = await ask('Уровень базы: own / market / target', preset['base-source'] || (a.group ? 'own' : 'market'));
   a.oos = (await ask('Поправка на out-of-stock? (y/n)', 'y')) === 'y' || undefined;
   a.weekly = (await ask('Недельный профиль? (y/n)', 'y')) === 'y' || undefined;
