@@ -59,41 +59,66 @@ export function buildParamsFromArgs(a = {}) {
     hotCoeff: num(a['hot-coeff']),
     ratingLeadDays: num(a['rating-lead']),
     logisticsLeadDays: num(a['logi-lead']),
+    oos: a.oos ? true : undefined, // поправка на out-of-stock
+    weekly: a.weekly ? true : undefined, // недельный профиль (дни недели)
   };
-  // Убираем undefined, чтобы не перетирать DEFAULTS ядра.
   for (const k of Object.keys(plan)) if (plan[k] === undefined) delete plan[k];
 
-  // Режим A — линейка из groups.json. С `--path` собираем BULK (1 запрос),
-  // без него — fallback per-SKU (дорого по лимиту).
+  const filter = {
+    words: list(a.words),
+    allWords: list(a['all-words']),
+    exclude: list(a.exclude),
+    brands: list(a.brands),
+    excludeBrands: list(a['exclude-brands']),
+    priceMin: num(a['price-min']),
+    priceMax: num(a['price-max']),
+    minSales: num(a['min-sales']),
+  };
+  for (const k of Object.keys(filter)) if (filter[k] === undefined) delete filter[k];
+  const hasFilter = Object.keys(filter).length > 0;
+  const baseSourceArg = a['base-source']; // 'own' | 'market' | 'target'
+
   if (a.group) {
     const groups = loadGroups();
     const wbList = groups[a.group];
     if (!wbList) throw new Error(`Неизвестная группа «${a.group}». Есть: ${Object.keys(groups).join(', ')}`);
-    return { ...period, label: a.group, group: wbList.map((wb) => ({ wb })), path: a.path, plan };
-  }
+    const ownGroup = wbList.map((wb) => ({ wb }));
 
-  // Режим B — сборка из предмета (path) с фильтрацией.
-  if (a.path) {
-    const filter = {
-      words: list(a.words),
-      allWords: list(a['all-words']),
-      exclude: list(a.exclude),
-      brands: list(a.brands),
-      excludeBrands: list(a['exclude-brands']),
-      priceMin: num(a['price-min']),
-      priceMax: num(a['price-max']),
-      minSales: num(a['min-sales']),
-    };
-    for (const k of Object.keys(filter)) if (filter[k] === undefined) delete filter[k];
+    // Комбинированный режим: линейка + предмет-аналоги. ФОРМА — от аналогов
+    // (subject+filter), УРОВЕНЬ — от собственных продаж линейки.
+    if (a.path && hasFilter) {
+      return {
+        ...period,
+        label: a.group,
+        subject: { path: a.path, filter, limit: num(a.limit), maxPages: num(a['max-pages']) },
+        baseSource: baseSourceArg || 'own',
+        own: { group: ownGroup, path: a.path },
+        plan,
+      };
+    }
+    // Режим A — сама линейка и форма, и база. С --path собираем BULK.
     return {
       ...period,
-      label: a.label || a.path,
-      subject: { path: a.path, filter, limit: num(a.limit), maxPages: num(a['max-pages']) },
+      label: a.group,
+      group: ownGroup,
+      path: a.path,
+      baseSource: baseSourceArg || 'market', // база = собственный уровень группы
       plan,
     };
   }
 
-  throw new Error('Укажите источник группы: --group <линейка> ИЛИ --path <предмет> [фильтры].');
+  // Режим B — только предмет+фильтр. База — рыночная (или цель).
+  if (a.path) {
+    return {
+      ...period,
+      label: a.label || a.path,
+      subject: { path: a.path, filter, limit: num(a.limit), maxPages: num(a['max-pages']) },
+      baseSource: baseSourceArg || (plan.targetPeriodUnits ? 'target' : 'market'),
+      plan,
+    };
+  }
+
+  throw new Error('Укажите источник: --group <линейка> и/или --path <предмет> [фильтры].');
 }
 
 function slug(s) {
@@ -173,11 +198,24 @@ function printSummary(report) {
   }
 
   console.log('\n— Плановые заказы —');
-  console.log(`  База: ${fmt(p.baseDaily)} зак/день. Пример по фазам:`);
+  const bi = report.baseInfo || {};
+  const baseLabel = {
+    own: `от собственных продаж линейки (${fmt(bi.ownBaseDaily)} зак/день, ${bi.ownActiveDays} дн.)`,
+    competitor: `оценка по конкурентам (${bi.reason}): ${fmt(bi.competitorPerItemDaily)}/товар × ${bi.ownSkuCount} SKU × ${bi.factor} = ${fmt(bi.estimatedBaseDaily)}`,
+    target: 'от цели по штукам',
+    group: 'рыночный уровень группы',
+    override: 'заданная база',
+  }[p.baseSource] || p.baseSource;
+  console.log(`  Уровень базы: ${baseLabel}`);
+  console.log(`  База плана: ${fmt(p.baseDaily)} зак/день (форма — от аналогов). Пример по фазам:`);
   const pick = (date) => p.daily.find((r) => r.date === date);
   for (const o of [ph?.ramp, ph?.peak, ph?.sale].filter(Boolean)) {
     const r = pick(o.date);
     if (r) console.log(`  ${o.label.padEnd(18)} ${o.date}: ${fmt(r.plannedOrders)} зак/день`);
+  }
+  if (p.weeklyProfile) {
+    const wd = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    console.log(`  Недельный профиль: ${p.weeklyProfile.map((f, i) => `${wd[i]} ${f}`).join('  ')}`);
   }
 
   if (report.errors.length) {

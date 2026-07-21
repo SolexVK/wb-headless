@@ -9,6 +9,8 @@ import {
   computeRank,
   detectPhases,
   buildSeasonPlan,
+  applyOOSCorrection,
+  computeWeeklyProfile,
 } from '../lib/salesPlan.js';
 
 // Генератор дневного ряда по функции продаж/цены от даты.
@@ -78,6 +80,54 @@ test('detectPhases: пик по МЕСЯЧНОМУ объёму, а не по р
   });
   const ph = detectPhases(series);
   assert.equal(ph.peak.month, 2, `ожидали пик в феврале, получили месяц ${ph.peak.month}`);
+});
+
+test('applyOOSCorrection: восстанавливает спрос в дни простоя по среднему в наличии', () => {
+  const daily = [
+    { date: '2024-01-01', sales: 10, balance: 5, price: 100, revenue: 1000 },
+    { date: '2024-01-02', sales: 20, balance: 5, price: 100, revenue: 2000 },
+    { date: '2024-01-03', sales: 0, balance: 0, price: 0, revenue: 0 }, // OOS
+  ];
+  const c = applyOOSCorrection(daily);
+  // Средние продажи в наличии = (10+20)/2 = 15 → восстанавливаем в день простоя.
+  assert.equal(c[2].sales, 15);
+  assert.equal(c[2].oosRestored, true);
+  assert.equal(c[2].price, 100); // цена = средняя по дням с продажами
+  assert.equal(c[0].sales, 10); // дни в наличии не трогаем
+});
+
+test('computeWeeklyProfile: ловит внутринедельную «пилу», нормирован к 1', () => {
+  // Выходные (Сб/Вс) вдвое выше будней.
+  const daily = [];
+  let t = new Date('2024-01-01T00:00:00Z').getTime();
+  for (let i = 0; i < 84; i++, t += 86400000) {
+    const date = new Date(t).toISOString().slice(0, 10);
+    const dow = new Date(date + 'T00:00:00Z').getUTCDay();
+    const sales = dow === 0 || dow === 6 ? 40 : 20;
+    daily.push({ date, sales });
+  }
+  const wf = computeWeeklyProfile(daily);
+  assert.equal(wf.length, 7);
+  const mean = wf.reduce((a, b) => a + b, 0) / 7;
+  assert.ok(Math.abs(mean - 1) < 0.05, `среднее ${mean} должно быть ~1`);
+  assert.ok(wf[6] > wf[3], 'суббота должна быть выше среды');
+});
+
+test('planDailyOrders: недельный фактор влияет на план заказов', () => {
+  const peak = new Date('2024-06-15T00:00:00Z').getTime();
+  const daily = [];
+  let t = new Date('2024-01-01T00:00:00Z').getTime();
+  for (let i = 0; i < 366; i++, t += 86400000) {
+    const date = new Date(t).toISOString().slice(0, 10);
+    const dow = new Date(date + 'T00:00:00Z').getUTCDay();
+    const x = (t - peak) / (25 * 86400000);
+    const base = 10 + Math.round(50 * Math.exp(-0.5 * x * x));
+    daily.push({ date, sales: dow === 6 ? base * 2 : base, balance: 40, price: 1000 });
+  }
+  const withWeekly = buildSeasonPlan(daily, { weekly: true });
+  assert.ok(Array.isArray(withWeekly.weeklyProfile) && withWeekly.weeklyProfile.length === 7);
+  const sat = withWeekly.daily.find((r) => r.weekday === 6);
+  assert.ok(sat.weekdayFactor > 1, 'суббота должна иметь фактор > 1');
 });
 
 test('buildSeasonPlan: короткий ряд помечается lowConfidence, фазы упорядочены', () => {
