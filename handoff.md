@@ -16,7 +16,8 @@ Mac mini пользователя (Tailscale). Ветка: `claude/production-pl
   автоматически (normalizeState).
 - **Эта сессия (всё запушено):** фикс сумм (`664a7fa`); образцы ткани на диск + DnD
   цветов (`ae2a2d9`); импорт/экспорт .xlsx (`94ff991`); раздел «Ранг сезонности» —
-  порт движка + API (`3490abe`), UI (`4199f74`), docs токена (`6ad732e`).
+  порт движка + API (`3490abe`), UI (`4199f74`), docs токена (`6ad732e`); компактный
+  конструктор сезонности в два столбца (`f171b1a`).
 - **По «единый vs по-этапно»** — подтверждено: **по-этапно ВЕРНО** (4 этапа = 4 разных
   объёма под пары месяцев; планировщик изолирует этапы, не залезает в следующий).
 - **«Ранг сезонности» пока АВТОНОМЕН** (построил → сохранил → смотришь графики/цифры).
@@ -37,7 +38,8 @@ Mac mini пользователя (Tailscale). Ветка: `claude/production-pl
   xlsx (`exportPlanXlsx`/`parsePlanWorkbook`/`importPlanAnyFile`); **раздел сезонности**
   (`renderSeason` и всё `season*`/`se*`).
 - `planner/public/index.html` — вкладка «Ранг сезонности»; подключён `vendor/xlsx.full.min.js`.
-- `planner/public/styles.css` — стили `.swatch-drag`, `.se-*` (карточки, графики, таблица).
+- `planner/public/styles.css` — стили `.swatch-drag`, `.se-*` (карточки, графики, таблица),
+  `.season-grid` (сетка конструктора 2 столбца, `.span2` — во всю ширину, свёртка <720px).
 - `planner/public/vendor/xlsx.full.min.js` — вендорен SheetJS 0.18.5 (Apache-2.0, 881 КБ), закоммичен.
 
 Ранг сезонности (движок портирован из `origin/claude/sales-plan-hzlqew`):
@@ -148,7 +150,7 @@ UI рисует 4 карточки + 2 графика (6 polyline) + раскр�
 ### Обновление прода (Mac mini) — давать после каждого пуша
 ```bash
 cd ~/wb-headless && git pull origin claude/production-plan-twv8ki
-git log --oneline -1   # ожидаем 6ad732e (или новее)
+git log --oneline -1   # ожидаем f171b1a (или новее)
 cd planner && npm install --prefer-offline --ignore-scripts --no-audit --no-fund && cd ..
 launchctl unload ~/Library/LaunchAgents/com.wbheadless.planner.plist
 launchctl load   ~/Library/LaunchAgents/com.wbheadless.planner.plist
