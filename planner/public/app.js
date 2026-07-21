@@ -579,19 +579,19 @@ function renderMatrix() {
         <button id="mx-save" class="btn btn-primary">Сохранить план</button>
       </div>
       <div class="matrix-io">
-        <span class="mini">Ввод: вручную · <b>вставка из буфера</b> (встань на ячейку и Ctrl+V — блок из Excel/Sheets) · через шаблон:</span>
-        <button id="mx-tpl-one" class="btn">⤓ шаблон: ${a.id}</button>
-        <button id="mx-tpl-all" class="btn">⤓ шаблон: все</button>
-        <label class="btn">⤒ загрузить из файла<input type="file" accept=".tsv,.txt,.csv" id="mx-import" hidden></label>
+        <span class="mini">Ввод: вручную · <b>вставка из буфера</b> (встань на ячейку и Ctrl+V — блок из Excel/Sheets) · через .xlsx-шаблон:</span>
+        <button id="mx-tpl-one" class="btn">⤓ шаблон .xlsx: ${a.id}</button>
+        <button id="mx-tpl-all" class="btn">⤓ шаблон .xlsx: все</button>
+        <label class="btn">⤒ загрузить (.xlsx)<input type="file" accept=".xlsx,.xls,.tsv,.txt,.csv" id="mx-import" hidden></label>
       </div>
       <div class="mini" style="margin-bottom:12px">Введи количества и нажми <b>«Сохранить план»</b>. Номер партии — свой у каждого цеха. Статус производства и факт — на вкладке «Факт». Сейчас отшивает: <b>${cycInfo}</b>.</div>
       ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
     </div>`;
 
   bindMatrixControls(a, stage);
-  document.getElementById('mx-tpl-one').addEventListener('click', () => downloadText(`plan_${a.id}.tsv`, buildPlanTemplate([a.id])));
-  document.getElementById('mx-tpl-all').addEventListener('click', () => downloadText('plan_all.tsv', buildPlanTemplate(state.articles.map((x) => x.id))));
-  document.getElementById('mx-import').addEventListener('change', (e) => importPlanFile(e.target.files && e.target.files[0]));
+  document.getElementById('mx-tpl-one').addEventListener('click', () => exportPlanXlsx([a.id], `plan_${a.id}.xlsx`));
+  document.getElementById('mx-tpl-all').addEventListener('click', () => exportPlanXlsx(state.articles.map((x) => x.id), 'plan_all.xlsx'));
+  document.getElementById('mx-import').addEventListener('change', (e) => importPlanAnyFile(e.target.files && e.target.files[0]));
   document.getElementById('mx-partia').addEventListener('change', (e) => { matrixPartiaId = e.target.value; renderMatrix(); });
   document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a, stage));
   document.getElementById('mx-ws').addEventListener('change', (e) => { p.workshopId = e.target.value; recomputePartiaNumbers(); dirty = true; renderMatrix(); });
@@ -706,6 +706,83 @@ function downloadText(filename, text) {
   const url = URL.createObjectURL(blob);
   const el = document.createElement('a'); el.href = url; el.download = filename; document.body.appendChild(el); el.click();
   setTimeout(() => { URL.revokeObjectURL(url); el.remove(); }, 1000);
+}
+
+// ---- шаблон плана (.xlsx): экспорт/импорт (лист = артикул, блоки по этапам) ----
+// строки одного артикула для листа .xlsx (AoA): маркеры ARTICLE/STAGE, шапка цветов, строки размеров
+function planAoAForArticle(a) {
+  const rows = [['ARTICLE', a.id, a.name]];
+  for (const st of seasonStages()) {
+    rows.push(['STAGE', st.id, st.name + (st.salesMonths ? ' ' + st.salesMonths : '')]);
+    rows.push(['', ...a.colors]);
+    const M = (partiasOf(a.id, st.id)[0] || {}).planMatrix || {};
+    for (const s of a.sizes) rows.push([s, ...a.colors.map((c) => cell(M, c, s) || 0)]);
+    rows.push([]); // разделитель между этапами
+  }
+  return rows;
+}
+function exportPlanXlsx(articleIds, filename) {
+  if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу (Cmd+Shift+R)', true); return; }
+  const wb = XLSX.utils.book_new();
+  const used = new Set();
+  let added = 0;
+  for (const aid of articleIds) {
+    const a = state.articles.find((x) => x.id === aid);
+    if (!a || !a.colors.length || !a.sizes.length) continue;
+    const ws = XLSX.utils.aoa_to_sheet(planAoAForArticle(a));
+    ws['!cols'] = [{ wch: 10 }, ...a.colors.map(() => ({ wch: 12 }))];
+    // имя листа: id артикула (Excel — макс 31 символ, без : \ / ? * [ ]); уникализируем
+    let name = String(a.id).replace(/[:\\/?*[\]]/g, '_').slice(0, 31) || ('арт' + (added + 1));
+    let base = name, n = 2; while (used.has(name)) name = (base.slice(0, 28) + '_' + n++);
+    used.add(name);
+    XLSX.utils.book_append_sheet(wb, ws, name);
+    added++;
+  }
+  if (!added) { toast('Нет артикулов с заданными цветами и размерами', true); return; }
+  XLSX.writeFile(wb, filename || 'plan.xlsx');
+}
+// разобрать книгу .xlsx в структуру { articleId: { stageId: { color: { size: qty } } } }
+function parsePlanWorkbook(wb) {
+  const res = {};
+  for (const sheetName of wb.SheetNames) {
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, blankrows: false });
+    let curA = null, curStage = null, curColors = null;
+    for (const row of aoa) {
+      const cells = row || [];
+      const key = String(cells[0] == null ? '' : cells[0]).trim();
+      if (key === 'ARTICLE') { curA = String(cells[1] == null ? '' : cells[1]).trim(); curStage = null; curColors = null; continue; }
+      if (key === 'STAGE') { curStage = String(cells[1] == null ? '' : cells[1]).trim(); curColors = null; continue; }
+      if (key === '') { // шапка цветов (первый столбец пуст, справа — названия цветов)
+        const rest = cells.slice(1).map((x) => String(x == null ? '' : x).trim());
+        if (rest.some((x) => x)) curColors = rest;
+        continue;
+      }
+      if (curA && curStage && curColors) {
+        const size = key;
+        cells.slice(1).forEach((val, i) => {
+          const color = curColors[i]; if (!color) return;
+          ((res[curA] ||= {})[curStage] ||= {})[color] ||= {};
+          res[curA][curStage][color][size] = parseQty(val);
+        });
+      }
+    }
+  }
+  return res;
+}
+function importPlanAnyFile(file) {
+  if (!file) return;
+  if (!/\.(xlsx|xls)$/i.test(file.name)) { importPlanFile(file); return; } // tsv/csv — прежний путь
+  if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу (Cmd+Shift+R)', true); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const wb = XLSX.read(new Uint8Array(reader.result), { type: 'array' });
+      const { filled, skipped } = applyPlanImport(parsePlanWorkbook(wb));
+      dirty = true;
+      recalc(true).then(() => { renderMatrix(); toast(`Загружено из .xlsx: ${filled} блоков${skipped ? `, пропущено ${skipped}` : ''}`); }).catch((err) => toast('Ошибка: ' + err.message, true));
+    } catch (err) { toast('Не удалось разобрать .xlsx: ' + err.message, true); }
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 function bindMatrixControls(a, stage) {
