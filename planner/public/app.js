@@ -1048,9 +1048,11 @@ function seasonBuilderPanel() {
   return `<div class="panel season-builder">
     <div class="subhead"><h3>Часть 1 — Построение плана продаж (по конкурентам)</h3></div>
     ${warn}
-    <div class="season-form">
+    <div class="season-form season-grid">
       <div class="field"><label>Артикул</label><select id="se-article">${arts.map((x) => `<option value="${x.id}"${x.id === aid ? ' selected' : ''}>${x.id} — ${seEsc(x.name)}</option>`).join('')}</select></div>
-      <div class="field grow"><label>Путь предмета WB</label>
+      <div class="field"><label>Размер группы аналогов</label><input id="se-limit" type="number" value="${f.limit ?? 60}"></div>
+
+      <div class="field span2"><label>Путь предмета WB</label>
         <div class="se-path-row">
           <input id="se-path" value="${seEsc(f.path || '')}" placeholder="Женщинам/Блузки и рубашки/Рубашка">
           <input id="se-path-q" placeholder="поиск по слову" title="напр. рубаш">
@@ -1058,25 +1060,26 @@ function seasonBuilderPanel() {
         </div>
         <div id="se-path-list" class="se-path-list"></div>
       </div>
-      <div class="row-flex">
-        <div class="field grow"><label>Слова в названии (любое из)</label><input id="se-words" value="${seEsc(f.words || '')}" placeholder="рубашка"></div>
-        <div class="field grow"><label>Доп. слова-признаки</label><input id="se-allwords" value="${seEsc(f.allWords || '')}" placeholder="оверсайз, длинный рукав"></div>
-        <div class="field grow"><label>Исключить слова</label><input id="se-exclude" value="${seEsc(f.exclude || '')}" placeholder="детск, мужск, блузка"></div>
-      </div>
-      <div class="row-flex">
-        <div class="field"><label>Цена от, ₽</label><input id="se-pmin" type="number" value="${f.priceMin ?? ''}" style="width:90px"></div>
-        <div class="field"><label>Цена до, ₽</label><input id="se-pmax" type="number" value="${f.priceMax ?? ''}" style="width:90px"></div>
-        <div class="field"><label>Мин. продаж/мес</label><input id="se-minsales" type="number" value="${f.minSales ?? ''}" style="width:120px"></div>
-        <div class="field"><label>Мин. выручка/мес, ₽</label><input id="se-minrev" type="number" value="${f.minRevenue ?? ''}" style="width:140px"></div>
-        <div class="field"><label>Размер группы</label><input id="se-limit" type="number" value="${f.limit ?? 60}" style="width:100px"></div>
-      </div>
-      <div class="row-flex">
-        <div class="field"><label>Прогноз с</label><input id="se-from" type="date" value="${seEsc(f.from || '')}"></div>
-        <div class="field"><label>Прогноз по</label><input id="se-to" type="date" value="${seEsc(f.to || '')}"></div>
+
+      <div class="field"><label>Слова в названии (любое из)</label><input id="se-words" value="${seEsc(f.words || '')}" placeholder="рубашка"></div>
+      <div class="field"><label>Доп. слова-признаки</label><input id="se-allwords" value="${seEsc(f.allWords || '')}" placeholder="оверсайз, длинный рукав"></div>
+
+      <div class="field span2"><label>Исключить слова</label><input id="se-exclude" value="${seEsc(f.exclude || '')}" placeholder="детск, мужск, блузка"></div>
+
+      <div class="field"><label>Цена от, ₽</label><input id="se-pmin" type="number" value="${f.priceMin ?? ''}"></div>
+      <div class="field"><label>Цена до, ₽</label><input id="se-pmax" type="number" value="${f.priceMax ?? ''}"></div>
+
+      <div class="field"><label>Мин. продаж/мес</label><input id="se-minsales" type="number" value="${f.minSales ?? ''}"></div>
+      <div class="field"><label>Мин. выручка/мес, ₽</label><input id="se-minrev" type="number" value="${f.minRevenue ?? ''}"></div>
+
+      <div class="field"><label>Прогноз с</label><input id="se-from" type="date" value="${seEsc(f.from || '')}"></div>
+      <div class="field"><label>Прогноз по</label><input id="se-to" type="date" value="${seEsc(f.to || '')}"></div>
+
+      <div class="span2 se-opts">
         <label class="se-check"><input type="checkbox" id="se-oos"${f.oos !== false ? ' checked' : ''}> OOS-поправка</label>
         <label class="se-check"><input type="checkbox" id="se-weekly"${f.weekly !== false ? ' checked' : ''}> недельный профиль</label>
       </div>
-      <div class="season-actions">
+      <div class="span2 season-actions">
         <button class="btn btn-primary" id="se-build"${seasonHasToken && !seasonBuilding ? '' : ' disabled'}>${seasonBuilding ? '⏳ Строю план…' : '▶ Построить план'}</button>
         <span class="mini">Данные берутся из MPStats по конкурентам-аналогам (несколько секунд, ~3–4 запроса). Готовый план сохранится в накопитель ниже.</span>
       </div>
