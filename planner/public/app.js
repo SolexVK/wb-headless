@@ -952,7 +952,8 @@ function dataArticlesPanel() {
         </div>
         <div class="field"><label>Размерный ряд (через запятую)</label><input data-art="${i}" data-f="sizes" value="${(a.sizes || []).join(', ')}"></div>
         <div class="field"><label>Цвета и образцы ткани (название · образец 80×40 · № планшета · № цвета)</label>
-          <div class="swatch-row">${(a.colors || []).map((c, ci) => { const fi = (a.fabricInfo && a.fabricInfo[c]) || {}; return `<div class="swatch-item">
+          <div class="swatch-row">${(a.colors || []).map((c, ci) => { const fi = (a.fabricInfo && a.fabricInfo[c]) || {}; return `<div class="swatch-item" data-swatch-art="${i}" data-swatch-idx="${ci}">
+            <span class="swatch-drag" draggable="true" data-color-drag data-art="${i}" data-idx="${ci}" title="перетащи, чтобы изменить порядок">⠿</span>
             ${fabricImgSrc(a, c) ? `<img class="swatch" src="${fabricImgSrc(a, c)}" alt="">` : '<div class="swatch swatch-empty">нет образца</div>'}
             <input class="swatch-name-input" data-colorname data-art="${i}" data-idx="${ci}" value="${String(c).replace(/"/g, '&quot;')}" placeholder="цвет" title="переименование сохранит количества и образец">
             <input class="swatch-meta" data-fabmeta data-art="${i}" data-color="${encodeURIComponent(c)}" data-f="plansheet" value="${(fi.plansheet || '').replace(/"/g, '&quot;')}" placeholder="№ планшета">
@@ -1034,6 +1035,49 @@ function dataSettingsPanel() {
   </div></div>`;
 }
 
+// перестановка порядка цветов перетаскиванием (ручка ⠿).
+// Порядок хранится в a.colors; все листы итерируют a.colors, а fabricInfo и
+// матрицы партий ключуются по имени цвета — поэтому достаточно переставить массив.
+let colorDragSrc = null; // { art, idx }
+function bindColorDnD(root) {
+  const mark = () => { dirty = true; setStatus(); };
+  root.querySelectorAll('[data-color-drag]').forEach((h) => {
+    h.addEventListener('dragstart', (e) => {
+      colorDragSrc = { art: +h.dataset.art, idx: +h.dataset.idx };
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', String(h.dataset.idx)); } catch (_) {}
+      h.closest('.swatch-item')?.classList.add('dragging');
+    });
+    h.addEventListener('dragend', () => {
+      colorDragSrc = null;
+      root.querySelectorAll('.swatch-item.dragging,.swatch-item.drop-target')
+        .forEach((el) => el.classList.remove('dragging', 'drop-target'));
+    });
+  });
+  root.querySelectorAll('.swatch-item').forEach((item) => {
+    item.addEventListener('dragover', (e) => {
+      if (!colorDragSrc || +item.dataset.swatchArt !== colorDragSrc.art) return; // только внутри одного артикула
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      item.classList.add('drop-target');
+    });
+    item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (!colorDragSrc || +item.dataset.swatchArt !== colorDragSrc.art) return;
+      const a = state.articles[colorDragSrc.art];
+      const from = colorDragSrc.idx;
+      const to = +item.dataset.swatchIdx;
+      if (a && from !== to && from >= 0 && to >= 0 && from < a.colors.length) {
+        const [moved] = a.colors.splice(from, 1);
+        a.colors.splice(to, 0, moved);
+        colorDragSrc = null;
+        mark(); renderData();
+      }
+    });
+  });
+}
+
 function bindDataEvents() {
   const root = document.getElementById('data-forms');
   const mark = () => { dirty = true; setStatus(); };
@@ -1053,7 +1097,14 @@ function bindDataEvents() {
     const a = state.articles[+e.target.dataset.art];
     const c = decodeURIComponent(e.target.dataset.color);
     const reader = new FileReader();
-    reader.onload = () => { a.fabricInfo = a.fabricInfo || {}; a.fabricInfo[c] = a.fabricInfo[c] || {}; a.fabricInfo[c].image = reader.result; mark(); renderData(); toast('Образец добавлен (не забудь «Сохранить»)'); };
+    reader.onload = async () => {
+      try {
+        // сохраняем картинку на диск (planner/data/samples), в state кладём только путь
+        const r = await api('/api/sample', { method: 'POST', body: JSON.stringify({ dataUrl: reader.result }) });
+        a.fabricInfo = a.fabricInfo || {}; a.fabricInfo[c] = a.fabricInfo[c] || {};
+        a.fabricInfo[c].image = r.path; mark(); renderData(); toast('Образец добавлен (не забудь «Сохранить»)');
+      } catch (err) { toast('Не удалось загрузить образец: ' + err.message, true); }
+    };
     reader.readAsDataURL(file);
   }));
   root.querySelectorAll('[data-artimg-del]').forEach((b) => b.addEventListener('click', () => {
@@ -1094,6 +1145,7 @@ function bindDataEvents() {
     a.colors.push(name);
     mark(); renderData();
   }));
+  bindColorDnD(root);
   root.querySelectorAll('input[data-fabmeta]').forEach((inp) => inp.addEventListener('change', (e) => {
     const a = state.articles[+e.target.dataset.art];
     const c = decodeURIComponent(e.target.dataset.color);

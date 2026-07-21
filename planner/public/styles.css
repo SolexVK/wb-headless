@@ -249,6 +249,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .swatch-meta:focus { outline: none; border-color: var(--accent); }
 .swatch-actions { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
 .swatch-del { background: var(--panel); border: 1px solid var(--line); color: var(--danger); border-radius: 50%; width: 18px; height: 18px; line-height: 1; font-size: 11px; padding: 0; }
+.swatch-drag { position: absolute; top: 3px; left: 5px; cursor: grab; color: var(--muted); font-size: 13px; line-height: 1; user-select: none; padding: 1px 3px; border-radius: 4px; }
+.swatch-drag:hover { color: var(--text); background: var(--panel); }
+.swatch-drag:active { cursor: grabbing; }
+.swatch-item.dragging { opacity: 0.45; }
+.swatch-item.drop-target { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .matrix-table .mx-color .swatch { width: 60px; height: 30px; margin-bottom: 3px; }
 
 /* план продаж — сетка мини-таблиц */

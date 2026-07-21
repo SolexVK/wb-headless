@@ -12,19 +12,58 @@ import { buildSchedule } from './lib/scheduler.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
+const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
 function ensureData() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(SAMPLES_DIR)) fs.mkdirSync(SAMPLES_DIR, { recursive: true });
   if (!fs.existsSync(STATE_FILE)) {
     fs.writeFileSync(STATE_FILE, JSON.stringify(defaultState(), null, 2));
   }
 }
+
+const IMG_EXT = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg',
+  'image/webp': 'webp', 'image/gif': 'gif', 'image/svg+xml': 'svg',
+};
+// сохранить data:-URL картинки в файл на диске, вернуть публичный путь /samples/<файл>.
+// Имя — по хэшу содержимого (дедупликация), поэтому повторная запись идемпотентна.
+function saveSampleDataUrl(dataUrl) {
+  const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/.exec(String(dataUrl || ''));
+  if (!m) return null;
+  const ext = IMG_EXT[m[1]] || 'img';
+  const buf = Buffer.from(m[2], 'base64');
+  if (!buf.length) return null;
+  ensureData();
+  const name = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 16) + '.' + ext;
+  const fp = path.join(SAMPLES_DIR, name);
+  if (!fs.existsSync(fp)) fs.writeFileSync(fp, buf);
+  return '/samples/' + name;
+}
+// перенести все встроенные (data:) образцы состояния в файлы; вернуть true, если что-то изменилось
+function migrateSamples(state) {
+  let changed = false;
+  for (const a of state.articles || []) {
+    if (!a.fabricInfo) continue;
+    for (const c of Object.keys(a.fabricInfo)) {
+      const info = a.fabricInfo[c];
+      if (info && typeof info.image === 'string' && info.image.startsWith('data:')) {
+        const p = saveSampleDataUrl(info.image);
+        if (p) { info.image = p; changed = true; }
+      }
+    }
+  }
+  return changed;
+}
+
 function loadState() {
   ensureData();
   try {
-    return normalizeState(JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')));
+    const st = normalizeState(JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')));
+    if (migrateSamples(st)) fs.writeFileSync(STATE_FILE, JSON.stringify(st, null, 2)); // одноразовый перенос data:→файл
+    return st;
   } catch (e) {
     return defaultState();
   }
@@ -32,6 +71,7 @@ function loadState() {
 function saveState(state) {
   ensureData();
   const norm = normalizeState(state);
+  migrateSamples(norm); // если клиент прислал встроенную картинку — тоже вынесем на диск
   fs.writeFileSync(STATE_FILE, JSON.stringify(norm, null, 2));
   return norm;
 }
@@ -67,6 +107,7 @@ if (AUTH_PASS) {
 
 app.use(express.json({ limit: '4mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/samples', express.static(SAMPLES_DIR)); // образцы ткани (за той же авторизацией)
 
 // текущее состояние
 app.get('/api/state', (req, res) => {
@@ -109,6 +150,17 @@ app.post('/api/override', (req, res) => {
     else state.overrides[cycleId] = { ...(state.overrides[cycleId] || {}), cutStart };
     const norm = saveState(state);
     res.json({ ok: true, schedule: buildSchedule(norm), state: norm });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+// загрузка образца ткани: принимает data:-URL, пишет файл, возвращает путь /samples/<файл>
+app.post('/api/sample', (req, res) => {
+  try {
+    const p = saveSampleDataUrl((req.body || {}).dataUrl);
+    if (!p) return res.status(400).json({ ok: false, error: 'некорректное изображение' });
+    res.json({ ok: true, path: p });
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.message || e) });
   }
