@@ -15,17 +15,18 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildSeasonPlanReport, seasonPlanToCSV } from './lib/seasonPlanReport.js';
+import { seasonPlanXlsx, seasonPlanHtml } from './lib/reportExport.js';
 import { loadGroups } from './report-stock.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ymd = (d) => d.toISOString().slice(0, 10);
 
-/** Период по умолчанию: последний завершённый год (год-назад-сезон). */
-export function defaultYear() {
+/** Период по умолчанию (Правило 2): последние 2 года от текущей даты. */
+export function default2Years() {
   const end = new Date();
-  end.setUTCDate(end.getUTCDate() - 1);
+  end.setUTCDate(end.getUTCDate() - 1); // вчера — последний закрытый день
   const start = new Date(end);
-  start.setUTCFullYear(start.getUTCFullYear() - 1);
+  start.setUTCFullYear(start.getUTCFullYear() - 2);
   start.setUTCDate(start.getUTCDate() + 1);
   return { d1: ymd(start), d2: ymd(end) };
 }
@@ -50,7 +51,7 @@ const fmt = (n) => new Intl.NumberFormat('ru-RU').format(Math.round(Number(n) ||
 
 /** Собирает параметры отчёта из разобранных аргументов/окружения. */
 export function buildParamsFromArgs(a = {}) {
-  const period = a.d1 && a.d2 ? { d1: a.d1, d2: a.d2 } : defaultYear();
+  const period = a.d1 && a.d2 ? { d1: a.d1, d2: a.d2 } : default2Years();
 
   const plan = {
     targetPeriodUnits: num(a['target-units']),
@@ -61,6 +62,8 @@ export function buildParamsFromArgs(a = {}) {
     logisticsLeadDays: num(a['logi-lead']),
     oos: a.oos ? true : undefined, // поправка на out-of-stock
     weekly: a.weekly ? true : undefined, // недельный профиль (дни недели)
+    competitorWeight: num(a['competitor-weight']), // доля конкурентов в базе (Правило 3)
+    recencyWeight: num(a['recency-weight']), // вес недавнего года (Правило 2)
   };
   for (const k of Object.keys(plan)) if (plan[k] === undefined) delete plan[k];
 
@@ -131,9 +134,19 @@ function writeOutputs(report) {
   const base = `season-${slug(report.label)}-${report.period.d1}_${report.period.d2}`;
   const csvPath = path.join(dir, `${base}.csv`);
   const jsonPath = path.join(dir, `${base}.json`);
+  const xlsxPath = path.join(dir, `${base}.xlsx`);
+  const htmlPath = path.join(dir, `${base}.html`);
   fs.writeFileSync(csvPath, seasonPlanToCSV(report));
   fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2));
-  return { csvPath, jsonPath };
+  const out = { csvPath, jsonPath };
+  // Правило 4: два файла-результата — .xlsx (по дням, с этапами) и HTML-артефакт.
+  if (report.plan) {
+    seasonPlanXlsx(report, xlsxPath);
+    fs.writeFileSync(htmlPath, seasonPlanHtml(report));
+    out.xlsxPath = xlsxPath;
+    out.htmlPath = htmlPath;
+  }
+  return out;
 }
 
 function printSummary(report) {
@@ -200,8 +213,9 @@ function printSummary(report) {
   console.log('\n— Плановые заказы —');
   const bi = report.baseInfo || {};
   const baseLabel = {
-    own: `от собственных продаж линейки (${fmt(bi.ownBaseDaily)} зак/день, ${bi.ownActiveDays} дн.)`,
-    competitor: `оценка по конкурентам (${bi.reason}): ${fmt(bi.competitorPerItemDaily)}/товар × ${bi.ownSkuCount} SKU × ${bi.factor} = ${fmt(bi.estimatedBaseDaily)}`,
+    blend: `бленд ${Math.round((bi.competitorWeight ?? 0.9) * 100)}% конкуренты / ${Math.round((1 - (bi.competitorWeight ?? 0.9)) * 100)}% свои: конкуренты ${fmt(bi.competitorLevel)} + свои ${fmt(bi.ownBaseDaily)} → ${fmt(bi.blendedBaseDaily)} зак/день`,
+    competitor: `100% конкуренты (${bi.reason}): ${fmt(bi.competitorPerItemDaily)}/товар × ${bi.ownSkuCount} SKU = ${fmt(bi.estimatedBaseDaily)}`,
+    own: `от собственных продаж линейки (${fmt(bi.ownBaseDaily)} зак/день)`,
     target: 'от цели по штукам',
     group: 'рыночный уровень группы',
     override: 'заданная база',
@@ -223,8 +237,44 @@ function printSummary(report) {
   }
 }
 
+/**
+ * Правило 1: интерактивный опрос параметров понятным языком ПЕРЕД сбором.
+ * Возвращает объект аргументов (как из parseArgs), который идёт в buildParamsFromArgs.
+ */
+async function promptParams(preset = {}) {
+  const rl = (await import('node:readline/promises')).createInterface({ input: process.stdin, output: process.stdout });
+  const ask = async (q, def) => {
+    const ans = (await rl.question(`${q}${def ? ` [${def}]` : ''}: `)).trim();
+    return ans || def || undefined;
+  };
+  console.log('\nНастройка прогона (Enter — оставить значение по умолчанию):\n');
+  const a = { ...preset };
+  a.path = await ask('Путь предмета MPStats (напр. Женщинам/Блузки и рубашки/Рубашка)', preset.path);
+  a.group = await ask('Своя линейка из groups.json для базы (можно пусто)', preset.group);
+  a.words = await ask('Слова в названии — любое из (через запятую)', preset.words);
+  a['all-words'] = await ask('Слова, которые должны быть ВСЕ', preset['all-words']);
+  a.exclude = await ask('Исключить, если встречается', preset.exclude);
+  a.brands = await ask('Только эти бренды', preset.brands);
+  a['exclude-brands'] = await ask('Исключить бренды', preset['exclude-brands']);
+  a['price-min'] = await ask('Цена от, ₽', preset['price-min']);
+  a['price-max'] = await ask('Цена до, ₽', preset['price-max']);
+  a['min-sales'] = await ask('Минимум продаж за период (отсечь мёртвые)', preset['min-sales'] || '3');
+  a.limit = await ask('Сколько аналогов брать в группу', preset.limit || '60');
+  a.d1 = await ask('Начало периода (YYYY-MM-DD), пусто — последние 2 года', preset.d1);
+  a.d2 = await ask('Конец периода (YYYY-MM-DD)', preset.d2);
+  a['base-source'] = await ask('Уровень базы: own / market / target', preset['base-source'] || (a.group ? 'own' : 'market'));
+  a.oos = (await ask('Поправка на out-of-stock? (y/n)', 'y')) === 'y' || undefined;
+  a.weekly = (await ask('Недельный профиль? (y/n)', 'y')) === 'y' || undefined;
+  rl.close();
+  return a;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const a = parseArgs(process.argv.slice(2));
+  let a = parseArgs(process.argv.slice(2));
+  // Правило 1: без явных параметров источника ИЛИ с --interactive — спрашиваем.
+  if (a.interactive || (!a.path && !a.group)) {
+    a = await promptParams(a);
+  }
   let params;
   try {
     params = buildParamsFromArgs(a);
@@ -241,9 +291,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     },
   })
     .then((report) => {
-      const { csvPath, jsonPath } = writeOutputs(report);
+      const out = writeOutputs(report);
       printSummary(report);
-      console.log(`\nФайлы:\n  ${csvPath}\n  ${jsonPath}`);
+      console.log('\nФайлы:');
+      for (const pth of [out.xlsxPath, out.htmlPath, out.csvPath, out.jsonPath].filter(Boolean)) {
+        console.log(`  ${pth}`);
+      }
       if (report.dailyLimit) process.exit(2);
     })
     .catch((err) => {
