@@ -88,7 +88,7 @@ export function buildParamsFromArgs(a = {}) {
     return {
       ...period,
       label: a.label || a.path,
-      subject: { path: a.path, filter, limit: num(a.limit) },
+      subject: { path: a.path, filter, limit: num(a.limit), maxPages: num(a['max-pages']) },
       plan,
     };
   }
@@ -123,6 +123,10 @@ function printSummary(report) {
   if (report.groupInfo) {
     console.log(`Предмет:           ${report.groupInfo.path}`);
     console.log(`Отобрано в группу: ${report.groupInfo.kept} из ${report.groupInfo.fetched} (всего в предмете ${report.groupInfo.total})`);
+    if (report.groupInfo.truncated) {
+      console.log(`  ⚠ Пагинация остановлена на ${report.groupInfo.maxPages} страницах, аналогов набрано меньше --limit.`);
+      console.log(`     Фильтр узкий: поднимите --max-pages или ослабьте критерии (--words/--price-*/--min-sales).`);
+    }
   }
   console.log(`Размер группы:     ${report.groupSize}, с данными: ${report.itemsWithData}`);
 
