@@ -191,6 +191,8 @@ export function normalizeState(input) {
     a.sizes = Array.isArray(a.sizes) ? a.sizes : [];
     // метаданные ткани по цвету: { цвет: { plansheet, colorNo, image(dataURL) } }
     a.fabricInfo = a.fabricInfo && typeof a.fabricInfo === 'object' ? a.fabricInfo : {};
+    // конфиг фильтра аналогов для раздела «Ранг сезонности» (путь предмета, слова, ценовой коридор…)
+    if (a.seasonFilter && typeof a.seasonFilter === 'object') { /* keep */ } else delete a.seasonFilter;
   }
   // автосортировка артикулов по номеру, от меньшего к большему (числовая)
   s.articles.sort(compareArticleId);

@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { defaultState, normalizeState } from './lib/model.js';
 import { buildSchedule } from './lib/scheduler.js';
+import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories } from './lib/seasonApi.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
@@ -23,6 +24,24 @@ function ensureData() {
     fs.writeFileSync(STATE_FILE, JSON.stringify(defaultState(), null, 2));
   }
 }
+
+// Локальные секреты: подхватываем planner/data/.env (KEY=VALUE), НЕ переопределяя
+// уже заданное окружение. Файл gitignored (planner/data/) — токены в репо не попадают.
+// Сюда кладётся MPSTATS_TOKEN для раздела «Ранг сезонности».
+function loadDotenv() {
+  try {
+    const envFile = path.join(DATA_DIR, '.env');
+    if (!fs.existsSync(envFile)) return;
+    for (const line of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
+      const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+      if (!m || line.trim().startsWith('#')) continue;
+      let val = m[2];
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
+      if (process.env[m[1]] === undefined) process.env[m[1]] = val;
+    }
+  } catch { /* ignore */ }
+}
+loadDotenv();
 
 const IMG_EXT = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg',
@@ -161,6 +180,44 @@ app.post('/api/sample', (req, res) => {
     const p = saveSampleDataUrl((req.body || {}).dataUrl);
     if (!p) return res.status(400).json({ ok: false, error: 'некорректное изображение' });
     res.json({ ok: true, path: p });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+// ---- Ранг сезонности (план продаж по методу сезонности) ----
+// доступность (есть ли токен MPStats)
+app.get('/api/season/status', (req, res) => {
+  res.json({ ok: true, hasToken: !!process.env.MPSTATS_TOKEN });
+});
+// подсказка пути предмета по слову
+app.get('/api/season/categories', async (req, res) => {
+  try { res.json({ ok: true, paths: await searchCategories(req.query.q || '', 40) }); }
+  catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+// список сохранённых планов (краткий индекс)
+app.get('/api/season/plans', (req, res) => {
+  try { res.json({ ok: true, plans: listPlans() }); }
+  catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+// один план целиком
+app.get('/api/season/plan', (req, res) => {
+  const rec = loadPlan(req.query.articleId || '');
+  if (!rec) return res.status(404).json({ ok: false, error: 'план не найден' });
+  res.json({ ok: true, ...rec });
+});
+// удалить сохранённый план
+app.delete('/api/season/plan', (req, res) => {
+  res.json({ ok: true, deleted: deletePlan((req.query.articleId) || (req.body && req.body.articleId) || '') });
+});
+// построить прогноз по фильтру артикула и сохранить (это сетевой вызов к MPStats, ~секунды)
+app.post('/api/season/build', async (req, res) => {
+  try {
+    const cfg = req.body || {};
+    if (!cfg.articleId) return res.status(400).json({ ok: false, error: 'не указан articleId' });
+    const report = await runForecast(cfg);
+    const rec = savePlan(cfg.articleId, report, cfg);
+    res.json({ ok: true, ...rec });
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.message || e) });
   }
