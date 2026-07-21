@@ -30,6 +30,11 @@
         <string>admin</string>
         <key>PLANNER_PASSWORD</key>
         <string>__PASSWORD__</string>
+        <!-- Токен MPStats для раздела «Ранг сезонности». Можно задать здесь
+             ИЛИ (проще) в файле planner/data/.env строкой MPSTATS_TOKEN=...
+             Если не нужен раздел сезонности — оставить пустым. -->
+        <key>MPSTATS_TOKEN</key>
+        <string>__MPSTATS_TOKEN__</string>
     </dict>
 
     <key>RunAtLoad</key>

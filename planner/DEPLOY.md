@@ -202,6 +202,28 @@ launchctl load   ~/Library/LaunchAgents/com.wbheadless.planner.plist
 | `PLANNER_HOST` | `0.0.0.0` | интерфейс прослушивания (все сети) |
 | `PLANNER_USER` | `admin` | логин для входа |
 | `PLANNER_PASSWORD` | — (пусто) | пароль; если пусто — доступ без авторизации |
+| `MPSTATS_TOKEN` | — (пусто) | токен MPStats для раздела «Ранг сезонности» (без него раздел недоступен) |
+
+## Токен MPStats (раздел «Ранг сезонности»)
+
+Раздел строит прогноз плана продаж по конкурентам через API MPStats — нужен
+токен `MPSTATS_TOKEN`. Два способа задать (любой):
+
+**Способ 1 (проще) — файл `planner/data/.env`** (он в `.gitignore`, в репозиторий
+не попадёт):
+```bash
+echo 'MPSTATS_TOKEN=ВАШ_ТОКЕН' >> ~/wb-headless/planner/data/.env
+launchctl unload ~/Library/LaunchAgents/com.wbheadless.planner.plist
+launchctl load   ~/Library/LaunchAgents/com.wbheadless.planner.plist
+```
+Сервер сам подхватит файл при старте (не переопределяя уже заданное окружение).
+
+**Способ 2 — в plist:** вписать значение в `MPSTATS_TOKEN` внутри
+`EnvironmentVariables` и перезагрузить агент.
+
+Проверка: открой вкладку «Ранг сезонности» — если предупреждения о токене нет,
+всё готово. Или `curl -s -u admin:ПАРОЛЬ localhost:8477/api/season/status`
+→ `{"ok":true,"hasToken":true}`.
 
 ## Рекомендация по безопасности
 
