@@ -1002,19 +1002,11 @@ function workingDaysInMonth(ym) {
 // ---------- РАНГ СЕЗОННОСТИ (план продаж по сезонности) ----------
 // Цвета этапов — как в скилле seasonality-sales-plan (references/outputs.md).
 const PHASE_COLORS = {
-  // периоды прогноза (заливка на графике)
+  // ПЕРИОДЫ (заливка на графике) — едины для прогноза и истории
   'Разгон':     { band: '#22c55e', row: 'rgba(34,197,94,.16)' },
   'Сезон':      { band: '#f97316', row: 'rgba(249,115,22,.16)' },
   'Распродажа': { band: '#ec4899', row: 'rgba(236,72,153,.16)' },
   'Межсезонье': { band: '#94a3b8', row: 'rgba(148,163,184,.12)' },
-  // старые метки истории (детекция по месяцам)
-  'вход':              { band: '#38bdf8', row: 'rgba(56,189,248,.16)' },
-  'разгон':            { band: '#22c55e', row: 'rgba(34,197,94,.16)' },
-  'старт сезона':      { band: '#eab308', row: 'rgba(234,179,8,.18)' },
-  'пик сезона':        { band: '#f97316', row: 'rgba(249,115,22,.18)' },
-  'начало распродажи': { band: '#ec4899', row: 'rgba(236,72,153,.16)' },
-  'конец распродажи':  { band: '#a78bfa', row: 'rgba(167,139,250,.18)' },
-  'межсезонье':        { band: '#94a3b8', row: 'rgba(148,163,184,.12)' },
 };
 const FAVORABLE_BAND = 'rgba(250,204,21,.85)'; // ленточка благоприятного периода (сверху, со звёздами)
 const SEASON_LAG = 7; // средний лаг заказ→выкуп (дней): заказ сегодня — выкуп через ~lag
@@ -1242,12 +1234,21 @@ function seasonBuyoutOf(articleId) {
 function seasonPlanChecks(rep, p) {
   const ph = p.phaseDates || {}, val = p.validation || {};
   const df = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}` : '—');
-  const steps = [['Вход', ph.entry], ['Старт сезона', ph.hotStart], ['Пик', ph.peak], ['Распродажа', ph.saleStart], ['Конец', ph.end]];
+  const steps = [['Вход', ph.entry], ['Старт сезона', ph.hotStart], ['Пик', ph.peak], ['Начало распродажи', ph.saleStart], ['Конец', ph.end]];
   const tl = steps.map(([n, d]) => `<div class="se-tl-step"><div class="se-tl-n">${n}</div><div class="se-tl-d">${df(d)}</div></div>`).join('<span class="se-tl-arr">→</span>');
   const checks = Object.values(val).map((v) => `<div class="se-chk ${v.ok ? 'ok' : 'bad'}"><span class="se-chk-i">${v.ok ? '✅' : '❌'}</span><span class="se-chk-l">${v.label}</span><span class="se-chk-v">${v.value} <span class="mini">(${v.ref})</span></span></div>`).join('');
+  // План поставок на склад WB (частями) + крайний срок подсорта
+  const dv = p.deliveries || [];
+  let deliv = '';
+  if (dv.length) {
+    const cells = dv.map((d) => `<div class="se-dv-step" title="${seEsc(d.title || '')}"><div class="se-dv-tag">${d.tag}</div><div class="se-dv-q">${Math.round(d.qty).toLocaleString('ru')} шт</div><div class="se-dv-d">${df(d.date)}</div></div>`).join('<span class="se-tl-arr">→</span>');
+    const rs = p.restockDeadline ? `<div class="se-dv-restock" title="${seEsc(p.restockDeadline.note || '')}">⚠ подсорт ≤ ${df(p.restockDeadline.date)} (за неделю до Пика, если факт&gt;плана)</div>` : '';
+    deliv = `<div class="se-chk-head">Поставки на склад WB (частями)</div><div class="se-deliveries">${cells}</div>${rs}`;
+  }
   return `<div class="se-checks">
     <div class="se-tl-head">Сезон и фазы (движок выбрал по спросу):</div>
     <div class="se-timeline">${tl}</div>
+    ${deliv}
     ${checks ? `<div class="se-chk-head">Самопроверка плана</div><div class="se-chk-grid">${checks}</div>` : ''}
   </div>`;
 }
@@ -1282,11 +1283,11 @@ function seasonChartsBlock(rep, p) {
   const ph = p.phaseDates || {};
   const milestones = [
     { date: ph.entry, name: 'Вход' }, { date: ph.hotStart, name: 'Старт сезона' },
-    { date: ph.peak, name: 'Пик' }, { date: ph.saleStart, name: 'Распродажа' }, { date: ph.end, name: 'Конец' },
+    { date: ph.peak, name: 'Пик' }, { date: ph.saleStart, name: 'Начало распродажи' }, { date: ph.end, name: 'Конец' },
   ].filter((m) => m.date);
   return `<div class="se-charts">
-    ${seasonChartSVG(fTitle, p.forecastDaily || [], 'plannedOrders', { demand: 'план продаж (выкупы), шт/день', stock: 'наш склад (план), шт', milestones })}
-    ${seasonChartSVG(hTitle, p.historyDaily || [], 'sales', { demand: 'продажи аналогов, шт/день', stock: 'остатки конкурентов, шт' })}
+    ${seasonChartSVG(fTitle, p.forecastDaily || [], 'plannedOrders', { demand: 'план продаж (выкупы), шт/день', stock: 'наш склад (план поставок), шт', milestones, deliveries: p.deliveries || [], restock: p.restockDeadline || null })}
+    ${seasonChartSVG(hTitle, p.historyDaily || [], 'sales', { demand: 'продажи аналогов, шт/день', stock: 'остатки конкурентов, шт', milestones: p.historyMilestones || [], milestoneLabels: false })}
   </div>`;
 }
 
@@ -1342,26 +1343,43 @@ function seasonChartSVG(title, rows, valueKey, labels = {}) {
     }
     i = j + 1;
   }
-  // БЛАГОПРИЯТНЫЙ период — ленточка СВЕРХУ (рамка + звёзды), а не заливка фона
+  // БЛАГОПРИЯТНЫЙ период — ленточка НАД цветными периодами (в верхнем поле), рамка + звёзды
   let favRibbon = ''; i = 0;
   while (i < n) {
     if (rows[i].favorable) {
       let j = i; while (j + 1 < n && rows[j + 1].favorable) j++;
-      const x0 = x(i), x1 = x(j) + 2, w = Math.max(4, x1 - x0), yr = padT + 2;
+      const x0 = x(i), x1 = x(j) + 2, w = Math.max(4, x1 - x0), yr = padT - 16;
       favRibbon += `<rect x="${x0.toFixed(1)}" y="${yr}" width="${w.toFixed(1)}" height="11" rx="3" fill="${FAVORABLE_BAND}" stroke="#a16207" stroke-width="0.8"/>`;
       const stars = Math.max(1, Math.min(20, Math.floor(w / 15)));
       favRibbon += `<text x="${((x0 + x1) / 2).toFixed(1)}" y="${(yr + 9).toFixed(1)}" text-anchor="middle" class="se-stars">${'★'.repeat(stars)}</text>`;
       i = j + 1;
     } else i++;
   }
-  // ВЕХИ (одиночные дни): вертикальная линия через график + подпись сверху
+  // ВЕХИ (одиночные дни): вертикальная линия через график + подпись сверху.
+  // На истории (milestoneLabels:false) вехи повторяются каждый год → подписи наложились бы;
+  // оставляем линии с тултипом, границы периодов и так читаются по смене цвета.
+  const showMsLabels = labels.milestoneLabels !== false;
   let milestones = '';
   for (const ms of (labels.milestones || [])) {
     const mi = idxByDate[ms.date]; if (mi == null) continue;
     const mx = x(mi).toFixed(1);
-    milestones += `<line x1="${mx}" y1="${padT}" x2="${mx}" y2="${H - padB}" stroke="var(--text)" stroke-width="1" opacity="0.32"/>`;
-    milestones += `<circle cx="${mx}" cy="${padT}" r="2.5" fill="var(--text)" opacity="0.55"/>`;
-    milestones += `<text x="${mx}" y="16" class="se-ms-label" text-anchor="middle">${ms.name}</text>`;
+    milestones += `<line x1="${mx}" y1="${padT}" x2="${mx}" y2="${H - padB}" stroke="var(--text)" stroke-width="1" opacity="0.32"><title>${seEsc(ms.name)}</title></line>`;
+    milestones += `<circle cx="${mx}" cy="${padT}" r="2.5" fill="var(--text)" opacity="0.55"><title>${seEsc(ms.name)}</title></circle>`;
+    if (showMsLabels) milestones += `<text x="${mx}" y="16" class="se-ms-label" text-anchor="middle">${ms.name}</text>`;
+  }
+  // КРАЙНИЙ СРОК ПОДСОРТА — оранжевая пунктирная веха (контингент, если факт > плана)
+  if (labels.restock && idxByDate[labels.restock.date] != null) {
+    const rx = x(idxByDate[labels.restock.date]).toFixed(1);
+    milestones += `<line x1="${rx}" y1="${padT}" x2="${rx}" y2="${H - padB}" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.9"><title>${seEsc(labels.restock.note || 'Крайний срок подсорта')}</title></line>`;
+    milestones += `<rect x="${(+rx - 4).toFixed(1)}" y="${padT - 4}" width="8" height="8" fill="#f59e0b" opacity="0.95"><title>${seEsc(labels.restock.note || '')}</title></rect>`;
+  }
+  // ПОСТАВКИ на склад WB (частями) — треугольные маркеры на линии остатков
+  let deliv = '';
+  for (const dv of (labels.deliveries || [])) {
+    const di = idxByDate[dv.date]; if (di == null) continue;
+    const dx = x(di); const sy = yOf(+(rows[di] || {}).stock || 0, sMax); const ty = Math.min(H - padB - 2, Math.max(padT + 14, sy));
+    deliv += `<path d="M ${dx.toFixed(1)} ${(ty - 10).toFixed(1)} L ${(dx - 5).toFixed(1)} ${ty.toFixed(1)} L ${(dx + 5).toFixed(1)} ${ty.toFixed(1)} Z" fill="${SE_COL.stock}" stroke="#fff" stroke-width="0.5"><title>${seEsc(dv.title || '')} — ${Math.round(dv.qty).toLocaleString('ru')} шт (${dv.date})</title></path>`;
+    deliv += `<text x="${dx.toFixed(1)}" y="${(ty - 12).toFixed(1)}" class="se-deliv-l" text-anchor="middle">${dv.tag}</text>`;
   }
 
   // ── горизонтальные линии сетки + вертикальные шкалы (3 оси, ОТ НУЛЯ) ──
@@ -1406,12 +1424,12 @@ function seasonChartSVG(title, rows, valueKey, labels = {}) {
       <polyline points="${poly(pvals, pMax)}" fill="none" stroke="${SE_COL.price}" stroke-width="1.3" stroke-dasharray="5 3" opacity="0.9"/>
       <polyline points="${poly(dvals, dMax)}" fill="none" stroke="${SE_COL.demand}" stroke-width="1.6"/>
       <line class="se-cursor" x1="0" x2="0" y1="${padT}" y2="${H - padB}" stroke="var(--text)" stroke-width="1" opacity="0"/>
-      ${bandLabels}${favRibbon}${yAxes}
+      ${bandLabels}${favRibbon}${deliv}${yAxes}
     </svg></div>
     <div class="se-legend">
       <span><i style="background:${SE_COL.demand}"></i>${lab.demand} (лев. ось, от 0)</span>
       <span><i style="background:${SE_COL.price}"></i>цена ₽ (прав. ось, от 0)</span>
-      <span><i style="background:${SE_COL.stock}"></i>${lab.stock} (крайняя прав. ось, от 0)</span>
+      <span><i style="background:${SE_COL.stock}"></i>${lab.stock} (крайняя прав. ось, от 0)</span>${(labels.deliveries && labels.deliveries.length) ? `<span><i style="background:${SE_COL.stock};clip-path:polygon(50% 0,0 100%,100% 100%)"></i>▲ поставки частями · <span style="color:#f59e0b">┊</span> крайний срок подсорта</span>` : ''}
     </div>
   </div>`;
 }

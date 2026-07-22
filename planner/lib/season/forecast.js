@@ -59,6 +59,20 @@ function smoothCirc(arr, win) {
   return out;
 }
 
+/** Принадлежность дня года k полукольцу [a, b) вперёд по кругу (1..365). */
+function ringHas(a, b, k) {
+  a = ((a - 1 + 365) % 365) + 1; b = ((b - 1 + 365) % 365) + 1; k = ((k - 1 + 365) % 365) + 1;
+  return a <= b ? (k >= a && k < b) : (k >= a || k < b);
+}
+/** Период (Разгон/Сезон/Распродажа/Межсезонье) для дня года k по границам сезона. */
+function periodOfCal(k, cal) {
+  if (!cal) return null;
+  if (ringHas(cal.entryCal, cal.hotStartCal, k)) return 'Разгон';
+  if (ringHas(cal.hotStartCal, cal.saleStartCal, k)) return 'Сезон';
+  if (ringHas(cal.saleStartCal, (cal.endCal % 365) + 1, k)) return 'Распродажа';
+  return 'Межсезонье';
+}
+
 /** S-кривая разгона 0..1 за rampDays (логистическая; ровно 0 в начале, 1 в конце). */
 function rampCurve(i, rampDays) {
   if (i <= 0) return 0; if (i >= rampDays) return 1;
@@ -133,15 +147,48 @@ function buildEngineeredSeason(shape, cfg) {
   const scale = p90body > 0 ? targetPeak / p90body : 1;
   for (const d of days) d.final = round(d.shapeVal * scale, 1);
 
-  // ПЕРИОДЫ (заливка на графике): Разгон [вход..старт сезона), Сезон [старт..распродажа),
-  // Распродажа [распродажа..конец]. ВЕХИ (1 день) — отдельно в phaseDates:
-  // Вход(0), Старт сезона(rampDays), Пик(peakI), Начало распродажи(iSale), Конец(последний).
+  // ПЕРИОДЫ (заливка на графике): Разгон [вход..старт сезона), Сезон [старт..начало распродажи),
+  // Распродажа [начало распродажи..конец]. Внутри Сезона — веха Пик. ВЕХИ (1 день) —
+  // Вход, Старт сезона, Пик, Начало распродажи, Конец — отдельно в phaseDates.
   const stageAt = (i) => (i < rampDays ? 'Разгон' : i < iSale ? 'Сезон' : 'Распродажа');
-  // НАШ склад на WB: производство (=итог плана) − накопленные продажи → к концу ≈ 0.
+
+  // ── ПОСТАВКИ на склад WB ЧАСТЯМИ (не весь объём сразу) ──
+  //  П1 к дате Входа          = объём периода Разгон + 10% буфер;
+  //  П2 за 2–3 дня до Старта   = 50% объёма Сезона + 10% буфер;
+  //  П3 к середине Сезона      = весь остаток ⇒ суммарно = план ⇒ склад → 0 к концу;
+  //  Подсорт (контингент)      = крайний срок поставки ≤ 7 дней до Пика (если факт > плана).
   const grand = days.reduce((s, d) => s + d.final, 0);
-  let cum = 0;
-  for (const d of days) { cum += d.final; d.ourStock = Math.max(0, round(grand - cum, 0)); }
-  // БЛАГОПРИЯТНЫЙ период — только в высоком спросе ДО распродажи (не в распродаже/межсезонье).
+  const rampVol = days.slice(0, rampDays).reduce((s, d) => s + d.final, 0);
+  const seasonVol = days.slice(rampDays, iSale).reduce((s, d) => s + d.final, 0);
+  const BUF = cfg.deliveryBuffer ?? 1.10; // +10% на непредвиденные ускоренные продажи
+  const iD2 = Math.max(0, Math.min(rampDays - 3, days.length - 1)); // за 2–3 дня до старта сезона
+  const iD3 = Math.max(rampDays, Math.min(rampDays + Math.floor((iSale - rampDays) / 2), days.length - 1)); // середина сезона
+  const d1qty = Math.round(Math.min(grand, rampVol * BUF));
+  const d2qty = Math.round(Math.min(Math.max(0, grand - d1qty), seasonVol * 0.5 * BUF));
+  const d3qty = Math.max(0, Math.round(grand - d1qty - d2qty)); // остаток ⇒ итог поставок = план
+  const deliveryByIdx = {};
+  deliveryByIdx[0] = (deliveryByIdx[0] || 0) + d1qty;
+  deliveryByIdx[iD2] = (deliveryByIdx[iD2] || 0) + d2qty;
+  deliveryByIdx[iD3] = (deliveryByIdx[iD3] || 0) + d3qty;
+  let lvl = 0;
+  for (let i = 0; i < days.length; i++) { lvl += (deliveryByIdx[i] || 0); lvl -= days[i].final; days[i].ourStock = Math.max(0, round(lvl, 0)); }
+  const deliveries = [
+    { date: days[0].date, qty: d1qty, tag: 'П1', title: 'Поставка 1 — под период Разгон (+10% буфер)' },
+    { date: days[iD2].date, qty: d2qty, tag: 'П2', title: 'Поставка 2 — 50% объёма Сезона (+10%), за 2–3 дня до старта' },
+    { date: days[iD3].date, qty: d3qty, tag: 'П3', title: 'Поставка 3 — остаток объёма к середине Сезона' },
+  ].filter((d) => d.qty > 0);
+  const restockDeadline = { date: days[Math.max(0, peakI - 7)].date, note: 'Крайний срок подсорта (если факт > плана): ≤ 7 дней до Пика' };
+
+  // календарные границы сезона (день года) — чтобы разметить те же периоды на истории
+  const seasonCal = {
+    entryCal: days[0].k,
+    hotStartCal: days[Math.min(rampDays, days.length - 1)].k,
+    peakCal: days[peakI].k,
+    saleStartCal: days[iSale].k,
+    endCal: days[days.length - 1].k,
+  };
+
+  // БЛАГОПРИЯТНЫЙ период — только в высоком спросе (Сезон), не в распродаже/межсезонье.
   const peakF = Math.max(...days.map((d) => d.final), 1);
   const forecastDaily = days.map((d, i) => ({
     date: d.date,
@@ -150,7 +197,7 @@ function buildEngineeredSeason(shape, cfg) {
     kSales: round(d.relief, 4),
     plannedOrders: d.final,
     price: round(cfg.meanPrice * (shape.priceIndex[d.k] || 1) * (cfg.priceAdj || 1), 0),
-    stock: d.ourStock, // НАШ плановый остаток на WB (убывает к нулю), не остаток конкурентов
+    stock: d.ourStock, // НАШ плановый остаток на WB (пила поставок → к концу ≈ 0)
   }));
 
   const phaseDates = {
@@ -180,7 +227,7 @@ function buildEngineeredSeason(shape, cfg) {
     marketDates: { ok: new Date(phaseDates.entry).getUTCDate() !== 1 || new Date(phaseDates.saleStart).getUTCDate() !== 1, label: 'Даты по рынку', value: `вход ${phaseDates.entry}`, ref: 'не 1-е число' },
   };
 
-  return { forecastDaily, forecastPeriod: { from: days[0].date, to: days[days.length - 1].date }, phaseDates, validation, top3PeakDaily: target3, totalUnits: Math.round(total) };
+  return { forecastDaily, forecastPeriod: { from: days[0].date, to: days[days.length - 1].date }, phaseDates, validation, top3PeakDaily: target3, totalUnits: Math.round(total), seasonCal, deliveries, restockDeadline };
 }
 
 /**
@@ -238,19 +285,27 @@ export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily
   });
 
   // Историческая кривая (2 года) — по фактическим дням (для второй диаграммы).
-  const stageOf = phases?.stageOfMonth || {};
+  // Размечаем ТЕМИ ЖЕ периодами (Разгон/Сезон/Распродажа/Межсезонье), что и прогноз:
+  // по календарным границам сезона (день года), так периоды повторяются каждый год.
+  const cal = eng.seasonCal;
   const historyDaily = active.map((r) => {
     const m = Number(r.date.slice(5, 7));
+    const k = shape.calDayOf(r.date);
+    const stage = periodOfCal(k, cal);
     return {
       date: r.date,
-      stage: stageOf[m] || null,
-      favorable: !!favorableMonth[m],
+      stage,
+      favorable: stage === 'Сезон' && !!favorableMonth[m], // благоприятный — только в Сезоне
       kSales: round(monthlyValueAt(indexMap, r.date), 4),
       price: round((Number(r.price) || 0), 0),
       sales: round(Number(r.sales) || 0, 1),
       stock: round(Number(r.stock ?? r.balance) || 0, 0),
     };
   });
+  // ВЕХИ на истории — дни, чей день года совпал с вехой сезона (в каждом из 2 лет).
+  const msCal = [['Вход', cal.entryCal], ['Старт сезона', cal.hotStartCal], ['Пик', cal.peakCal], ['Начало распродажи', cal.saleStartCal], ['Конец', cal.endCal]];
+  const historyMilestones = [];
+  for (const r of active) { const k = shape.calDayOf(r.date); for (const [name, cd] of msCal) if (k === cd) historyMilestones.push({ date: r.date, name }); }
 
   const favMonths = [...new Set(eng.forecastDaily.filter((d) => d.favorable).map((d) => Number(d.date.slice(5, 7))))].sort((a, b) => a - b);
   const favShare = eng.forecastDaily.length ? eng.forecastDaily.filter((d) => d.favorable).length / eng.forecastDaily.length : 0;
@@ -259,6 +314,10 @@ export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily
     forecastPeriod: eng.forecastPeriod,
     targetYear: year,
     phaseDates: eng.phaseDates,
+    seasonCal: eng.seasonCal,
+    deliveries: eng.deliveries,
+    restockDeadline: eng.restockDeadline,
+    historyMilestones,
     validation: eng.validation,
     top3PeakDaily: eng.top3PeakDaily,
     top3Daily: round(top3, 2),
