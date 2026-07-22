@@ -347,7 +347,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   padding: 7px 10px; font-size: 12px; color: var(--text);
   box-shadow: 0 6px 20px rgba(0,0,0,.28); min-width: 150px;
 }
-.se-tip .se-tip-d { font-weight: 700; margin-bottom: 3px; }
+.se-tip .se-tip-st { font-weight: 700; margin-bottom: 2px; }
+.se-tip .se-tip-d { color: var(--muted); margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
 .se-tip div { line-height: 1.5; }
 .se-tip i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
 .se-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 6px; font-size: 12px; color: var(--muted); }

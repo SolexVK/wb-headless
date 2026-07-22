@@ -1048,7 +1048,11 @@ function attachSeasonTip(svg) {
     const cx = (meta.padL + (meta.n > 1 ? idx / (meta.n - 1) : 0) * meta.plotW).toFixed(1);
     cursor.setAttribute('x1', cx); cursor.setAttribute('x2', cx); cursor.setAttribute('opacity', '0.45');
     const val = Math.round(+r[meta.valueKey] || 0);
-    tip.innerHTML = `<div class="se-tip-d">${seFmtDate(r.date)}</div>`
+    const wd = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'][new Date(r.date + 'T00:00:00Z').getUTCDay()];
+    const st = r.stage || '—';
+    const stColor = (PHASE_COLORS[st] || {}).band || 'var(--muted)';
+    tip.innerHTML = `<div class="se-tip-st"><i style="background:${stColor}"></i>${st.charAt(0).toUpperCase() + st.slice(1)}${r.favorable ? ' ⭐' : ''}</div>`
+      + `<div class="se-tip-d">${seFmtDate(r.date)} (${wd})</div>`
       + `<div><i style="background:${SE_COL.demand}"></i>Продажи: <b>${val.toLocaleString('ru')}</b> шт</div>`
       + `<div><i style="background:${SE_COL.price}"></i>Цена: <b>${Math.round(+r.price || 0).toLocaleString('ru')}</b> ₽</div>`
       + `<div><i style="background:${SE_COL.stock}"></i>Остатки: <b>${Math.round(+r.stock || 0).toLocaleString('ru')}</b> шт</div>`;
@@ -1246,7 +1250,7 @@ function seasonSummary(rep, p) {
       <div class="se-card"><div class="k">Цена, ₽</div><div class="v">${pmin ? pmin.toLocaleString('ru') + '–' + pmax.toLocaleString('ru') : '—'}</div><div class="mini">якорь: медиана ТОПов −10%</div></div>
       <div class="se-card"><div class="k">Благоприятные месяцы</div><div class="v">${favM || '—'}</div><div class="mini">спрос выше среднего, остатки ниже</div></div>
     </div>
-    <div class="mini">Группа-аналогов: ${rep.itemsWithData ?? '—'} из ${rep.groupSize ?? '—'} · сбор: ${rep.method || '—'} (${rep.requests ?? '—'} запр.) · построено ${gen}</div>
+    <div class="mini">Группа-аналогов: ${rep.itemsWithData ?? '—'} из ${rep.groupSize ?? '—'} · сбор: ${rep.method === 'category-bulk' ? 'одним запросом по категории' : rep.method === 'per-sku' ? 'по каждому товару' : (rep.method || '—')} (${rep.requests ?? '—'} обращ. к MPStats) · построено ${gen}</div>
     ${seasonPhaseLegend()}
   </div>`;
 }
