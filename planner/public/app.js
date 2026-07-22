@@ -1236,16 +1236,33 @@ const seFmtK = (v) => { v = Math.round(v); const a = Math.abs(v); if (a >= 10000
 
 function seasonChartSVG(title, rows, valueKey) {
   if (!rows || !rows.length) return `<div class="se-chart"><div class="se-chart-title">${title}</div><div class="mini">нет данных</div></div>`;
-  const W = 980, H = 300, padL = 54, padR = 104, padT = 20, padB = 46;
+  const W = 980, H = 320, padL = 54, padR = 104, padT = 20, padB = 58;
   const n = rows.length;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const x = (i) => padL + (n > 1 ? i * plotW / (n - 1) : 0);
-  const raw = (key) => rows.map((r) => +r[key] || 0);
-  const demand = seMA(raw(valueKey), 7), price = raw('price'), stock = raw('stock');
-  const norm = (arr) => { const mn = Math.min(...arr), mx = Math.max(...arr), span = (mx - mn) || 1; return { mn, mx, y: (v) => padT + plotH * (1 - (v - mn) / span) }; };
-  const nd = norm(demand), np = norm(price), ns = norm(stock);
-  const poly = (arr, ny) => arr.map((v, i) => `${x(i).toFixed(1)},${ny.y(v).toFixed(1)}`).join(' ');
+  const weekly = n <= 300; // прогноз — недельные вехи с подписями; история — по месяцам
+
+  // недельные точки: агрегируем дни в недели (по понедельникам), берём средние —
+  // график идёт «от недели к неделе», без сильного суточного сглаживания.
+  const buckets = []; let cur = null;
+  rows.forEach((r, idx) => {
+    const d = new Date(r.date + 'T00:00:00Z'); const isMon = d.getUTCDay() === 1;
+    if (!cur || isMon) { if (cur) buckets.push(cur); cur = { i0: idx, i1: idx, ds: 0, nd: 0, ps: 0, np: 0, ss: 0, ns: 0 }; }
+    cur.i1 = idx;
+    cur.ds += (+r[valueKey] || 0); cur.nd++;
+    const pv = +r.price || 0; if (pv > 0) { cur.ps += pv; cur.np++; }
+    cur.ss += (+r.stock || 0); cur.ns++;
+  });
+  if (cur) buckets.push(cur);
+  const wk = buckets.map((b) => ({ idx: (b.i0 + b.i1) / 2, demand: b.nd ? b.ds / b.nd : 0, price: b.np ? b.ps / b.np : 0, stock: b.ns ? b.ss / b.ns : 0 }));
+  // максимумы для НУЛЕВОЙ базы осей (0 … max)
+  const dMax = Math.max(1, ...wk.map((w) => w.demand));
+  const pMax = Math.max(1, ...wk.map((w) => w.price));
+  const sMax = Math.max(1, ...wk.map((w) => w.stock));
+  const yOf = (v, mx) => padT + plotH * (1 - v / mx);
+  const poly = (key, mx) => wk.map((w) => `${x(w.idx).toFixed(1)},${yOf(w[key], mx).toFixed(1)}`).join(' ');
   const bandH = plotH.toFixed(1);
+
   // фон-полосы этапов
   let bands = '', i = 0;
   while (i < n) { let j = i; const st = rows[i].stage; while (j + 1 < n && rows[j + 1].stage === st) j++; const c = PHASE_COLORS[st]; if (c) bands += `<rect x="${x(i).toFixed(1)}" y="${padT}" width="${Math.max(1, x(j) - x(i) + (j === i ? 2 : 0)).toFixed(1)}" height="${bandH}" fill="${c.band}" fill-opacity="0.16"/>`; i = j + 1; }
@@ -1253,50 +1270,53 @@ function seasonChartSVG(title, rows, valueKey) {
   let fav = ''; i = 0;
   while (i < n) { if (rows[i].favorable) { let j = i; while (j + 1 < n && rows[j + 1].favorable) j++; fav += `<rect x="${x(i).toFixed(1)}" y="${padT}" width="${Math.max(1, x(j) - x(i) + 2).toFixed(1)}" height="${bandH}" fill="${FAVORABLE_BAND}"/>`; i = j + 1; } else i++; }
 
-  // ── горизонтальные линии сетки + вертикальные шкалы (3 оси) ──
+  // ── горизонтальные линии сетки + вертикальные шкалы (3 оси, ОТ НУЛЯ) ──
   let hgrid = '', yAxes = '';
-  const LV = 4; // число уровней сетки
+  const LV = 5; // уровней сетки (0 … max)
   for (let k = 0; k < LV; k++) {
     const f = k / (LV - 1); const yy = (padT + plotH * (1 - f)).toFixed(1);
-    hgrid += `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="var(--line)" opacity="0.35"/>`;
-    const dv = nd.mn + (nd.mx - nd.mn) * f, pv = np.mn + (np.mx - np.mn) * f, sv = ns.mn + (ns.mx - ns.mn) * f;
-    yAxes += `<text x="${padL - 6}" y="${(+yy + 3).toFixed(1)}" class="se-axis" text-anchor="end" fill="${SE_COL.demand}">${seFmtK(dv)}</text>`;
-    yAxes += `<text x="${W - padR + 8}" y="${(+yy + 3).toFixed(1)}" class="se-axis" text-anchor="start" fill="${SE_COL.price}">${seFmtK(pv)}</text>`;
-    yAxes += `<text x="${W - 4}" y="${(+yy + 3).toFixed(1)}" class="se-axis" text-anchor="end" fill="${SE_COL.stock}">${seFmtK(sv)}</text>`;
+    hgrid += `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="var(--line)" opacity="${k === 0 ? 0.6 : 0.3}"/>`;
+    yAxes += `<text x="${padL - 6}" y="${(+yy + 3).toFixed(1)}" class="se-axis" text-anchor="end" fill="${SE_COL.demand}">${seFmtK(dMax * f)}</text>`;
+    yAxes += `<text x="${W - padR + 8}" y="${(+yy + 3).toFixed(1)}" class="se-axis" text-anchor="start" fill="${SE_COL.price}">${seFmtK(pMax * f)}</text>`;
+    yAxes += `<text x="${W - 4}" y="${(+yy + 3).toFixed(1)}" class="se-axis" text-anchor="end" fill="${SE_COL.stock}">${seFmtK(sMax * f)}</text>`;
   }
-  // заголовки осей
-  yAxes += `<text x="${padL - 6}" y="${padT - 6}" class="se-axis" text-anchor="end" fill="${SE_COL.demand}">шт/дн</text>`;
+  yAxes += `<text x="${padL - 6}" y="${padT - 6}" class="se-axis" text-anchor="end" fill="${SE_COL.demand}">шт/нед</text>`;
   yAxes += `<text x="${W - padR + 8}" y="${padT - 6}" class="se-axis" text-anchor="start" fill="${SE_COL.price}">₽</text>`;
   yAxes += `<text x="${W - 4}" y="${padT - 6}" class="se-axis" text-anchor="end" fill="${SE_COL.stock}">ост.</text>`;
 
-  // ── горизонтальная ось: недельная сетка + месячные подписи ──
+  // ── горизонтальная ось ──
   const mondays = [];
   rows.forEach((r, idx) => { const d = new Date(r.date + 'T00:00:00Z'); if (d.getUTCDay() === 1 || idx === 0) mondays.push(idx); });
-  let vgrid = '';
-  for (const idx of mondays) vgrid += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--line)" opacity="0.18"/>`;
-  // подписи недель (только если не слишком плотно — короткий прогнозный период)
-  let wlab = '';
-  if (n <= 300) {
-    const step = Math.max(1, Math.ceil(mondays.length / 16));
-    for (let w = 0; w < mondays.length; w += step) { const idx = mondays[w]; const dt = rows[idx].date; wlab += `<text x="${x(idx).toFixed(1)}" y="${H - padB + 13}" class="se-axis se-wk" text-anchor="middle">${dt.slice(8, 10)}.${dt.slice(5, 7)}</text>`; }
+  let vgrid = '', xlab = '';
+  if (weekly) {
+    // понедельные вехи: линия + подпись даты по диагонали (−40°), чтобы умещались
+    for (const idx of mondays) {
+      const xx = x(idx).toFixed(1); const dt = rows[idx].date;
+      vgrid += `<line x1="${xx}" y1="${padT}" x2="${xx}" y2="${H - padB}" stroke="var(--line)" opacity="0.22"/>`;
+      xlab += `<text x="${xx}" y="${H - padB + 12}" class="se-axis se-wk" text-anchor="end" transform="rotate(-40 ${xx} ${H - padB + 12})">${dt.slice(8, 10)}.${dt.slice(5, 7)}</text>`;
+    }
+    // границы месяцев — жирнее (месяц читается по датам)
+    let lastM = null;
+    rows.forEach((r, idx) => { const m = r.date.slice(0, 7); if (m !== lastM) { lastM = m; vgrid += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--muted)" stroke-dasharray="2 3" opacity="0.5"/>`; } });
+  } else {
+    // история: недельная сетка (тонкая) + подписи по месяцам
+    for (const idx of mondays) vgrid += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--line)" opacity="0.14"/>`;
+    let lastM = null;
+    rows.forEach((r, idx) => { const m = r.date.slice(0, 7); if (m !== lastM) { lastM = m; vgrid += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--muted)" stroke-dasharray="2 3" opacity="0.45"/><text x="${x(idx).toFixed(1)}" y="${H - padB + 14}" class="se-axis se-mo" text-anchor="middle">${SE_MON[+r.date.slice(5, 7) - 1]} ${r.date.slice(2, 4)}</text>`; } });
   }
-  // месячные разделители (жирнее) + подписи
-  let mlab = '', lastM = null;
-  const monY = n <= 300 ? H - padB + 28 : H - padB + 14;
-  rows.forEach((r, idx) => { const m = r.date.slice(0, 7); if (m !== lastM) { lastM = m; mlab += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--line)" stroke-dasharray="2 3" opacity="0.55"/><text x="${x(idx).toFixed(1)}" y="${monY}" class="se-axis se-mo" text-anchor="middle">${SE_MON[+r.date.slice(5, 7) - 1]} ${r.date.slice(2, 4)}</text>`; } });
 
   return `<div class="se-chart"><div class="se-chart-title">${title}</div>
     <div class="se-svg-wrap"><svg viewBox="0 0 ${W} ${H}" class="se-svg" preserveAspectRatio="xMidYMid meet">
-      ${bands}${fav}${hgrid}${vgrid}${mlab}${wlab}
-      <polyline points="${poly(stock, ns)}" fill="none" stroke="${SE_COL.stock}" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.85"/>
-      <polyline points="${poly(price, np)}" fill="none" stroke="${SE_COL.price}" stroke-width="1.3" stroke-dasharray="5 3" opacity="0.9"/>
-      <polyline points="${poly(demand, nd)}" fill="none" stroke="${SE_COL.demand}" stroke-width="1.9"/>
+      ${bands}${fav}${hgrid}${vgrid}${xlab}
+      <polyline points="${poly('stock', sMax)}" fill="none" stroke="${SE_COL.stock}" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.85"/>
+      <polyline points="${poly('price', pMax)}" fill="none" stroke="${SE_COL.price}" stroke-width="1.4" stroke-dasharray="5 3" opacity="0.9"/>
+      <polyline points="${poly('demand', dMax)}" fill="none" stroke="${SE_COL.demand}" stroke-width="2"/>
       ${yAxes}
     </svg></div>
     <div class="se-legend">
-      <span><i style="background:${SE_COL.demand}"></i>спрос, шт/день (лев. ось)</span>
-      <span><i style="background:${SE_COL.price}"></i>цена ₽ (прав. ось)</span>
-      <span><i style="background:${SE_COL.stock}"></i>остатки, шт (крайняя прав. ось)</span>
+      <span><i style="background:${SE_COL.demand}"></i>спрос, шт/нед (лев. ось, от 0)</span>
+      <span><i style="background:${SE_COL.price}"></i>цена ₽ (прав. ось, от 0)</span>
+      <span><i style="background:${SE_COL.stock}"></i>остатки, шт (крайняя прав. ось, от 0)</span>
     </div>
   </div>`;
 }
