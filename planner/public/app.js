@@ -1002,6 +1002,12 @@ function workingDaysInMonth(ym) {
 // ---------- РАНГ СЕЗОННОСТИ (план продаж по сезонности) ----------
 // Цвета этапов — как в скилле seasonality-sales-plan (references/outputs.md).
 const PHASE_COLORS = {
+  // периоды прогноза (заливка на графике)
+  'Разгон':     { band: '#22c55e', row: 'rgba(34,197,94,.16)' },
+  'Сезон':      { band: '#f97316', row: 'rgba(249,115,22,.16)' },
+  'Распродажа': { band: '#ec4899', row: 'rgba(236,72,153,.16)' },
+  'Межсезонье': { band: '#94a3b8', row: 'rgba(148,163,184,.12)' },
+  // старые метки истории (детекция по месяцам)
   'вход':              { band: '#38bdf8', row: 'rgba(56,189,248,.16)' },
   'разгон':            { band: '#22c55e', row: 'rgba(34,197,94,.16)' },
   'старт сезона':      { band: '#eab308', row: 'rgba(234,179,8,.18)' },
@@ -1010,7 +1016,8 @@ const PHASE_COLORS = {
   'конец распродажи':  { band: '#a78bfa', row: 'rgba(167,139,250,.18)' },
   'межсезонье':        { band: '#94a3b8', row: 'rgba(148,163,184,.12)' },
 };
-const FAVORABLE_BAND = 'rgba(250,204,21,.30)';
+const FAVORABLE_BAND = 'rgba(250,204,21,.85)'; // ленточка благоприятного периода (сверху, со звёздами)
+const SEASON_LAG = 7; // средний лаг заказ→выкуп (дней): заказ сегодня — выкуп через ~lag
 const seEsc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 const seFmtD = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
 const SE_MON = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1264,7 +1271,6 @@ function seasonSummary(rep, p) {
       <div class="se-card"><div class="k">Благоприятные месяцы</div><div class="v">${favM || '—'}</div><div class="mini">спрос выше среднего, остатки ниже</div></div>
     </div>
     <div class="mini">Группа-аналогов: ${rep.itemsWithData ?? '—'} из ${rep.groupSize ?? '—'} · сбор: ${rep.method === 'category-bulk' ? 'одним запросом по категории' : rep.method === 'per-sku' ? 'по каждому товару' : (rep.method || '—')} (${rep.requests ?? '—'} обращ. к MPStats) · построено ${gen}</div>
-    ${seasonPhaseLegend()}
   </div>`;
 }
 
@@ -1273,9 +1279,13 @@ function seasonChartsBlock(rep, p) {
   const fp = rep.forecastPeriod, hp = rep.historyPeriod;
   const fTitle = 'Прогноз спроса, цены и остатков — ' + (fp ? seFmtRange(fp.from, fp.to) : 'на запрошенный период');
   const hTitle = 'История за 2 года (реальные данные аналогов)' + (hp ? ' — ' + seFmtRange(hp.d1, hp.d2) : '');
+  const ph = p.phaseDates || {};
+  const milestones = [
+    { date: ph.entry, name: 'Вход' }, { date: ph.hotStart, name: 'Старт сезона' },
+    { date: ph.peak, name: 'Пик' }, { date: ph.saleStart, name: 'Распродажа' }, { date: ph.end, name: 'Конец' },
+  ].filter((m) => m.date);
   return `<div class="se-charts">
-    ${seasonChartSVG(fTitle, p.forecastDaily || [], 'plannedOrders', { demand: 'план продаж (выкупы), шт/день', stock: 'наш склад (план), шт' })}
-    ${seasonPhaseLegend()}
+    ${seasonChartSVG(fTitle, p.forecastDaily || [], 'plannedOrders', { demand: 'план продаж (выкупы), шт/день', stock: 'наш склад (план), шт', milestones })}
     ${seasonChartSVG(hTitle, p.historyDaily || [], 'sales', { demand: 'продажи аналогов, шт/день', stock: 'остатки конкурентов, шт' })}
   </div>`;
 }
@@ -1298,7 +1308,7 @@ const seFmtK = (v) => { v = Math.round(v); const a = Math.abs(v); if (a >= 10000
 function seasonChartSVG(title, rows, valueKey, labels = {}) {
   const lab = { demand: 'спрос, шт/день', stock: 'остатки, шт', ...labels };
   if (!rows || !rows.length) return `<div class="se-chart"><div class="se-chart-title">${title}</div><div class="mini">нет данных</div></div>`;
-  const W = 980, H = 320, padL = 54, padR = 104, padT = 20, padB = 58;
+  const W = 980, H = 344, padL = 54, padR = 104, padT = 46, padB = 58;
   const n = rows.length;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const x = (i) => padL + (n > 1 ? i * plotW / (n - 1) : 0);
@@ -1319,12 +1329,40 @@ function seasonChartSVG(title, rows, valueKey, labels = {}) {
   const poly = (arr, mx) => arr.map((v, i) => `${x(i).toFixed(1)},${yOf(v, mx).toFixed(1)}`).join(' ');
   const bandH = plotH.toFixed(1);
 
-  // фон-полосы этапов
-  let bands = '', i = 0;
-  while (i < n) { let j = i; const st = rows[i].stage; while (j + 1 < n && rows[j + 1].stage === st) j++; const c = PHASE_COLORS[st]; if (c) bands += `<rect x="${x(i).toFixed(1)}" y="${padT}" width="${Math.max(1, x(j) - x(i) + (j === i ? 2 : 0)).toFixed(1)}" height="${bandH}" fill="${c.band}" fill-opacity="0.16"/>`; i = j + 1; }
-  // фон-полосы благоприятных периодов
-  let fav = ''; i = 0;
-  while (i < n) { if (rows[i].favorable) { let j = i; while (j + 1 < n && rows[j + 1].favorable) j++; fav += `<rect x="${x(i).toFixed(1)}" y="${padT}" width="${Math.max(1, x(j) - x(i) + 2).toFixed(1)}" height="${bandH}" fill="${FAVORABLE_BAND}"/>`; i = j + 1; } else i++; }
+  const idxByDate = {}; rows.forEach((r, ii) => { idxByDate[r.date] = ii; });
+  // фон-полосы этапов + ПОДПИСЬ названия этапа на сегменте
+  let bands = '', bandLabels = '', i = 0;
+  while (i < n) {
+    let j = i; const st = rows[i].stage; while (j + 1 < n && rows[j + 1].stage === st) j++;
+    const c = PHASE_COLORS[st];
+    if (c) {
+      const x0 = x(i), x1 = x(j) + (j === i ? 2 : 0);
+      bands += `<rect x="${x0.toFixed(1)}" y="${padT}" width="${Math.max(1, x1 - x0).toFixed(1)}" height="${bandH}" fill="${c.band}" fill-opacity="0.16"/>`;
+      if (st && (x1 - x0) > 40) bandLabels += `<text x="${((x0 + x1) / 2).toFixed(1)}" y="${padT + 15}" class="se-band-label" text-anchor="middle" fill="${c.band}">${st}</text>`;
+    }
+    i = j + 1;
+  }
+  // БЛАГОПРИЯТНЫЙ период — ленточка СВЕРХУ (рамка + звёзды), а не заливка фона
+  let favRibbon = ''; i = 0;
+  while (i < n) {
+    if (rows[i].favorable) {
+      let j = i; while (j + 1 < n && rows[j + 1].favorable) j++;
+      const x0 = x(i), x1 = x(j) + 2, w = Math.max(4, x1 - x0), yr = padT + 2;
+      favRibbon += `<rect x="${x0.toFixed(1)}" y="${yr}" width="${w.toFixed(1)}" height="11" rx="3" fill="${FAVORABLE_BAND}" stroke="#a16207" stroke-width="0.8"/>`;
+      const stars = Math.max(1, Math.min(20, Math.floor(w / 15)));
+      favRibbon += `<text x="${((x0 + x1) / 2).toFixed(1)}" y="${(yr + 9).toFixed(1)}" text-anchor="middle" class="se-stars">${'★'.repeat(stars)}</text>`;
+      i = j + 1;
+    } else i++;
+  }
+  // ВЕХИ (одиночные дни): вертикальная линия через график + подпись сверху
+  let milestones = '';
+  for (const ms of (labels.milestones || [])) {
+    const mi = idxByDate[ms.date]; if (mi == null) continue;
+    const mx = x(mi).toFixed(1);
+    milestones += `<line x1="${mx}" y1="${padT}" x2="${mx}" y2="${H - padB}" stroke="var(--text)" stroke-width="1" opacity="0.32"/>`;
+    milestones += `<circle cx="${mx}" cy="${padT}" r="2.5" fill="var(--text)" opacity="0.55"/>`;
+    milestones += `<text x="${mx}" y="16" class="se-ms-label" text-anchor="middle">${ms.name}</text>`;
+  }
 
   // ── горизонтальные линии сетки + вертикальные шкалы (3 оси, ОТ НУЛЯ) ──
   let hgrid = '', yAxes = '';
@@ -1363,12 +1401,12 @@ function seasonChartSVG(title, rows, valueKey, labels = {}) {
 
   return `<div class="se-chart"><div class="se-chart-title">${title}</div>
     <div class="se-svg-wrap"><svg viewBox="0 0 ${W} ${H}" class="se-svg" data-chart="${chartId}" preserveAspectRatio="xMidYMid meet">
-      ${bands}${fav}${hgrid}${vgrid}${xlab}
+      ${bands}${hgrid}${vgrid}${xlab}${milestones}
       <polyline points="${poly(svals, sMax)}" fill="none" stroke="${SE_COL.stock}" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.8"/>
       <polyline points="${poly(pvals, pMax)}" fill="none" stroke="${SE_COL.price}" stroke-width="1.3" stroke-dasharray="5 3" opacity="0.9"/>
       <polyline points="${poly(dvals, dMax)}" fill="none" stroke="${SE_COL.demand}" stroke-width="1.6"/>
       <line class="se-cursor" x1="0" x2="0" y1="${padT}" y2="${H - padB}" stroke="var(--text)" stroke-width="1" opacity="0"/>
-      ${yAxes}
+      ${bandLabels}${favRibbon}${yAxes}
     </svg></div>
     <div class="se-legend">
       <span><i style="background:${SE_COL.demand}"></i>${lab.demand} (лев. ось, от 0)</span>
@@ -1379,43 +1417,52 @@ function seasonChartSVG(title, rows, valueKey, labels = {}) {
 }
 
 // агрегирование дневного ряда прогноза до день/неделя/месяц
-function seasonAgg(rows, gran) {
-  if (gran === 'day') return rows.map((r) => ({ label: seFmtD(r.date), stage: r.stage, favorable: !!r.favorable, units: Math.round(+r.plannedOrders || 0), price: Math.round(+r.price || 0) }));
+// агрегирование дневного плана + расчёт ЗАКАЗОВ с лагом: заказ размещается за ~lag
+// дней ДО выкупа (товар едет к покупателю). Заказы[день] = выкупы[день+lag] / %выкупа.
+function seasonAgg(rows, gran, buyout) {
+  const ordFactor = 1 / ((buyout || 40) / 100);
+  const salesByDate = {}; rows.forEach((r) => { salesByDate[r.date] = +r.plannedOrders || 0; });
+  const addD = (iso, k) => new Date(Date.parse(iso + 'T00:00:00Z') + k * 86400000).toISOString().slice(0, 10);
+  const daily = rows.map((r) => ({
+    date: r.date, stage: r.stage, favorable: !!r.favorable,
+    units: Math.round(+r.plannedOrders || 0), // выкупы (продажи)
+    orders: Math.round((salesByDate[addD(r.date, SEASON_LAG)] || 0) * ordFactor), // заказы (сдвиг на лаг)
+    price: Math.round(+r.price || 0),
+  }));
+  if (gran === 'day') return daily.map((d) => ({ label: seFmtD(d.date), ...d }));
   const buckets = new Map();
-  for (const r of rows) {
+  for (const r of daily) {
     let key, label;
     if (gran === 'month') { key = r.date.slice(0, 7); label = seMonthLabel(key); }
     else { const d = new Date(r.date + 'T00:00:00Z'); const dow = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - dow); key = d.toISOString().slice(0, 10); label = 'нед. ' + seFmtD(key); }
     let b = buckets.get(key);
-    if (!b) { b = { label, units: 0, priceSum: 0, priceDays: 0, favorable: false, stages: {} }; buckets.set(key, b); }
-    b.units += +r.plannedOrders || 0;
-    const pr = +r.price || 0; if (pr > 0) { b.priceSum += pr; b.priceDays++; }
+    if (!b) { b = { label, units: 0, orders: 0, priceSum: 0, priceDays: 0, favorable: false, stages: {} }; buckets.set(key, b); }
+    b.units += r.units; b.orders += r.orders;
+    if (r.price > 0) { b.priceSum += r.price; b.priceDays++; }
     if (r.favorable) b.favorable = true;
     b.stages[r.stage] = (b.stages[r.stage] || 0) + 1;
   }
   return [...buckets.values()].map((b) => ({
     label: b.label,
     stage: Object.entries(b.stages).sort((a, c) => c[1] - a[1])[0]?.[0] || '',
-    favorable: b.favorable,
-    units: Math.round(b.units),
+    favorable: b.favorable, units: Math.round(b.units), orders: Math.round(b.orders),
     price: b.priceDays ? Math.round(b.priceSum / b.priceDays) : 0,
   }));
 }
 
 function seasonTableBlock(p) {
-  const rows = seasonAgg(p.forecastDaily || [], seasonGran);
   const buyout = seasonBuyoutOf(seasonSelArticle);
-  const ordersOf = (u) => Math.round(u / (buyout / 100));
+  const rows = seasonAgg(p.forecastDaily || [], seasonGran, buyout);
   const total = rows.reduce((s, r) => s + r.units, 0);
-  const totalOrders = ordersOf(total);
+  const totalOrders = rows.reduce((s, r) => s + r.orders, 0);
   const gbtn = (g, t) => `<button class="btn se-gran${seasonGran === g ? ' active' : ''}" type="button" data-gran="${g}">${t}</button>`;
   return `<div class="se-table-head">
       <b>План продаж по ${seasonGran === 'day' ? 'дням' : seasonGran === 'week' ? 'неделям' : 'месяцам'}</b>
       <span class="se-gran-group">${gbtn('day', 'дни')}${gbtn('week', 'недели')}${gbtn('month', 'месяцы')}</span>
     </div>
     <div class="matrix-scroll"><table class="matrix-table se-plan-table">
-      <thead><tr><th>Период</th><th>Этап сезона</th><th class="num" title="MPStats «продажи» = выкупы. База для производства.">Выкупы, шт</th><th class="num" title="Заказы = выкупы / (%выкупа). Нагрузка на витрину/логистику.">Заказы, шт</th><th class="num">Цена, ₽</th><th>Благопр.</th></tr></thead>
-      <tbody>${rows.map((r) => { const c = PHASE_COLORS[r.stage]; return `<tr style="background:${c ? c.row : 'transparent'}"><td>${r.label}</td><td>${r.stage || '—'}</td><td class="num">${r.units.toLocaleString('ru')}</td><td class="num se-orders">${ordersOf(r.units).toLocaleString('ru')}</td><td class="num">${r.price ? r.price.toLocaleString('ru') : '—'}</td><td>${r.favorable ? '⭐' : ''}</td></tr>`; }).join('')}</tbody>
+      <thead><tr><th>Период</th><th>Этап сезона</th><th class="num" title="MPStats «продажи» = выкупы. База для производства.">Выкупы, шт</th><th class="num" title="Заказы = выкупы через ~${SEASON_LAG} дн ÷ %выкупа (лаг «заказ→доставка→выкуп»).">Заказы, шт</th><th class="num">Цена, ₽</th><th>Благопр.</th></tr></thead>
+      <tbody>${rows.map((r) => { const c = PHASE_COLORS[r.stage]; return `<tr style="background:${c ? c.row : 'transparent'}"><td>${r.label}</td><td>${r.stage || '—'}</td><td class="num">${r.units.toLocaleString('ru')}</td><td class="num se-orders">${r.orders.toLocaleString('ru')}</td><td class="num">${r.price ? r.price.toLocaleString('ru') : '—'}</td><td>${r.favorable ? '⭐' : ''}</td></tr>`; }).join('')}</tbody>
       <tfoot><tr><th colspan="2">ИТОГО</th><th class="num">${total.toLocaleString('ru')}</th><th class="num se-orders">${totalOrders.toLocaleString('ru')}</th><th colspan="2"></th></tr></tfoot>
     </table></div>`;
 }

@@ -133,25 +133,20 @@ function buildEngineeredSeason(shape, cfg) {
   const scale = p90body > 0 ? targetPeak / p90body : 1;
   for (const d of days) d.final = round(d.shapeVal * scale, 1);
 
-  // фазы по РЫНОЧНЫМ датам. «Пик сезона» — ОКНО вокруг пика (не один день).
-  const peakLo = Math.max(rampDays, peakI - 10);
-  const stageAt = (i) => {
-    if (i < Math.round(rampDays * 0.5)) return 'вход';
-    if (i < rampDays) return 'разгон';
-    if (i < peakLo) return 'старт сезона';
-    if (i < iSale) return 'пик сезона';
-    const sl = days.length - 1 - iSale;
-    return (i - iSale) < sl * 0.4 ? 'начало распродажи' : 'конец распродажи';
-  };
+  // ПЕРИОДЫ (заливка на графике): Разгон [вход..старт сезона), Сезон [старт..распродажа),
+  // Распродажа [распродажа..конец]. ВЕХИ (1 день) — отдельно в phaseDates:
+  // Вход(0), Старт сезона(rampDays), Пик(peakI), Начало распродажи(iSale), Конец(последний).
+  const stageAt = (i) => (i < rampDays ? 'Разгон' : i < iSale ? 'Сезон' : 'Распродажа');
   // НАШ склад на WB: производство (=итог плана) − накопленные продажи → к концу ≈ 0.
   const grand = days.reduce((s, d) => s + d.final, 0);
   let cum = 0;
   for (const d of days) { cum += d.final; d.ourStock = Math.max(0, round(grand - cum, 0)); }
-  const favM = cfg.favorableMonth || {};
+  // БЛАГОПРИЯТНЫЙ период — только в высоком спросе ДО распродажи (не в распродаже/межсезонье).
+  const peakF = Math.max(...days.map((d) => d.final), 1);
   const forecastDaily = days.map((d, i) => ({
     date: d.date,
     stage: stageAt(i),
-    favorable: !!favM[Number(d.date.slice(5, 7))],
+    favorable: i >= rampDays && i < iSale && d.final >= 0.5 * peakF,
     kSales: round(d.relief, 4),
     plannedOrders: d.final,
     price: round(cfg.meanPrice * (shape.priceIndex[d.k] || 1) * (cfg.priceAdj || 1), 0),
@@ -257,7 +252,7 @@ export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily
     };
   });
 
-  const favMonths = Object.keys(favorableMonth).filter((m) => favorableMonth[m]).map(Number).sort((a, b) => a - b);
+  const favMonths = [...new Set(eng.forecastDaily.filter((d) => d.favorable).map((d) => Number(d.date.slice(5, 7))))].sort((a, b) => a - b);
   const favShare = eng.forecastDaily.length ? eng.forecastDaily.filter((d) => d.favorable).length / eng.forecastDaily.length : 0;
 
   return {
