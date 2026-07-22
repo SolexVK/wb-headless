@@ -43,7 +43,7 @@ async function mapPool(items, concurrency, worker, shouldStop) {
   return results;
 }
 
-const lc = (s) => String(s ?? '').toLowerCase();
+const lc = (s) => String(s ?? '').toLowerCase().replace(/ё/g, 'е'); // ё=е для совпадений
 
 // Лёгкий стем русского слова: срезаем распространённое окончание, чтобы «клетка»
 // матчила «в клетку», «лето» — «летняя» и т.п. (учёт словоформ).
@@ -70,7 +70,8 @@ const hasStem = (text, stemList) => stemList.some((s) => text.includes(s));
  * @returns items (прошедшие жёсткие), у каждого проставлен `_relevance` (число).
  */
 export function filterGroupItems(items, f = {}) {
-  const soft = stems([...(f.words || []), ...(f.allWords || [])]);
+  const hard = stems(f.words); // «слова» — ОБЯЗАТЕЛЬНЫ (любое из), не только релевантность
+  const soft = [...new Set(stems([...(f.words || []), ...(f.allWords || [])]))]; // уникальные признаки
   const exclude = stems(f.exclude);
   const brands = stems(f.brands);
   const excludeBrands = stems(f.excludeBrands);
@@ -87,6 +88,8 @@ export function filterGroupItems(items, f = {}) {
     if (f.priceMin != null && it.price < f.priceMin) continue;
     if (f.priceMax != null && it.price > f.priceMax) continue;
     if (exclude.length && hasStem(name, exclude)) continue;
+    // «слова»: по умолчанию любое из; при matchAll — ВСЕ обязательны (точная выборка).
+    if (hard.length) { const ok = f.matchAll ? hard.every((s) => name.includes(s)) : hasStem(name, hard); if (!ok) continue; }
     if (brands.length && !hasStem(brand, brands)) continue;
     if (excludeBrands.length && hasStem(brand, excludeBrands)) continue;
     // Живость: проходит, если ЛИБО продажи/мес ≥ порога, ЛИБО выручка/мес ≥ порога.
@@ -188,6 +191,14 @@ export async function collectFromCategory({
     (b._relevance || 0) - (a._relevance || 0) ||
     (b.sales || 0) - (a.sales || 0) ||
     (b.price || 0) - (a.price || 0));
+  // Отсев СЛАБО-релевантных: если задан фильтр слов, отбрасываем карточки, совпавшие по
+  // слишком малому числу признаков — устойчивее к «чужим» товарам в выдаче (напр. летние
+  // рубашки при поиске зимних). Порог — 45% от максимума совпавших признаков.
+  let relFloor = 0;
+  if (!wbSet && hasSoft) {
+    const maxRel = items.reduce((m, it) => Math.max(m, it._relevance || 0), 0);
+    if (maxRel >= 3) { relFloor = Math.ceil(0.45 * maxRel); items = items.filter((it) => (it._relevance || 0) >= relFloor); }
+  }
   const keptBeforeLimit = items.length;
   if (limit && items.length > limit) items = items.slice(0, limit);
 

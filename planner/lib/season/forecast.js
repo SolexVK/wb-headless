@@ -118,16 +118,13 @@ function buildEngineeredSeason(shape, cfg) {
   let acc = 0, iSale = days.length - 1;
   for (let i = 0; i < days.length; i++) { acc += days[i].base; if (acc >= 0.80 * total0) { iSale = Math.max(i, peakI + 1); break; } }
   iSale = Math.max(1, Math.min(iSale, days.length - 2));
-  const preSum = days.slice(0, iSale).reduce((s, d) => s + d.base, 0) || total0 * 0.8;
-
-  // 5) ЛИКВИДАЦИЯ хвоста в ноль: рельеф × тапер(1→0), объём хвоста = 20% итога (→80/20).
-  const tail = days.slice(iSale); const Lt = tail.length;
-  let rawTail = 0;
-  tail.forEach((d, j) => { const p = Lt > 1 ? j / (Lt - 1) : 1; d.taper = (d.relief || 1) * Math.pow(1 - p, 1.4); rawTail += d.taper; });
-  const saleTarget = preSum / 4; // sale = 20% от итога (pre=80%)
-  const tScale = rawTail > 0 ? saleTarget / rawTail : 0;
-  tail.forEach((d) => { d.shapeVal = d.taper * tScale; });
+  // 5) ЛИКВИДАЦИЯ хвоста в ноль: ПЛАВНЫЙ СПАД от уровня старта распродажи к нулю.
+  //    Хвост НИКОГДА не выше уровня старта распродажи (⇒ и не выше пика) — распродажа
+  //    не может продавать больше, чем в сезон. Объём хвоста получается ~20% (pre≥80%).
   for (let i = 0; i < iSale; i++) days[i].shapeVal = days[i].base;
+  const v0 = iSale > 0 ? days[iSale - 1].base : days[0].base;
+  const tail = days.slice(iSale); const Lt = tail.length;
+  tail.forEach((d, j) => { const p = Lt > 1 ? j / (Lt - 1) : 1; d.shapeVal = v0 * Math.pow(1 - p, cfg.saleDecay ?? 1.4); });
 
   // 6) МАСШТАБ под ТОП-3: p90 тела (устойчиво к текстурным спайкам) = уровень ТОП-3 на пике.
   const bodyShape = days.slice(0, iSale).map((d) => d.shapeVal).filter((v) => v > 0).sort((a, b) => a - b);
@@ -136,15 +133,20 @@ function buildEngineeredSeason(shape, cfg) {
   const scale = p90body > 0 ? targetPeak / p90body : 1;
   for (const d of days) d.final = round(d.shapeVal * scale, 1);
 
-  // фазы по РЫНОЧНЫМ датам
+  // фазы по РЫНОЧНЫМ датам. «Пик сезона» — ОКНО вокруг пика (не один день).
+  const peakLo = Math.max(rampDays, peakI - 10);
   const stageAt = (i) => {
     if (i < Math.round(rampDays * 0.5)) return 'вход';
     if (i < rampDays) return 'разгон';
-    if (i < peakI) return 'старт сезона';
+    if (i < peakLo) return 'старт сезона';
     if (i < iSale) return 'пик сезона';
     const sl = days.length - 1 - iSale;
     return (i - iSale) < sl * 0.4 ? 'начало распродажи' : 'конец распродажи';
   };
+  // НАШ склад на WB: производство (=итог плана) − накопленные продажи → к концу ≈ 0.
+  const grand = days.reduce((s, d) => s + d.final, 0);
+  let cum = 0;
+  for (const d of days) { cum += d.final; d.ourStock = Math.max(0, round(grand - cum, 0)); }
   const favM = cfg.favorableMonth || {};
   const forecastDaily = days.map((d, i) => ({
     date: d.date,
@@ -153,7 +155,7 @@ function buildEngineeredSeason(shape, cfg) {
     kSales: round(d.relief, 4),
     plannedOrders: d.final,
     price: round(cfg.meanPrice * (shape.priceIndex[d.k] || 1) * (cfg.priceAdj || 1), 0),
-    stock: round(shape.stock[d.k] || 0, 0),
+    stock: d.ourStock, // НАШ плановый остаток на WB (убывает к нулю), не остаток конкурентов
   }));
 
   const phaseDates = {

@@ -46,6 +46,7 @@ function buildFilter(f = {}) {
     brands: list(f.brands), excludeBrands: list(f.excludeBrands),
     priceMin: num(f.priceMin), priceMax: num(f.priceMax),
     minSalesPerMonth: num(f.minSales), minRevenuePerMonth: num(f.minRevenue),
+    matchAll: f.matchAll ? true : undefined,
   };
   for (const k of Object.keys(filter)) if (filter[k] === undefined) delete filter[k];
   return filter;

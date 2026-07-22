@@ -1274,9 +1274,9 @@ function seasonChartsBlock(rep, p) {
   const fTitle = 'Прогноз спроса, цены и остатков — ' + (fp ? seFmtRange(fp.from, fp.to) : 'на запрошенный период');
   const hTitle = 'История за 2 года (реальные данные аналогов)' + (hp ? ' — ' + seFmtRange(hp.d1, hp.d2) : '');
   return `<div class="se-charts">
-    ${seasonChartSVG(fTitle, p.forecastDaily || [], 'plannedOrders')}
+    ${seasonChartSVG(fTitle, p.forecastDaily || [], 'plannedOrders', { demand: 'план продаж (выкупы), шт/день', stock: 'наш склад (план), шт' })}
     ${seasonPhaseLegend()}
-    ${seasonChartSVG(hTitle, p.historyDaily || [], 'sales')}
+    ${seasonChartSVG(hTitle, p.historyDaily || [], 'sales', { demand: 'продажи аналогов, шт/день', stock: 'остатки конкурентов, шт' })}
   </div>`;
 }
 
@@ -1295,7 +1295,8 @@ function seMA(arr, k = 7) {
 const SE_COL = { demand: '#3b82f6', price: '#ef4444', stock: '#a78bfa' };
 const seFmtK = (v) => { v = Math.round(v); const a = Math.abs(v); if (a >= 100000) return Math.round(v / 1000) + 'k'; if (a >= 10000) return (v / 1000).toFixed(1).replace(/\.0$/, '') + 'k'; return v.toLocaleString('ru'); };
 
-function seasonChartSVG(title, rows, valueKey) {
+function seasonChartSVG(title, rows, valueKey, labels = {}) {
+  const lab = { demand: 'спрос, шт/день', stock: 'остатки, шт', ...labels };
   if (!rows || !rows.length) return `<div class="se-chart"><div class="se-chart-title">${title}</div><div class="mini">нет данных</div></div>`;
   const W = 980, H = 320, padL = 54, padR = 104, padT = 20, padB = 58;
   const n = rows.length;
@@ -1370,9 +1371,9 @@ function seasonChartSVG(title, rows, valueKey) {
       ${yAxes}
     </svg></div>
     <div class="se-legend">
-      <span><i style="background:${SE_COL.demand}"></i>спрос, шт/день (лев. ось, от 0)</span>
+      <span><i style="background:${SE_COL.demand}"></i>${lab.demand} (лев. ось, от 0)</span>
       <span><i style="background:${SE_COL.price}"></i>цена ₽ (прав. ось, от 0)</span>
-      <span><i style="background:${SE_COL.stock}"></i>остатки, шт (крайняя прав. ось, от 0)</span>
+      <span><i style="background:${SE_COL.stock}"></i>${lab.stock} (крайняя прав. ось, от 0)</span>
     </div>
   </div>`;
 }
