@@ -3,7 +3,7 @@ import { renderGantt } from './gantt.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-2026-07-22c';
+const APP_BUILD = 'season-2026-07-22d';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1374,24 +1374,32 @@ function seasonChartSVG(title, rows, valueKey, labels = {}) {
   while (i < n) {
     if (rows[i].favorable) {
       let j = i; while (j + 1 < n && rows[j + 1].favorable) j++;
-      const x0 = x(i), x1 = x(j) + 2, w = Math.max(4, x1 - x0), yr = padT - 16;
-      favRibbon += `<rect x="${x0.toFixed(1)}" y="${yr}" width="${w.toFixed(1)}" height="11" rx="3" fill="${FAVORABLE_BAND}" stroke="#a16207" stroke-width="0.8"/>`;
+      const x0 = x(i), x1 = x(j) + 2, w = Math.max(4, x1 - x0), yr = padT - 13;
+      favRibbon += `<rect x="${x0.toFixed(1)}" y="${yr}" width="${w.toFixed(1)}" height="10" rx="3" fill="${FAVORABLE_BAND}" stroke="#a16207" stroke-width="0.8"/>`;
       const stars = Math.max(1, Math.min(20, Math.floor(w / 15)));
-      favRibbon += `<text x="${((x0 + x1) / 2).toFixed(1)}" y="${(yr + 9).toFixed(1)}" text-anchor="middle" class="se-stars">${'★'.repeat(stars)}</text>`;
+      favRibbon += `<text x="${((x0 + x1) / 2).toFixed(1)}" y="${(yr + 8).toFixed(1)}" text-anchor="middle" class="se-stars">${'★'.repeat(stars)}</text>`;
       i = j + 1;
     } else i++;
   }
   // ВЕХИ (одиночные дни): вертикальная линия через график + подпись сверху.
   // На истории (milestoneLabels:false) вехи повторяются каждый год → подписи наложились бы;
   // оставляем линии с тултипом, границы периодов и так читаются по смене цвета.
+  // Подписи вех раскладываем в ДВА ряда, если соседние близко (Пик рядом с Началом распродажи).
   const showMsLabels = labels.milestoneLabels !== false;
+  const msList = (labels.milestones || []).map((ms) => ({ ...ms, mi: idxByDate[ms.date] }))
+    .filter((m) => m.mi != null).sort((a, b) => a.mi - b.mi);
   let milestones = '';
-  for (const ms of (labels.milestones || [])) {
-    const mi = idxByDate[ms.date]; if (mi == null) continue;
-    const mx = x(mi).toFixed(1);
+  const lastRight = [-1e9, -1e9]; // правый край подписи в ряду 0 и 1
+  for (const ms of msList) {
+    const mxN = x(ms.mi), mx = mxN.toFixed(1);
     milestones += `<line x1="${mx}" y1="${padT}" x2="${mx}" y2="${H - padB}" stroke="var(--text)" stroke-width="1" opacity="0.32"><title>${seEsc(ms.name)}</title></line>`;
     milestones += `<circle cx="${mx}" cy="${padT}" r="2.5" fill="var(--text)" opacity="0.55"><title>${seEsc(ms.name)}</title></circle>`;
-    if (showMsLabels) milestones += `<text x="${mx}" y="16" class="se-ms-label" text-anchor="middle">${ms.name}</text>`;
+    if (showMsLabels) {
+      const halfW = Math.max(16, ms.name.length * 3.3); // оценка полуширины подписи
+      let row = mxN - halfW > lastRight[0] ? 0 : (mxN - halfW > lastRight[1] ? 1 : 0);
+      lastRight[row] = mxN + halfW;
+      milestones += `<text x="${mx}" y="${row === 0 ? 12 : 26}" class="se-ms-label" text-anchor="middle">${ms.name}</text>`;
+    }
   }
   // КРАЙНИЙ СРОК ПОДСОРТА — оранжевая пунктирная веха (контингент, если факт > плана)
   if (labels.restock && idxByDate[labels.restock.date] != null) {
