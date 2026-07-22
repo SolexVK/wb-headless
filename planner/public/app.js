@@ -1115,8 +1115,8 @@ function seasonBuilderPanel() {
       <div class="field"><label>Мин. продаж/мес</label><input id="se-minsales" type="number" value="${f.minSales ?? ''}"></div>
       <div class="field"><label>Мин. выручка/мес, ₽</label><input id="se-minrev" type="number" value="${f.minRevenue ?? ''}"></div>
 
-      <div class="field"><label>Прогноз с</label><input id="se-from" type="date" value="${seEsc(f.from || '')}"></div>
-      <div class="field"><label>Прогноз по</label><input id="se-to" type="date" value="${seEsc(f.to || '')}"></div>
+      <div class="field"><label title="Год старта сезона. Вход, пик и распродажу движок выбирает сам из годового анализа рынка.">Целевой сезон (год старта)</label><input id="se-year" type="number" min="2024" max="2032" value="${f.targetYear || (new Date().getUTCFullYear())}"></div>
+      <div class="field"><span class="mini" style="align-self:end">Точные даты входа / пика / распродажи движок определит сам по спросу.</span></div>
 
       <div class="span2 se-opts">
         <label class="se-check"><input type="checkbox" id="se-oos"${f.oos !== false ? ' checked' : ''}> OOS-поправка</label>
@@ -1136,7 +1136,7 @@ function collectSeasonForm() {
     articleId: seasonBuildArticle,
     path: v('se-path'), words: v('se-words'), allWords: v('se-allwords'), exclude: v('se-exclude'),
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
-    limit: v('se-limit'), from: v('se-from'), to: v('se-to'),
+    limit: v('se-limit'), targetYear: v('se-year'),
     oos: document.getElementById('se-oos')?.checked !== false,
     weekly: document.getElementById('se-weekly')?.checked !== false,
   };
@@ -1161,7 +1161,6 @@ function bindSeasonBuilder() {
   g('se-build')?.addEventListener('click', async () => {
     const cfg = collectSeasonForm();
     if (!cfg.path) { toast('Укажи путь предмета WB', true); return; }
-    if (!cfg.from || !cfg.to) { toast('Укажи прогнозный период (с … по)', true); return; }
     seasonBuilding = true; renderSeason();
     try {
       await api('/api/season/build', { method: 'POST', body: JSON.stringify(cfg) });
@@ -1170,7 +1169,7 @@ function bindSeasonBuilder() {
       if (a) {
         a.seasonFilter = { path: cfg.path, words: cfg.words, allWords: cfg.allWords, exclude: cfg.exclude,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
-          limit: cfg.limit, from: cfg.from, to: cfg.to, oos: cfg.oos, weekly: cfg.weekly };
+          limit: cfg.limit, targetYear: cfg.targetYear, oos: cfg.oos, weekly: cfg.weekly };
         await recalc(true).catch(() => {});
       }
       seasonSelArticle = cfg.articleId;
@@ -1220,7 +1219,7 @@ async function renderSeasonView(articleId) {
   try { rec = await api('/api/season/plan?articleId=' + encodeURIComponent(articleId)); }
   catch (e) { box.innerHTML = '<div class="mini bad">Не удалось загрузить: ' + e.message + '</div>'; return; }
   const rep = rec.report, p = rep.plan || {};
-  box.innerHTML = seasonSummary(rep, p) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   bindSeasonView(p);
 }
 
@@ -1232,6 +1231,20 @@ function seasonBuyoutOf(articleId) {
   const a = (state.articles || []).find((x) => x.id === articleId);
   return a && +a.buyoutPct > 0 ? +a.buyoutPct : 40;
 }
+// таймлайн выбранных движком дат фаз + блок самопроверки плана
+function seasonPlanChecks(rep, p) {
+  const ph = p.phaseDates || {}, val = p.validation || {};
+  const df = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}` : '—');
+  const steps = [['Вход', ph.entry], ['Старт сезона', ph.hotStart], ['Пик', ph.peak], ['Распродажа', ph.saleStart], ['Конец', ph.end]];
+  const tl = steps.map(([n, d]) => `<div class="se-tl-step"><div class="se-tl-n">${n}</div><div class="se-tl-d">${df(d)}</div></div>`).join('<span class="se-tl-arr">→</span>');
+  const checks = Object.values(val).map((v) => `<div class="se-chk ${v.ok ? 'ok' : 'bad'}"><span class="se-chk-i">${v.ok ? '✅' : '❌'}</span><span class="se-chk-l">${v.label}</span><span class="se-chk-v">${v.value} <span class="mini">(${v.ref})</span></span></div>`).join('');
+  return `<div class="se-checks">
+    <div class="se-tl-head">Сезон и фазы (движок выбрал по спросу):</div>
+    <div class="se-timeline">${tl}</div>
+    ${checks ? `<div class="se-chk-head">Самопроверка плана</div><div class="se-chk-grid">${checks}</div>` : ''}
+  </div>`;
+}
+
 function seasonSummary(rep, p) {
   const rank = p.rank || {};
   const fd = p.forecastDaily || [];
