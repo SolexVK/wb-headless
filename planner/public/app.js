@@ -3,7 +3,7 @@ import { renderGantt } from './gantt.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-2026-07-22b';
+const APP_BUILD = 'season-2026-07-22c';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1226,11 +1226,26 @@ async function renderSeasonView(articleId) {
   // План построен СТАРЫМ движком (нет календаря сезона/поставок) → графики отрисуются
   // по устаревшим данным. Просим перестроить, иначе новые правки «не видно».
   const stale = !p.seasonCal || !Array.isArray(p.deliveries);
+  const canRebuild = stale && rec.cfg && rec.cfg.path;
   const staleBanner = stale
-    ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка. Нажмите <b>«Построить заново»</b> в конструкторе выше — только после пересборки появятся новые периоды, вехи, лента благоприятного периода и поставки на склад частями.</div>`
+    ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
   box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   bindSeasonView(p);
+  // Пересборка в один клик прямо из баннера (тем же cfg, что сохранён у плана).
+  if (canRebuild) {
+    document.getElementById('se-rebuild')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget; btn.disabled = true; btn.textContent = '⏳ Пересобираю план…';
+      try {
+        await api('/api/season/build', { method: 'POST', body: JSON.stringify({ ...rec.cfg, articleId }) });
+        toast('План пересобран новым движком');
+        await renderSeasonView(articleId);
+      } catch (err) {
+        toast('Ошибка пересборки: ' + err.message, true);
+        btn.disabled = false; btn.textContent = '↻ Построить заново';
+      }
+    });
+  }
 }
 
 function seasonPhaseLegend() {
