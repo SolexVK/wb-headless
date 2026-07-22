@@ -187,6 +187,9 @@ export function normalizeState(input) {
     a.comment = typeof a.comment === 'string' ? a.comment : '';
     a.fabricPerUnit = +a.fabricPerUnit > 0 ? +a.fabricPerUnit : 1.6;
     a.fabricPricePerMeter = +a.fabricPricePerMeter >= 0 ? +a.fabricPricePerMeter : 0; // $/м
+    // процент выкупа (WB): доля заказов, которые реально выкупают. Для одежды ~30–60%.
+    // MPStats отдаёт «продажи» = выкупы; заказы = выкупы / (buyoutPct/100).
+    a.buyoutPct = (+a.buyoutPct > 0 && +a.buyoutPct <= 100) ? +a.buyoutPct : 40;
     a.colors = Array.isArray(a.colors) ? a.colors : [];
     a.sizes = Array.isArray(a.sizes) ? a.sizes : [];
     // метаданные ткани по цвету: { цвет: { plansheet, colorNo, image(dataURL) } }

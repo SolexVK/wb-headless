@@ -1185,10 +1185,16 @@ function seasonPhaseLegend() {
   return `<div class="se-phases">${Object.entries(PHASE_COLORS).map(([name, c]) => `<span class="se-phase-chip"><i style="background:${c.band}"></i>${name}</span>`).join('')}<span class="se-phase-chip"><i style="background:${FAVORABLE_BAND}"></i>благоприятный период</span></div>`;
 }
 
+function seasonBuyoutOf(articleId) {
+  const a = (state.articles || []).find((x) => x.id === articleId);
+  return a && +a.buyoutPct > 0 ? +a.buyoutPct : 40;
+}
 function seasonSummary(rep, p) {
   const rank = p.rank || {};
   const fd = p.forecastDaily || [];
-  const total = Math.round(fd.reduce((s, d) => s + (+d.plannedOrders || 0), 0));
+  const total = Math.round(fd.reduce((s, d) => s + (+d.plannedOrders || 0), 0)); // выкупы
+  const buyout = seasonBuyoutOf(seasonSelArticle);
+  const orders = Math.round(total / (buyout / 100)); // заказы = выкупы / %выкупа
   const prices = fd.map((d) => +d.price || 0).filter((x) => x > 0);
   const pmin = prices.length ? Math.min(...prices) : 0, pmax = prices.length ? Math.max(...prices) : 0;
   const favM = (p.favorable && p.favorable.months || []).map((m) => SE_MON[m - 1]).join(', ');
@@ -1196,8 +1202,9 @@ function seasonSummary(rep, p) {
   return `<div class="se-summary">
     <div class="se-cards">
       <div class="se-card"><div class="k">Ранг сезонности</div><div class="v">${rank.rank || '—'}</div><div class="mini">амплитуда p90/p50 = ${rank.amplitude ?? '—'}</div></div>
-      <div class="se-card"><div class="k">Прогноз, штук</div><div class="v good">${total.toLocaleString('ru')}</div><div class="mini">${rep.forecastPeriod ? rep.forecastPeriod.from + ' … ' + rep.forecastPeriod.to : ''}</div></div>
-      <div class="se-card"><div class="k">Цена, ₽</div><div class="v">${pmin ? pmin.toLocaleString('ru') + '–' + pmax.toLocaleString('ru') : '—'}</div><div class="mini">среднерыночный якорь</div></div>
+      <div class="se-card"><div class="k">Выкупы (прогноз), шт</div><div class="v good">${total.toLocaleString('ru')}</div><div class="mini">MPStats «продажи» = выкупы · база для производства</div></div>
+      <div class="se-card"><div class="k">Заказы (оценка), шт</div><div class="v">${orders.toLocaleString('ru')}</div><div class="mini">выкупы ÷ выкуп: <input id="se-buyout" type="number" min="1" max="100" value="${buyout}" title="% выкупа"> %</div></div>
+      <div class="se-card"><div class="k">Цена, ₽</div><div class="v">${pmin ? pmin.toLocaleString('ru') + '–' + pmax.toLocaleString('ru') : '—'}</div><div class="mini">якорь: медиана ТОПов −10%</div></div>
       <div class="se-card"><div class="k">Благоприятные месяцы</div><div class="v">${favM || '—'}</div><div class="mini">спрос выше среднего, остатки ниже</div></div>
     </div>
     <div class="mini">Группа-аналогов: ${rep.itemsWithData ?? '—'} из ${rep.groupSize ?? '—'} · сбор: ${rep.method || '—'} (${rep.requests ?? '—'} запр.) · построено ${gen}</div>
@@ -1224,40 +1231,72 @@ function seMA(arr, k = 7) {
   return out;
 }
 
+const SE_COL = { demand: '#3b82f6', price: '#ef4444', stock: '#a78bfa' };
+const seFmtK = (v) => { v = Math.round(v); const a = Math.abs(v); if (a >= 100000) return Math.round(v / 1000) + 'k'; if (a >= 10000) return (v / 1000).toFixed(1).replace(/\.0$/, '') + 'k'; return v.toLocaleString('ru'); };
+
 function seasonChartSVG(title, rows, valueKey) {
   if (!rows || !rows.length) return `<div class="se-chart"><div class="se-chart-title">${title}</div><div class="mini">нет данных</div></div>`;
-  const W = 980, H = 300, padL = 46, padR = 14, padT = 24, padB = 40;
+  const W = 980, H = 300, padL = 54, padR = 104, padT = 20, padB = 46;
   const n = rows.length;
-  const x = (i) => padL + (n > 1 ? i * (W - padL - padR) / (n - 1) : 0);
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const x = (i) => padL + (n > 1 ? i * plotW / (n - 1) : 0);
   const raw = (key) => rows.map((r) => +r[key] || 0);
-  const demandRaw = raw(valueKey), price = raw('price'), stock = raw('stock');
-  const demand = seMA(demandRaw, 7);
-  const norm = (arr) => { const mn = Math.min(...arr), mx = Math.max(...arr), span = (mx - mn) || 1; return { mn, mx, y: (v) => padT + (H - padT - padB) * (1 - (v - mn) / span) }; };
+  const demand = seMA(raw(valueKey), 7), price = raw('price'), stock = raw('stock');
+  const norm = (arr) => { const mn = Math.min(...arr), mx = Math.max(...arr), span = (mx - mn) || 1; return { mn, mx, y: (v) => padT + plotH * (1 - (v - mn) / span) }; };
   const nd = norm(demand), np = norm(price), ns = norm(stock);
   const poly = (arr, ny) => arr.map((v, i) => `${x(i).toFixed(1)},${ny.y(v).toFixed(1)}`).join(' ');
-  const bandH = (H - padT - padB).toFixed(1);
-  // полосы этапов
+  const bandH = plotH.toFixed(1);
+  // фон-полосы этапов
   let bands = '', i = 0;
   while (i < n) { let j = i; const st = rows[i].stage; while (j + 1 < n && rows[j + 1].stage === st) j++; const c = PHASE_COLORS[st]; if (c) bands += `<rect x="${x(i).toFixed(1)}" y="${padT}" width="${Math.max(1, x(j) - x(i) + (j === i ? 2 : 0)).toFixed(1)}" height="${bandH}" fill="${c.band}" fill-opacity="0.16"/>`; i = j + 1; }
-  // полосы благоприятных периодов
+  // фон-полосы благоприятных периодов
   let fav = ''; i = 0;
   while (i < n) { if (rows[i].favorable) { let j = i; while (j + 1 < n && rows[j + 1].favorable) j++; fav += `<rect x="${x(i).toFixed(1)}" y="${padT}" width="${Math.max(1, x(j) - x(i) + 2).toFixed(1)}" height="${bandH}" fill="${FAVORABLE_BAND}"/>`; i = j + 1; } else i++; }
-  // сетка по месяцам
-  let ticks = '', lastM = null;
-  rows.forEach((r, idx) => { const m = r.date.slice(0, 7); if (m !== lastM) { lastM = m; ticks += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--line)" stroke-dasharray="2 3" opacity="0.45"/><text x="${x(idx).toFixed(1)}" y="${H - padB + 14}" class="se-axis" text-anchor="middle">${SE_MON[+r.date.slice(5, 7) - 1]} ${r.date.slice(2, 4)}</text>`; } });
-  const axisY = `<text x="${padL - 6}" y="${padT + 6}" class="se-axis" text-anchor="end">${Math.round(nd.mx)}</text><text x="${padL - 6}" y="${H - padB}" class="se-axis" text-anchor="end">${Math.round(nd.mn)}</text>`;
+
+  // ── горизонтальные линии сетки + вертикальные шкалы (3 оси) ──
+  let hgrid = '', yAxes = '';
+  const LV = 4; // число уровней сетки
+  for (let k = 0; k < LV; k++) {
+    const f = k / (LV - 1); const yy = (padT + plotH * (1 - f)).toFixed(1);
+    hgrid += `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="var(--line)" opacity="0.35"/>`;
+    const dv = nd.mn + (nd.mx - nd.mn) * f, pv = np.mn + (np.mx - np.mn) * f, sv = ns.mn + (ns.mx - ns.mn) * f;
+    yAxes += `<text x="${padL - 6}" y="${(+yy + 3).toFixed(1)}" class="se-axis" text-anchor="end" fill="${SE_COL.demand}">${seFmtK(dv)}</text>`;
+    yAxes += `<text x="${W - padR + 8}" y="${(+yy + 3).toFixed(1)}" class="se-axis" text-anchor="start" fill="${SE_COL.price}">${seFmtK(pv)}</text>`;
+    yAxes += `<text x="${W - 4}" y="${(+yy + 3).toFixed(1)}" class="se-axis" text-anchor="end" fill="${SE_COL.stock}">${seFmtK(sv)}</text>`;
+  }
+  // заголовки осей
+  yAxes += `<text x="${padL - 6}" y="${padT - 6}" class="se-axis" text-anchor="end" fill="${SE_COL.demand}">шт/дн</text>`;
+  yAxes += `<text x="${W - padR + 8}" y="${padT - 6}" class="se-axis" text-anchor="start" fill="${SE_COL.price}">₽</text>`;
+  yAxes += `<text x="${W - 4}" y="${padT - 6}" class="se-axis" text-anchor="end" fill="${SE_COL.stock}">ост.</text>`;
+
+  // ── горизонтальная ось: недельная сетка + месячные подписи ──
+  const mondays = [];
+  rows.forEach((r, idx) => { const d = new Date(r.date + 'T00:00:00Z'); if (d.getUTCDay() === 1 || idx === 0) mondays.push(idx); });
+  let vgrid = '';
+  for (const idx of mondays) vgrid += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--line)" opacity="0.18"/>`;
+  // подписи недель (только если не слишком плотно — короткий прогнозный период)
+  let wlab = '';
+  if (n <= 300) {
+    const step = Math.max(1, Math.ceil(mondays.length / 16));
+    for (let w = 0; w < mondays.length; w += step) { const idx = mondays[w]; const dt = rows[idx].date; wlab += `<text x="${x(idx).toFixed(1)}" y="${H - padB + 13}" class="se-axis se-wk" text-anchor="middle">${dt.slice(8, 10)}.${dt.slice(5, 7)}</text>`; }
+  }
+  // месячные разделители (жирнее) + подписи
+  let mlab = '', lastM = null;
+  const monY = n <= 300 ? H - padB + 28 : H - padB + 14;
+  rows.forEach((r, idx) => { const m = r.date.slice(0, 7); if (m !== lastM) { lastM = m; mlab += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--line)" stroke-dasharray="2 3" opacity="0.55"/><text x="${x(idx).toFixed(1)}" y="${monY}" class="se-axis se-mo" text-anchor="middle">${SE_MON[+r.date.slice(5, 7) - 1]} ${r.date.slice(2, 4)}</text>`; } });
+
   return `<div class="se-chart"><div class="se-chart-title">${title}</div>
     <div class="se-svg-wrap"><svg viewBox="0 0 ${W} ${H}" class="se-svg" preserveAspectRatio="xMidYMid meet">
-      ${bands}${fav}${ticks}
-      <polyline points="${poly(stock, ns)}" fill="none" stroke="#a78bfa" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.85"/>
-      <polyline points="${poly(price, np)}" fill="none" stroke="#ef4444" stroke-width="1.3" stroke-dasharray="5 3" opacity="0.9"/>
-      <polyline points="${poly(demand, nd)}" fill="none" stroke="#3b82f6" stroke-width="1.9"/>
-      ${axisY}
+      ${bands}${fav}${hgrid}${vgrid}${mlab}${wlab}
+      <polyline points="${poly(stock, ns)}" fill="none" stroke="${SE_COL.stock}" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.85"/>
+      <polyline points="${poly(price, np)}" fill="none" stroke="${SE_COL.price}" stroke-width="1.3" stroke-dasharray="5 3" opacity="0.9"/>
+      <polyline points="${poly(demand, nd)}" fill="none" stroke="${SE_COL.demand}" stroke-width="1.9"/>
+      ${yAxes}
     </svg></div>
     <div class="se-legend">
-      <span><i style="background:#3b82f6"></i>спрос, шт/день (${Math.round(nd.mn)}–${Math.round(nd.mx)})</span>
-      <span><i style="background:#ef4444"></i>цена ₽ (${Math.round(np.mn).toLocaleString('ru')}–${Math.round(np.mx).toLocaleString('ru')})</span>
-      <span><i style="background:#a78bfa"></i>остатки, шт (${Math.round(ns.mn).toLocaleString('ru')}–${Math.round(ns.mx).toLocaleString('ru')})</span>
+      <span><i style="background:${SE_COL.demand}"></i>спрос, шт/день (лев. ось)</span>
+      <span><i style="background:${SE_COL.price}"></i>цена ₽ (прав. ось)</span>
+      <span><i style="background:${SE_COL.stock}"></i>остатки, шт (крайняя прав. ось)</span>
     </div>
   </div>`;
 }
@@ -1288,16 +1327,19 @@ function seasonAgg(rows, gran) {
 
 function seasonTableBlock(p) {
   const rows = seasonAgg(p.forecastDaily || [], seasonGran);
+  const buyout = seasonBuyoutOf(seasonSelArticle);
+  const ordersOf = (u) => Math.round(u / (buyout / 100));
   const total = rows.reduce((s, r) => s + r.units, 0);
+  const totalOrders = ordersOf(total);
   const gbtn = (g, t) => `<button class="btn se-gran${seasonGran === g ? ' active' : ''}" type="button" data-gran="${g}">${t}</button>`;
   return `<div class="se-table-head">
       <b>План продаж по ${seasonGran === 'day' ? 'дням' : seasonGran === 'week' ? 'неделям' : 'месяцам'}</b>
       <span class="se-gran-group">${gbtn('day', 'дни')}${gbtn('week', 'недели')}${gbtn('month', 'месяцы')}</span>
     </div>
     <div class="matrix-scroll"><table class="matrix-table se-plan-table">
-      <thead><tr><th>Период</th><th>Этап сезона</th><th class="num">План продаж, шт</th><th class="num">Цена, ₽</th><th>Благопр.</th></tr></thead>
-      <tbody>${rows.map((r) => { const c = PHASE_COLORS[r.stage]; return `<tr style="background:${c ? c.row : 'transparent'}"><td>${r.label}</td><td>${r.stage || '—'}</td><td class="num">${r.units.toLocaleString('ru')}</td><td class="num">${r.price ? r.price.toLocaleString('ru') : '—'}</td><td>${r.favorable ? '⭐' : ''}</td></tr>`; }).join('')}</tbody>
-      <tfoot><tr><th colspan="2">ИТОГО</th><th class="num">${total.toLocaleString('ru')}</th><th colspan="2"></th></tr></tfoot>
+      <thead><tr><th>Период</th><th>Этап сезона</th><th class="num" title="MPStats «продажи» = выкупы. База для производства.">Выкупы, шт</th><th class="num" title="Заказы = выкупы / (%выкупа). Нагрузка на витрину/логистику.">Заказы, шт</th><th class="num">Цена, ₽</th><th>Благопр.</th></tr></thead>
+      <tbody>${rows.map((r) => { const c = PHASE_COLORS[r.stage]; return `<tr style="background:${c ? c.row : 'transparent'}"><td>${r.label}</td><td>${r.stage || '—'}</td><td class="num">${r.units.toLocaleString('ru')}</td><td class="num se-orders">${ordersOf(r.units).toLocaleString('ru')}</td><td class="num">${r.price ? r.price.toLocaleString('ru') : '—'}</td><td>${r.favorable ? '⭐' : ''}</td></tr>`; }).join('')}</tbody>
+      <tfoot><tr><th colspan="2">ИТОГО</th><th class="num">${total.toLocaleString('ru')}</th><th class="num se-orders">${totalOrders.toLocaleString('ru')}</th><th colspan="2"></th></tr></tfoot>
     </table></div>`;
 }
 
@@ -1308,6 +1350,13 @@ function bindSeasonView(p) {
     if (box) box.innerHTML = seasonTableBlock(p);
     bindSeasonView(p);
   }));
+  const bo = document.getElementById('se-buyout');
+  bo?.addEventListener('change', (e) => {
+    const v = Math.max(1, Math.min(100, +e.target.value || 40));
+    const a = (state.articles || []).find((x) => x.id === seasonSelArticle);
+    if (a) { a.buyoutPct = v; dirty = true; setStatus(); }
+    renderSeasonView(seasonSelArticle); // пересчитать заказы в сводке и таблице
+  });
 }
 
 // ---------- ДАННЫЕ (формы) ----------
@@ -1338,6 +1387,7 @@ function dataArticlesPanel() {
         <div class="row-flex">
           <div class="field"><label>Расход ткани, м/шт</label><input data-art="${i}" data-f="fabricPerUnit" value="${a.fabricPerUnit}" style="width:90px"></div>
           <div class="field"><label>Цена ткани, $/м</label><input data-art="${i}" data-f="fabricPricePerMeter" value="${a.fabricPricePerMeter || 0}" style="width:90px"></div>
+          <div class="field"><label title="Доля заказов, которые выкупают. Для одежды ~30–60%. Заказы = выкупы / (%выкупа)">% выкупа</label><input data-art="${i}" data-f="buyoutPct" type="number" min="1" max="100" value="${a.buyoutPct ?? 40}" style="width:80px"></div>
         </div>
         <div class="field"><label>Размерный ряд (через запятую)</label><input data-art="${i}" data-f="sizes" value="${(a.sizes || []).join(', ')}"></div>
         <div class="field"><label>Цвета и образцы ткани (название · образец 80×40 · № планшета · № цвета)</label>
@@ -1477,6 +1527,7 @@ function bindDataEvents() {
     else if (f === 'sizes') { a.sizes = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); pruneArticlePartias(a); mark(); renderData(); return; }
     else if (f === 'fabricPerUnit') a.fabricPerUnit = +e.target.value || 1.6;
     else if (f === 'fabricPricePerMeter') a.fabricPricePerMeter = Math.max(0, +e.target.value || 0);
+    else if (f === 'buyoutPct') a.buyoutPct = Math.max(1, Math.min(100, +e.target.value || 40));
     else a[f] = e.target.value; mark();
   }));
   root.querySelectorAll('input[data-artimg]').forEach((inp) => inp.addEventListener('change', (e) => {

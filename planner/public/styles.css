@@ -335,6 +335,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .se-svg-wrap { width: 100%; overflow-x: auto; }
 .se-svg { width: 100%; height: auto; min-width: 640px; display: block; }
 .se-axis { fill: var(--muted); font-size: 10px; }
+.se-axis.se-wk { font-size: 8.5px; opacity: 0.85; }
+.se-axis.se-mo { font-weight: 700; font-size: 10px; }
+#se-buyout { width: 52px; padding: 1px 4px; text-align: right; background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 5px; font-size: 12px; }
+.se-plan-table td.se-orders { color: var(--muted); }
 .se-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 6px; font-size: 12px; color: var(--muted); }
 .se-legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
 

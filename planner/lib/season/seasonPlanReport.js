@@ -191,12 +191,11 @@ export async function collectFromCategory({
   const keptBeforeLimit = items.length;
   if (limit && items.length > limit) items = items.slice(0, limit);
 
-  // Ценовой якорь «выше медианы» (торгуем в среднем/высоком сегменте): медиана
-  // цен отобранных конкурентов и средняя по верхней половине (цена ≥ медианы).
+  // Ценовой якорь «по медиане и ниже на 10%» (конкурентная цена входа среди ТОПов):
+  // медиана цен отобранных конкурентов минус 10%.
   const prices = items.map((it) => it.price).filter((v) => v > 0).sort((a, b) => a - b);
   const medianPrice = prices.length ? prices[Math.floor((prices.length - 1) / 2)] : 0;
-  const upper = prices.filter((v) => v >= medianPrice);
-  const priceAnchorAboveMedian = upper.length ? Math.round(upper.reduce((s, v) => s + v, 0) / upper.length) : medianPrice;
+  const priceAnchorBelowMedian = medianPrice ? Math.round(medianPrice * 0.9) : 0;
 
   // Обрезано предохранителем: упёрлись в maxPages, в предмете есть ещё товары, а
   // отфильтрованных аналогов набралось меньше запрошенного limit. Значит фильтр
@@ -230,7 +229,7 @@ export async function collectFromCategory({
     maxPages,
     dailyLimit,
     medianPrice,
-    priceAnchor: priceAnchorAboveMedian, // цена среднего/высокого сегмента
+    priceAnchor: priceAnchorBelowMedian, // конкурентная цена: медиана −10%
   };
 }
 
@@ -407,7 +406,7 @@ export async function buildSeasonPlanReport({
       forecastTo: forecast.to,
       opts: { ...plan, baseSource: baseInfo.source, priceAnchor: collected.priceAnchor },
     });
-    fc.priceInfo = { anchorAboveMedian: collected.priceAnchor, medianPrice: collected.medianPrice };
+    fc.priceInfo = { anchor: collected.priceAnchor, medianPrice: collected.medianPrice };
 
     return {
       label,
