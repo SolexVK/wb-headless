@@ -1015,6 +1015,8 @@ const seEsc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/
 const seFmtD = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
 const SE_MON = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 const seMonthLabel = (ym) => `${SE_MON[+ym.slice(5, 7) - 1]} ${ym.slice(0, 4)}`;
+const seFmtDate = (iso) => `${iso.slice(8, 10)} ${SE_MON[+iso.slice(5, 7) - 1]} ${iso.slice(0, 4)}`;
+const seFmtRange = (a, b) => `${seFmtDate(a)} — ${seFmtDate(b)}`;
 
 let seasonBuildArticle = null;   // артикул в форме построения
 let seasonSelArticle = null;     // артикул в накопителе (просмотр)
@@ -1022,6 +1024,43 @@ let seasonGran = 'day';          // день/неделя/месяц в табл
 let seasonBuilding = false;
 let seasonPlansIndex = [];
 let seasonHasToken = null;
+const SE_CHARTS = {};            // реестр графиков для тултипа: id → {rows, геометрия, valueKey}
+let seChartSeq = 0;
+
+// всплывающая подсказка на графиках (дата, продажи, цена, остатки)
+function seasonTipEl() {
+  let el = document.getElementById('se-tip');
+  if (!el) { el = document.createElement('div'); el.id = 'se-tip'; el.className = 'se-tip'; document.body.appendChild(el); }
+  return el;
+}
+function attachSeasonTip(svg) {
+  const meta = SE_CHARTS[svg.dataset.chart];
+  if (!meta) return;
+  const cursor = svg.querySelector('.se-cursor');
+  const tip = seasonTipEl();
+  svg.addEventListener('mousemove', (e) => {
+    const rect = svg.getBoundingClientRect();
+    const vbX = (e.clientX - rect.left) * (meta.W / rect.width);
+    if (vbX < meta.padL || vbX > meta.padL + meta.plotW || meta.n < 1) { cursor.setAttribute('opacity', '0'); tip.style.display = 'none'; return; }
+    const frac = (vbX - meta.padL) / meta.plotW;
+    let idx = Math.round(frac * (meta.n - 1)); idx = Math.max(0, Math.min(meta.n - 1, idx));
+    const r = meta.rows[idx] || {};
+    const cx = (meta.padL + (meta.n > 1 ? idx / (meta.n - 1) : 0) * meta.plotW).toFixed(1);
+    cursor.setAttribute('x1', cx); cursor.setAttribute('x2', cx); cursor.setAttribute('opacity', '0.45');
+    const val = Math.round(+r[meta.valueKey] || 0);
+    tip.innerHTML = `<div class="se-tip-d">${seFmtDate(r.date)}</div>`
+      + `<div><i style="background:${SE_COL.demand}"></i>Продажи: <b>${val.toLocaleString('ru')}</b> шт</div>`
+      + `<div><i style="background:${SE_COL.price}"></i>Цена: <b>${Math.round(+r.price || 0).toLocaleString('ru')}</b> ₽</div>`
+      + `<div><i style="background:${SE_COL.stock}"></i>Остатки: <b>${Math.round(+r.stock || 0).toLocaleString('ru')}</b> шт</div>`;
+    tip.style.display = 'block';
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = e.clientX + 14, top = e.clientY + 14;
+    if (left + tw > window.innerWidth - 8) left = e.clientX - tw - 14;
+    if (top + th > window.innerHeight - 8) top = e.clientY - th - 14;
+    tip.style.left = left + 'px'; tip.style.top = top + 'px';
+  });
+  svg.addEventListener('mouseleave', () => { cursor.setAttribute('opacity', '0'); tip.style.display = 'none'; });
+}
 
 async function renderSeason() {
   const root = document.getElementById('season');
@@ -1177,7 +1216,7 @@ async function renderSeasonView(articleId) {
   try { rec = await api('/api/season/plan?articleId=' + encodeURIComponent(articleId)); }
   catch (e) { box.innerHTML = '<div class="mini bad">Не удалось загрузить: ' + e.message + '</div>'; return; }
   const rep = rec.report, p = rep.plan || {};
-  box.innerHTML = seasonSummary(rep, p) + seasonChartsBlock(p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = seasonSummary(rep, p) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   bindSeasonView(p);
 }
 
@@ -1212,10 +1251,15 @@ function seasonSummary(rep, p) {
   </div>`;
 }
 
-function seasonChartsBlock(p) {
+function seasonChartsBlock(rep, p) {
+  for (const k of Object.keys(SE_CHARTS)) delete SE_CHARTS[k]; // сброс реестра тултипов
+  const fp = rep.forecastPeriod, hp = rep.historyPeriod;
+  const fTitle = 'Прогноз спроса, цены и остатков — ' + (fp ? seFmtRange(fp.from, fp.to) : 'на запрошенный период');
+  const hTitle = 'История за 2 года (реальные данные аналогов)' + (hp ? ' — ' + seFmtRange(hp.d1, hp.d2) : '');
   return `<div class="se-charts">
-    ${seasonChartSVG('Прогноз спроса, цены и остатков — на запрошенный период', p.forecastDaily || [], 'plannedOrders')}
-    ${seasonChartSVG('История за 2 года (реальные данные аналогов)', p.historyDaily || [], 'sales')}
+    ${seasonChartSVG(fTitle, p.forecastDaily || [], 'plannedOrders')}
+    ${seasonPhaseLegend()}
+    ${seasonChartSVG(hTitle, p.historyDaily || [], 'sales')}
   </div>`;
 }
 
@@ -1240,27 +1284,21 @@ function seasonChartSVG(title, rows, valueKey) {
   const n = rows.length;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const x = (i) => padL + (n > 1 ? i * plotW / (n - 1) : 0);
-  const weekly = n <= 300; // прогноз — недельные вехи с подписями; история — по месяцам
+  const weekly = n <= 300; // прогноз — недельные вехи; история — по месяцам
 
-  // недельные точки: агрегируем дни в недели (по понедельникам), берём средние —
-  // график идёт «от недели к неделе», без сильного суточного сглаживания.
-  const buckets = []; let cur = null;
-  rows.forEach((r, idx) => {
-    const d = new Date(r.date + 'T00:00:00Z'); const isMon = d.getUTCDay() === 1;
-    if (!cur || isMon) { if (cur) buckets.push(cur); cur = { i0: idx, i1: idx, ds: 0, nd: 0, ps: 0, np: 0, ss: 0, ns: 0 }; }
-    cur.i1 = idx;
-    cur.ds += (+r[valueKey] || 0); cur.nd++;
-    const pv = +r.price || 0; if (pv > 0) { cur.ps += pv; cur.np++; }
-    cur.ss += (+r.stock || 0); cur.ns++;
-  });
-  if (cur) buckets.push(cur);
-  const wk = buckets.map((b) => ({ idx: (b.i0 + b.i1) / 2, demand: b.nd ? b.ds / b.nd : 0, price: b.np ? b.ps / b.np : 0, stock: b.ns ? b.ss / b.ns : 0 }));
-  // максимумы для НУЛЕВОЙ базы осей (0 … max)
-  const dMax = Math.max(1, ...wk.map((w) => w.demand));
-  const pMax = Math.max(1, ...wk.map((w) => w.price));
-  const sMax = Math.max(1, ...wk.map((w) => w.stock));
+  // реестр для тултипа/крестика
+  const chartId = 'sec' + (seChartSeq++);
+  SE_CHARTS[chartId] = { rows, padL, plotW, n, W, valueKey };
+
+  // РЕАЛИСТИЧНЫЕ линии: рисуем по ДНЯМ (без недельного усреднения). Цену forward-fill
+  // (в дни без продаж цена = последняя известная), чтобы линия не падала в 0.
+  const dvals = rows.map((r) => +r[valueKey] || 0);
+  const svals = rows.map((r) => +r.stock || 0);
+  const pvals = []; let lastP = 0;
+  for (const r of rows) { const pv = +r.price || 0; if (pv > 0) lastP = pv; pvals.push(lastP || pv); }
+  const dMax = Math.max(1, ...dvals), pMax = Math.max(1, ...pvals), sMax = Math.max(1, ...svals);
   const yOf = (v, mx) => padT + plotH * (1 - v / mx);
-  const poly = (key, mx) => wk.map((w) => `${x(w.idx).toFixed(1)},${yOf(w[key], mx).toFixed(1)}`).join(' ');
+  const poly = (arr, mx) => arr.map((v, i) => `${x(i).toFixed(1)},${yOf(v, mx).toFixed(1)}`).join(' ');
   const bandH = plotH.toFixed(1);
 
   // фон-полосы этапов
@@ -1280,7 +1318,7 @@ function seasonChartSVG(title, rows, valueKey) {
     yAxes += `<text x="${W - padR + 8}" y="${(+yy + 3).toFixed(1)}" class="se-axis" text-anchor="start" fill="${SE_COL.price}">${seFmtK(pMax * f)}</text>`;
     yAxes += `<text x="${W - 4}" y="${(+yy + 3).toFixed(1)}" class="se-axis" text-anchor="end" fill="${SE_COL.stock}">${seFmtK(sMax * f)}</text>`;
   }
-  yAxes += `<text x="${padL - 6}" y="${padT - 6}" class="se-axis" text-anchor="end" fill="${SE_COL.demand}">шт/нед</text>`;
+  yAxes += `<text x="${padL - 6}" y="${padT - 6}" class="se-axis" text-anchor="end" fill="${SE_COL.demand}">шт/дн</text>`;
   yAxes += `<text x="${W - padR + 8}" y="${padT - 6}" class="se-axis" text-anchor="start" fill="${SE_COL.price}">₽</text>`;
   yAxes += `<text x="${W - 4}" y="${padT - 6}" class="se-axis" text-anchor="end" fill="${SE_COL.stock}">ост.</text>`;
 
@@ -1299,22 +1337,23 @@ function seasonChartSVG(title, rows, valueKey) {
     let lastM = null;
     rows.forEach((r, idx) => { const m = r.date.slice(0, 7); if (m !== lastM) { lastM = m; vgrid += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--muted)" stroke-dasharray="2 3" opacity="0.5"/>`; } });
   } else {
-    // история: недельная сетка (тонкая) + подписи по месяцам
+    // история: недельная сетка (тонкая) + подписи по месяцам ПО ДИАГОНАЛИ
     for (const idx of mondays) vgrid += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--line)" opacity="0.14"/>`;
     let lastM = null;
-    rows.forEach((r, idx) => { const m = r.date.slice(0, 7); if (m !== lastM) { lastM = m; vgrid += `<line x1="${x(idx).toFixed(1)}" y1="${padT}" x2="${x(idx).toFixed(1)}" y2="${H - padB}" stroke="var(--muted)" stroke-dasharray="2 3" opacity="0.45"/><text x="${x(idx).toFixed(1)}" y="${H - padB + 14}" class="se-axis se-mo" text-anchor="middle">${SE_MON[+r.date.slice(5, 7) - 1]} ${r.date.slice(2, 4)}</text>`; } });
+    rows.forEach((r, idx) => { const m = r.date.slice(0, 7); if (m !== lastM) { lastM = m; const xx = x(idx).toFixed(1); vgrid += `<line x1="${xx}" y1="${padT}" x2="${xx}" y2="${H - padB}" stroke="var(--muted)" stroke-dasharray="2 3" opacity="0.45"/>`; xlab += `<text x="${xx}" y="${H - padB + 12}" class="se-axis se-mo" text-anchor="end" transform="rotate(-40 ${xx} ${H - padB + 12})">${SE_MON[+r.date.slice(5, 7) - 1]} ${r.date.slice(2, 4)}</text>`; } });
   }
 
   return `<div class="se-chart"><div class="se-chart-title">${title}</div>
-    <div class="se-svg-wrap"><svg viewBox="0 0 ${W} ${H}" class="se-svg" preserveAspectRatio="xMidYMid meet">
+    <div class="se-svg-wrap"><svg viewBox="0 0 ${W} ${H}" class="se-svg" data-chart="${chartId}" preserveAspectRatio="xMidYMid meet">
       ${bands}${fav}${hgrid}${vgrid}${xlab}
-      <polyline points="${poly('stock', sMax)}" fill="none" stroke="${SE_COL.stock}" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.85"/>
-      <polyline points="${poly('price', pMax)}" fill="none" stroke="${SE_COL.price}" stroke-width="1.4" stroke-dasharray="5 3" opacity="0.9"/>
-      <polyline points="${poly('demand', dMax)}" fill="none" stroke="${SE_COL.demand}" stroke-width="2"/>
+      <polyline points="${poly(svals, sMax)}" fill="none" stroke="${SE_COL.stock}" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.8"/>
+      <polyline points="${poly(pvals, pMax)}" fill="none" stroke="${SE_COL.price}" stroke-width="1.3" stroke-dasharray="5 3" opacity="0.9"/>
+      <polyline points="${poly(dvals, dMax)}" fill="none" stroke="${SE_COL.demand}" stroke-width="1.6"/>
+      <line class="se-cursor" x1="0" x2="0" y1="${padT}" y2="${H - padB}" stroke="var(--text)" stroke-width="1" opacity="0"/>
       ${yAxes}
     </svg></div>
     <div class="se-legend">
-      <span><i style="background:${SE_COL.demand}"></i>спрос, шт/нед (лев. ось, от 0)</span>
+      <span><i style="background:${SE_COL.demand}"></i>спрос, шт/день (лев. ось, от 0)</span>
       <span><i style="background:${SE_COL.price}"></i>цена ₽ (прав. ось, от 0)</span>
       <span><i style="background:${SE_COL.stock}"></i>остатки, шт (крайняя прав. ось, от 0)</span>
     </div>
@@ -1377,6 +1416,7 @@ function bindSeasonView(p) {
     if (a) { a.buyoutPct = v; dirty = true; setStatus(); }
     renderSeasonView(seasonSelArticle); // пересчитать заказы в сводке и таблице
   });
+  document.querySelectorAll('.se-svg[data-chart]').forEach((svg) => attachSeasonTip(svg));
 }
 
 // ---------- ДАННЫЕ (формы) ----------
