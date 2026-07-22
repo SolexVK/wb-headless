@@ -125,7 +125,14 @@ if (AUTH_PASS) {
 }
 
 app.use(express.json({ limit: '4mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+// Анти-кэш для кода интерфейса: html/js/css отдаём с обязательной ревалидацией,
+// иначе браузер держит старые app.js/styles.css после обновления (обновления «не видно»).
+const NO_CACHE_RE = /\.(?:html|js|css)$/i;
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res, filePath) {
+    if (NO_CACHE_RE.test(filePath)) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  },
+}));
 app.use('/samples', express.static(SAMPLES_DIR)); // образцы ткани (за той же авторизацией)
 
 // текущее состояние

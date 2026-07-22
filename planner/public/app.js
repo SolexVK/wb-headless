@@ -1,6 +1,11 @@
 // app.js — оболочка SPA: загрузка данных, вкладки, дашборд, формы, Гант.
 import { renderGantt } from './gantt.js';
 
+// Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
+// (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
+const APP_BUILD = 'season-2026-07-22b';
+console.log('[planner] UI build:', APP_BUILD);
+
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 // сортировка артикулов по номеру, от меньшего к большему (числовая: 004 < 026)
 const cmpArticleId = (a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true, sensitivity: 'base' });
@@ -1218,7 +1223,13 @@ async function renderSeasonView(articleId) {
   try { rec = await api('/api/season/plan?articleId=' + encodeURIComponent(articleId)); }
   catch (e) { box.innerHTML = '<div class="mini bad">Не удалось загрузить: ' + e.message + '</div>'; return; }
   const rep = rec.report, p = rep.plan || {};
-  box.innerHTML = seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  // План построен СТАРЫМ движком (нет календаря сезона/поставок) → графики отрисуются
+  // по устаревшим данным. Просим перестроить, иначе новые правки «не видно».
+  const stale = !p.seasonCal || !Array.isArray(p.deliveries);
+  const staleBanner = stale
+    ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка. Нажмите <b>«Построить заново»</b> в конструкторе выше — только после пересборки появятся новые периоды, вехи, лента благоприятного периода и поставки на склад частями.</div>`
+    : '';
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   bindSeasonView(p);
 }
 
