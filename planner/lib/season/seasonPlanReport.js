@@ -389,21 +389,27 @@ export async function buildSeasonPlanReport({
     baseInfo = { source: 'competitor-per-item', competitorPerItemDaily: round1(perItemBase), analogCount, note: 'план на 1 карточку (средний конкурент); задайте свою линейку --group для бленда 90/10' };
   }
 
-  // ── ВЕТКА ПРОГНОЗА (Правила 3–5): проекция на запрошенный будущий период ──
-  if (forecast && forecast.from && forecast.to && groupDaily.length > 0) {
+  // ── ВЕТКА ПРОГНОЗА: движок сам выбирает окно сезона из ГОДОВОГО анализа ──
+  if (forecast && groupDaily.length > 0) {
     // Правило 4: аналоги за последние 60 дней и то же окно год назад.
     const recentCol = await collectShape(offsetDate(d2, -59), d2);
     requests += recentCol.requests || 0;
     const priorCol = await collectShape(offsetDate(d2, -59 - 365), offsetDate(d2, -365));
     requests += priorCol.requests || 0;
 
+    // Уровень ТОП-3 (целевой пик): средняя дневных продаж трёх сильнейших аналогов.
+    const perAnalogDaily = (perItemMeta || []).filter((m) => m.days > 0).map((m) => m.unitsSold / m.days).sort((a, b) => b - a);
+    const top3Daily = perAnalogDaily.length
+      ? perAnalogDaily.slice(0, 3).reduce((s, v) => s + v, 0) / Math.min(3, perAnalogDaily.length)
+      : perItemBase;
+
     const fc = buildForecast({
       history: groupDaily,
       recent60: recentCol.groupDaily,
       prior60: priorCol.groupDaily,
       baseDaily,
-      forecastFrom: forecast.from,
-      forecastTo: forecast.to,
+      top3Daily,
+      targetYear: forecast.targetYear,
       opts: { ...plan, baseSource: baseInfo.source, priceAnchor: collected.priceAnchor },
     });
     fc.priceInfo = { anchor: collected.priceAnchor, medianPrice: collected.medianPrice };

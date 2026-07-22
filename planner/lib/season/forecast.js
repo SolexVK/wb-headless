@@ -1,10 +1,11 @@
-// lib/forecast.js — прогноз плана продаж на ЗАДАННЫЙ будущий период (Правила 3–5).
+// lib/forecast.js — ИНЖЕНЕРНЫЙ прогноз плана продаж под жизненный цикл товара.
 //
-// Идея: по 2 годам истории строим свёрнутый (recency-взвешенный) сезонный профиль
-// продаж/цены, проецируем его на запрошенные будущие даты и корректируем «дрейфом
-// текущего года» — сравнением аналогов за последние 60 дней с тем же окном год
-// назад (Правило 4). Дополнительно отмечаем БЛАГОПРИЯТНЫЕ периоды: спрос выше
-// среднего при остатках ниже среднего = спрос превышает предложение (Правило 1).
+// Модель = РИТМ РЫНКА (аналоговая посуточная форма из истории, сохраняет рельеф)
+//   × ЖИЗНЕННЫЙ ЦИКЛ НАШЕГО ТОВАРА (вход с нуля S-рампой → тело сезона →
+//     ликвидация хвоста в ноль) × УРОВЕНЬ (ТОП-3 конкурентов, не средний аналог).
+// Движок сам анализирует ПОЛНЫЙ ГОД, находит самый сильный сезон, ставит границы
+// фаз на РЕАЛЬНЫЕ даты спроса (а не на 1-е число), проецирует на целевой год и
+// проверяет результат самопроверкой (правило разгона, 80/20, обнуление склада).
 
 import {
   computeFoldedMonthlyProfile,
@@ -19,26 +20,50 @@ import {
 const round = (n, d = 2) => { const f = 10 ** d; return Math.round((Number(n) || 0) * f) / f; };
 const mean = (a) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
 const daysInMonth = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+const DAYMS = 86400000;
+const NL_MCUM = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+const pad2 = (n) => String(n).padStart(2, '0');
 
 /** Ось дат [from..to] включительно. */
 export function dateRange(from, to) {
   const out = [];
   let t = Date.parse(from + 'T00:00:00Z');
   const end = Date.parse(to + 'T00:00:00Z');
-  while (t <= end) { out.push(new Date(t).toISOString().slice(0, 10)); t += 86400000; }
+  while (t <= end) { out.push(new Date(t).toISOString().slice(0, 10)); t += DAYMS; }
   return out;
+}
+
+/** «Нормализованный день года» 1..365 → {месяц, день}. */
+function calDayToMd(k) {
+  k = Math.max(1, Math.min(365, Math.round(k)));
+  for (let m = 1; m <= 12; m++) { const end = m < 12 ? NL_MCUM[m] : 365; if (k <= end) return { m, d: k - NL_MCUM[m - 1] }; }
+  return { m: 12, d: 31 };
 }
 
 /** Циклическая интерполяция месячных значений (в середине месяца) на дату. */
 function monthlyValueAt(map, date) {
   const [y, m, d] = date.split('-').map(Number);
-  const frac = (d - 15) / daysInMonth(y, m); // −0.5..+0.5 вокруг середины месяца
+  const frac = (d - 15) / daysInMonth(y, m);
   let m0, m1, t;
   if (frac >= 0) { m0 = m; m1 = m === 12 ? 1 : m + 1; t = frac; }
   else { m0 = m === 1 ? 12 : m - 1; m1 = m; t = 1 + frac; }
   const v0 = map[m0] ?? map[m] ?? 1;
   const v1 = map[m1] ?? map[m] ?? 1;
   return v0 * (1 - t) + v1 * t;
+}
+
+/** Кольцевое сглаживание массива [1..365]. */
+function smoothCirc(arr, win) {
+  const N = 365, h = Math.floor(win / 2), out = arr.slice();
+  for (let i = 1; i <= N; i++) { let s = 0, c = 0; for (let j = i - h; j <= i + h; j++) { const idx = ((j - 1 + N) % N) + 1; s += arr[idx]; c++; } out[i] = s / c; }
+  return out;
+}
+
+/** S-кривая разгона 0..1 за rampDays (логистическая; ровно 0 в начале, 1 в конце). */
+function rampCurve(i, rampDays) {
+  if (i <= 0) return 0; if (i >= rampDays) return 1;
+  const L = (t) => 1 / (1 + Math.exp(-11 * (t - 0.5)));
+  const t = i / rampDays; return (L(t) - L(0)) / (L(1) - L(0));
 }
 
 /** Агрегат окна: средние дневные продажи и цена спроса (выручка/штуки). */
@@ -54,44 +79,145 @@ function aggWindow(groupDaily) {
 }
 
 /**
- * Строит прогноз на [forecastFrom..forecastTo].
- * @param {object} p
- *   history      — groupDaily аналогов за 2 года (форма сезона);
- *   recent60/prior60 — groupDaily аналогов за последние 60 дней и то же окно год
- *                  назад (корректировка текущего года);
- *   baseDaily    — уровень базы (штук/день), посчитан оркестратором (бленд 90/10);
- *   opts         — recencyWeight, weekly, hotCoeff, лаги, competitorWeight…
- * @returns { forecastDaily, historyDaily, phases, rank, adjustments, weeklyProfile,
- *            meanPrice, favorable:{months, share} }
+ * Инженерная кривая сезона (см. шапку файла). Возвращает готовый forecastDaily,
+ * выбранные движком даты фаз, период и блок самопроверки.
  */
-export function buildForecast({ history, recent60, prior60, baseDaily, forecastFrom, forecastTo, opts = {} }) {
+function buildEngineeredSeason(shape, cfg) {
+  const A = shape.index; const N = 365;
+  // 1) ГОДОВОЙ анализ. Трендовую (спайк-устойчивую) кривую строим ТЯЖЁЛЫМ сглаживанием —
+  // разовые лончевые всплески не должны определять границы сезона.
+  const trend = smoothCirc(A, 31);
+  let kPeak = 1; for (let k = 2; k <= N; k++) if (trend[k] > trend[kPeak]) kPeak = k;
+  const thr = Math.max(1.0, (cfg.seasonFrac ?? 0.6) * trend[kPeak]); // порог «активного» спроса
+  let s0 = kPeak; for (let g = 0; g < N; g++) { const p = ((s0 - 2 + N) % N) + 1; if (trend[p] >= thr) s0 = p; else break; } // старт горячего
+  let s1 = kPeak; for (let g = 0; g < N; g++) { const nx = (s1 % N) + 1; if (trend[nx] >= thr) s1 = nx; else break; }         // спад
+  const rampDays = cfg.rampDays ?? 28; // до 4 недель на выход в ТОП
+  let entryCal = ((s0 - rampDays - 1 + N) % N) + 1; // вход = за rampDays до старта горячего
+  let seasonLen = ((s1 - entryCal + N) % N) + 1;
+  // минимальная длина сезона (не даём выродиться в узкий пик от артефакта)
+  const minLen = cfg.minSeasonDays ?? 140;
+  if (seasonLen < minLen) { entryCal = ((entryCal - Math.ceil((minLen - seasonLen) / 2) - 1 + N) % N) + 1; seasonLen = minLen; }
+  seasonLen = Math.min(seasonLen, 330);
+
+  // 2) проекция на ЦЕЛЕВОЙ ГОД: реальные последовательные даты (перешагивают НГ сами)
+  const emd = calDayToMd(entryCal);
+  const startT = Date.parse(`${cfg.targetYear}-${pad2(emd.m)}-${pad2(emd.d)}T00:00:00Z`);
+  const days = [];
+  for (let i = 0; i < seasonLen; i++) {
+    const date = new Date(startT + i * DAYMS).toISOString().slice(0, 10);
+    const k = shape.calDayOf(date);
+    days.push({ date, k, relief: A[k] || 1, i });
+  }
+  let peakI = 0; for (let i = 1; i < days.length; i++) if (days[i].relief > days[peakI].relief) peakI = i;
+
+  // 3) ВХОД с нуля: S-рампа 0→1 за rampDays поверх рельефа рынка.
+  for (const d of days) { d.ramp = rampCurve(d.i, rampDays); d.base = d.relief * d.ramp; }
+
+  // 4) начало распродажи = точка 80% кумулятива тела (правило 80/20), но не раньше пика.
+  const total0 = days.reduce((s, d) => s + d.base, 0) || 1;
+  let acc = 0, iSale = days.length - 1;
+  for (let i = 0; i < days.length; i++) { acc += days[i].base; if (acc >= 0.80 * total0) { iSale = Math.max(i, peakI + 1); break; } }
+  iSale = Math.max(1, Math.min(iSale, days.length - 2));
+  const preSum = days.slice(0, iSale).reduce((s, d) => s + d.base, 0) || total0 * 0.8;
+
+  // 5) ЛИКВИДАЦИЯ хвоста в ноль: рельеф × тапер(1→0), объём хвоста = 20% итога (→80/20).
+  const tail = days.slice(iSale); const Lt = tail.length;
+  let rawTail = 0;
+  tail.forEach((d, j) => { const p = Lt > 1 ? j / (Lt - 1) : 1; d.taper = (d.relief || 1) * Math.pow(1 - p, 1.4); rawTail += d.taper; });
+  const saleTarget = preSum / 4; // sale = 20% от итога (pre=80%)
+  const tScale = rawTail > 0 ? saleTarget / rawTail : 0;
+  tail.forEach((d) => { d.shapeVal = d.taper * tScale; });
+  for (let i = 0; i < iSale; i++) days[i].shapeVal = days[i].base;
+
+  // 6) МАСШТАБ под ТОП-3: p90 тела (устойчиво к текстурным спайкам) = уровень ТОП-3 на пике.
+  const bodyShape = days.slice(0, iSale).map((d) => d.shapeVal).filter((v) => v > 0).sort((a, b) => a - b);
+  const p90body = bodyShape.length ? bodyShape[Math.floor(0.9 * (bodyShape.length - 1))] : 1;
+  const targetPeak = (cfg.top3Daily || 1) * (cfg.volumeAdj || 1) * trend[kPeak];
+  const scale = p90body > 0 ? targetPeak / p90body : 1;
+  for (const d of days) d.final = round(d.shapeVal * scale, 1);
+
+  // фазы по РЫНОЧНЫМ датам
+  const stageAt = (i) => {
+    if (i < Math.round(rampDays * 0.5)) return 'вход';
+    if (i < rampDays) return 'разгон';
+    if (i < peakI) return 'старт сезона';
+    if (i < iSale) return 'пик сезона';
+    const sl = days.length - 1 - iSale;
+    return (i - iSale) < sl * 0.4 ? 'начало распродажи' : 'конец распродажи';
+  };
+  const favM = cfg.favorableMonth || {};
+  const forecastDaily = days.map((d, i) => ({
+    date: d.date,
+    stage: stageAt(i),
+    favorable: !!favM[Number(d.date.slice(5, 7))],
+    kSales: round(d.relief, 4),
+    plannedOrders: d.final,
+    price: round(cfg.meanPrice * (shape.priceIndex[d.k] || 1) * (cfg.priceAdj || 1), 0),
+    stock: round(shape.stock[d.k] || 0, 0),
+  }));
+
+  const phaseDates = {
+    entry: days[0].date,
+    ramp: days[Math.min(Math.round(rampDays * 0.5), days.length - 1)].date,
+    hotStart: days[Math.min(rampDays, days.length - 1)].date,
+    peak: days[peakI].date,
+    saleStart: days[iSale].date,
+    end: days[days.length - 1].date,
+  };
+
+  // 7) САМОПРОВЕРКА расчёта.
+  const vals = days.map((d) => d.final);
+  const bodyFinal = days.slice(0, iSale).map((d) => d.final).filter((v) => v > 0).sort((a, b) => a - b);
+  const planPeak = bodyFinal.length ? bodyFinal[Math.floor(0.9 * (bodyFinal.length - 1))] : Math.max(...vals, 1);
+  const total = vals.reduce((a, b) => a + b, 0) || 1;
+  const preShare = vals.slice(0, iSale).reduce((a, b) => a + b, 0) / total;
+  const hotVal = vals[Math.min(rampDays, vals.length - 1)];
+  const earlyVal = Math.max(vals[Math.min(3, vals.length - 1)] || 0, 0.01);
+  const target3 = round(targetPeak, 0);
+  const validation = {
+    entryFromZero: { ok: vals[0] <= 0.06 * planPeak, label: 'Вход с нуля', value: `${round(vals[0], 1)} шт/день`, ref: `≤ ${round(0.06 * planPeak, 1)}` },
+    rampToTop: { ok: hotVal >= 6 * earlyVal, label: 'Разгон с нуля к старту сезона', value: `×${round(hotVal / earlyVal, 1)} за ${rampDays} дн`, ref: 'выход с нуля' },
+    peakVsTop3: { ok: Math.abs(planPeak / target3 - 1) <= 0.15, label: 'Пик ≈ уровень ТОП-3', value: `${Math.round(planPeak)} шт/день`, ref: `≈ ${target3}` },
+    preSale80: { ok: preShare >= 0.795, label: '≥80% до распродажи', value: `${round(preShare * 100, 1)}%`, ref: '≥ 80%' },
+    endToZero: { ok: vals[vals.length - 1] <= 0.06 * planPeak, label: 'Обнуление склада', value: `${round(vals[vals.length - 1], 1)} шт/день`, ref: `≤ ${round(0.06 * planPeak, 1)}` },
+    marketDates: { ok: new Date(phaseDates.entry).getUTCDate() !== 1 || new Date(phaseDates.saleStart).getUTCDate() !== 1, label: 'Даты по рынку', value: `вход ${phaseDates.entry}`, ref: 'не 1-е число' },
+  };
+
+  return { forecastDaily, forecastPeriod: { from: days[0].date, to: days[days.length - 1].date }, phaseDates, validation, top3PeakDaily: target3, totalUnits: Math.round(total) };
+}
+
+/**
+ * Строит инженерный прогноз (движок сам выбирает окно сезона из годового анализа).
+ * @param {object} p
+ *   history            — groupDaily аналогов за 2 года (форма/ритм рынка);
+ *   recent60/prior60   — окна для дрейфа текущего года (Правило 4);
+ *   baseDaily          — уровень базы (штук/день, средний конкурент/бленд);
+ *   top3Daily          — средняя дневных продаж ТОП-3 аналогов (целевой уровень);
+ *   targetYear         — год старта сезона (движок ставит вход в этом году);
+ *   opts               — recencyWeight, rampDays, seasonFrac, priceAnchor…
+ */
+export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily, targetYear, opts = {} }) {
   const active = trimToActive(history);
+  const asOfYear = Number(active[active.length - 1].date.slice(0, 4));
+  const year = Number(targetYear) || asOfYear;
   const folded = computeFoldedMonthlyProfile(active, opts);
-  const shape = computeAnalogDailyShape(active, opts); // аналоговая посуточная форма — сохраняет рельеф
+  const shape = computeAnalogDailyShape(active, opts); // аналоговая посуточная форма (рельеф)
   const phases = detectPhases(active, opts);
   const rank = computeRank(computeCoefficients(active, opts).kSales, opts);
-  const weekdayFactors = opts.weekly ? computeWeeklyProfile(active, opts.smoothWindow ?? 7) : null;
-  // Ценовой якорь: «выше медианы» (средний/высокий сегмент) если задан, иначе
-  // средневзвешенная цена спроса.
   const meanPrice = opts.priceAnchor > 0 ? opts.priceAnchor : folded.meanPrice;
 
-  // Месячные карты.
   const indexMap = {}, priceIdxMap = {}, stockMap = {};
   for (const m of folded.months) { indexMap[m.month] = m.index; priceIdxMap[m.month] = m.priceIndex; stockMap[m.month] = m.avgStock; }
   const meanStock = mean(folded.months.map((m) => m.avgStock).filter((v) => v > 0)) || 1;
 
-  // Благоприятные месяцы (Правило 1): спрос выше среднего И остаток ниже среднего.
-  const favorableMonth = {};
-  const deficitScoreMap = {};
+  const favorableMonth = {}, deficitScoreMap = {};
   for (const m of folded.months) {
     const stockIdx = (m.avgStock || meanStock) / meanStock;
     deficitScoreMap[m.month] = round(m.index / Math.max(stockIdx, 0.15), 2);
     favorableMonth[m.month] = m.index > 1.0 && stockIdx < 1.0;
   }
 
-  // Дрейф текущего года по конкурентам (Правило 4): последние 60 дней vs год назад.
-  // Мягкий клэмп [clampLo..clampHi] — 60-дневное окно шумное, не даём годовому
-  // плану скакнуть в разы от одного окна (границы настраиваются).
+  // Дрейф текущего года по конкурентам (Правило 4): 60 дней vs год назад, мягкий клэмп.
   const clampLo = opts.adjClampLo ?? 0.5, clampHi = opts.adjClampHi ?? 2.0;
   const clamp = (v) => Math.max(clampLo, Math.min(clampHi, v));
   const rec = aggWindow(recent60), pri = aggWindow(prior60);
@@ -106,30 +232,16 @@ export function buildForecast({ history, recent60, prior60, baseDaily, forecastF
     windowDays: rec.days,
   };
 
-  const stageOf = phases?.stageOfMonth || {};
-  // Прогнозный ряд по дням запрошенного периода.
-  const forecastDaily = dateRange(forecastFrom, forecastTo).map((date) => {
-    const m = Number(date.slice(5, 7));
-    const k = shape.calDayOf(date);
-    // АНАЛОГОВАЯ форма: индекс спроса/цены = форма тех же календарных дат из истории
-    // (recency-взвешенно; недавний год доминирует). Рельеф — пики/провалы — сохраняется.
-    // День недели уже «зашит» в форму, отдельного коэфф. не добавляем.
-    const salesIdx = shape.present[k] ? shape.index[k] : monthlyValueAt(indexMap, date);
-    const priceIdx = shape.present[k] ? shape.priceIndex[k] : monthlyValueAt(priceIdxMap, date);
-    const stockVal = shape.present[k] && shape.stock[k] > 0 ? shape.stock[k] : monthlyValueAt(stockMap, date);
-    return {
-      date,
-      stage: stageOf[m] || null,
-      favorable: !!favorableMonth[m],
-      deficitScore: deficitScoreMap[m] ?? null,
-      kSales: round(salesIdx, 4),
-      plannedOrders: round(baseDaily * volumeAdj * salesIdx, 1),
-      price: round(meanPrice * priceIdx * priceAdj, 0),
-      stock: round(stockVal, 0), // прогноз уровня остатков рынка (аналоговая форма)
-    };
+  // Уровень ТОП-3 (целевой пик): если не передан — берём базовый (средний конкурент).
+  const top3 = top3Daily > 0 ? top3Daily : baseDaily;
+
+  const eng = buildEngineeredSeason(shape, {
+    targetYear: year, top3Daily: top3, volumeAdj, priceAdj, meanPrice,
+    rampDays: opts.rampDays, seasonFrac: opts.seasonFrac, favorableMonth,
   });
 
-  // Историческая кривая (2 года) для диаграммы — по фактическим дням активного окна.
+  // Историческая кривая (2 года) — по фактическим дням (для второй диаграммы).
+  const stageOf = phases?.stageOfMonth || {};
   const historyDaily = active.map((r) => {
     const m = Number(r.date.slice(5, 7));
     return {
@@ -144,20 +256,25 @@ export function buildForecast({ history, recent60, prior60, baseDaily, forecastF
   });
 
   const favMonths = Object.keys(favorableMonth).filter((m) => favorableMonth[m]).map(Number).sort((a, b) => a - b);
-  const favShare = forecastDaily.length ? forecastDaily.filter((d) => d.favorable).length / forecastDaily.length : 0;
+  const favShare = eng.forecastDaily.length ? eng.forecastDaily.filter((d) => d.favorable).length / eng.forecastDaily.length : 0;
 
   return {
-    forecastPeriod: { from: forecastFrom, to: forecastTo },
+    forecastPeriod: eng.forecastPeriod,
+    targetYear: year,
+    phaseDates: eng.phaseDates,
+    validation: eng.validation,
+    top3PeakDaily: eng.top3PeakDaily,
+    top3Daily: round(top3, 2),
+    totalUnits: eng.totalUnits,
     rank,
     baseSource: opts.baseSource,
     phases,
     adjustments,
-    weeklyProfile: weekdayFactors,
     meanPrice,
     baseDaily: round(baseDaily, 2),
     favorable: { months: favMonths, share: round(favShare, 3), deficitScore: deficitScoreMap },
     monthlyProfile: folded.months.map((m) => ({ month: m.month, index: m.index, priceIndex: m.priceIndex, favorable: !!favorableMonth[m.month] })),
-    forecastDaily,
+    forecastDaily: eng.forecastDaily,
     historyDaily,
   };
 }

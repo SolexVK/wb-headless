@@ -52,11 +52,13 @@ function buildFilter(f = {}) {
 }
 
 // Построить прогноз (режим B: предмет + фильтр, база = рынок).
+// Движок сам выбирает окно сезона из ГОДОВОГО анализа; из UI приходит только
+// целевой ГОД старта сезона (targetYear).
 export async function runForecast(cfg = {}) {
   if (!process.env.MPSTATS_TOKEN) throw new Error('MPSTATS_TOKEN не задан в окружении службы (planner/data/.env)');
   if (!cfg.path) throw new Error('Не указан путь предмета WB (path)');
-  if (!cfg.from || !cfg.to) throw new Error('Не указан прогнозный период (from/to)');
   const hist = default2Years();
+  const targetYear = num(cfg.targetYear) || (Number(hist.d2.slice(0, 4)) + 1);
   return buildSeasonPlanReport({
     d1: hist.d1, d2: hist.d2,
     label: cfg.label || cfg.path,
@@ -66,9 +68,9 @@ export async function runForecast(cfg = {}) {
       limit: num(cfg.limit),
       maxPages: num(cfg.maxPages),
     },
-    forecast: { from: cfg.from, to: cfg.to },
+    forecast: { targetYear },
     baseSource: 'market',
-    plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false },
+    plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false, rampDays: num(cfg.rampDays), seasonFrac: num(cfg.seasonFrac) },
   });
 }
 
