@@ -3,7 +3,7 @@ import { renderGantt } from './gantt.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-2026-07-22d';
+const APP_BUILD = 'season-2026-07-22e';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1120,7 +1120,12 @@ function seasonBuilderPanel() {
       <div class="field"><label>Мин. выручка/мес, ₽</label><input id="se-minrev" type="number" value="${f.minRevenue ?? ''}"></div>
 
       <div class="field"><label title="Год старта сезона. Вход, пик и распродажу движок выбирает сам из годового анализа рынка.">Целевой сезон (год старта)</label><input id="se-year" type="number" min="2024" max="2032" value="${f.targetYear || (new Date().getUTCFullYear())}"></div>
-      <div class="field"><span class="mini" style="align-self:end">Точные даты входа / пика / распродажи движок определит сам по спросу.</span></div>
+      <div class="field"><label title="Уровень, на который движок выводит пик плана. ТОП-3 — средняя трёх сильнейших аналогов (реалистично). ТОП-1 — уровень самого сильного аналога по выручке в вашем ценовом сегменте (амбициозно: цель занять ТОП-1, максимальный объём и заказ на производство).">Целевой уровень (пик плана)</label>
+        <select id="se-level">
+          <option value="top3"${f.targetLevel === 'top1' ? '' : ' selected'}>ТОП-3 — средний (реалистично)</option>
+          <option value="top1"${f.targetLevel === 'top1' ? ' selected' : ''}>ТОП-1 — максимум (амбициозно)</option>
+        </select>
+      </div>
 
       <div class="span2 se-opts">
         <label class="se-check"><input type="checkbox" id="se-oos"${f.oos !== false ? ' checked' : ''}> OOS-поправка</label>
@@ -1141,6 +1146,7 @@ function collectSeasonForm() {
     path: v('se-path'), words: v('se-words'), allWords: v('se-allwords'), exclude: v('se-exclude'),
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
     limit: v('se-limit'), targetYear: v('se-year'),
+    targetLevel: (document.getElementById('se-level')?.value === 'top1') ? 'top1' : 'top3',
     oos: document.getElementById('se-oos')?.checked !== false,
     weekly: document.getElementById('se-weekly')?.checked !== false,
   };
@@ -1173,7 +1179,7 @@ function bindSeasonBuilder() {
       if (a) {
         a.seasonFilter = { path: cfg.path, words: cfg.words, allWords: cfg.allWords, exclude: cfg.exclude,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
-          limit: cfg.limit, targetYear: cfg.targetYear, oos: cfg.oos, weekly: cfg.weekly };
+          limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, oos: cfg.oos, weekly: cfg.weekly };
         await recalc(true).catch(() => {});
       }
       seasonSelArticle = cfg.articleId;
@@ -1297,8 +1303,20 @@ function seasonSummary(rep, p) {
       <div class="se-card"><div class="k">Цена, ₽</div><div class="v">${pmin ? pmin.toLocaleString('ru') + '–' + pmax.toLocaleString('ru') : '—'}</div><div class="mini">якорь: медиана ТОПов −10%</div></div>
       <div class="se-card"><div class="k">Благоприятные месяцы</div><div class="v">${favM || '—'}</div><div class="mini">спрос выше среднего, остатки ниже</div></div>
     </div>
+    ${seasonLevelNote(p)}
     <div class="mini">Группа-аналогов: ${rep.itemsWithData ?? '—'} из ${rep.groupSize ?? '—'} · сбор: ${rep.method === 'category-bulk' ? 'одним запросом по категории' : rep.method === 'per-sku' ? 'по каждому товару' : (rep.method || '—')} (${rep.requests ?? '—'} обращ. к MPStats) · построено ${gen}</div>
   </div>`;
+}
+
+// Пояснение к целевому уровню (ТОП-3/ТОП-1) с обоими значениями для сравнения.
+function seasonLevelNote(p) {
+  const li = p.levelInfo; if (!li || !li.targetLevel) return '';
+  const isTop1 = li.targetLevel === 'top1';
+  const active = isTop1 ? 'ТОП-1 (максимум)' : 'ТОП-3 (средний)';
+  const cur = isTop1 ? li.top1Daily : li.top3Daily;
+  const alt = isTop1 ? `реалистичный ТОП-3 дал бы ${li.top3Daily}` : `амбициозный ТОП-1 дал бы ${li.top1Daily}`;
+  const who = isTop1 && li.top1Name ? ` (сильнейший аналог: «${seEsc(String(li.top1Name).slice(0, 46))}»)` : '';
+  return `<div class="mini se-level-note">🎯 Целевой уровень пика: <b>${active}</b> ≈ <b>${cur}</b> шт/день${who}. ${alt} шт/день — переключается в конструкторе и требует пересборки.</div>`;
 }
 
 function seasonChartsBlock(rep, p) {

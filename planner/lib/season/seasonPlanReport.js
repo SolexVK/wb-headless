@@ -226,6 +226,7 @@ export async function collectFromCategory({
     name: p.name,
     days: p.daily.length,
     unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
+    revenue: p.daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0),
   }));
 
   return {
@@ -280,6 +281,7 @@ export async function collectGroupDaily({ group, d1, d2, concurrency = 5, onProg
     name: p.name,
     days: p.daily.length,
     unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
+    revenue: p.daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0),
   }));
 
   return { groupDaily, perItemMeta, errors, dailyLimit };
@@ -408,22 +410,35 @@ export async function buildSeasonPlanReport({
     const priorCol = await collectShape(offsetDate(d2, -59 - 365), offsetDate(d2, -365));
     requests += priorCol.requests || 0;
 
-    // Уровень ТОП-3 (целевой пик): средняя дневных продаж трёх сильнейших аналогов.
-    const perAnalogDaily = (perItemMeta || []).filter((m) => m.days > 0).map((m) => m.unitsSold / m.days).sort((a, b) => b - a);
-    const top3Daily = perAnalogDaily.length
-      ? perAnalogDaily.slice(0, 3).reduce((s, v) => s + v, 0) / Math.min(3, perAnalogDaily.length)
-      : perItemBase;
+    // ЦЕЛЕВОЙ УРОВЕНЬ (пик плана). Два режима:
+    //   'top3' (по умолчанию) — средняя дневных продаж трёх сильнейших аналогов (реалистично);
+    //   'top1' — уровень САМОГО сильного аналога (амбициозно: цель стать ТОП-1, макс. объём).
+    // «Сильнейший» — по ВЫРУЧКЕ (при заданном ценовом сегменте это и максимум продаж);
+    // ценовой сегмент уже применён фильтром (priceMin/priceMax), поэтому сравниваем внутри него.
+    const withDays = (perItemMeta || []).filter((m) => m.days > 0);
+    const byDaily = withDays.map((m) => m.unitsSold / m.days).sort((a, b) => b - a);
+    const top3Daily = byDaily.length ? byDaily.slice(0, 3).reduce((s, v) => s + v, 0) / Math.min(3, byDaily.length) : perItemBase;
+    const strongest = withDays.slice().sort((a, b) => (b.revenue || 0) - (a.revenue || 0) || (b.unitsSold || 0) - (a.unitsSold || 0))[0];
+    const top1Daily = strongest && strongest.days > 0 ? strongest.unitsSold / strongest.days : (byDaily[0] || perItemBase);
+    const targetLevel = plan.targetLevel === 'top1' ? 'top1' : 'top3';
+    const targetDaily = targetLevel === 'top1' ? top1Daily : top3Daily;
 
     const fc = buildForecast({
       history: groupDaily,
       recent60: recentCol.groupDaily,
       prior60: priorCol.groupDaily,
       baseDaily,
-      top3Daily,
+      top3Daily: targetDaily,
       targetYear: forecast.targetYear,
       opts: { ...plan, baseSource: baseInfo.source, priceAnchor: collected.priceAnchor },
     });
     fc.priceInfo = { anchor: collected.priceAnchor, medianPrice: collected.medianPrice };
+    fc.levelInfo = {
+      targetLevel,
+      top1Daily: Math.round(top1Daily * 10) / 10,
+      top3Daily: Math.round(top3Daily * 10) / 10,
+      top1Name: strongest ? strongest.name : null,
+    };
 
     return {
       label,
