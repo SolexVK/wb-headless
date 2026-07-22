@@ -402,6 +402,73 @@ export function computeFoldedWeeklyProfile(active, opts = {}) {
   return { index, priceIndex, avgStock, present, meanPrice: round(meanPrice, 2) };
 }
 
+// «Нормализованный день года» 1..365 по (месяц,день) — выравнивает КАЛЕНДАРНЫЕ даты
+// между годами независимо от високосности (29 фев → 28 фев).
+const NL_MCUM = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+export function calDayOf(date) { const [, m, d] = date.split('-').map(Number); return Math.min(365, NL_MCUM[m - 1] + d); }
+function fillGapsCircular(arr, present) {
+  const N = 365;
+  if (!present.some(Boolean)) return;
+  for (let i = 1; i <= N; i++) {
+    if (present[i]) continue;
+    for (let d = 1; d < N; d++) {
+      const a = ((i - 1 - d + N) % N) + 1, b = ((i - 1 + d) % N) + 1;
+      if (present[a]) { arr[i] = arr[a]; break; }
+      if (present[b]) { arr[i] = arr[b]; break; }
+    }
+  }
+}
+function smoothCircular(arr, win) {
+  const N = 365, h = Math.floor(win / 2);
+  return arr.map((v, i) => {
+    if (i < 1 || i > N) return v;
+    let s = 0, c = 0;
+    for (let j = i - h; j <= i + h; j++) { const idx = ((j - 1 + N) % N) + 1; s += arr[idx]; c++; }
+    return s / c;
+  });
+}
+
+/**
+ * АНАЛОГОВАЯ ПОСУТОЧНАЯ ФОРМА (Правило 3, по-новому). Вместо усреднения в помесячную/
+ * понедельную «полку» переносим РЕАЛЬНУЮ форму тех же КАЛЕНДАРНЫХ дат из истории:
+ * для каждого дня года берём recency-взвешенное среднее дневных продаж (недавний год
+ * весит больше → прогноз почти повторяет прошлогоднюю кривую этих же дат) и делим на
+ * годовую среднюю. Лёгкое сглаживание (окно 3) убирает единичный дневной шум, но
+ * рельеф — недельные и событийные пики/провалы — сохраняется. Мягкий клип гасит
+ * разовые «лончевые» спайки, чтобы они не доминировали.
+ * @returns { index[1..365], priceIndex[1..365], stock[1..365], present, meanPrice, calDayOf }
+ */
+export function computeAnalogDailyShape(active, opts = {}) {
+  const recencyWeight = opts.recencyWeight ?? DEFAULTS.recencyWeight;
+  const recentDays = opts.recentDays ?? 365;
+  const N = 365;
+  const asOfT = Date.parse(active[active.length - 1].date + 'T00:00:00Z');
+  const acc = Array.from({ length: N + 1 }, () => ({ s: 0, w: 0, pN: 0, pD: 0, st: 0 }));
+  for (const r of active) {
+    const k = calDayOf(r.date);
+    const age = (asOfT - Date.parse(r.date + 'T00:00:00Z')) / 86400000;
+    const w = age <= recentDays ? recencyWeight : 1;
+    const s = Number(r.sales) || 0, price = Number(r.price) || 0;
+    const a = acc[k]; a.s += s * w; a.w += w; a.st += (Number(r.stock ?? r.balance) || 0) * w;
+    if (price > 0) { a.pN += price * (s || 1) * w; a.pD += (s || 1) * w; }
+  }
+  const present = acc.map((a) => a.w > 0);
+  const avg = acc.map((a) => (a.w ? a.s / a.w : 0));
+  const price = acc.map((a) => (a.pD ? a.pN / a.pD : 0));
+  const stock = acc.map((a) => (a.w ? a.st / a.w : 0));
+  fillGapsCircular(avg, present); fillGapsCircular(price, present); fillGapsCircular(stock, present);
+  const annualMean = mean(avg.filter((v, i) => i >= 1 && i <= N && v > 0)) || 1;
+  const meanPrice = mean(price.filter((v) => v > 0)) || 1;
+  let index = avg.map((v) => v / annualMean);
+  let priceIndex = price.map((v) => (v || meanPrice) / meanPrice);
+  index = smoothCircular(index, opts.shapeSmooth ?? 3).map((v) => round(v, 3));
+  priceIndex = smoothCircular(priceIndex, 5).map((v) => round(v, 3));
+  const stockSm = smoothCircular(stock, 5).map((v) => round(v, 0));
+  const cap = opts.shapeCap ?? 6;
+  index = index.map((v) => Math.min(v, cap));
+  return { index, priceIndex, stock: stockSm, present, meanPrice: round(meanPrice, 2), calDayOf };
+}
+
 const nextM = (m) => (m === 12 ? 1 : m + 1);
 const prevM = (m) => (m === 1 ? 12 : m - 1);
 /** Месяцы кольца [fromM..toM) вперёд (fromM включительно, toM нет). */
