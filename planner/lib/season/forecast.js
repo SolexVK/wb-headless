@@ -8,6 +8,8 @@
 
 import {
   computeFoldedMonthlyProfile,
+  computeFoldedWeeklyProfile,
+  weekOfYearOf,
   detectPhases,
   computeWeeklyProfile,
   trimToActive,
@@ -66,6 +68,7 @@ function aggWindow(groupDaily) {
 export function buildForecast({ history, recent60, prior60, baseDaily, forecastFrom, forecastTo, opts = {} }) {
   const active = trimToActive(history);
   const folded = computeFoldedMonthlyProfile(active, opts);
+  const weekProfile = computeFoldedWeeklyProfile(active, opts); // недельный профиль — сохраняет пики
   const phases = detectPhases(active, opts);
   const rank = computeRank(computeCoefficients(active, opts).kSales, opts);
   const weekdayFactors = opts.weekly ? computeWeeklyProfile(active, opts.smoothWindow ?? 7) : null;
@@ -108,10 +111,14 @@ export function buildForecast({ history, recent60, prior60, baseDaily, forecastF
   // Прогнозный ряд по дням запрошенного периода.
   const forecastDaily = dateRange(forecastFrom, forecastTo).map((date) => {
     const m = Number(date.slice(5, 7));
+    const wk = weekOfYearOf(date);
     const dow = new Date(date + 'T00:00:00Z').getUTCDay();
     const wf = weekdayFactors ? weekdayFactors[dow] : 1;
-    const salesIdx = monthlyValueAt(indexMap, date);
-    const priceIdx = monthlyValueAt(priceIdxMap, date);
+    // сезонный индекс спроса/цены — по НЕДЕЛЯМ ГОДА (сохраняет внутримесячные пики),
+    // с откатом на месячный, если по неделе нет данных.
+    const salesIdx = weekProfile.present[wk] ? weekProfile.index[wk] : monthlyValueAt(indexMap, date);
+    const priceIdx = weekProfile.present[wk] ? weekProfile.priceIndex[wk] : monthlyValueAt(priceIdxMap, date);
+    const stockVal = weekProfile.present[wk] && weekProfile.avgStock[wk] > 0 ? weekProfile.avgStock[wk] : monthlyValueAt(stockMap, date);
     return {
       date,
       stage: stageOf[m] || null,
@@ -121,7 +128,7 @@ export function buildForecast({ history, recent60, prior60, baseDaily, forecastF
       weekdayFactor: round(wf, 3),
       plannedOrders: round(baseDaily * volumeAdj * salesIdx * wf, 1),
       price: round(meanPrice * priceIdx * priceAdj, 0),
-      stock: round(monthlyValueAt(stockMap, date), 0), // прогноз уровня остатков рынка
+      stock: round(stockVal, 0), // прогноз уровня остатков рынка (по неделям года)
     };
   });
 

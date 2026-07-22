@@ -355,6 +355,53 @@ export function computeFoldedMonthlyProfile(active, opts = {}) {
   return { months, asOf, meanPrice: round(meanPrice, 2) };
 }
 
+// День года 1..366 и «неделя года» 0..52 (по дню года — календарные пики
+// выравниваются между годами: 25 дек ≈ день 359 в любой год).
+export function dayOfYearOf(date) {
+  const [y, m, d] = date.split('-').map(Number);
+  return Math.floor((Date.UTC(y, m - 1, d) - Date.UTC(y, 0, 1)) / 86400000) + 1;
+}
+export function weekOfYearOf(date) { return Math.min(52, Math.floor((dayOfYearOf(date) - 1) / 7)); }
+
+/**
+ * Свёрнутый сезонный профиль по НЕДЕЛЯМ ГОДА (53 корзины) с весом по свежести.
+ * В отличие от месячного, сохраняет ВНУТРИМЕСЯЧНЫЕ пики (предновогодний всплеск
+ * конца декабря, распродажные недели и т.п.) — прогноз получает характер истории,
+ * а не сглаженную помесячную «полку». Нормировка к среднему 1, мягкое кольцевое
+ * сглаживание гасит одно-недельный шум, но пики остаются.
+ * @returns { index[0..52], priceIndex[0..52], avgStock[0..52], meanPrice, meanStock }
+ */
+export function computeFoldedWeeklyProfile(active, opts = {}) {
+  const recencyWeight = opts.recencyWeight ?? DEFAULTS.recencyWeight;
+  const recentDays = opts.recentDays ?? 365;
+  const NW = 53;
+  const asOfT = Date.parse(active[active.length - 1].date + 'T00:00:00Z');
+  const acc = Array.from({ length: NW }, () => ({ sNum: 0, dNum: 0, pNum: 0, pDen: 0, stNum: 0 }));
+  for (const r of active) {
+    const wk = weekOfYearOf(r.date);
+    const ageDays = (asOfT - Date.parse(r.date + 'T00:00:00Z')) / 86400000;
+    const w = ageDays <= recentDays ? recencyWeight : 1;
+    const s = Number(r.sales) || 0, price = Number(r.price) || 0;
+    const a = acc[wk];
+    a.sNum += s * w; a.dNum += w; a.stNum += (Number(r.stock ?? r.balance) || 0) * w;
+    if (price > 0) { a.pNum += price * (s || 1) * w; a.pDen += (s || 1) * w; }
+  }
+  const present = acc.map((a) => a.dNum > 0);
+  const avgDaily = acc.map((a) => (a.dNum ? a.sNum / a.dNum : 0));
+  const avgPrice = acc.map((a) => (a.pDen ? a.pNum / a.pDen : 0));
+  const avgStock = acc.map((a) => (a.dNum ? a.stNum / a.dNum : 0));
+  const meanAvg = mean(avgDaily.filter((v, i) => present[i])) || 1;
+  const meanPrice = mean(avgPrice.filter((v) => v > 0)) || 1;
+  // индекс: для недель без данных — нейтральная 1 (без сезонного эффекта)
+  let index = acc.map((a, i) => (present[i] ? round(avgDaily[i] / meanAvg, 3) : 1));
+  let priceIndex = acc.map((a, i) => (present[i] && avgPrice[i] > 0 ? round(avgPrice[i] / meanPrice, 3) : 1));
+  if (opts.weekSmooth !== false) {
+    const sm = (arr) => arr.map((v, i) => round(0.25 * arr[(i - 1 + NW) % NW] + 0.5 * v + 0.25 * arr[(i + 1) % NW], 3));
+    index = sm(index); priceIndex = sm(priceIndex);
+  }
+  return { index, priceIndex, avgStock, present, meanPrice: round(meanPrice, 2) };
+}
+
 const nextM = (m) => (m === 12 ? 1 : m + 1);
 const prevM = (m) => (m === 1 ? 12 : m - 1);
 /** Месяцы кольца [fromM..toM) вперёд (fromM включительно, toM нет). */
