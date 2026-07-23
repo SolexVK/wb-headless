@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildSeasonPlanReport } from './season/seasonPlanReport.js';
+import { dbAvailable, planSave, planLoad, planDelete, planList } from './db.js';
 
 const MPSTATS_BASE = process.env.MPSTATS_BASE_URL || 'https://mpstats.io/api';
 // Дерево категорий MPStats (пути предметов) — для подсказки в UI.
@@ -87,14 +88,47 @@ export async function searchCategories(query, limit = 40) {
     .slice(0, limit);
 }
 
-// ---- хранилище планов (отдельные JSON-файлы, чтобы не раздувать state.json) ----
+// ---- хранилище планов: SQLite (при наличии), иначе отдельные JSON-файлы ----
+// Одноразовый импорт существующих JSON-планов в БД (чтобы не потерять при переходе).
+let _plansMigrated = false;
+function migrateJsonPlans() {
+  if (_plansMigrated) return; _plansMigrated = true;
+  if (!dbAvailable()) return;
+  try {
+    if ((planList() || []).length) return;            // в БД уже есть — не трогаем
+    if (!fs.existsSync(PLANS_DIR)) return;
+    let n = 0;
+    for (const f of fs.readdirSync(PLANS_DIR)) {
+      if (!f.endsWith('.json')) continue;
+      try { const rec = JSON.parse(fs.readFileSync(path.join(PLANS_DIR, f), 'utf8')); planSave(rec.articleId, rec); n++; } catch { /* skip */ }
+    }
+    if (n) console.log(`[planner] импортировано планов сезонности в БД: ${n}`);
+  } catch { /* игнор */ }
+}
+// Индексная строка плана из полной записи (без тяжёлых дневных рядов).
+function planIndexRow(rec) {
+  const p = (rec.report && rec.report.plan) || {};
+  const fd = p.forecastDaily || [];
+  return {
+    articleId: rec.articleId,
+    label: rec.report && rec.report.label,
+    forecastPeriod: rec.report && rec.report.forecastPeriod,
+    generatedAt: rec.report && rec.report.generatedAt,
+    savedAt: rec.savedAt,
+    rank: p.rank || null,
+    totalUnits: Math.round(fd.reduce((s, d) => s + (+d.plannedOrders || 0), 0)),
+  };
+}
 export function savePlan(articleId, report, cfg) {
-  ensurePlansDir();
   const rec = { articleId, cfg: cfg || null, report, savedAt: new Date().toISOString() };
+  if (dbAvailable()) { planSave(articleId, rec); return rec; }
+  ensurePlansDir();
   fs.writeFileSync(path.join(PLANS_DIR, safeId(articleId) + '.json'), JSON.stringify(rec));
   return rec;
 }
 export function loadPlan(articleId) {
+  migrateJsonPlans();
+  if (dbAvailable()) return planLoad(articleId);
   try {
     const fp = path.join(PLANS_DIR, safeId(articleId) + '.json');
     if (!fs.existsSync(fp)) return null;
@@ -102,30 +136,23 @@ export function loadPlan(articleId) {
   } catch { return null; }
 }
 export function deletePlan(articleId) {
+  if (dbAvailable()) return planDelete(articleId);
   const fp = path.join(PLANS_DIR, safeId(articleId) + '.json');
   if (fs.existsSync(fp)) { fs.unlinkSync(fp); return true; }
   return false;
 }
 // краткий индекс сохранённых планов (без тяжёлых дневных рядов)
 export function listPlans() {
-  ensurePlansDir();
+  migrateJsonPlans();
   const out = [];
-  for (const f of fs.readdirSync(PLANS_DIR)) {
-    if (!f.endsWith('.json')) continue;
-    try {
-      const rec = JSON.parse(fs.readFileSync(path.join(PLANS_DIR, f), 'utf8'));
-      const p = (rec.report && rec.report.plan) || {};
-      const fd = p.forecastDaily || [];
-      out.push({
-        articleId: rec.articleId,
-        label: rec.report && rec.report.label,
-        forecastPeriod: rec.report && rec.report.forecastPeriod,
-        generatedAt: rec.report && rec.report.generatedAt,
-        savedAt: rec.savedAt,
-        rank: p.rank || null,
-        totalUnits: Math.round(fd.reduce((s, d) => s + (+d.plannedOrders || 0), 0)),
-      });
-    } catch { /* skip broken */ }
+  if (dbAvailable()) {
+    for (const rec of (planList() || [])) out.push(planIndexRow(rec));
+  } else {
+    ensurePlansDir();
+    for (const f of fs.readdirSync(PLANS_DIR)) {
+      if (!f.endsWith('.json')) continue;
+      try { out.push(planIndexRow(JSON.parse(fs.readFileSync(path.join(PLANS_DIR, f), 'utf8')))); } catch { /* skip */ }
+    }
   }
   return out.sort((a, b) => String(a.articleId).localeCompare(String(b.articleId), undefined, { numeric: true }));
 }

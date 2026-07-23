@@ -42,6 +42,11 @@ function migrate(db) {
       fetchedAt TEXT,
       PRIMARY KEY (date, warehouseName)
     );
+    CREATE TABLE IF NOT EXISTS season_plans (
+      articleId TEXT PRIMARY KEY,
+      cfg TEXT, report TEXT, savedAt TEXT,
+      label TEXT, generatedAt TEXT, totalUnits INTEGER
+    );
   `);
 }
 
@@ -139,4 +144,36 @@ export function wbLoadTariffs(date, maxAgeMs) {
     deliveryBase: r.deliveryBase, deliveryLiter: r.deliveryLiter, deliveryCoef: r.deliveryCoef,
     storageBase: r.storageBase, storageLiter: r.storageLiter, storageCoef: r.storageCoef,
   })) };
+}
+
+// ── Планы сезонности ──
+export function planSave(articleId, rec) {
+  const db = getDb(); if (!db) return false;
+  const rep = rec.report || {};
+  const fd = (rep.plan && rep.plan.forecastDaily) || [];
+  const totalUnits = Math.round(fd.reduce((s, d) => s + (+d.plannedOrders || 0), 0));
+  db.prepare(`INSERT INTO season_plans(articleId,cfg,report,savedAt,label,generatedAt,totalUnits)
+    VALUES(?,?,?,?,?,?,?)
+    ON CONFLICT(articleId) DO UPDATE SET cfg=excluded.cfg, report=excluded.report, savedAt=excluded.savedAt,
+      label=excluded.label, generatedAt=excluded.generatedAt, totalUnits=excluded.totalUnits`)
+    .run(String(articleId), JSON.stringify(rec.cfg || null), JSON.stringify(rep), rec.savedAt || new Date().toISOString(),
+      rep.label || '', rep.generatedAt || '', totalUnits);
+  return true;
+}
+export function planLoad(articleId) {
+  const db = getDb(); if (!db) return null;
+  const r = db.prepare('SELECT * FROM season_plans WHERE articleId = ?').get(String(articleId));
+  if (!r) return null;
+  return { articleId: r.articleId, cfg: JSON.parse(r.cfg || 'null'), report: JSON.parse(r.report || 'null'), savedAt: r.savedAt };
+}
+export function planDelete(articleId) {
+  const db = getDb(); if (!db) return false;
+  const info = db.prepare('DELETE FROM season_plans WHERE articleId = ?').run(String(articleId));
+  return info.changes > 0;
+}
+// Полные записи (для построения индекса — как в JSON-версии listPlans).
+export function planList() {
+  const db = getDb(); if (!db) return null;
+  const rows = db.prepare('SELECT articleId,cfg,report,savedAt FROM season_plans ORDER BY articleId').all();
+  return rows.map((r) => ({ articleId: r.articleId, cfg: JSON.parse(r.cfg || 'null'), report: JSON.parse(r.report || 'null'), savedAt: r.savedAt }));
 }
