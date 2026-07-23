@@ -388,5 +388,8 @@ function normalizeUnitArticle(input) {
     },
     drrPhase: i.drrPhase === 'launch' ? 'launch' : 'steady',
     over: i.over && typeof i.over === 'object' ? i.over : {}, // переопределения глобальных ставок
+    // привязка к карточке WB + рассчитанная по тарифам логистика (nmID, vendorCode,
+    // volumeL, deliveryPerOrder, returnLogistics, storageTotal, warehouse, tariffDate)
+    wb: i.wb && typeof i.wb === 'object' ? i.wb : null,
   };
 }

@@ -9,6 +9,8 @@ import { fileURLToPath } from 'url';
 import { defaultState, normalizeState } from './lib/model.js';
 import { buildSchedule } from './lib/scheduler.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories } from './lib/seasonApi.js';
+import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse } from './lib/wb/wbApi.js';
+import { computeWbLogistics } from './lib/wb/logistics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
@@ -228,6 +230,33 @@ app.post('/api/season/build', async (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.message || e) });
   }
+});
+
+// ── Wildberries API: карточки (маппинг+габариты) и логистика по тарифам ──
+app.get('/api/wb/status', (req, res) => res.json({ ok: true, hasToken: hasWbToken() }));
+// список карточек продавца для пикера «Артикул WB» (nmID/vendorCode/объём), кэш сутки
+app.get('/api/wb/cards', async (req, res) => {
+  try { res.json({ ok: true, cards: await fetchCards({ force: req.query.force === '1' }) }); }
+  catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+// логистика/хранение для артикула (по nmID или объёму) на складе (Коледино по умолчанию)
+app.get('/api/wb/logistics', async (req, res) => {
+  try {
+    const warehouse = req.query.warehouse || 'Коледино';
+    const days = req.query.days != null ? +req.query.days : 60;
+    const ret = req.query.return != null ? +req.query.return : 50;
+    let volumeL = req.query.volumeL != null ? +req.query.volumeL : null;
+    let card = null;
+    if (volumeL == null && req.query.nmID) {
+      const cards = await fetchCards({});
+      card = cards.find((c) => String(c.nmID) === String(req.query.nmID)) || null;
+      volumeL = card ? card.volumeL : null;
+    }
+    const tar = await fetchBoxTariffs({ force: req.query.force === '1' });
+    const wh = findWarehouse(tar, warehouse);
+    const logistics = computeWbLogistics(volumeL, wh, { storageDays: days, returnLogistics: ret });
+    res.json({ ok: true, warehouse: wh && wh.warehouseName, tariffDate: tar.date, volumeL, card, logistics });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'planner' }));

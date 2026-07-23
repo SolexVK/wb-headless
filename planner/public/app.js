@@ -1574,6 +1574,34 @@ function unitPersist() {
   }, 700);
 }
 
+// ── Привязка к карточкам WB (габариты) + расчёт логистики по тарифам ──
+let wbCards = null, wbCardsLoading = false, wbHasToken = null;
+function ensureWbCards() {
+  if (wbHasToken == null) api('/api/wb/status').then((r) => { wbHasToken = !!r.hasToken; if (activeTab === 'unit') renderUnit(); }).catch(() => { wbHasToken = false; });
+  if (wbCards != null || wbCardsLoading) return;
+  wbCardsLoading = true;
+  api('/api/wb/cards').then((r) => { wbCards = r.cards || []; wbCardsLoading = false; if (activeTab === 'unit') renderUnit(); })
+    .catch(() => { wbCards = []; wbCardsLoading = false; });
+}
+// Привязать карточку WB к артикулу: тянем логистику по nmID и складываем в a.unit.wb.
+async function wbLinkArticle(a, nmID, days) {
+  const d = days || (a.unit && a.unit.wb && a.unit.wb.storageDays) || 60;
+  try {
+    const r = await api(`/api/wb/logistics?nmID=${encodeURIComponent(nmID)}&days=${d}`);
+    if (!r.logistics || r.volumeL == null) { toast('У карточки нет габаритов', true); return; }
+    const card = (wbCards || []).find((c) => String(c.nmID) === String(nmID));
+    a.unit = a.unit || {};
+    a.unit.wb = {
+      nmID: +nmID, vendorCode: card ? card.vendorCode : '',
+      volumeL: r.volumeL, warehouse: r.warehouse, tariffDate: r.tariffDate, storageDays: d,
+      deliveryPerOrder: r.logistics.deliveryPerOrder,
+      returnLogistics: r.logistics.returnLogistics,
+      storageTotal: r.logistics.storageTotal,
+    };
+    dirty = true; unitPersist(); renderUnit();
+  } catch (e) { toast('Ошибка логистики WB: ' + e.message, true); }
+}
+
 // Параметры движка (доли/₽) из глобальных настроек + переопределений артикула.
 function unitPr(a) {
   const g = state.unit || {};
@@ -1593,6 +1621,13 @@ function unitPr(a) {
 function unitAnalyze(a) {
   const u = a.unit || {};
   const pr = unitPr(a);
+  // Логистика/хранение из WB-тарифов (если артикул привязан) перекрывают глобальные.
+  const wb = u.wb;
+  if (wb) {
+    if (wb.deliveryPerOrder != null) pr.logisticsPvz = wb.deliveryPerOrder;
+    if (wb.returnLogistics != null) pr.returnLogistics = wb.returnLogistics;
+    if (wb.storageTotal != null) pr.storage = wb.storageTotal;
+  }
   const drr = u.drrPhase === 'launch' ? pr.drr_launch : pr.drr_steady;
   const inp = {
     pr, drr, buyout: (a.buyoutPct || 40) / 100,
@@ -1608,6 +1643,8 @@ function renderUnit() {
   const root = document.getElementById('unit');
   const arts = articlesSorted();
   const g = state.unit || {};
+  ensureWbCards();
+  const wbDatalist = wbCards ? `<datalist id="wb-cards">${wbCards.map((c) => `<option value="${seEsc(c.vendorCode)}">${c.volumeL != null ? c.volumeL + ' л' : 'нет габаритов'} · nmID ${c.nmID}</option>`).join('')}</datalist>` : '';
   const gi = (k, label, suf = '%') => `<label class="u-gi"><span>${label}</span><input type="number" step="0.1" min="0" data-ug="${k}" value="${g[k] ?? ''}"><i>${suf}</i></label>`;
   const settings = `<details class="u-settings"${unitSettingsOpen ? ' open' : ''}>
     <summary>Параметры ВБ, налоги и расходы (применяются ко всем артикулам)</summary>
@@ -1662,7 +1699,7 @@ function renderUnit() {
       <tbody>${rows || '<tr><td colspan="9" class="mini">Нет артикулов — добавь во вкладке «Данные».</td></tr>'}</tbody>
     </table></div>
     <div class="mini">Расчёт мгновенный. Правки сохраняются кнопкой «Сохранить» в шапке. Клик по строке — полный каскад P&L и обратный расчёт.</div>
-  </div>`;
+  </div>${wbDatalist}`;
   bindUnit();
 }
 
@@ -1752,14 +1789,63 @@ function unitDetail(a, r) {
         <div class="u-card-h">Чувствительность по базовой цене</div>
         <table class="u-art"><thead><tr><th class="num">Базовая</th><th class="num">S</th><th class="num">Чистая</th><th class="num">Маржинальность</th></tr></thead><tbody>${sens}</tbody></table>
       </div>
+      ${unitWbCard(a)}
     </div>
+  </div>`;
+}
+
+// Карточка «Логистика ВБ» в детали артикула (привязка к nmID + расчёт по тарифам).
+function unitWbCard(a) {
+  const wb = a.unit && a.unit.wb;
+  const tokenWarn = wbHasToken === false ? '<div class="mini bad">Нет WB-токена в planner/data/.env (WB_API_TOKEN или Wildberries_API).</div>' : '';
+  const loading = wbCards == null ? '<div class="mini">Загружаю карточки WB…</div>' : '';
+  const linked = wb ? `
+    <div class="mini">nmID ${wb.nmID} · <b>${seEsc(wb.vendorCode || '')}</b> · объём <b>${wb.volumeL} л</b> · ${seEsc(wb.warehouse || '—')} · тариф ${wb.tariffDate || ''}</div>
+    <table class="u-art"><tbody>
+      <tr><td>Прямая логистика</td><td class="num">${uFmtR(wb.deliveryPerOrder)} <span class="mini">/заказ</span></td></tr>
+      <tr><td>Обратная логистика</td><td class="num">${uFmtR(wb.returnLogistics)} <span class="mini">/возврат</span></td></tr>
+      <tr><td>Хранение (${wb.storageDays || 60} дн)</td><td class="num">${uFmtR(wb.storageTotal)} <span class="mini">/ед</span></td></tr>
+    </tbody></table>
+    <div class="mini">→ в расчёт: на 1 выкуп = (прямая + обратная×(1−выкуп))/выкуп при выкупе ${a.buyoutPct || 40}%.</div>
+    <div class="u-toggle-row" style="margin-top:8px">
+      <label class="mini">Дней хранения <input class="u-in u-in-sm" type="number" min="1" data-wbdays="1" data-id="${a.id}" value="${wb.storageDays || 60}"></label>
+      <button class="btn u-toggle" data-wbrefresh="1" data-id="${a.id}">↻ обновить</button>
+      <button class="btn u-toggle" data-wbunlink="1" data-id="${a.id}">отвязать</button>
+    </div>` : '<div class="mini">Привяжи карточку WB — подтянем объём упаковки и рассчитаем логистику/хранение по тарифам склада Коледино.</div>';
+  return `<div class="u-card">
+    <div class="u-card-h">Логистика ВБ (тарифы, склад Коледино)</div>
+    ${tokenWarn}${loading}
+    <div class="u-target-in"><label>Артикул WB <input class="u-in" list="wb-cards" data-wblink="1" data-id="${a.id}" value="${wb ? seEsc(wb.vendorCode || '') : ''}" placeholder="vendorCode…"></label></div>
+    ${linked}
   </div>`;
 }
 
 function bindUnit() {
   const g = () => state.unit;
+  const findA = (el) => state.articles.find((x) => x.id === el.dataset.id);
   document.querySelectorAll('input[data-ug]').forEach((inp) => inp.addEventListener('change', (e) => {
     const k = e.target.dataset.ug; g()[k] = Math.max(0, +e.target.value || 0); dirty = true; unitPersist(); renderUnit();
+  }));
+  // привязка карточки WB (по vendorCode из datalist)
+  document.querySelectorAll('input[data-wblink]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const a = findA(e.target); if (!a) return;
+    const vc = e.target.value.trim();
+    if (!vc) { if (a.unit) a.unit.wb = null; dirty = true; unitPersist(); renderUnit(); return; }
+    const card = (wbCards || []).find((c) => c.vendorCode === vc);
+    if (!card) { toast('Карточка WB не найдена: ' + vc, true); return; }
+    wbLinkArticle(a, card.nmID);
+  }));
+  document.querySelectorAll('input[data-wbdays]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const a = findA(e.target); if (!a || !a.unit || !a.unit.wb) return;
+    wbLinkArticle(a, a.unit.wb.nmID, Math.max(1, +e.target.value || 60));
+  }));
+  document.querySelectorAll('button[data-wbrefresh]').forEach((b) => b.addEventListener('click', () => {
+    const a = findA(b); if (!a || !a.unit || !a.unit.wb) return;
+    wbLinkArticle(a, a.unit.wb.nmID, a.unit.wb.storageDays);
+  }));
+  document.querySelectorAll('button[data-wbunlink]').forEach((b) => b.addEventListener('click', () => {
+    const a = findA(b); if (!a) return;
+    if (a.unit) a.unit.wb = null; dirty = true; unitPersist(); renderUnit();
   }));
   const det = document.querySelector('.u-settings');
   if (det) det.addEventListener('toggle', () => { unitSettingsOpen = det.open; });
