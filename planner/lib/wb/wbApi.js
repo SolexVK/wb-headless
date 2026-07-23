@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WbClient } from './wbClient.js';
+import { dbAvailable, wbLoadCards, wbSaveCards, wbLoadTariffs, wbSaveTariffs } from '../db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_DIR = path.join(__dirname, '..', '..', 'data', 'wb-cache');
@@ -53,7 +54,10 @@ const CARDS_TTL = 24 * 3600 * 1000; // сутки
  * Пагинация курсором Content API. Кэш — сутки (или force).
  */
 export async function fetchCards({ force = false } = {}) {
-  if (!force) { const c = readCache('cards.json', CARDS_TTL); if (c) return c.data; }
+  if (!force) {
+    if (dbAvailable()) { const hit = wbLoadCards(CARDS_TTL); if (hit) return hit; }
+    else { const c = readCache('cards.json', CARDS_TTL); if (c) return c.data; }
+  }
   const c = client();
   const limit = 100;
   const out = [];
@@ -78,7 +82,7 @@ export async function fetchCards({ force = false } = {}) {
     if (cards.length < limit || cur.nmID == null) break;
     cursor = { limit, updatedAt: cur.updatedAt, nmID: cur.nmID };
   }
-  writeCache('cards.json', out);
+  if (dbAvailable()) wbSaveCards(out); else writeCache('cards.json', out);
   return out;
 }
 
@@ -88,7 +92,10 @@ const TARIFFS_TTL = 12 * 3600 * 1000; // полсуток
 export async function fetchBoxTariffs({ date, force = false } = {}) {
   const d = date || new Date().toISOString().slice(0, 10);
   const cacheName = `tariffs-box-${d}.json`;
-  if (!force) { const c = readCache(cacheName, TARIFFS_TTL); if (c) return c.data; }
+  if (!force) {
+    if (dbAvailable()) { const hit = wbLoadTariffs(d, TARIFFS_TTL); if (hit) return hit; }
+    else { const c = readCache(cacheName, TARIFFS_TTL); if (c) return c.data; }
+  }
   const c = client();
   const { data } = await c.get('common', '/api/v1/tariffs/box', {
     query: { date: d },
@@ -106,7 +113,7 @@ export async function fetchBoxTariffs({ date, force = false } = {}) {
     storageCoef: wbNum(w.boxStorageCoefExpr),     // % коэффициент хранения
   }));
   const result = { date: d, warehouseList: list };
-  writeCache(cacheName, result);
+  if (dbAvailable()) wbSaveTariffs(d, list); else writeCache(cacheName, result);
   return result;
 }
 

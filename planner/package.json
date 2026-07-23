@@ -5,7 +5,7 @@
   "private": true,
   "description": "Инструмент планирования производства (изолированные зависимости, без puppeteer)",
   "scripts": {
-    "start": "node server.js"
+    "start": "node --experimental-sqlite server.js"
   },
   "dependencies": {
     "express": "^4.19.2"

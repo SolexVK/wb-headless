@@ -20,4 +20,4 @@ if [ -z "$NODE_BIN" ]; then
   exit 1
 fi
 
-exec "$NODE_BIN" planner/server.js
+exec "$NODE_BIN" --experimental-sqlite planner/server.js
