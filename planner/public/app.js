@@ -1666,6 +1666,7 @@ function renderUnit() {
     const net = r.unit ? r.unit.net : null;
     const cls = marg == null ? '' : marg < 0 ? 'bad' : marg >= (g.mMin || 25) / 100 ? 'good' : 'warn';
     const cor = r.corridor.loS != null ? `${uFmtR(r.corridor.loS)}–${uFmtR(r.corridor.hiS)}` : '—';
+    const sVal = u.basePrice != null ? Math.round(u.basePrice * (1 - (u.sellerDiscount || 0) / 100)) : '';
     const open = unitExpanded.has(a.id);
     const main = `<tr class="u-row${open ? ' open' : ''}" data-uexp="${a.id}">
       <td class="u-name">${open ? '▾' : '▸'} ${a.id} — ${seEsc(a.name)}</td>
@@ -1673,13 +1674,19 @@ function renderUnit() {
       <td class="num"><input class="u-in" type="number" min="0" step="1" data-uf="logisticsToWb" data-id="${a.id}" value="${u.logisticsToWb || ''}" placeholder="0"></td>
       <td class="num"><input class="u-in" type="number" min="0" step="1" data-uf="basePrice" data-id="${a.id}" value="${u.basePrice ?? ''}" placeholder="—"></td>
       <td class="num"><input class="u-in u-in-sm" type="number" min="0" max="99" step="1" data-uf="sellerDiscount" data-id="${a.id}" value="${u.sellerDiscount || ''}" placeholder="0"></td>
+      <td class="num"><input class="u-in" type="number" min="0" step="1" data-uf="priceS" data-id="${a.id}" value="${sVal}" placeholder="—" title="Цена после скидки. Правка меняет размер скидки (базовая — статична)."></td>
       <td class="num ${cls}">${uFmtP(marg)}</td>
       <td class="num ${net != null && net < 0 ? 'bad' : ''}">${uFmtR(net)}</td>
       <td class="num">${cor}</td>
       <td class="num">${uFmtR(r.breakeven.S)}</td>
     </tr>`;
-    return main + (open ? `<tr class="u-detail-row"><td colspan="9">${unitDetail(a, r)}</td></tr>` : '');
+    return main;
   }).join('');
+  // Деталь раскрытых артикулов — ОТДЕЛЬНЫМИ блоками под таблицей (полная ширина →
+  // карточки корректно стекаются на мобильном, таблица скроллится независимо).
+  const details = arts.filter((a) => unitExpanded.has(a.id)).map((a) => `<div class="u-detail-block">
+      <div class="u-detail-head"><b>${a.id} — ${seEsc(a.name)}</b><button class="btn u-toggle" data-uclose="${a.id}">свернуть ▲</button></div>
+      ${unitDetail(a, unitAnalyze(a))}</div>`).join('');
 
   root.innerHTML = `<div class="panel u-panel">
     <div class="subhead"><h3>Юнит-экономика по артикулам</h3></div>
@@ -1691,14 +1698,16 @@ function renderUnit() {
         <th class="num" title="Логистика до склада ВБ (first-mile), ₽/ед — суммируется с себестоимостью">Лог.→ВБ</th>
         <th class="num" title="Базовая цена до скидки продавца. Пусто — считаем только коридор/безубыток.">Базовая цена</th>
         <th class="num" title="Скидка продавца, %">Скидка</th>
+        <th class="num" title="Цена после скидки продавца (S). Правка меняет размер скидки; базовая цена статична.">Цена со скидкой (S)</th>
         <th class="num" title="Маржинальность = валовая прибыль / цена после скидки (S)">Маржинальность</th>
         <th class="num" title="Чистая прибыль на единицу, ₽">Чистая/ед</th>
         <th class="num" title="Цена после скидки (S) под целевую валовую маржинальность mMin–mMax">Коридор цены до СПП (S)</th>
         <th class="num" title="Цена после скидки (S), при которой прибыль = 0">Безубыток (S)</th>
       </tr></thead>
-      <tbody>${rows || '<tr><td colspan="9" class="mini">Нет артикулов — добавь во вкладке «Данные».</td></tr>'}</tbody>
+      <tbody>${rows || '<tr><td colspan="10" class="mini">Нет артикулов — добавь во вкладке «Данные».</td></tr>'}</tbody>
     </table></div>
     <div class="mini">Расчёт мгновенный. Правки сохраняются кнопкой «Сохранить» в шапке. Клик по строке — полный каскад P&L и обратный расчёт.</div>
+    ${details}
   </div>${wbDatalist}`;
   bindUnit();
 }
@@ -1709,7 +1718,7 @@ function unitDetail(a, r) {
   const pr = r.pr;
   const un = r.unit;
   const drrPct = uFmtP(un ? un.drr : (u.drrPhase === 'launch' ? pr.drr_launch : pr.drr_steady));
-  const line = (name, val, extra = '', cls = '') => `<tr><td>${name}</td><td class="num ${cls}">${val}</td><td class="mini">${extra}</td></tr>`;
+  const line = (name, val, extra = '', cls = '') => `<tr><td>${name}${extra ? ` <span class="u-ex">${extra}</span>` : ''}</td><td class="num ${cls}">${val}</td></tr>`;
   const neg = (v) => (v ? '−' + uFmtR(v) : uFmtR(0));
 
   let waterfall = '<div class="mini">Укажи базовую цену в строке — появится полный каскад.</div>';
@@ -1722,7 +1731,7 @@ function unitDetail(a, r) {
       ${line('= Цена после СПП', uFmtR(un.priceAfterSpp))}
       ${line('− WB Кошелёк', uFmtP(pr.wallet))}
       ${line('= Конечная цена покупателя (Pб)', '<b>' + uFmtR(un.buyerPrice) + '</b>', 'база эквайринга/налога')}
-      <tr class="u-sep"><td colspan="3">Услуги ВБ (на 1 выкуп)</td></tr>
+      <tr class="u-sep"><td colspan="2">Услуги ВБ (на 1 выкуп)</td></tr>
       ${line('Комиссия ВБ', neg(un.commission), uFmtP(pr.commission) + ' от S', 'bad')}
       ${line('Эквайринг', neg(un.acquiring), uFmtP(pr.acquiring) + ' от Pб', 'bad')}
       ${line('Реклама (ДРР)', neg(un.ad), drrPct + ' от Pб', 'bad')}
@@ -1731,13 +1740,13 @@ function unitDetail(a, r) {
       ${line('Платная приёмка', neg(un.acceptance), '×' + (u.acceptanceCoef == null ? 1 : u.acceptanceCoef), 'bad')}
       ${line('Итого услуги ВБ', neg(un.wbServices), '', 'bad')}
       ${line('= Перечисления на р/с', '<b>' + uFmtR(un.payout) + '</b>')}
-      <tr class="u-sep"><td colspan="3">Затраты и налоги</td></tr>
+      <tr class="u-sep"><td colspan="2">Затраты и налоги</td></tr>
       ${line('Полная себестоимость', neg(un.fullCost), 'себест.+лог.до ВБ', 'bad')}
       ${line('Налог', neg(un.tax), uFmtP(pr.tax) + ' от Pб', 'bad')}
       ${line('Доп. расходы', neg(un.extra), uFmtP(pr.extra) + ' от S', 'bad')}
-      <tr class="u-tot"><td>Валовая прибыль</td><td class="num ${un.gross < 0 ? 'bad' : ''}">${uFmtR(un.gross)}</td><td></td></tr>
-      ${line('Опер. расходы', neg(un.opex), uFmtP(pr.opexShare) + ' валовой', 'bad')}
-      <tr class="u-tot"><td>ЧИСТАЯ прибыль</td><td class="num ${un.net < 0 ? 'bad' : 'good'}"><b>${uFmtR(un.net)}</b></td><td></td></tr>
+      <tr class="u-tot"><td>Валовая прибыль</td><td class="num ${un.gross < 0 ? 'bad' : ''}">${uFmtR(un.gross)}</td></tr>
+      ${line('Опер. расходы', uFmtR(-un.opex), uFmtP(pr.opexShare) + ' валовой', un.opex >= 0 ? 'bad' : '')}
+      <tr class="u-tot"><td>ЧИСТАЯ прибыль</td><td class="num ${un.net < 0 ? 'bad' : 'good'}"><b>${uFmtR(un.net)}</b></td></tr>
       ${line('Маржинальность (валовая /S)', '<b>' + uFmtP(un.marginGross) + '</b>')}
       ${line('Чистая маржинальность (/S)', uFmtP(un.marginNet), 'для справки')}
       ${line('Рентабельность (чистая /себест.)', uFmtP(un.roi))}
@@ -1855,6 +1864,9 @@ function bindUnit() {
     if (unitExpanded.has(id)) unitExpanded.delete(id); else unitExpanded.add(id);
     renderUnit();
   }));
+  document.querySelectorAll('button[data-uclose]').forEach((b) => b.addEventListener('click', () => {
+    unitExpanded.delete(b.dataset.uclose); renderUnit();
+  }));
   document.querySelectorAll('input.u-in[data-uf]').forEach((inp) => inp.addEventListener('change', (e) => {
     const a = state.articles.find((x) => x.id === e.target.dataset.id); if (!a) return;
     a.unit = a.unit || {}; a.unit.target = a.unit.target || { mode: 'margin', margin: 25, profit: null };
@@ -1863,7 +1875,13 @@ function bindUnit() {
     if (f === 'cost') a.unit.cost = nv || 0;
     else if (f === 'logisticsToWb') a.unit.logisticsToWb = nv || 0;
     else if (f === 'basePrice') a.unit.basePrice = nv;
-    else if (f === 'sellerDiscount') a.unit.sellerDiscount = nv || 0;
+    else if (f === 'sellerDiscount') a.unit.sellerDiscount = Math.min(99, nv || 0);
+    else if (f === 'priceS') {
+      // Правка цены после скидки (S): базовая статична → пересчитываем размер скидки.
+      const S = nv || 0; const base = a.unit.basePrice;
+      if (base && base > 0) a.unit.sellerDiscount = Math.max(0, Math.min(99, Math.round((1 - S / base) * 100)));
+      else { a.unit.basePrice = S || null; a.unit.sellerDiscount = 0; } // нет базовой — S становится базовой
+    }
     else if (f === 'acceptanceCoef') a.unit.acceptanceCoef = nv == null ? 1 : nv;
     else if (f === 'target.margin') a.unit.target.margin = nv == null ? 0 : nv;
     else if (f === 'target.profit') a.unit.target.profit = nv;

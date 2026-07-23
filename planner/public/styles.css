@@ -431,3 +431,35 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .u-tablewrap { overflow: auto; max-height: calc(100vh - 230px); border: 1px solid var(--line); border-radius: 8px; }
 .u-table thead th { position: sticky; top: 0; z-index: 5; background: var(--panel-2); box-shadow: 0 1px 0 var(--line); }
 .u-table thead th:first-child { position: sticky; left: 0; z-index: 6; }
+
+/* Юнит-экономика: адаптивная деталь (без переполнения, удобно на мобильном) */
+.u-detail-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.u-detail-grid .u-card { min-width: 0; overflow-wrap: anywhere; }
+.u-card-wide { grid-column: 1 / -1; } /* каскад P&L на всю ширину строки грида */
+.u-art { table-layout: auto; }
+.u-art td:first-child { white-space: normal; word-break: normal; overflow-wrap: anywhere; }
+.u-art td.num { white-space: nowrap; }
+.u-ex { color: var(--muted); font-size: 11px; font-weight: 400; }
+.u-rev { overflow-wrap: anywhere; }
+.u-target-in label { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .u-detail { padding: 8px 2px 12px; }
+  .u-card { padding: 10px 10px; }
+  .u-grid { grid-template-columns: 1fr 1fr; }
+  .u-gi { font-size: 11px; }
+  .u-gi input { width: 56px; }
+  .view { padding: 10px; }
+}
+
+/* Юнит-экономика: блок детали под таблицей (полная ширина, адаптивно) */
+.u-detail-block { margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); padding: 4px 12px 12px; }
+.u-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 2px 4px; font-size: 14px; }
+.u-detail-block .u-detail { padding: 6px 0 6px; }
+.u-detail-block .u-card { background: var(--panel); }
+
+/* Мобильный: навигация переносится, не тянет страницу вширь */
+@media (max-width: 720px) {
+  .topbar { flex-wrap: wrap; gap: 8px 12px; }
+  .tabs { flex-wrap: wrap; }
+  .actions { width: 100%; flex-wrap: wrap; margin-left: 0; }
+}
