@@ -95,5 +95,30 @@
   <button id="scroll-top" class="scroll-top" title="Наверх" aria-label="Прокрутить наверх">↑</button>
   <script src="vendor/xlsx.full.min.js"></script>
   <script type="module" src="app.js"></script>
+  <!-- Пользовательский чип (имя, админка, выход) — только при включённой авторизации. -->
+  <script>
+    (function () {
+      fetch('/api/me', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d || !d.authEnabled || !d.user) return;
+        var actions = document.querySelector('.topbar .actions');
+        if (!actions) return;
+        var u = d.user;
+        var wrap = document.createElement('span');
+        wrap.className = 'user-chip';
+        wrap.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:6px;font-size:13px;white-space:nowrap';
+        var who = (u.name || ('@' + (u.username || u.telegramId)));
+        wrap.innerHTML =
+          (u.photoUrl ? '<img src="' + u.photoUrl + '" alt="" style="width:22px;height:22px;border-radius:50%">' : '👤') +
+          '<span title="Telegram-ID: ' + u.telegramId + '">' + who.replace(/[<>&]/g, '') + '</span>' +
+          (u.isAdmin ? ' <a href="/admin" class="btn btn-icon" title="Управление доступом" style="text-decoration:none">🔑</a>' : '') +
+          ' <button id="btn-logout" class="btn btn-icon" title="Выйти">⎋</button>';
+        actions.appendChild(wrap);
+        var lo = document.getElementById('btn-logout');
+        if (lo) lo.addEventListener('click', function () {
+          fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }).then(function () { location.replace('/login'); });
+        });
+      }).catch(function () {});
+    })();
+  </script>
 </body>
 </html>

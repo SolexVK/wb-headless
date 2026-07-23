@@ -51,6 +51,14 @@ function migrate(db) {
       id INTEGER PRIMARY KEY CHECK (id = 1),
       json TEXT, updatedAt TEXT
     );
+    CREATE TABLE IF NOT EXISTS users (
+      telegramId INTEGER PRIMARY KEY,
+      username TEXT, name TEXT, photoUrl TEXT,
+      status TEXT DEFAULT 'active',   -- active | blocked
+      isAdmin INTEGER DEFAULT 0,
+      grantedAt TEXT, expiresAt TEXT, -- срок подписки (NULL = бессрочно)
+      lastLoginAt TEXT, activeSession TEXT, note TEXT
+    );
   `);
 }
 
@@ -175,6 +183,54 @@ export function planDelete(articleId) {
   const info = db.prepare('DELETE FROM season_plans WHERE articleId = ?').run(String(articleId));
   return info.changes > 0;
 }
+// ── Пользователи (allowlist Telegram-аккаунтов) ──
+export function userGet(telegramId) {
+  const db = getDb(); if (!db) return null;
+  return db.prepare('SELECT * FROM users WHERE telegramId = ?').get(Number(telegramId)) || null;
+}
+export function userList() {
+  const db = getDb(); if (!db) return [];
+  return db.prepare('SELECT * FROM users ORDER BY (isAdmin=1) DESC, grantedAt DESC').all();
+}
+/** Создать/обновить пользователя из данных Telegram (при выдаче доступа или входе). */
+export function userUpsert(u) {
+  const db = getDb(); if (!db) return false;
+  const now = new Date().toISOString();
+  db.prepare(`INSERT INTO users(telegramId,username,name,photoUrl,status,isAdmin,grantedAt,expiresAt,note)
+    VALUES(?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(telegramId) DO UPDATE SET
+      username=COALESCE(excluded.username,users.username),
+      name=COALESCE(excluded.name,users.name),
+      photoUrl=COALESCE(excluded.photoUrl,users.photoUrl),
+      status=COALESCE(excluded.status,users.status),
+      isAdmin=COALESCE(excluded.isAdmin,users.isAdmin),
+      expiresAt=excluded.expiresAt, note=COALESCE(excluded.note,users.note)`)
+    .run(Number(u.telegramId), u.username ?? null, u.name ?? null, u.photoUrl ?? null,
+      u.status ?? 'active', u.isAdmin ? 1 : 0, u.grantedAt ?? now, u.expiresAt ?? null, u.note ?? null);
+  return true;
+}
+export function userSetStatus(telegramId, status) {
+  const db = getDb(); if (!db) return false;
+  db.prepare('UPDATE users SET status=? WHERE telegramId=?').run(status, Number(telegramId));
+  return true;
+}
+export function userSetExpiry(telegramId, expiresAt) {
+  const db = getDb(); if (!db) return false;
+  db.prepare('UPDATE users SET expiresAt=? WHERE telegramId=?').run(expiresAt || null, Number(telegramId));
+  return true;
+}
+export function userDelete(telegramId) {
+  const db = getDb(); if (!db) return false;
+  return db.prepare('DELETE FROM users WHERE telegramId=?').run(Number(telegramId)).changes > 0;
+}
+/** Отметить вход: обновить профиль, lastLoginAt и активную сессию (одна на аккаунт). */
+export function userMarkLogin(telegramId, patch = {}, sessionId = null) {
+  const db = getDb(); if (!db) return false;
+  db.prepare('UPDATE users SET username=COALESCE(?,username), name=COALESCE(?,name), photoUrl=COALESCE(?,photoUrl), lastLoginAt=?, activeSession=? WHERE telegramId=?')
+    .run(patch.username ?? null, patch.name ?? null, patch.photoUrl ?? null, new Date().toISOString(), sessionId, Number(telegramId));
+  return true;
+}
+
 // ── App-state (всё состояние приложения единым JSON-блобом) ──
 export function stateLoadJson() {
   const db = getDb(); if (!db) return null;

@@ -12,6 +12,7 @@ import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategorie
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
 import { dbAvailable, stateLoadJson, stateSaveJson } from './lib/db.js';
+import { installAuth } from './lib/authMiddleware.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
@@ -109,10 +110,16 @@ function saveState(state) {
 }
 
 const app = express();
+app.set('trust proxy', true); // за Tailscale Funnel: доверяем X-Forwarded-Proto/For
 
-// Опциональная защита паролем (HTTP Basic).
-// Включается, если задан PLANNER_PASSWORD. Логин по умолчанию — 'admin'
-// (или PLANNER_USER). Без пароля сервер открыт — только для локальной сети!
+app.use(express.json({ limit: '4mb' }));
+
+// ── Авторизация ──
+// Основной механизм — Telegram-аккаунт с allowlist (planner/lib/authMiddleware.js),
+// включается при заданном TELEGRAM_BOT_TOKEN. Устанавливает guard + роуты /auth/*,
+// /api/me, /api/admin/*. Пока Telegram не настроен — падаем на легаси HTTP Basic
+// (PLANNER_PASSWORD), чтобы сервис в сети не остался без защиты во время перехода.
+const auth = installAuth(app);
 const AUTH_USER = process.env.PLANNER_USER || 'admin';
 const AUTH_PASS = process.env.PLANNER_PASSWORD || '';
 function timingSafeEqual(a, b) {
@@ -121,7 +128,7 @@ function timingSafeEqual(a, b) {
   if (ab.length !== bb.length) return false;
   return crypto.timingSafeEqual(ab, bb);
 }
-if (AUTH_PASS) {
+if (!auth.enabled && AUTH_PASS) {
   app.use((req, res, next) => {
     const hdr = req.headers.authorization || '';
     const m = hdr.match(/^Basic\s+(.+)$/i);
@@ -132,12 +139,13 @@ if (AUTH_PASS) {
     res.set('WWW-Authenticate', 'Basic realm="Planner"');
     return res.status(401).send('Authorization required');
   });
-  console.log('[planner] защита паролем включена (пользователь: ' + AUTH_USER + ')');
-} else {
-  console.log('[planner] ВНИМАНИЕ: пароль не задан — доступ открыт. Используйте только в локальной сети.');
+  console.log('[planner] легаси-защита паролем включена (пользователь: ' + AUTH_USER + ')');
+} else if (!auth.enabled) {
+  console.log('[planner] ВНИМАНИЕ: авторизация не задана — доступ открыт. Используйте только в локальной сети.');
 }
-
-app.use(express.json({ limit: '4mb' }));
+// Красивые пути без .html: /login (публичный) и /admin (за guard, req.user уже есть).
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 // Анти-кэш для кода интерфейса: html/js/css отдаём с обязательной ревалидацией,
 // иначе браузер держит старые app.js/styles.css после обновления (обновления «не видно»).
 const NO_CACHE_RE = /\.(?:html|js|css)$/i;

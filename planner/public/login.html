@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Вход — Производственный план</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%91%94%3C/text%3E%3C/svg%3E" />
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #0f1115; color: #e6e6e6;
+      display: flex; min-height: 100vh; align-items: center; justify-content: center; margin: 0; padding: 16px; }
+    .card { max-width: 400px; width: 100%; padding: 32px 28px; background: #181b22; border: 1px solid #262a33;
+      border-radius: 16px; text-align: center; box-shadow: 0 8px 40px rgba(0,0,0,.4); }
+    .logo { font-size: 44px; margin-bottom: 8px; }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    p.sub { color: #9aa4b2; margin: 0 0 24px; font-size: 14px; line-height: 1.5; }
+    #widget { min-height: 46px; display: flex; justify-content: center; }
+    .err { background: #3a1d22; border: 1px solid #5a2a33; color: #ffb4b4; padding: 10px 14px;
+      border-radius: 10px; margin-bottom: 18px; font-size: 14px; }
+    .hint { color: #6b7280; font-size: 12px; margin-top: 22px; line-height: 1.5; }
+    .spin { color: #6b7280; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">🧵</div>
+    <h1>Производственный план</h1>
+    <p class="sub">Вход по Telegram-аккаунту. Доступ выдаётся администратором.</p>
+    <div id="err" class="err" style="display:none"></div>
+    <div id="widget"><span class="spin">Загрузка…</span></div>
+    <div class="hint" id="hint"></div>
+  </div>
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var errCode = params.get('err');
+      var errMsg = {
+        bad_signature: 'Не удалось проверить подпись Telegram. Попробуйте ещё раз.',
+        auth_required: 'Требуется вход.',
+      };
+      if (errCode) {
+        var e = document.getElementById('err');
+        e.textContent = errMsg[errCode] || 'Ошибка входа.';
+        e.style.display = 'block';
+      }
+      // Уже вошли? — сразу на главную.
+      fetch('/api/me', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
+        if (d && d.user) { location.replace('/'); return; }
+        if (!d || !d.authEnabled) {
+          // Авторизация выключена — сервис открыт.
+          document.getElementById('widget').innerHTML = '<a href="/" style="color:#6ea8fe">Войти без авторизации →</a>';
+          return;
+        }
+        var bot = d.botUsername;
+        var w = document.getElementById('widget');
+        if (!bot) {
+          w.innerHTML = '<span class="spin">Бот не настроен (TELEGRAM_BOT_USERNAME).</span>';
+          return;
+        }
+        w.innerHTML = '';
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://telegram.org/js/telegram-widget.js?22';
+        s.setAttribute('data-telegram-login', bot);
+        s.setAttribute('data-size', 'large');
+        s.setAttribute('data-radius', '10');
+        s.setAttribute('data-auth-url', location.origin + '/auth/telegram');
+        s.setAttribute('data-request-access', 'write');
+        s.onerror = function () { w.innerHTML = '<span class="spin">Не удалось загрузить виджет Telegram.</span>'; };
+        w.appendChild(s);
+        document.getElementById('hint').innerHTML =
+          'Нет доступа? После входа вы увидите свой Telegram-ID — передайте его администратору.';
+      }).catch(function () {
+        document.getElementById('widget').innerHTML = '<span class="spin">Сервер недоступен.</span>';
+      });
+    })();
+  </script>
+</body>
+</html>

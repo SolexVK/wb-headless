@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Доступ — админ-панель</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%91%3C/text%3E%3C/svg%3E" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: #0f1115; color: #e6e6e6; margin: 0; padding: 24px; }
+    .wrap { max-width: 980px; margin: 0 auto; }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+    h1 { font-size: 22px; margin: 0; }
+    a.back { color: #6ea8fe; text-decoration: none; font-size: 14px; }
+    .grant { background: #181b22; border: 1px solid #262a33; border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+    .grant h2 { font-size: 15px; margin: 0 0 12px; color: #9aa4b2; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    label { display: flex; flex-direction: column; font-size: 12px; color: #9aa4b2; gap: 4px; }
+    input, select { background: #0f1115; border: 1px solid #2a2f3a; color: #e6e6e6; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+    input[type=text], input[type=number] { min-width: 130px; }
+    button { background: #2563eb; color: #fff; border: 0; border-radius: 8px; padding: 9px 16px; font-size: 14px; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    button.ghost { background: #262a33; }
+    button.danger { background: #7f1d1d; }
+    button.warn { background: #92610e; }
+    table { width: 100%; border-collapse: collapse; background: #181b22; border-radius: 12px; overflow: hidden; }
+    th, td { padding: 10px 12px; text-align: left; font-size: 14px; border-bottom: 1px solid #23272f; }
+    th { color: #9aa4b2; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+    tr:last-child td { border-bottom: 0; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .b-active { background: #16351f; color: #6ee7a0; }
+    .b-blocked { background: #3a1d22; color: #ffb4b4; }
+    .b-expired { background: #3a2f1d; color: #ffd166; }
+    .b-admin { background: #1d2f3a; color: #7cc4ff; margin-left: 6px; }
+    .muted { color: #6b7280; font-size: 12px; }
+    .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+    .acts button { padding: 5px 10px; font-size: 12px; }
+    #msg { margin: 12px 0; font-size: 14px; }
+    .err { color: #ffb4b4; }
+    .ok { color: #6ee7a0; }
+    @media (max-width: 640px) { table, thead, tbody, th, td, tr { display: block; } thead { display: none; }
+      tr { border: 1px solid #23272f; border-radius: 10px; margin-bottom: 10px; padding: 6px; }
+      td { border: 0; padding: 6px 8px; } td::before { content: attr(data-l); color: #6b7280; font-size: 11px; display: block; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>🔑 Управление доступом</h1>
+      <a class="back" href="/">← В планировщик</a>
+    </header>
+
+    <div class="grant">
+      <h2>Выдать доступ по Telegram-ID</h2>
+      <div class="row">
+        <label>Telegram-ID<input id="g-id" type="number" placeholder="напр. 55501234" /></label>
+        <label>Имя (заметка)<input id="g-name" type="text" placeholder="необязательно" /></label>
+        <label>Подписка до<input id="g-exp" type="date" /></label>
+        <label>Админ<select id="g-admin"><option value="0">нет</option><option value="1">да</option></select></label>
+        <button id="g-btn">Выдать доступ</button>
+      </div>
+      <p class="muted">Пользователь узнаёт свой Telegram-ID, попытавшись войти: ему покажут ID для передачи вам.
+        «Подписка до» пусто = бессрочно.</p>
+    </div>
+
+    <div id="msg"></div>
+    <table id="tbl">
+      <thead><tr><th>Пользователь</th><th>Telegram-ID</th><th>Статус</th><th>Подписка до</th><th>Последний вход</th><th>Действия</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="6" class="muted">Загрузка…</td></tr></tbody>
+    </table>
+  </div>
+
+  <script>
+    var OWNER = 0;
+    function msg(text, cls) { var m = document.getElementById('msg'); m.textContent = text || ''; m.className = cls || ''; if (text) setTimeout(function(){ if(m.textContent===text) m.textContent=''; }, 4000); }
+    function api(url, opts) {
+      return fetch(url, Object.assign({ credentials: 'same-origin', headers: { 'Content-Type': 'application/json' } }, opts || {}))
+        .then(function (r) { return r.json().then(function (d) { if (!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status)); return d; }); });
+    }
+    function fmtDate(s) { if (!s) return '—'; try { return new Date(s).toLocaleDateString('ru-RU'); } catch (e) { return s; } }
+    function fmtDateTime(s) { if (!s) return '—'; try { return new Date(s).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }); } catch (e) { return s; } }
+    function statusOf(u) {
+      if (u.status === 'blocked') return { t: 'заблокирован', c: 'b-blocked' };
+      if (u.expiresAt && Date.now() > Date.parse(u.expiresAt)) return { t: 'просрочен', c: 'b-expired' };
+      return { t: 'активен', c: 'b-active' };
+    }
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+
+    function render(users) {
+      var rows = document.getElementById('rows');
+      if (!users.length) { rows.innerHTML = '<tr><td colspan="6" class="muted">Пока никого. Выдайте доступ выше.</td></tr>'; return; }
+      rows.innerHTML = users.map(function (u) {
+        var st = statusOf(u);
+        var isOwner = u.telegramId === OWNER;
+        var name = esc(u.name || u.username || '—') + (u.username ? ' <span class="muted">@' + esc(u.username) + '</span>' : '');
+        var adminBadge = u.isAdmin ? '<span class="badge b-admin">админ</span>' : '';
+        var acts = [];
+        if (u.status === 'blocked') acts.push('<button class="ghost" data-act="unblock" data-id="' + u.telegramId + '">Разблокировать</button>');
+        else acts.push('<button class="warn" data-act="block" data-id="' + u.telegramId + '"' + (isOwner ? ' disabled' : '') + '>Заблокировать</button>');
+        acts.push('<button class="ghost" data-act="expiry" data-id="' + u.telegramId + '">Срок…</button>');
+        if (!isOwner) acts.push('<button class="danger" data-act="del" data-id="' + u.telegramId + '">Удалить</button>');
+        return '<tr>' +
+          '<td data-l="Пользователь">' + name + ' ' + adminBadge + (isOwner ? '<span class="badge b-admin">владелец</span>' : '') + '</td>' +
+          '<td data-l="ID">' + u.telegramId + '</td>' +
+          '<td data-l="Статус"><span class="badge ' + st.c + '">' + st.t + '</span></td>' +
+          '<td data-l="Подписка до">' + fmtDate(u.expiresAt) + '</td>' +
+          '<td data-l="Вход">' + fmtDateTime(u.lastLoginAt) + '</td>' +
+          '<td data-l="Действия"><div class="acts">' + acts.join('') + '</div></td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    function load() {
+      api('/api/admin/users').then(function (d) { OWNER = d.ownerId || 0; render(d.users || []); })
+        .catch(function (e) {
+          if (/admin_only/.test(e.message)) document.getElementById('rows').innerHTML = '<tr><td colspan="6" class="err">Доступ только для администратора.</td></tr>';
+          else if (/auth_required/.test(e.message)) location.replace('/login');
+          else document.getElementById('rows').innerHTML = '<tr><td colspan="6" class="err">' + esc(e.message) + '</td></tr>';
+        });
+    }
+
+    document.getElementById('g-btn').addEventListener('click', function () {
+      var id = Number(document.getElementById('g-id').value);
+      if (!id) { msg('Укажите числовой Telegram-ID', 'err'); return; }
+      var exp = document.getElementById('g-exp').value;
+      api('/api/admin/users', { method: 'POST', body: JSON.stringify({
+        telegramId: id, status: 'active',
+        isAdmin: document.getElementById('g-admin').value === '1',
+        expiresAt: exp ? new Date(exp + 'T23:59:59').toISOString() : null,
+        note: document.getElementById('g-name').value || null,
+        name: document.getElementById('g-name').value || null,
+      }) }).then(function () {
+        msg('Доступ выдан', 'ok');
+        document.getElementById('g-id').value = ''; document.getElementById('g-name').value = ''; document.getElementById('g-exp').value = '';
+        load();
+      }).catch(function (e) { msg(e.message, 'err'); });
+    });
+
+    document.getElementById('rows').addEventListener('click', function (ev) {
+      var btn = ev.target.closest('button[data-act]'); if (!btn) return;
+      var id = btn.getAttribute('data-id'), act = btn.getAttribute('data-act');
+      if (act === 'block' || act === 'unblock') {
+        api('/api/admin/users/' + id + '/status', { method: 'POST', body: JSON.stringify({ status: act === 'unblock' ? 'active' : 'blocked' }) })
+          .then(function () { msg(act === 'unblock' ? 'Разблокирован' : 'Заблокирован', 'ok'); load(); }).catch(function (e) { msg(e.message, 'err'); });
+      } else if (act === 'del') {
+        if (!confirm('Удалить доступ навсегда?')) return;
+        api('/api/admin/users/' + id, { method: 'DELETE' }).then(function () { msg('Удалён', 'ok'); load(); }).catch(function (e) { msg(e.message, 'err'); });
+      } else if (act === 'expiry') {
+        var v = prompt('Подписка до (ГГГГ-ММ-ДД), пусто = бессрочно:');
+        if (v === null) return;
+        var iso = v.trim() ? new Date(v.trim() + 'T23:59:59').toISOString() : null;
+        api('/api/admin/users/' + id + '/expiry', { method: 'POST', body: JSON.stringify({ expiresAt: iso }) })
+          .then(function () { msg('Срок обновлён', 'ok'); load(); }).catch(function (e) { msg(e.message, 'err'); });
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>
