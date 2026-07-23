@@ -158,7 +158,7 @@ export function analyze(inp) {
   const sensitivity = [-0.2, -0.1, 0, 0.1, 0.2].map((d) => {
     const bp = baseB * (1 + d);
     const u = unitBreakdown(bp * (1 - sd), pr, inp);
-    return { delta: d, base: bp, S: u.S, buyerPrice: u.buyerPrice, net: u.net, margin: u.margin };
+    return { delta: d, base: bp, S: u.S, buyerPrice: u.buyerPrice, net: u.net, margin: u.marginGross };
   });
 
   return { input: { basePrice: inp.basePrice != null ? num(inp.basePrice) : null, sellerDiscount: sd }, pr, unit, corridor, breakeven, reverse, sensitivity };
