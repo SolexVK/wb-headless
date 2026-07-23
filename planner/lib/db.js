@@ -47,6 +47,10 @@ function migrate(db) {
       cfg TEXT, report TEXT, savedAt TEXT,
       label TEXT, generatedAt TEXT, totalUnits INTEGER
     );
+    CREATE TABLE IF NOT EXISTS app_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      json TEXT, updatedAt TEXT
+    );
   `);
 }
 
@@ -171,6 +175,19 @@ export function planDelete(articleId) {
   const info = db.prepare('DELETE FROM season_plans WHERE articleId = ?').run(String(articleId));
   return info.changes > 0;
 }
+// ── App-state (всё состояние приложения единым JSON-блобом) ──
+export function stateLoadJson() {
+  const db = getDb(); if (!db) return null;
+  const r = db.prepare('SELECT json FROM app_state WHERE id = 1').get();
+  return r ? r.json : null;
+}
+export function stateSaveJson(json) {
+  const db = getDb(); if (!db) return false;
+  db.prepare('INSERT INTO app_state(id,json,updatedAt) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET json=excluded.json, updatedAt=excluded.updatedAt')
+    .run(String(json), new Date().toISOString());
+  return true;
+}
+
 // Полные записи (для построения индекса — как в JSON-версии listPlans).
 export function planList() {
   const db = getDb(); if (!db) return null;

@@ -11,6 +11,7 @@ import { buildSchedule } from './lib/scheduler.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
+import { dbAvailable, stateLoadJson, stateSaveJson } from './lib/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
@@ -82,6 +83,15 @@ function migrateSamples(state) {
 function loadState() {
   ensureData();
   try {
+    if (dbAvailable()) {
+      let raw = stateLoadJson();
+      if (raw == null && fs.existsSync(STATE_FILE)) { // одноразовый импорт файла state.json в БД
+        try { raw = JSON.stringify(normalizeState(JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')))); stateSaveJson(raw); console.log('[planner] состояние импортировано из state.json в БД'); } catch { /* skip */ }
+      }
+      const st = normalizeState(raw ? JSON.parse(raw) : defaultState());
+      if (migrateSamples(st)) stateSaveJson(JSON.stringify(st));
+      return st;
+    }
     const st = normalizeState(JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')));
     if (migrateSamples(st)) fs.writeFileSync(STATE_FILE, JSON.stringify(st, null, 2)); // одноразовый перенос data:→файл
     return st;
@@ -93,7 +103,8 @@ function saveState(state) {
   ensureData();
   const norm = normalizeState(state);
   migrateSamples(norm); // если клиент прислал встроенную картинку — тоже вынесем на диск
-  fs.writeFileSync(STATE_FILE, JSON.stringify(norm, null, 2));
+  if (dbAvailable()) stateSaveJson(JSON.stringify(norm));
+  else fs.writeFileSync(STATE_FILE, JSON.stringify(norm, null, 2));
   return norm;
 }
 
