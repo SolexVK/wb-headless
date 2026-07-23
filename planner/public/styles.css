@@ -421,3 +421,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .u-target-in { margin: 6px 0; font-size: 13px; }
 .u-target-in input { width: 90px; }
 .u-rev { font-size: 13px; margin: 6px 0; }
+
+/* Юнит-экономика: каскад P&L */
+.u-detail-grid .u-card-wide { grid-column: span 1; min-width: 340px; }
+.u-art tr.u-sep td { background: var(--panel); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; padding-top: 8px; }
+.u-in.u-in-sm { width: 56px; }

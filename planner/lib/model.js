@@ -339,13 +339,25 @@ function deepMergeSettings(base, over) {
   return out;
 }
 
-// ── Юнит-экономика: нормализация параметров ──
-// Глобальные параметры ВБ/налогов (в ПРОЦЕНТАХ для ввода; ₽/ед для логистики/хранения).
+// ── Юнит-экономика: нормализация параметров (полный каскадный P&L) ──
+// Глобальные ставки ВБ/налогов (ПРОЦЕНТЫ для ввода) + ₽-статьи логистики/хранения/приёмки.
 const UNIT_GLOBAL_DEFAULTS = {
-  commission: 35.7, spp: 4, acquiring: 4.7, tax: 2,
-  drrLaunch: 30, drrSteady: 8, defect: 2.5,
-  logistics: 0, storage: 0, // индивидуальные условия, ₽/ед
-  mMin: 25, mMax: 30,        // целевой коридор маржи, %
+  commission: 35.7,   // комиссия ВБ, % от S
+  spp: 4,             // СПП, %
+  wallet: 2,          // скидка WB Кошелёк, %
+  acquiring: 4.7,     // эквайринг, % от конечной цены
+  tax: 2,             // налог, % от оборота (конечная цена)
+  drrLaunch: 30,      // ДРР запуск, %
+  drrSteady: 8,       // ДРР выход, %
+  extra: 0,           // доп.расходы, % от цены после скидки
+  opexShare: 50,      // доля валовой прибыли на операционные расходы, %
+  logisticsPvz: 0,    // логистика до ПВЗ, ₽/заказ
+  returnLogistics: 0, // обратная логистика, ₽/заказ
+  storage: 0,         // хранение, ₽/ед
+  acceptanceTariff: 0, // базовый тариф платной приёмки, ₽/ед (× коэффициент артикула)
+  // целевой коридор ЧИСТОЙ маржи, %. При опех=50% чистая маржа структурно ≤ ~25%,
+  // поэтому дефолт занижен к достижимому диапазону.
+  mMin: 10, mMax: 15,
 };
 function normalizeUnitGlobal(input) {
   const u = { ...UNIT_GLOBAL_DEFAULTS };
@@ -361,19 +373,22 @@ function normalizeUnitGlobal(input) {
 function normalizeUnitArticle(input) {
   const i = input && typeof input === 'object' ? input : {};
   const t = i.target && typeof i.target === 'object' ? i.target : {};
-  const cost = Number(i.cost);
-  const price = Number(i.price);
+  const posOrNull = (v) => (Number.isFinite(+v) && +v > 0 ? +v : null);
+  const nonNeg = (v, d = 0) => (Number.isFinite(+v) && +v >= 0 ? +v : d);
   const margin = Number(t.margin);
   const profit = Number(t.profit);
   return {
-    cost: Number.isFinite(cost) && cost >= 0 ? cost : 0,
-    price: Number.isFinite(price) && price > 0 ? price : null,
+    cost: nonNeg(i.cost),                 // себестоимость, ₽
+    logisticsToWb: nonNeg(i.logisticsToWb), // логистика до склада ВБ (first-mile), ₽/ед
+    basePrice: posOrNull(i.basePrice),    // базовая цена до скидки, ₽
+    sellerDiscount: nonNeg(i.sellerDiscount), // скидка продавца, %
+    acceptanceCoef: Number.isFinite(+i.acceptanceCoef) && +i.acceptanceCoef >= 0 ? +i.acceptanceCoef : 1, // коэф. платной приёмки
     target: {
       mode: t.mode === 'profit' ? 'profit' : 'margin',
-      margin: Number.isFinite(margin) && margin >= 0 ? margin : 28,
+      margin: Number.isFinite(margin) && margin >= 0 ? margin : 12, // достижимо при опех 50%
       profit: Number.isFinite(profit) && profit >= 0 ? profit : null,
     },
     drrPhase: i.drrPhase === 'launch' ? 'launch' : 'steady',
-    over: i.over && typeof i.over === 'object' ? i.over : {},
+    over: i.over && typeof i.over === 'object' ? i.over : {}, // переопределения глобальных ставок
   };
 }

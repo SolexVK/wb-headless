@@ -1,32 +1,46 @@
 // unitCalc.js — ядро Юнит-калькулятора WB (браузерный ESM, без зависимостей).
-// Портировано из скилла wb-unit-calc (lib/wbUnitCalc.js). МОДЕЛЬ ПОДТВЕРЖДЕНА
-// пользователем — не менять без запроса. Здесь оставлена только математика ядра;
-// презентацию (таблицы/раскладку) строит app.js средствами вкладки.
+// ПОЛНЫЙ каскадный P&L «на 1 выкуп». Модель согласована с пользователем:
 //
-// Две цены на карточку:
-//   S — цена ПРОДАВЦА без СПП (база маржи и комиссии).
-//   P — цена ПОКУПАТЕЛЯ с СПП (витрина, как в MPStats).  P = S·(1−СПП).
+//  ЦЕНА (каскад):
+//    Базовая ─(−скидка продавца)→ Цена после скидки S   [база комиссии, выплаты, знаменатель маржи]
+//    S ─(−СПП)→ после СПП ─(−Кошелёк)→ Конечная цена покупателя Pб  [база эквайринга, налога]
+//    СПП и Кошелёк выплату продавцу НЕ уменьшают (выплата считается от S).
 //
-//   Прибыль = S − ком·S − (эквайр+налог+ДРР)·P − брак·C − C − (логистика+хранение)
-//           = S·k − C·(1+брак) − fixed,   k = 1 − ком − (эквайр+налог+ДРР)·(1−СПП)
-//   Маржа % = Прибыль / S
-//   Цена под маржу m:  S = [C·(1+брак)+fixed] / (k − m),  P = S·(1−СПП)
+//  УСЛУГИ ВБ (на 1 выкуп):
+//    комиссия=ком%·S; эквайринг=экв%·Pб; реклама=ДРР%·Pб;
+//    логистика=(логистика_ПВЗ + обратная·(1−выкуп))/выкуп; хранение=₽/ед;
+//    приёмка=коэф·тариф(₽/ед).  ИТОГО услуги ВБ = сумма.
 //
-// Выкуп 36% — НЕ статья затрат (логистика 0), только для оценки объёма.
+//  ИТОГ:
+//    Перечисления на р/с = S − услуги ВБ
+//    Полная себестоимость = себестоимость + логистика до склада ВБ
+//    Налог = налог%·Pб (оборот по конечной цене);  Доп.расходы = доп%·S
+//    ВАЛОВАЯ = Перечисления − Полная себестоимость − Налог − Доп.расходы
+//    Опер.расходы = opexShare·ВАЛОВАЯ;  ЧИСТАЯ = (1−opexShare)·ВАЛОВАЯ
+//    Маржинальность = ЧИСТАЯ / S;  Рентабельность = ЧИСТАЯ / Полная себестоимость
+//
+// Замкнутая форма: ВАЛОВАЯ = A·S − B, где
+//   wf = (1−СПП)(1−кошелёк)
+//   A  = 1 − ком − (экв + ДРР + налог)·wf − доп
+//   B  = логистика + хранение + приёмка + полная_себестоимость
 
-export const ECON_DEFAULTS = {
-  commission: 0.357, // комиссия ВБ, от S (до СПП)
-  spp: 0.04,         // средняя СПП
-  acquiring: 0.047,  // эквайринг, от P (с СПП)
-  tax: 0.02,         // налог, от P (с СПП)
-  drr_launch: 0.30,  // ДРР в фазе запуска
-  drr_steady: 0.08,  // ДРР на выходе (рабочий режим)
-  defect: 0.025,     // брак, от себестоимости
-  redemption: 0.36,  // выкуп (только для оценки объёма, не затрата)
-  logistics: 0,      // ₽/ед (индивидуальные условия)
-  storage: 0,        // ₽/ед
-  m_min: 0.25,       // целевой коридор маржи, низ
-  m_max: 0.30,       // целевой коридор маржи, верх
+// Ставки — ДОЛИ (не проценты). ₽-поля — рубли на единицу/заказ.
+export const UNIT_DEFAULTS = {
+  commission: 0.357, // комиссия ВБ, от S
+  spp: 0.04,         // СПП (скидка постоянного покупателя)
+  wallet: 0.02,      // скидка WB Кошелёк
+  acquiring: 0.047,  // эквайринг, от Pб
+  tax: 0.02,         // налог, от Pб (оборот)
+  drr_launch: 0.30,  // ДРР запуск, от Pб
+  drr_steady: 0.08,  // ДРР выход, от Pб
+  extra: 0,          // доп.расходы, от S
+  opexShare: 0.5,    // доля валовой прибыли на операционные расходы (остаток — чистая)
+  logisticsPvz: 0,   // логистика до ПВЗ, ₽/заказ
+  returnLogistics: 0, // обратная логистика, ₽/заказ
+  storage: 0,        // хранение, ₽/ед
+  acceptanceTariff: 0, // базовый тариф платной приёмки, ₽/ед (× коэффициент)
+  m_min: 0.10,       // целевой коридор ЧИСТОЙ маржи, низ (потолок ≈ (1−opexShare)·A)
+  m_max: 0.15,       // целевой коридор ЧИСТОЙ маржи, верх
 };
 
 const num = (v) => {
@@ -35,141 +49,118 @@ const num = (v) => {
 };
 
 /** Слить дефолты с переопределениями (null/undefined игнорируются). */
-export function econParams(over = {}) {
-  const p = { ...ECON_DEFAULTS };
+export function unitParams(over = {}) {
+  const p = { ...UNIT_DEFAULTS };
   for (const [k, v] of Object.entries(over)) if (v != null) p[k] = num(v);
   return p;
 }
 
-/** Коэффициент k = 1 − ком − (эквайр+налог+ДРР)·(1−СПП). */
-function kOf(pr, drr) {
-  return 1 - pr.commission - (pr.acquiring + pr.tax + drr) * (1 - pr.spp);
+/** Коэффициенты замкнутой формы ВАЛОВАЯ = A·S − B. */
+function coeffs(pr, inp) {
+  const drr = inp.drr != null ? num(inp.drr) : pr.drr_steady;
+  const buyout = Math.max(0.01, num(inp.buyout) || 0.4);
+  const wf = (1 - pr.spp) * (1 - pr.wallet);
+  const logistics = (pr.logisticsPvz + pr.returnLogistics * (1 - buyout)) / buyout;
+  const acceptance = num(inp.acceptanceCoef != null ? inp.acceptanceCoef : 1) * pr.acceptanceTariff;
+  const fullCost = num(inp.cost) + num(inp.logisticsToWb);
+  const A = 1 - pr.commission - (pr.acquiring + drr + pr.tax) * wf - pr.extra;
+  const B = logistics + pr.storage + acceptance + fullCost;
+  return { drr, buyout, wf, logistics, acceptance, fullCost, A, B };
 }
 
-/** Полная раскладка экономики на единицу при цене покупателя P (с СПП) и данном ДРР. */
-export function unitCalc(P_buyer, cost, pr, drr) {
-  const P = num(P_buyer);
-  const C = num(cost);
-  const S = 1 - pr.spp ? P / (1 - pr.spp) : P; // цена продавца без СПП
-  const spp = S - P; // недополученное с витрины (СПП, ₽)
+/** Полная раскладка P&L при цене после скидки S (руб). */
+export function unitBreakdown(S_after_discount, pr, inp) {
+  const S = num(S_after_discount);
+  const c = coeffs(pr, inp);
+  const priceAfterSpp = S * (1 - pr.spp);
+  const buyerPrice = priceAfterSpp * (1 - pr.wallet); // Pб
   const commission = pr.commission * S;
-  const acquiring = pr.acquiring * P;
-  const tax = pr.tax * P;
-  const ad = drr * P;
-  const defect = pr.defect * C;
-  const fixed = pr.logistics + pr.storage;
-  const profit = S - commission - acquiring - tax - ad - defect - C - fixed;
+  const acquiring = pr.acquiring * buyerPrice;
+  const ad = c.drr * buyerPrice;
+  const wbServices = commission + acquiring + ad + c.logistics + pr.storage + c.acceptance;
+  const payout = S - wbServices;
+  const tax = pr.tax * buyerPrice;
+  const extra = pr.extra * S;
+  const gross = payout - c.fullCost - tax - extra; // A·S − B
+  const opex = pr.opexShare * gross;
+  const net = gross - opex;
   return {
-    P, S, spp, drr,
-    commission, acquiring, tax, ad, defect, cost: C, fixed,
-    profit,
-    margin: S ? profit / S : 0,
-    markup: C ? profit / C : 0,
+    S, priceAfterSpp, buyerPrice,
+    commission, acquiring, ad,
+    logistics: c.logistics, storage: pr.storage, acceptance: c.acceptance,
+    wbServices, payout,
+    cost: num(inp.cost), logisticsToWb: num(inp.logisticsToWb), fullCost: c.fullCost,
+    tax, extra, gross, opex, net,
+    drr: c.drr, buyout: c.buyout,
+    margin: S ? net / S : 0,           // маржинальность (от S = цена до СПП)
+    roi: c.fullCost ? net / c.fullCost : 0, // рентабельность (от полной себестоимости)
   };
 }
 
-/** Маржа при заданной витринной цене P и ДРР. */
-export function marginForBuyerPrice(P_buyer, cost, pr, drr) {
-  return unitCalc(P_buyer, cost, pr, drr).margin;
-}
-
-/** Витринная цена P (с СПП), при которой маржа = m. null — недостижимо. */
-export function priceBuyerForMargin(cost, pr, m, drr) {
-  const k = kOf(pr, drr);
-  const fixedC = num(cost) * (1 + pr.defect) + pr.logistics + pr.storage;
-  const denom = k - m;
+/** Цена после скидки S под целевую ЧИСТУЮ маржу m. null — недостижимо. */
+export function sForMargin(pr, inp, m) {
+  const { A, B } = coeffs(pr, inp);
+  const keep = 1 - pr.opexShare;
+  if (keep <= 0) return null;
+  const denom = A - m / keep;
   if (denom <= 0) return null;
-  return (fixedC / denom) * (1 - pr.spp);
+  return B / denom;
+}
+/** Цена после скидки S под целевую ЧИСТУЮ прибыль x (₽). null — недостижимо. */
+export function sForProfit(pr, inp, x) {
+  const { A, B } = coeffs(pr, inp);
+  const keep = 1 - pr.opexShare;
+  if (A <= 0 || keep <= 0) return null;
+  return (num(x) / keep + B) / A;
+}
+/** Точка безубыточности (S, при которой чистая=0). */
+export function sBreakeven(pr, inp) {
+  const { A, B } = coeffs(pr, inp);
+  return A > 0 ? B / A : null;
 }
 
-/** Витринная цена P (с СПП) под заданную опер. прибыль на единицу (₽). null — недостижимо. */
-export function priceBuyerForProfit(cost, pr, profit, drr) {
-  const k = kOf(pr, drr);
-  if (k <= 0) return null;
-  const fixedC = num(cost) * (1 + pr.defect) + pr.logistics + pr.storage;
-  return ((num(profit) + fixedC) / k) * (1 - pr.spp);
-}
-
-/** Чувствительность по цене: набор витринных цен вокруг базовой → прибыль/маржа. */
-export function priceSensitivity(basePrice, cost, pr, drr, steps = [-0.2, -0.1, 0, 0.1, 0.2]) {
-  const base = num(basePrice) || priceBuyerForMargin(cost, pr, pr.m_min, drr) || 0;
-  return steps.map((s) => {
-    const P = base * (1 + s);
-    const u = unitCalc(P, cost, pr, drr);
-    return { delta: s, P, S: u.S, profit: u.profit, margin: u.margin };
-  });
-}
-
-/** Чувствительность по ДРР при фиксированной витринной цене. */
-export function drrSensitivity(price, cost, pr, drrList = [0, 0.05, 0.08, 0.15, 0.2, 0.3]) {
-  return drrList.map((d) => {
-    const u = unitCalc(price, cost, pr, d);
-    return { drr: d, profit: u.profit, margin: u.margin };
-  });
-}
+const basePriceOf = (S, sellerDiscount) => (S == null ? null : S / (1 - num(sellerDiscount)));
 
 /**
- * Полный расчёт для калькулятора.
- * @param {object} a  price(P,с СПП)|sellerPrice(S), cost(C), pr(econParams()), drr,
- *                    targetMargin(доля), targetProfit(₽), units(для прогноза).
+ * Полный расчёт. inp:
+ *   basePrice, sellerDiscount(доля), cost, logisticsToWb, buyout(доля), acceptanceCoef,
+ *   pr(unitParams()), drr(доля, опц.), targetMargin(доля), targetProfit(₽).
  */
-export function analyze(a) {
-  const pr = a.pr || econParams();
-  const cost = num(a.cost);
-  const drr = a.drr != null ? num(a.drr) : pr.drr_steady;
+export function analyze(inp) {
+  const pr = inp.pr || unitParams();
+  const sd = num(inp.sellerDiscount);
+  // основная цена: из базовой (−скидка) → S. Если базовой нет — считаем только коридор/безубыток.
+  const S = inp.basePrice != null ? num(inp.basePrice) * (1 - sd) : null;
+  const unit = S != null ? unitBreakdown(S, pr, inp) : null;
 
-  let price = a.price != null ? num(a.price) : null;
-  if (price == null && a.sellerPrice != null) price = num(a.sellerPrice) * (1 - pr.spp);
-
-  const unit = price != null ? unitCalc(price, cost, pr, drr) : null;
-  const launch = price != null ? unitCalc(price, cost, pr, pr.drr_launch) : null;
-
+  const cor = { loS: sForMargin(pr, inp, pr.m_min), hiS: sForMargin(pr, inp, pr.m_max) };
   const corridor = {
-    lo: priceBuyerForMargin(cost, pr, pr.m_min, drr),
-    hi: priceBuyerForMargin(cost, pr, pr.m_max, drr),
+    lo: basePriceOf(cor.loS, sd), hi: basePriceOf(cor.hiS, sd),
+    loS: cor.loS, hiS: cor.hiS,
   };
-  const launchAtCorridor = {
-    lo: corridor.lo != null ? unitCalc(corridor.lo, cost, pr, pr.drr_launch).margin : null,
-    hi: corridor.hi != null ? unitCalc(corridor.hi, cost, pr, pr.drr_launch).margin : null,
-  };
-  const breakeven = priceBuyerForMargin(cost, pr, 0, drr);
-  const breakevenLaunch = priceBuyerForMargin(cost, pr, 0, pr.drr_launch);
+  const beS = sBreakeven(pr, inp);
+  const breakeven = { S: beS, base: basePriceOf(beS, sd) };
 
   let reverse = null;
-  if (a.targetMargin != null || a.targetProfit != null) {
+  if (inp.targetMargin != null || inp.targetProfit != null) {
     reverse = {};
-    if (a.targetMargin != null) {
-      const m = num(a.targetMargin);
-      const P = priceBuyerForMargin(cost, pr, m, drr);
-      reverse.margin = { target: m, price: P, unit: P != null ? unitCalc(P, cost, pr, drr) : null };
+    if (inp.targetMargin != null) {
+      const s = sForMargin(pr, inp, num(inp.targetMargin));
+      reverse.margin = { target: num(inp.targetMargin), S: s, base: basePriceOf(s, sd), unit: s != null ? unitBreakdown(s, pr, inp) : null };
     }
-    if (a.targetProfit != null) {
-      const x = num(a.targetProfit);
-      const P = priceBuyerForProfit(cost, pr, x, drr);
-      reverse.profit = { target: x, price: P, unit: P != null ? unitCalc(P, cost, pr, drr) : null };
+    if (inp.targetProfit != null) {
+      const s = sForProfit(pr, inp, num(inp.targetProfit));
+      reverse.profit = { target: num(inp.targetProfit), S: s, base: basePriceOf(s, sd), unit: s != null ? unitBreakdown(s, pr, inp) : null };
     }
   }
 
-  let period = null;
-  if (a.units != null && unit) {
-    const units = num(a.units);
-    period = {
-      units,
-      profit: unit.profit * units,
-      revenue: unit.S * units,
-      revenueBuyer: unit.P * units,
-    };
-  }
+  // чувствительность по базовой цене (±20%)
+  const baseB = num(inp.basePrice) || basePriceOf(sForMargin(pr, inp, pr.m_min), sd) || 0;
+  const sensitivity = [-0.2, -0.1, 0, 0.1, 0.2].map((d) => {
+    const bp = baseB * (1 + d);
+    const u = unitBreakdown(bp * (1 - sd), pr, inp);
+    return { delta: d, base: bp, S: u.S, buyerPrice: u.buyerPrice, net: u.net, margin: u.margin };
+  });
 
-  return {
-    input: { price, cost, drr },
-    pr,
-    unit, launch,
-    corridor, launchAtCorridor, breakeven, breakevenLaunch,
-    reverse, period,
-    sensitivity: {
-      price: priceSensitivity(price, cost, pr, drr),
-      drr: price != null ? drrSensitivity(price, cost, pr) : null,
-    },
-  };
+  return { input: { basePrice: inp.basePrice != null ? num(inp.basePrice) : null, sellerDiscount: sd }, pr, unit, corridor, breakeven, reverse, sensitivity };
 }
