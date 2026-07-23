@@ -39,8 +39,8 @@ export const UNIT_DEFAULTS = {
   returnLogistics: 0, // обратная логистика, ₽/заказ
   storage: 0,        // хранение, ₽/ед
   acceptanceTariff: 0, // базовый тариф платной приёмки, ₽/ед (× коэффициент)
-  m_min: 0.10,       // целевой коридор ЧИСТОЙ маржи, низ (потолок ≈ (1−opexShare)·A)
-  m_max: 0.15,       // целевой коридор ЧИСТОЙ маржи, верх
+  m_min: 0.25,       // целевой коридор ВАЛОВОЙ маржи (валовая/S), низ
+  m_max: 0.30,       // целевой коридор ВАЛОВОЙ маржи, верх
 };
 
 const num = (v) => {
@@ -92,17 +92,16 @@ export function unitBreakdown(S_after_discount, pr, inp) {
     cost: num(inp.cost), logisticsToWb: num(inp.logisticsToWb), fullCost: c.fullCost,
     tax, extra, gross, opex, net,
     drr: c.drr, buyout: c.buyout,
-    margin: S ? net / S : 0,           // маржинальность (от S = цена до СПП)
-    roi: c.fullCost ? net / c.fullCost : 0, // рентабельность (от полной себестоимости)
+    marginGross: S ? gross / S : 0,    // маржинальность = ВАЛОВАЯ / S (от цены до СПП) — основная
+    marginNet: S ? net / S : 0,        // чистая маржа = чистая / S (для справки)
+    roi: c.fullCost ? net / c.fullCost : 0, // рентабельность = чистая / полная себестоимость
   };
 }
 
-/** Цена после скидки S под целевую ЧИСТУЮ маржу m. null — недостижимо. */
+/** Цена после скидки S под целевую ВАЛОВУЮ маржу m (валовая/S = m). null — недостижимо. */
 export function sForMargin(pr, inp, m) {
   const { A, B } = coeffs(pr, inp);
-  const keep = 1 - pr.opexShare;
-  if (keep <= 0) return null;
-  const denom = A - m / keep;
+  const denom = A - m; // gross/S = A − B/S = m ⇒ S = B/(A−m)
   if (denom <= 0) return null;
   return B / denom;
 }

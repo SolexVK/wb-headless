@@ -355,9 +355,7 @@ const UNIT_GLOBAL_DEFAULTS = {
   returnLogistics: 0, // обратная логистика, ₽/заказ
   storage: 0,         // хранение, ₽/ед
   acceptanceTariff: 0, // базовый тариф платной приёмки, ₽/ед (× коэффициент артикула)
-  // целевой коридор ЧИСТОЙ маржи, %. При опех=50% чистая маржа структурно ≤ ~25%,
-  // поэтому дефолт занижен к достижимому диапазону.
-  mMin: 10, mMax: 15,
+  mMin: 25, mMax: 30, // целевой коридор ВАЛОВОЙ маржи (валовая/S), %
 };
 function normalizeUnitGlobal(input) {
   const u = { ...UNIT_GLOBAL_DEFAULTS };
@@ -385,7 +383,7 @@ function normalizeUnitArticle(input) {
     acceptanceCoef: Number.isFinite(+i.acceptanceCoef) && +i.acceptanceCoef >= 0 ? +i.acceptanceCoef : 1, // коэф. платной приёмки
     target: {
       mode: t.mode === 'profit' ? 'profit' : 'margin',
-      margin: Number.isFinite(margin) && margin >= 0 ? margin : 12, // достижимо при опех 50%
+      margin: Number.isFinite(margin) && margin >= 0 ? margin : 25, // целевая ВАЛОВАЯ маржа
       profit: Number.isFinite(profit) && profit >= 0 ? profit : null,
     },
     drrPhase: i.drrPhase === 'launch' ? 'launch' : 'steady',

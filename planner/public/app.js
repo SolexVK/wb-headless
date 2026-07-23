@@ -1613,7 +1613,7 @@ function renderUnit() {
   const rows = arts.map((a) => {
     const u = a.unit || {};
     const r = unitAnalyze(a);
-    const marg = r.unit ? r.unit.margin : null;
+    const marg = r.unit ? r.unit.marginGross : null; // маржинальность = валовая/S
     const net = r.unit ? r.unit.net : null;
     const cls = marg == null ? '' : marg < 0 ? 'bad' : marg >= (g.mMin || 25) / 100 ? 'good' : 'warn';
     const cor = r.corridor.lo != null ? `${uFmtR(r.corridor.lo)}–${uFmtR(r.corridor.hi)}` : '—';
@@ -1689,8 +1689,9 @@ function unitDetail(a, r) {
       <tr class="u-tot"><td>Валовая прибыль</td><td class="num ${un.gross < 0 ? 'bad' : ''}">${uFmtR(un.gross)}</td><td></td></tr>
       ${line('Опер. расходы', neg(un.opex), uFmtP(pr.opexShare) + ' валовой', 'bad')}
       <tr class="u-tot"><td>ЧИСТАЯ прибыль</td><td class="num ${un.net < 0 ? 'bad' : 'good'}"><b>${uFmtR(un.net)}</b></td><td></td></tr>
-      ${line('Маржинальность (/S)', uFmtP(un.margin))}
-      ${line('Рентабельность (/себест.)', uFmtP(un.roi))}
+      ${line('Маржинальность (валовая /S)', '<b>' + uFmtP(un.marginGross) + '</b>')}
+      ${line('Чистая маржа (/S)', uFmtP(un.marginNet), 'для справки')}
+      ${line('Рентабельность (чистая /себест.)', uFmtP(un.roi))}
     </tbody></table>`;
   }
 
@@ -1699,7 +1700,7 @@ function unitDetail(a, r) {
   const rev = r.reverse || {};
   const revLine = tmode === 'profit'
     ? (rev.profit ? `Под чистую прибыль <b>${uFmtR(rev.profit.target)}</b>/ед → базовая цена <b class="good">${uFmtR(rev.profit.base)}</b>${rev.profit.unit ? ` <span class="mini">(S ${uFmtR(rev.profit.unit.S)}, маржа ${uFmtP(rev.profit.unit.margin)})</span>` : ' — недостижимо'}` : '—')
-    : (rev.margin ? `Под чистую маржу <b>${uFmtP(rev.margin.target)}</b> → базовая цена <b class="good">${uFmtR(rev.margin.base)}</b>${rev.margin.unit ? ` <span class="mini">(S ${uFmtR(rev.margin.unit.S)}, чистая ${uFmtR(rev.margin.unit.net)}/ед)</span>` : ' — недостижимо'}` : '—');
+    : (rev.margin ? `Под валовую маржу <b>${uFmtP(rev.margin.target)}</b> → базовая цена <b class="good">${uFmtR(rev.margin.base)}</b>${rev.margin.unit ? ` <span class="mini">(S ${uFmtR(rev.margin.unit.S)}, чистая ${uFmtR(rev.margin.unit.net)}/ед)</span>` : ' — недостижимо'}` : '—');
 
   const sens = r.sensitivity.map((s) => `<tr class="${s.delta === 0 ? 'hl' : ''}"><td class="num">${uFmtR(s.base)}</td><td class="num">${uFmtR(s.S)}</td><td class="num ${s.net < 0 ? 'bad' : ''}">${uFmtR(s.net)}</td><td class="num">${uFmtP(s.margin)}</td></tr>`).join('');
 
@@ -1710,16 +1711,16 @@ function unitDetail(a, r) {
         ${waterfall}
       </div>
       <div class="u-card">
-        <div class="u-card-h">Обратный расчёт цены (по чистой прибыли)</div>
+        <div class="u-card-h">Обратный расчёт цены</div>
         <div class="u-toggle-row">
           <span class="mini">от:</span>
-          <button class="btn u-toggle${tmode === 'margin' ? ' active' : ''}" data-utmode="margin" data-id="${a.id}">маржи</button>
+          <button class="btn u-toggle${tmode === 'margin' ? ' active' : ''}" data-utmode="margin" data-id="${a.id}">валовой маржи</button>
           <button class="btn u-toggle${tmode === 'profit' ? ' active' : ''}" data-utmode="profit" data-id="${a.id}">чистой прибыли</button>
         </div>
         <div class="u-target-in">
           ${tmode === 'profit'
             ? `<label>Целевая чистая прибыль/ед <input class="u-in" type="number" min="0" step="1" data-uf="target.profit" data-id="${a.id}" value="${u.target && u.target.profit != null ? u.target.profit : ''}" placeholder="₽"></label>`
-            : `<label>Целевая чистая маржа <input class="u-in u-in-sm" type="number" min="0" step="1" data-uf="target.margin" data-id="${a.id}" value="${u.target ? u.target.margin : 25}"> %</label>`}
+            : `<label>Целевая валовая маржа <input class="u-in u-in-sm" type="number" min="0" step="1" data-uf="target.margin" data-id="${a.id}" value="${u.target ? u.target.margin : 25}"> %</label>`}
         </div>
         <div class="u-rev">${revLine}</div>
         <div class="u-card-h" style="margin-top:12px">Коридор и безубыток (базовая цена)</div>
@@ -1756,7 +1757,7 @@ function bindUnit() {
   }));
   document.querySelectorAll('input.u-in[data-uf]').forEach((inp) => inp.addEventListener('change', (e) => {
     const a = state.articles.find((x) => x.id === e.target.dataset.id); if (!a) return;
-    a.unit = a.unit || {}; a.unit.target = a.unit.target || { mode: 'margin', margin: 12, profit: null };
+    a.unit = a.unit || {}; a.unit.target = a.unit.target || { mode: 'margin', margin: 25, profit: null };
     const f = e.target.dataset.uf; const raw = e.target.value.trim();
     const nv = raw === '' ? null : Math.max(0, +raw || 0);
     if (f === 'cost') a.unit.cost = nv || 0;
