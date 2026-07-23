@@ -156,6 +156,7 @@ export function normalizeState(input) {
   if (!input || typeof input !== 'object') return base;
   const s = { ...base, ...input };
   s.settings = deepMergeSettings(base.settings, input.settings || {});
+  s.unit = normalizeUnitGlobal(input.unit); // глобальные параметры ВБ/налогов (юнит-экономика)
   s.seasons = Array.isArray(input.seasons) && input.seasons.length ? input.seasons : base.seasons;
   s.stages = Array.isArray(input.stages) ? input.stages : base.stages;
   s.workshops = Array.isArray(input.workshops) ? input.workshops : base.workshops;
@@ -196,6 +197,8 @@ export function normalizeState(input) {
     a.fabricInfo = a.fabricInfo && typeof a.fabricInfo === 'object' ? a.fabricInfo : {};
     // конфиг фильтра аналогов для раздела «Ранг сезонности» (путь предмета, слова, ценовой коридор…)
     if (a.seasonFilter && typeof a.seasonFilter === 'object') { /* keep */ } else delete a.seasonFilter;
+    // юнит-экономика: себестоимость, цена, плановая вилка маржи/прибыли, фаза ДРР, переопределения
+    a.unit = normalizeUnitArticle(a.unit);
   }
   // автосортировка артикулов по номеру, от меньшего к большему (числовая)
   s.articles.sort(compareArticleId);
@@ -334,4 +337,43 @@ function deepMergeSettings(base, over) {
     }
   }
   return out;
+}
+
+// ── Юнит-экономика: нормализация параметров ──
+// Глобальные параметры ВБ/налогов (в ПРОЦЕНТАХ для ввода; ₽/ед для логистики/хранения).
+const UNIT_GLOBAL_DEFAULTS = {
+  commission: 35.7, spp: 4, acquiring: 4.7, tax: 2,
+  drrLaunch: 30, drrSteady: 8, defect: 2.5,
+  logistics: 0, storage: 0, // индивидуальные условия, ₽/ед
+  mMin: 25, mMax: 30,        // целевой коридор маржи, %
+};
+function normalizeUnitGlobal(input) {
+  const u = { ...UNIT_GLOBAL_DEFAULTS };
+  if (input && typeof input === 'object') {
+    for (const k of Object.keys(UNIT_GLOBAL_DEFAULTS)) {
+      const v = Number(input[k]);
+      if (Number.isFinite(v) && v >= 0) u[k] = v;
+    }
+  }
+  return u;
+}
+// Параметры юнит-экономики на артикул.
+function normalizeUnitArticle(input) {
+  const i = input && typeof input === 'object' ? input : {};
+  const t = i.target && typeof i.target === 'object' ? i.target : {};
+  const cost = Number(i.cost);
+  const price = Number(i.price);
+  const margin = Number(t.margin);
+  const profit = Number(t.profit);
+  return {
+    cost: Number.isFinite(cost) && cost >= 0 ? cost : 0,
+    price: Number.isFinite(price) && price > 0 ? price : null,
+    target: {
+      mode: t.mode === 'profit' ? 'profit' : 'margin',
+      margin: Number.isFinite(margin) && margin >= 0 ? margin : 28,
+      profit: Number.isFinite(profit) && profit >= 0 ? profit : null,
+    },
+    drrPhase: i.drrPhase === 'launch' ? 'launch' : 'steady',
+    over: i.over && typeof i.over === 'object' ? i.over : {},
+  };
 }

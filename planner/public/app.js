@@ -1,5 +1,6 @@
 // app.js — оболочка SPA: загрузка данных, вкладки, дашборд, формы, Гант.
 import { renderGantt } from './gantt.js';
+import { econParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
@@ -106,6 +107,7 @@ function renderCurrent() {
   else if (activeTab === 'fabric') renderFabricOrder();
   else if (activeTab === 'dashboard') renderDashboard();
   else if (activeTab === 'season') renderSeason();
+  else if (activeTab === 'unit') renderUnit();
   else if (activeTab === 'data') renderData();
   applyCollapsibles();
 }
@@ -1552,6 +1554,208 @@ function bindSeasonView(p) {
     renderSeasonView(seasonSelArticle); // пересчитать заказы в сводке и таблице
   });
   document.querySelectorAll('.se-svg[data-chart]').forEach((svg) => attachSeasonTip(svg));
+}
+
+// ---------- ЮНИТ-ЭКОНОМИКА ----------
+const unitExpanded = new Set(); // id артикулов с раскрытой деталью
+let unitSettingsOpen = false;   // раскрыт ли блок глобальных параметров
+const uFmtR = (v) => (v == null || !Number.isFinite(v) ? '—' : Math.round(v).toLocaleString('ru') + ' ₽');
+const uFmtP = (v) => (v == null || !Number.isFinite(v) ? '—' : (v * 100).toFixed(1).replace(/\.0$/, '') + '%');
+
+// Собрать параметры движка (доли) из глобальных настроек + переопределений артикула.
+function unitPr(a) {
+  const g = state.unit || {};
+  const o = (a && a.unit && a.unit.over) || {};
+  const val = (k, dflt) => { const v = o[k] != null ? +o[k] : +g[k]; return Number.isFinite(v) ? v : dflt; };
+  return econParams({
+    commission: val('commission', 35.7) / 100, spp: val('spp', 4) / 100,
+    acquiring: val('acquiring', 4.7) / 100, tax: val('tax', 2) / 100,
+    drr_launch: val('drrLaunch', 30) / 100, drr_steady: val('drrSteady', 8) / 100,
+    defect: val('defect', 2.5) / 100, logistics: val('logistics', 0), storage: val('storage', 0),
+    m_min: val('mMin', 25) / 100, m_max: val('mMax', 30) / 100,
+  });
+}
+// Полный расчёт по артикулу (использует его же плановую вилку и фазу ДРР).
+function unitAnalyze(a) {
+  const u = a.unit || {};
+  const pr = unitPr(a);
+  const drr = u.drrPhase === 'launch' ? pr.drr_launch : pr.drr_steady;
+  const args = { cost: u.cost, pr, drr };
+  if (u.price != null) args.price = u.price;
+  if (u.target && u.target.mode === 'profit' && u.target.profit != null) args.targetProfit = u.target.profit;
+  else if (u.target && u.target.margin != null) args.targetMargin = u.target.margin / 100;
+  return analyze(args);
+}
+
+function renderUnit() {
+  const root = document.getElementById('unit');
+  const arts = articlesSorted();
+  const g = state.unit || {};
+  const gi = (k, label, suf = '%') => `<label class="u-gi"><span>${label}</span><input type="number" step="0.1" min="0" data-ug="${k}" value="${g[k] ?? ''}"><i>${suf}</i></label>`;
+  const settings = `<details class="u-settings"${unitSettingsOpen ? ' open' : ''}>
+    <summary>Параметры ВБ и налоги (применяются ко всем артикулам)</summary>
+    <div class="u-grid">
+      ${gi('commission', 'Комиссия ВБ (от S)')}
+      ${gi('spp', 'СПП')}
+      ${gi('acquiring', 'Эквайринг (от P)')}
+      ${gi('tax', 'Налог (от P)')}
+      ${gi('drrLaunch', 'ДРР запуск (от P)')}
+      ${gi('drrSteady', 'ДРР выход (от P)')}
+      ${gi('defect', 'Брак (от C)')}
+      ${gi('mMin', 'Целевая маржа, низ')}
+      ${gi('mMax', 'Целевая маржа, верх')}
+    </div>
+    <div class="u-subhead">Индивидуальные условия (₽/ед)</div>
+    <div class="u-grid">
+      ${gi('logistics', 'Логистика', '₽')}
+      ${gi('storage', 'Хранение', '₽')}
+    </div>
+    <div class="mini">S — цена продавца без СПП, P — витрина с СПП (P = S·(1−СПП)). Комиссия от S; эквайринг/налог/ДРР от P; брак от себестоимости. Маржа = прибыль / S.</div>
+  </details>`;
+
+  const rows = arts.map((a) => {
+    const u = a.unit || {};
+    const r = unitAnalyze(a);
+    const marg = r.unit ? r.unit.margin : null;
+    const prof = r.unit ? r.unit.profit : null;
+    const cls = marg == null ? '' : marg < 0 ? 'bad' : marg >= (g.mMin || 25) / 100 ? 'good' : 'warn';
+    const cor = r.corridor.lo != null ? `${uFmtR(r.corridor.lo)}–${uFmtR(r.corridor.hi)}` : '—';
+    const open = unitExpanded.has(a.id);
+    const main = `<tr class="u-row${open ? ' open' : ''}" data-uexp="${a.id}">
+      <td class="u-name">${open ? '▾' : '▸'} ${a.id} — ${seEsc(a.name)}</td>
+      <td class="num"><input class="u-in" type="number" min="0" step="1" data-uf="cost" data-id="${a.id}" value="${u.cost || ''}" placeholder="0"></td>
+      <td class="num"><input class="u-in" type="number" min="0" step="1" data-uf="price" data-id="${a.id}" value="${u.price ?? ''}" placeholder="—"></td>
+      <td class="num ${cls}">${uFmtP(marg)}</td>
+      <td class="num ${prof != null && prof < 0 ? 'bad' : ''}">${uFmtR(prof)}</td>
+      <td class="num">${cor}</td>
+      <td class="num">${uFmtR(r.breakeven)}</td>
+    </tr>`;
+    return main + (open ? `<tr class="u-detail-row"><td colspan="7">${unitDetail(a, r)}</td></tr>` : '');
+  }).join('');
+
+  root.innerHTML = `<div class="panel u-panel">
+    <div class="subhead"><h3>Юнит-экономика по артикулам</h3></div>
+    ${settings}
+    <div class="matrix-scroll"><table class="matrix-table u-table">
+      <thead><tr>
+        <th>Артикул</th><th class="num" title="Себестоимость C, ₽">Себест., ₽</th>
+        <th class="num" title="Витринная цена с СПП (P). Пусто — считаем только коридор/безубыток.">Цена (P), ₽</th>
+        <th class="num">Маржа</th><th class="num">Прибыль/ед</th>
+        <th class="num" title="Витринная цена под целевую маржу mMin–mMax">Коридор цены</th>
+        <th class="num" title="Ниже этой витринной цены — в минус">Безубыток</th>
+      </tr></thead>
+      <tbody>${rows || '<tr><td colspan="7" class="mini">Нет артикулов — добавь во вкладке «Данные».</td></tr>'}</tbody>
+    </table></div>
+    <div class="mini">Расчёт мгновенный. Правки сохраняются кнопкой «Сохранить» в шапке. Клик по строке — подробная раскладка и обратный расчёт.</div>
+  </div>`;
+  bindUnit();
+}
+
+// Подробная раскладка + переключатели для одного артикула.
+function unitDetail(a, r) {
+  const u = a.unit || {};
+  const pr = r.pr;
+  const un = r.unit;
+  const drrPct = uFmtP(r.input.drr);
+  const artRows = un ? [
+    ['Комиссия ВБ', un.commission, uFmtP(pr.commission) + ' от S'],
+    ['Эквайринг', un.acquiring, uFmtP(pr.acquiring) + ' от P'],
+    ['Налог', un.tax, uFmtP(pr.tax) + ' от P'],
+    ['Реклама (ДРР)', un.ad, drrPct + ' от P'],
+    ['Брак', un.defect, uFmtP(pr.defect) + ' от C'],
+    ...(un.fixed ? [['Логистика+хранение', un.fixed, '₽/ед']] : []),
+    ['Себестоимость', un.cost, ''],
+  ].map(([n, v, x]) => `<tr><td>${n}</td><td class="num bad">−${uFmtR(v)}</td><td class="mini">${x}</td></tr>`).join('') : '';
+
+  const tmode = u.target && u.target.mode === 'profit' ? 'profit' : 'margin';
+  const phase = u.drrPhase === 'launch' ? 'launch' : 'steady';
+  const rev = r.reverse || {};
+  const revLine = tmode === 'profit'
+    ? (rev.profit ? `Под прибыль <b>${uFmtR(rev.profit.target)}</b>/ед → витрина <b class="good">${uFmtR(rev.profit.price)}</b>${rev.profit.unit ? ` <span class="mini">(S ${uFmtR(rev.profit.unit.S)}, маржа ${uFmtP(rev.profit.unit.margin)})</span>` : ' — недостижимо'}` : '—')
+    : (rev.margin ? `Под маржу <b>${uFmtP(rev.margin.target)}</b> → витрина <b class="good">${uFmtR(rev.margin.price)}</b>${rev.margin.unit ? ` <span class="mini">(S ${uFmtR(rev.margin.unit.S)}, прибыль ${uFmtR(rev.margin.unit.profit)}/ед)</span>` : ' — недостижимо'}` : '—');
+
+  const sens = r.sensitivity.price.map((s) => `<tr class="${s.delta === 0 ? 'hl' : ''}"><td class="num">${uFmtR(s.P)}</td><td class="num">${uFmtR(s.S)}</td><td class="num ${s.profit < 0 ? 'bad' : ''}">${uFmtR(s.profit)}</td><td class="num">${uFmtP(s.margin)}</td></tr>`).join('');
+
+  return `<div class="u-detail">
+    <div class="u-detail-grid">
+      <div class="u-card">
+        <div class="u-card-h">Раскладка на единицу ${un ? `<span class="mini">(ДРР ${drrPct})</span>` : ''}</div>
+        ${un ? `<div class="u-prices"><span>Витрина P <b>${uFmtR(un.P)}</b></span><span>Продавец S <b>${uFmtR(un.S)}</b></span></div>
+        <table class="u-art"><tbody>${artRows}
+          <tr class="u-tot"><td>Опер. прибыль</td><td class="num ${un.profit < 0 ? 'bad' : 'good'}">${uFmtR(un.profit)}</td><td></td></tr>
+          <tr class="u-tot"><td>Маржа (/S)</td><td class="num">${uFmtP(un.margin)}</td><td></td></tr>
+          <tr><td>Рентаб. к C</td><td class="num">${uFmtP(un.markup)}</td><td></td></tr>
+        </tbody></table>` : '<div class="mini">Укажи цену (P) в строке — появится раскладка.</div>'}
+      </div>
+      <div class="u-card">
+        <div class="u-card-h">Обратный расчёт цены</div>
+        <div class="u-toggle-row">
+          <span class="mini">от:</span>
+          <button class="btn u-toggle${tmode === 'margin' ? ' active' : ''}" data-utmode="margin" data-id="${a.id}">маржи</button>
+          <button class="btn u-toggle${tmode === 'profit' ? ' active' : ''}" data-utmode="profit" data-id="${a.id}">чистой прибыли</button>
+        </div>
+        <div class="u-target-in">
+          ${tmode === 'profit'
+            ? `<label>Целевая прибыль/ед <input class="u-in" type="number" min="0" step="1" data-uf="target.profit" data-id="${a.id}" value="${u.target && u.target.profit != null ? u.target.profit : ''}" placeholder="₽"></label>`
+            : `<label>Целевая маржа <input class="u-in" type="number" min="0" step="1" data-uf="target.margin" data-id="${a.id}" value="${u.target ? u.target.margin : 28}"> %</label>`}
+        </div>
+        <div class="u-rev">${revLine}</div>
+        <div class="u-card-h" style="margin-top:12px">Коридор и безубыток</div>
+        <div class="mini">Целевая маржа ${uFmtP(pr.m_min)}–${uFmtP(pr.m_max)} → витрина <b class="good">${r.corridor.lo != null ? uFmtR(r.corridor.lo) + '–' + uFmtR(r.corridor.hi) : 'недостижимо'}</b></div>
+        <div class="mini">Безубыток (ДРР ${drrPct}): <b>${uFmtR(r.breakeven)}</b> · в запуске: ${uFmtR(r.breakevenLaunch)}</div>
+        <div class="u-toggle-row" style="margin-top:8px">
+          <span class="mini">Фаза ДРР для раскладки:</span>
+          <button class="btn u-toggle${phase === 'steady' ? ' active' : ''}" data-uphase="steady" data-id="${a.id}">выход (${uFmtP(pr.drr_steady)})</button>
+          <button class="btn u-toggle${phase === 'launch' ? ' active' : ''}" data-uphase="launch" data-id="${a.id}">запуск (${uFmtP(pr.drr_launch)})</button>
+        </div>
+      </div>
+      <div class="u-card">
+        <div class="u-card-h">Чувствительность по цене</div>
+        <table class="u-art"><thead><tr><th class="num">Витрина</th><th class="num">S</th><th class="num">Прибыль</th><th class="num">Маржа</th></tr></thead><tbody>${sens}</tbody></table>
+      </div>
+    </div>
+  </div>`;
+}
+
+function bindUnit() {
+  const g = () => state.unit;
+  // глобальные параметры
+  document.querySelectorAll('input[data-ug]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const k = e.target.dataset.ug; const v = Math.max(0, +e.target.value || 0);
+    g()[k] = v; dirty = true; renderUnit();
+  }));
+  // раскрыть/свернуть глобальный блок (запомнить состояние)
+  const det = document.querySelector('.u-settings');
+  if (det) det.addEventListener('toggle', () => { unitSettingsOpen = det.open; });
+  // раскрыть/свернуть деталь по клику на строку
+  document.querySelectorAll('tr[data-uexp]').forEach((tr) => tr.addEventListener('click', (e) => {
+    if (e.target.closest('input,button,label')) return; // не по инпутам
+    const id = tr.dataset.uexp;
+    if (unitExpanded.has(id)) unitExpanded.delete(id); else unitExpanded.add(id);
+    renderUnit();
+  }));
+  // поля артикула (себестоимость, цена, цели)
+  document.querySelectorAll('input.u-in[data-uf]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const a = state.articles.find((x) => x.id === e.target.dataset.id); if (!a) return;
+    a.unit = a.unit || {}; a.unit.target = a.unit.target || { mode: 'margin', margin: 28, profit: null };
+    const f = e.target.dataset.uf; const raw = e.target.value.trim();
+    const numv = raw === '' ? null : Math.max(0, +raw || 0);
+    if (f === 'cost') a.unit.cost = numv || 0;
+    else if (f === 'price') a.unit.price = numv;
+    else if (f === 'target.margin') a.unit.target.margin = numv == null ? 0 : numv;
+    else if (f === 'target.profit') a.unit.target.profit = numv;
+    dirty = true; renderUnit();
+  }));
+  // переключатели режима обратного расчёта и фазы ДРР
+  document.querySelectorAll('button[data-utmode]').forEach((b) => b.addEventListener('click', () => {
+    const a = state.articles.find((x) => x.id === b.dataset.id); if (!a) return;
+    a.unit = a.unit || {}; a.unit.target = a.unit.target || { mode: 'margin', margin: 28, profit: null };
+    a.unit.target.mode = b.dataset.utmode; dirty = true; renderUnit();
+  }));
+  document.querySelectorAll('button[data-uphase]').forEach((b) => b.addEventListener('click', () => {
+    const a = state.articles.find((x) => x.id === b.dataset.id); if (!a) return;
+    a.unit = a.unit || {}; a.unit.drrPhase = b.dataset.uphase; dirty = true; renderUnit();
+  }));
 }
 
 // ---------- ДАННЫЕ (формы) ----------
