@@ -463,3 +463,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .tabs { flex-wrap: wrap; }
   .actions { width: 100%; flex-wrap: wrap; margin-left: 0; }
 }
+
+/* Юнит-экономика: инлайн-деталь строкой под артикулом (залипает по левому краю) */
+.u-detail-cell { padding: 0 !important; background: var(--panel-2); }
+.u-detail-inner { position: sticky; left: 0; box-sizing: border-box; padding: 6px 12px 12px; }
+.u-pb { color: var(--muted); }

@@ -153,12 +153,17 @@ export function analyze(inp) {
     }
   }
 
-  // чувствительность по базовой цене (±20%)
-  const baseB = num(inp.basePrice) || basePriceOf(sForMargin(pr, inp, pr.m_min), sd) || 0;
-  const sensitivity = [-0.2, -0.1, 0, 0.1, 0.2].map((d) => {
-    const bp = baseB * (1 + d);
-    const u = unitBreakdown(bp * (1 - sd), pr, inp);
-    return { delta: d, base: bp, S: u.S, buyerPrice: u.buyerPrice, net: u.net, margin: u.marginGross };
+  // Чувствительность по ЦЕНЕ СО СКИДКОЙ (S) — базовая цена фиксирована.
+  // Точки берём В ПРЕДЕЛАХ КОРИДОРА [loS..hiS] + текущая S (подсвечивается).
+  const curS = S;
+  const rawPts = [];
+  if (cor.loS != null && cor.hiS != null) for (let i = 0; i <= 4; i++) rawPts.push(cor.loS + (cor.hiS - cor.loS) * i / 4);
+  else if (curS != null) for (const dd of [-0.2, -0.1, 0, 0.1, 0.2]) rawPts.push(curS * (1 + dd));
+  if (curS != null) rawPts.push(curS);
+  const uniq = [...new Set(rawPts.map((v) => Math.round(v)))].filter((v) => v > 0).sort((a, b) => a - b);
+  const sensitivity = uniq.map((sv) => {
+    const u = unitBreakdown(sv, pr, inp);
+    return { S: sv, buyerPrice: u.buyerPrice, net: u.net, margin: u.marginGross, current: curS != null && Math.round(sv) === Math.round(curS) };
   });
 
   return { input: { basePrice: inp.basePrice != null ? num(inp.basePrice) : null, sellerDiscount: sd }, pr, unit, corridor, breakeven, reverse, sensitivity };

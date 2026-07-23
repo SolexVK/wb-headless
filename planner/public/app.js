@@ -1675,18 +1675,18 @@ function renderUnit() {
       <td class="num"><input class="u-in" type="number" min="0" step="1" data-uf="basePrice" data-id="${a.id}" value="${u.basePrice ?? ''}" placeholder="—"></td>
       <td class="num"><input class="u-in u-in-sm" type="number" min="0" max="99" step="1" data-uf="sellerDiscount" data-id="${a.id}" value="${u.sellerDiscount || ''}" placeholder="0"></td>
       <td class="num"><input class="u-in" type="number" min="0" step="1" data-uf="priceS" data-id="${a.id}" value="${sVal}" placeholder="—" title="Цена после скидки. Правка меняет размер скидки (базовая — статична)."></td>
+      <td class="num u-pb">${r.unit ? uFmtR(r.unit.buyerPrice) : '—'}</td>
       <td class="num ${cls}">${uFmtP(marg)}</td>
       <td class="num ${net != null && net < 0 ? 'bad' : ''}">${uFmtR(net)}</td>
       <td class="num">${cor}</td>
       <td class="num">${uFmtR(r.breakeven.S)}</td>
     </tr>`;
-    return main;
+    // Деталь — СТРОКОЙ прямо под артикулом (остальные строки смещаются вниз).
+    // Контейнер u-detail-inner залипает по левому краю и получает ширину видимой
+    // области скролла (JS), чтобы на мобильном карточки стекались по ширине экрана.
+    const detail = open ? `<tr class="u-detail-row"><td colspan="11" class="u-detail-cell"><div class="u-detail-inner">${unitDetail(a, r)}</div></td></tr>` : '';
+    return main + detail;
   }).join('');
-  // Деталь раскрытых артикулов — ОТДЕЛЬНЫМИ блоками под таблицей (полная ширина →
-  // карточки корректно стекаются на мобильном, таблица скроллится независимо).
-  const details = arts.filter((a) => unitExpanded.has(a.id)).map((a) => `<div class="u-detail-block">
-      <div class="u-detail-head"><b>${a.id} — ${seEsc(a.name)}</b><button class="btn u-toggle" data-uclose="${a.id}">свернуть ▲</button></div>
-      ${unitDetail(a, unitAnalyze(a))}</div>`).join('');
 
   root.innerHTML = `<div class="panel u-panel">
     <div class="subhead"><h3>Юнит-экономика по артикулам</h3></div>
@@ -1699,17 +1699,31 @@ function renderUnit() {
         <th class="num" title="Базовая цена до скидки продавца. Пусто — считаем только коридор/безубыток.">Базовая цена</th>
         <th class="num" title="Скидка продавца, %">Скидка</th>
         <th class="num" title="Цена после скидки продавца (S). Правка меняет размер скидки; базовая цена статична.">Цена со скидкой (S)</th>
+        <th class="num" title="Конечная цена покупателя (Pб) = S после СПП и WB Кошелька. Это цена на витрине ВБ и средняя цена продажи в MPStats.">Цена покупателя (Pб)</th>
         <th class="num" title="Маржинальность = валовая прибыль / цена после скидки (S)">Маржинальность</th>
         <th class="num" title="Чистая прибыль на единицу, ₽">Чистая/ед</th>
         <th class="num" title="Цена после скидки (S) под целевую валовую маржинальность mMin–mMax">Коридор цены до СПП (S)</th>
         <th class="num" title="Цена после скидки (S), при которой прибыль = 0">Безубыток (S)</th>
       </tr></thead>
-      <tbody>${rows || '<tr><td colspan="10" class="mini">Нет артикулов — добавь во вкладке «Данные».</td></tr>'}</tbody>
+      <tbody>${rows || '<tr><td colspan="11" class="mini">Нет артикулов — добавь во вкладке «Данные».</td></tr>'}</tbody>
     </table></div>
     <div class="mini">Расчёт мгновенный. Правки сохраняются кнопкой «Сохранить» в шапке. Клик по строке — полный каскад P&L и обратный расчёт.</div>
-    ${details}
   </div>${wbDatalist}`;
   bindUnit();
+  fixUnitDetailWidths();
+}
+
+// Ширина раскрытой детали = видимая ширина скролла таблицы (чтобы деталь не тянула
+// таблицу вширь и корректно стекалась на мобильном). Обновляется и на ресайзе.
+function fixUnitDetailWidths() {
+  const wrap = document.querySelector('.u-tablewrap'); if (!wrap) return;
+  const w = wrap.clientWidth;
+  document.querySelectorAll('.u-detail-inner').forEach((el) => { el.style.width = w + 'px'; });
+}
+let _uResizeBound = false;
+function bindUnitResize() {
+  if (_uResizeBound) return; _uResizeBound = true;
+  let t; window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => { if (activeTab === 'unit') fixUnitDetailWidths(); }, 120); });
 }
 
 // Полный каскад P&L + переключатели для одного артикула.
@@ -1762,7 +1776,7 @@ function unitDetail(a, r) {
     ? (rev.profit ? `Под чистую прибыль <b>${uFmtR(rev.profit.target)}</b>/ед → цена после скидки S = <b class="good">${uFmtR(rev.profit.S)}</b>${rev.profit.S != null ? baseHint(rev.profit.base) : ' — недостижимо'}` : '—')
     : (rev.margin ? `Под валовую маржинальность <b>${uFmtP(rev.margin.target)}</b> → цена после скидки S = <b class="good">${uFmtR(rev.margin.S)}</b>${rev.margin.S != null ? baseHint(rev.margin.base) : ' — недостижимо'}` : '—');
 
-  const sens = r.sensitivity.map((s) => `<tr class="${s.delta === 0 ? 'hl' : ''}"><td class="num">${uFmtR(s.base)}</td><td class="num">${uFmtR(s.S)}</td><td class="num ${s.net < 0 ? 'bad' : ''}">${uFmtR(s.net)}</td><td class="num">${uFmtP(s.margin)}</td></tr>`).join('');
+  const sens = r.sensitivity.map((s) => `<tr class="${s.current ? 'hl' : ''}"><td class="num">${uFmtR(s.S)}</td><td class="num">${uFmtR(s.buyerPrice)}</td><td class="num ${s.net < 0 ? 'bad' : ''}">${uFmtR(s.net)}</td><td class="num">${uFmtP(s.margin)}</td></tr>`).join('');
 
   return `<div class="u-detail">
     <div class="u-detail-grid">
@@ -1795,8 +1809,9 @@ function unitDetail(a, r) {
         <div class="u-target-in"><label>Коэф. приёмки <input class="u-in u-in-sm" type="number" min="0" step="0.5" data-uf="acceptanceCoef" data-id="${a.id}" value="${u.acceptanceCoef == null ? 1 : u.acceptanceCoef}"></label></div>
       </div>
       <div class="u-card">
-        <div class="u-card-h">Чувствительность по базовой цене</div>
-        <table class="u-art"><thead><tr><th class="num">Базовая</th><th class="num">S</th><th class="num">Чистая</th><th class="num">Маржинальность</th></tr></thead><tbody>${sens}</tbody></table>
+        <div class="u-card-h">Чувствительность по цене со скидкой (S)</div>
+        <div class="mini">базовая ${uFmtR(r.input.basePrice)} фиксирована · S в коридоре ${r.corridor.loS != null ? uFmtR(r.corridor.loS) + '–' + uFmtR(r.corridor.hiS) : '—'}</div>
+        <table class="u-art"><thead><tr><th class="num">Цена со скидкой (S)</th><th class="num">Покупатель (Pб)</th><th class="num">Чистая</th><th class="num">Маржинальность</th></tr></thead><tbody>${sens}</tbody></table>
       </div>
       ${unitWbCard(a)}
     </div>
@@ -1830,6 +1845,7 @@ function unitWbCard(a) {
 }
 
 function bindUnit() {
+  bindUnitResize();
   const g = () => state.unit;
   const findA = (el) => state.articles.find((x) => x.id === el.dataset.id);
   document.querySelectorAll('input[data-ug]').forEach((inp) => inp.addEventListener('change', (e) => {
