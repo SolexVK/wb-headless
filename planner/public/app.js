@@ -1646,16 +1646,16 @@ function renderUnit() {
   ensureWbCards();
   const wbDatalist = wbCards ? `<datalist id="wb-cards">${wbCards.map((c) => `<option value="${seEsc(c.vendorCode)}">${c.volumeL != null ? c.volumeL + ' л' : 'нет габаритов'} · nmID ${c.nmID}</option>`).join('')}</datalist>` : '';
   const gi = (k, label, suf = '%') => `<label class="u-gi"><span>${label}</span><input type="number" step="0.1" min="0" data-ug="${k}" value="${g[k] ?? ''}"><i>${suf}</i></label>`;
+  const pg = (title, inner) => `<div class="u-pg"><div class="u-pg-t">${title}</div><div class="u-grid">${inner}</div></div>`;
   const settings = `<details class="u-settings"${unitSettingsOpen ? ' open' : ''}>
     <summary>Параметры ВБ, налоги и расходы (применяются ко всем артикулам)</summary>
-    <div class="u-subhead">Услуги ВБ, %</div>
-    <div class="u-grid">${gi('commission', 'Комиссия ВБ (от S)')}${gi('acquiring', 'Эквайринг (от Pб)')}${gi('drrLaunch', 'ДРР запуск (от Pб)')}${gi('drrSteady', 'ДРР выход (от Pб)')}</div>
-    <div class="u-subhead">Скидки покупателю, % (выплату продавцу не уменьшают)</div>
-    <div class="u-grid">${gi('spp', 'СПП')}${gi('wallet', 'WB Кошелёк')}</div>
-    <div class="u-subhead">Логистика / хранение / приёмка, ₽</div>
-    <div class="u-grid">${gi('logisticsPvz', 'Логистика до ПВЗ', '₽/зак')}${gi('returnLogistics', 'Обратная логистика', '₽/зак')}${gi('storage', 'Хранение', '₽/ед')}${gi('acceptanceTariff', 'Тариф приёмки', '₽/ед')}</div>
-    <div class="u-subhead">Налоги и расходы</div>
-    <div class="u-grid">${gi('tax', 'Налог (от оборота Pб)')}${gi('extra', 'Доп. расходы (от S)')}${gi('opexShare', 'Опер. расходы (доля валовой)')}${gi('mMin', 'Целевая маржа, низ')}${gi('mMax', 'Целевая маржа, верх')}</div>
+    <div class="u-params">
+      ${pg('Услуги ВБ, %', gi('commission', 'Комиссия ВБ (от S)') + gi('acquiring', 'Эквайринг (от Pб)') + gi('drrLaunch', 'ДРР запуск (от Pб)') + gi('drrSteady', 'ДРР выход (от Pб)'))}
+      ${pg('Скидки покупателю, % (выплату не уменьшают)', gi('spp', 'СПП') + gi('wallet', 'WB Кошелёк'))}
+      ${pg('Логистика / хранение / приёмка, ₽', gi('logisticsPvz', 'Логистика до ПВЗ', '₽/зак') + gi('returnLogistics', 'Обратная логистика', '₽/зак') + gi('storage', 'Хранение', '₽/ед') + gi('acceptanceTariff', 'Тариф приёмки', '₽/ед'))}
+      ${pg('Налоги и расходы', gi('tax', 'Налог (от оборота Pб)') + gi('extra', 'Доп. расходы (от S)') + gi('opexShare', 'Опер. расходы (доля валовой)'))}
+      ${pg('Целевой коридор маржинальности, %', gi('mMin', 'Мин.') + gi('mMax', 'Макс.'))}
+    </div>
     <div class="mini">S — цена после скидки продавца (база комиссии, выплаты, знаменатель маржи). Pб — конечная цена покупателя (после СПП и Кошелька; база эквайринга/налога). Чистая прибыль = ${g.opexShare ?? 50}% валовой (остаток — опер.расходы).</div>
   </details>`;
 
@@ -1776,7 +1776,7 @@ function unitDetail(a, r) {
     ? (rev.profit ? `Под чистую прибыль <b>${uFmtR(rev.profit.target)}</b>/ед → цена после скидки S = <b class="good">${uFmtR(rev.profit.S)}</b>${rev.profit.S != null ? baseHint(rev.profit.base) : ' — недостижимо'}` : '—')
     : (rev.margin ? `Под валовую маржинальность <b>${uFmtP(rev.margin.target)}</b> → цена после скидки S = <b class="good">${uFmtR(rev.margin.S)}</b>${rev.margin.S != null ? baseHint(rev.margin.base) : ' — недостижимо'}` : '—');
 
-  const sens = r.sensitivity.map((s) => `<tr class="${s.current ? 'hl' : ''}"><td class="num">${uFmtR(s.S)}</td><td class="num">${uFmtR(s.buyerPrice)}</td><td class="num ${s.net < 0 ? 'bad' : ''}">${uFmtR(s.net)}</td><td class="num">${uFmtP(s.margin)}</td></tr>`).join('');
+  const sens = r.sensitivity.map((s) => `<tr class="${s.current ? 'hl' : ''}"><td class="num"><b>${s.marginTarget}%</b></td><td class="num">${uFmtR(s.S)}</td><td class="num">${uFmtR(s.buyerPrice)}</td><td class="num ${s.net < 0 ? 'bad' : ''}">${uFmtR(s.net)}</td></tr>`).join('');
 
   return `<div class="u-detail">
     <div class="u-detail-grid">
@@ -1809,9 +1809,9 @@ function unitDetail(a, r) {
         <div class="u-target-in"><label>Коэф. приёмки <input class="u-in u-in-sm" type="number" min="0" step="0.5" data-uf="acceptanceCoef" data-id="${a.id}" value="${u.acceptanceCoef == null ? 1 : u.acceptanceCoef}"></label></div>
       </div>
       <div class="u-card">
-        <div class="u-card-h">Чувствительность по цене со скидкой (S)</div>
-        <div class="mini">базовая ${uFmtR(r.input.basePrice)} фиксирована · S в коридоре ${r.corridor.loS != null ? uFmtR(r.corridor.loS) + '–' + uFmtR(r.corridor.hiS) : '—'}</div>
-        <table class="u-art"><thead><tr><th class="num">Цена со скидкой (S)</th><th class="num">Покупатель (Pб)</th><th class="num">Чистая</th><th class="num">Маржинальность</th></tr></thead><tbody>${sens}</tbody></table>
+        <div class="u-card-h">Чувствительность по маржинальности</div>
+        <div class="mini">шаг 1% · от ${uFmtP(pr.m_min)} до ${uFmtP(pr.m_max)} (задаётся в параметрах ВБ)</div>
+        <table class="u-art"><thead><tr><th class="num">Маржин.</th><th class="num">Цена S</th><th class="num">Pб</th><th class="num">Чистая</th></tr></thead><tbody>${sens}</tbody></table>
       </div>
       ${unitWbCard(a)}
     </div>

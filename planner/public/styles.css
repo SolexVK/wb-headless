@@ -468,3 +468,16 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .u-detail-cell { padding: 0 !important; background: var(--panel-2); }
 .u-detail-inner { position: sticky; left: 0; box-sizing: border-box; padding: 6px 12px 12px; }
 .u-pb { color: var(--muted); }
+
+/* Юнит: параметры ВБ — обрамлённые смысловые мини-блоки */
+.u-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 10px 0; }
+.u-pg { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 10px; background: var(--panel); }
+.u-pg-t { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 8px; }
+.u-pg .u-grid { grid-template-columns: 1fr; gap: 7px; }
+.u-pg .u-gi span { flex: 1; }
+/* Устойчивость карточек детали (без выезда строк за края) */
+.u-detail-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.u-card .u-art { font-size: 12.5px; }
+.u-card .u-art td, .u-card .u-art th { padding: 4px 6px; }
+.u-card .u-art td:first-child, .u-card .u-art th:first-child { padding-left: 2px; }
+.u-card .u-art td:last-child, .u-card .u-art th:last-child { padding-right: 2px; }

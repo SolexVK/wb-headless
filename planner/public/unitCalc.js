@@ -153,18 +153,18 @@ export function analyze(inp) {
     }
   }
 
-  // Чувствительность по ЦЕНЕ СО СКИДКОЙ (S) — базовая цена фиксирована.
-  // Точки берём В ПРЕДЕЛАХ КОРИДОРА [loS..hiS] + текущая S (подсвечивается).
-  const curS = S;
-  const rawPts = [];
-  if (cor.loS != null && cor.hiS != null) for (let i = 0; i <= 4; i++) rawPts.push(cor.loS + (cor.hiS - cor.loS) * i / 4);
-  else if (curS != null) for (const dd of [-0.2, -0.1, 0, 0.1, 0.2]) rawPts.push(curS * (1 + dd));
-  if (curS != null) rawPts.push(curS);
-  const uniq = [...new Set(rawPts.map((v) => Math.round(v)))].filter((v) => v > 0).sort((a, b) => a - b);
-  const sensitivity = uniq.map((sv) => {
+  // Чувствительность — ГРАДАЦИЯ ПО МАРЖИНАЛЬНОСТИ шагом 1%: от mMin до mMax.
+  // Для каждой целевой валовой маржинальности m считаем S (базовая фиксирована),
+  // цену покупателя и чистую прибыль. Строка текущей маржинальности подсвечивается.
+  const curMpct = unit ? Math.round(unit.marginGross * 100) : null;
+  const mLo = Math.round(pr.m_min * 100), mHi = Math.round(pr.m_max * 100);
+  const sensitivity = [];
+  for (let m = mLo; m <= mHi && sensitivity.length < 60; m++) {
+    const sv = sForMargin(pr, inp, m / 100);
+    if (sv == null || sv <= 0) continue;
     const u = unitBreakdown(sv, pr, inp);
-    return { S: sv, buyerPrice: u.buyerPrice, net: u.net, margin: u.marginGross, current: curS != null && Math.round(sv) === Math.round(curS) };
-  });
+    sensitivity.push({ marginTarget: m, S: sv, buyerPrice: u.buyerPrice, net: u.net, margin: u.marginGross, current: curMpct === m });
+  }
 
   return { input: { basePrice: inp.basePrice != null ? num(inp.basePrice) : null, sellerDiscount: sd }, pr, unit, corridor, breakeven, reverse, sensitivity };
 }
