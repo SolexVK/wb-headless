@@ -426,3 +426,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .u-detail-grid .u-card-wide { grid-column: span 1; min-width: 340px; }
 .u-art tr.u-sep td { background: var(--panel); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; padding-top: 8px; }
 .u-in.u-in-sm { width: 56px; }
+
+/* Юнит-экономика: таблица со своим скроллом и залипающей шапкой */
+.u-tablewrap { overflow: auto; max-height: calc(100vh - 230px); border: 1px solid var(--line); border-radius: 8px; }
+.u-table thead th { position: sticky; top: 0; z-index: 5; background: var(--panel-2); box-shadow: 0 1px 0 var(--line); }
+.u-table thead th:first-child { position: sticky; left: 0; z-index: 6; }

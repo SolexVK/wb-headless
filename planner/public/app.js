@@ -1562,6 +1562,18 @@ let unitSettingsOpen = false;   // раскрыт ли блок глобальн
 const uFmtR = (v) => (v == null || !Number.isFinite(v) ? '—' : Math.round(v).toLocaleString('ru') + ' ₽');
 const uFmtP = (v) => (v == null || !Number.isFinite(v) ? '—' : (v * 100).toFixed(1).replace(/\.0$/, '') + '%');
 
+// Автосохранение юнит-данных: дебаунс PUT /api/state (без пересчёта расписания и
+// перерисовки), чтобы введённое не терялось при перезагрузке страницы.
+let unitSaveT;
+function unitPersist() {
+  clearTimeout(unitSaveT);
+  unitSaveT = setTimeout(() => {
+    api('/api/state', { method: 'PUT', body: JSON.stringify(state) })
+      .then(() => { dirty = false; setStatus(); })
+      .catch(() => { /* оставляем dirty — сохранится общей кнопкой */ });
+  }, 700);
+}
+
 // Параметры движка (доли/₽) из глобальных настроек + переопределений артикула.
 function unitPr(a) {
   const g = state.unit || {};
@@ -1635,7 +1647,7 @@ function renderUnit() {
   root.innerHTML = `<div class="panel u-panel">
     <div class="subhead"><h3>Юнит-экономика по артикулам</h3></div>
     ${settings}
-    <div class="matrix-scroll"><table class="matrix-table u-table">
+    <div class="u-tablewrap"><table class="matrix-table u-table">
       <thead><tr>
         <th>Артикул</th>
         <th class="num" title="Себестоимость, ₽">Себест.</th>
@@ -1747,7 +1759,7 @@ function unitDetail(a, r) {
 function bindUnit() {
   const g = () => state.unit;
   document.querySelectorAll('input[data-ug]').forEach((inp) => inp.addEventListener('change', (e) => {
-    const k = e.target.dataset.ug; g()[k] = Math.max(0, +e.target.value || 0); dirty = true; renderUnit();
+    const k = e.target.dataset.ug; g()[k] = Math.max(0, +e.target.value || 0); dirty = true; unitPersist(); renderUnit();
   }));
   const det = document.querySelector('.u-settings');
   if (det) det.addEventListener('toggle', () => { unitSettingsOpen = det.open; });
@@ -1769,20 +1781,20 @@ function bindUnit() {
     else if (f === 'acceptanceCoef') a.unit.acceptanceCoef = nv == null ? 1 : nv;
     else if (f === 'target.margin') a.unit.target.margin = nv == null ? 0 : nv;
     else if (f === 'target.profit') a.unit.target.profit = nv;
-    dirty = true; renderUnit();
+    dirty = true; unitPersist(); renderUnit();
   }));
   document.querySelectorAll('input[data-ubuyout]').forEach((inp) => inp.addEventListener('change', (e) => {
     const a = state.articles.find((x) => x.id === e.target.dataset.id); if (!a) return;
-    a.buyoutPct = Math.max(1, Math.min(100, +e.target.value || 40)); dirty = true; renderUnit();
+    a.buyoutPct = Math.max(1, Math.min(100, +e.target.value || 40)); dirty = true; unitPersist(); renderUnit();
   }));
   document.querySelectorAll('button[data-utmode]').forEach((b) => b.addEventListener('click', () => {
     const a = state.articles.find((x) => x.id === b.dataset.id); if (!a) return;
     a.unit = a.unit || {}; a.unit.target = a.unit.target || { mode: 'margin', margin: 25, profit: null };
-    a.unit.target.mode = b.dataset.utmode; dirty = true; renderUnit();
+    a.unit.target.mode = b.dataset.utmode; dirty = true; unitPersist(); renderUnit();
   }));
   document.querySelectorAll('button[data-uphase]').forEach((b) => b.addEventListener('click', () => {
     const a = state.articles.find((x) => x.id === b.dataset.id); if (!a) return;
-    a.unit = a.unit || {}; a.unit.drrPhase = b.dataset.uphase; dirty = true; renderUnit();
+    a.unit = a.unit || {}; a.unit.drrPhase = b.dataset.uphase; dirty = true; unitPersist(); renderUnit();
   }));
 }
 
