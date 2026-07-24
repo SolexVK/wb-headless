@@ -56,12 +56,16 @@
       <div class="row">
         <label>Telegram-ID<input id="g-id" type="number" placeholder="напр. 55501234" /></label>
         <label>Имя (заметка)<input id="g-name" type="text" placeholder="необязательно" /></label>
+        <label>Роль<select id="g-role">
+          <option value="viewer">Наблюдатель (просмотр)</option>
+          <option value="editor">Редактор (все листы)</option>
+          <option value="admin">Админ</option>
+        </select></label>
         <label>Подписка до<input id="g-exp" type="date" /></label>
-        <label>Админ<select id="g-admin"><option value="0">нет</option><option value="1">да</option></select></label>
         <button id="g-btn">Выдать доступ</button>
       </div>
-      <p class="muted">Пользователь узнаёт свой Telegram-ID, попытавшись войти: ему покажут ID для передачи вам.
-        «Подписка до» пусто = бессрочно.</p>
+      <p class="muted">Роль задаёт стартовый набор прав; тонко настроить листы можно кнопкой «Права» в таблице.
+        Пользователь узнаёт свой Telegram-ID, попытавшись войти. «Подписка до» пусто = бессрочно.</p>
     </div>
 
     <div id="msg"></div>
@@ -73,6 +77,10 @@
 
   <script>
     var OWNER = 0;
+    var TABS = [];
+    var LEVELS = [['none', 'нет'], ['view', 'просмотр'], ['edit', 'редактир.']];
+    function permsOf(u) { try { var p = JSON.parse(u.perms || '{}'); return (p && p.tabs) ? p.tabs : (p || {}); } catch (e) { return {}; } }
+    function roleLabel(u) { if (u.isAdmin) return 'админ'; return { editor: 'редактор', viewer: 'наблюдатель', custom: 'настроен' }[u.role] || (u.role || '—'); }
     function msg(text, cls) { var m = document.getElementById('msg'); m.textContent = text || ''; m.className = cls || ''; if (text) setTimeout(function(){ if(m.textContent===text) m.textContent=''; }, 4000); }
     function api(url, opts) {
       return fetch(url, Object.assign({ credentials: 'same-origin', headers: { 'Content-Type': 'application/json' } }, opts || {}))
@@ -94,14 +102,16 @@
         var st = statusOf(u);
         var isOwner = u.telegramId === OWNER;
         var name = esc(u.name || u.username || '—') + (u.username ? ' <span class="muted">@' + esc(u.username) + '</span>' : '');
-        var adminBadge = u.isAdmin ? '<span class="badge b-admin">админ</span>' : '';
+        var roleB = '<span class="badge ' + (u.isAdmin ? 'b-admin' : 'b-active') + '">' + roleLabel(u) + '</span>';
+        var req = u.accessRequest ? '<div class="muted" style="color:#ffd166;margin-top:4px">✉ заявка: ' + esc(u.accessRequest) + '</div>' : '';
         var acts = [];
+        if (!isOwner) acts.push('<button class="ghost" data-act="perms" data-id="' + u.telegramId + '">Права…</button>');
         if (u.status === 'blocked') acts.push('<button class="ghost" data-act="unblock" data-id="' + u.telegramId + '">Разблокировать</button>');
         else acts.push('<button class="warn" data-act="block" data-id="' + u.telegramId + '"' + (isOwner ? ' disabled' : '') + '>Заблокировать</button>');
         acts.push('<button class="ghost" data-act="expiry" data-id="' + u.telegramId + '">Срок…</button>');
         if (!isOwner) acts.push('<button class="danger" data-act="del" data-id="' + u.telegramId + '">Удалить</button>');
-        return '<tr>' +
-          '<td data-l="Пользователь">' + name + ' ' + adminBadge + (isOwner ? '<span class="badge b-admin">владелец</span>' : '') + '</td>' +
+        return '<tr data-uid="' + u.telegramId + '">' +
+          '<td data-l="Пользователь">' + name + ' ' + roleB + (isOwner ? '<span class="badge b-admin">владелец</span>' : '') + req + '</td>' +
           '<td data-l="ID">' + u.telegramId + '</td>' +
           '<td data-l="Статус"><span class="badge ' + st.c + '">' + st.t + '</span></td>' +
           '<td data-l="Подписка до">' + fmtDate(u.expiresAt) + '</td>' +
@@ -109,10 +119,56 @@
           '<td data-l="Действия"><div class="acts">' + acts.join('') + '</div></td>' +
         '</tr>';
       }).join('');
+      window.__users = {}; users.forEach(function (u) { window.__users[u.telegramId] = u; });
+    }
+
+    // Инлайн-редактор прав по листам под строкой пользователя.
+    function togglePerms(id) {
+      var existing = document.querySelector('tr.perms-row[data-for="' + id + '"]');
+      if (existing) { existing.remove(); return; }
+      document.querySelectorAll('tr.perms-row').forEach(function (r) { r.remove(); });
+      var u = window.__users[id]; if (!u) return;
+      var cur = permsOf(u);
+      var tr = document.createElement('tr'); tr.className = 'perms-row'; tr.setAttribute('data-for', id);
+      var td = document.createElement('td'); td.setAttribute('colspan', '6');
+      var rowsHtml = TABS.map(function (t) {
+        var lvl = cur[t.key] || 'none';
+        var opts = LEVELS.map(function (l) { return '<option value="' + l[0] + '"' + (l[0] === lvl ? ' selected' : '') + '>' + l[1] + '</option>'; }).join('');
+        return '<label style="display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:13px;color:var(--text,#e6e6e6)">' +
+          '<span>' + esc(t.label) + '</span><select data-tab="' + t.key + '">' + opts + '</select></label>';
+      }).join('');
+      td.innerHTML = '<div style="background:#0f1115;border:1px solid #2a2f3a;border-radius:10px;padding:14px;margin:4px 0">' +
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' +
+        '<strong style="font-size:13px">Права по листам</strong>' +
+        '<button class="ghost" data-preset="viewer" style="padding:4px 10px;font-size:12px">шаблон: Наблюдатель</button>' +
+        '<button class="ghost" data-preset="editor" style="padding:4px 10px;font-size:12px">шаблон: Редактор</button>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">' + rowsHtml + '</div>' +
+        '<div style="margin-top:12px;display:flex;gap:8px"><button data-save-perms="' + id + '">Сохранить права</button>' +
+        '<button class="ghost" data-act="perms" data-id="' + id + '">Отмена</button></div></div>';
+      tr.appendChild(td);
+      var host = document.querySelector('tr[data-uid="' + id + '"]');
+      host.parentNode.insertBefore(tr, host.nextSibling);
+      // пресеты
+      td.querySelectorAll('button[data-preset]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var preset = btn.getAttribute('data-preset');
+          td.querySelectorAll('select[data-tab]').forEach(function (sel) {
+            var key = sel.getAttribute('data-tab');
+            sel.value = preset === 'editor' ? 'edit' : (key === 'dashboard' ? 'view' : 'none');
+          });
+        });
+      });
+      td.querySelector('button[data-save-perms]').addEventListener('click', function () {
+        var tabs = {};
+        td.querySelectorAll('select[data-tab]').forEach(function (sel) { tabs[sel.getAttribute('data-tab')] = sel.value; });
+        api('/api/admin/users/' + id + '/perms', { method: 'POST', body: JSON.stringify({ role: 'custom', perms: { tabs: tabs } }) })
+          .then(function () { msg('Права сохранены', 'ok'); load(); }).catch(function (e) { msg(e.message, 'err'); });
+      });
     }
 
     function load() {
-      api('/api/admin/users').then(function (d) { OWNER = d.ownerId || 0; render(d.users || []); })
+      api('/api/admin/users').then(function (d) { OWNER = d.ownerId || 0; TABS = d.tabs || []; render(d.users || []); })
         .catch(function (e) {
           if (/admin_only/.test(e.message)) document.getElementById('rows').innerHTML = '<tr><td colspan="6" class="err">Доступ только для администратора.</td></tr>';
           else if (/auth_required/.test(e.message)) location.replace('/login');
@@ -124,9 +180,10 @@
       var id = Number(document.getElementById('g-id').value);
       if (!id) { msg('Укажите числовой Telegram-ID', 'err'); return; }
       var exp = document.getElementById('g-exp').value;
+      var role = document.getElementById('g-role').value;
       api('/api/admin/users', { method: 'POST', body: JSON.stringify({
         telegramId: id, status: 'active',
-        isAdmin: document.getElementById('g-admin').value === '1',
+        role: role, isAdmin: role === 'admin',
         expiresAt: exp ? new Date(exp + 'T23:59:59').toISOString() : null,
         note: document.getElementById('g-name').value || null,
         name: document.getElementById('g-name').value || null,
@@ -140,6 +197,7 @@
     document.getElementById('rows').addEventListener('click', function (ev) {
       var btn = ev.target.closest('button[data-act]'); if (!btn) return;
       var id = btn.getAttribute('data-id'), act = btn.getAttribute('data-act');
+      if (act === 'perms') { togglePerms(Number(id)); return; }
       if (act === 'block' || act === 'unblock') {
         api('/api/admin/users/' + id + '/status', { method: 'POST', body: JSON.stringify({ status: act === 'unblock' ? 'active' : 'blocked' }) })
           .then(function () { msg(act === 'unblock' ? 'Разблокирован' : 'Заблокирован', 'ok'); load(); }).catch(function (e) { msg(e.message, 'err'); });

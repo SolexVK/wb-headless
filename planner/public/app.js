@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-2026-07-22e';
+const APP_BUILD = 'rbac-2026-07-24a';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -39,6 +39,76 @@ async function recalc(persist = false) {
   schedule = r.schedule;
   renderCurrent();
   setStatus();
+}
+
+// ---------- права доступа (RBAC) ----------
+// PERMS === null → авторизация выключена (локальная сеть) ИЛИ админ: полный доступ.
+let PERMS = null;
+async function loadPerms() {
+  try { const me = await api('/api/me'); PERMS = (me && me.authEnabled && me.perms && !me.perms.isAdmin) ? me.perms : null; }
+  catch { PERMS = null; }
+}
+function tabAllowed(key) { if (!PERMS) return true; const l = PERMS.tabs[key]; return l === 'view' || l === 'edit'; }
+function tabEditable(key) { if (!PERMS) return true; return PERMS.tabs[key] === 'edit'; }
+function canEditAny() { if (!PERMS) return true; return Object.values(PERMS.tabs).some((v) => v === 'edit'); }
+async function requestAccess() {
+  const msg = prompt('Что нужно открыть/дать на редактирование? (сообщение админу)', '');
+  if (msg === null) return;
+  try { await api('/api/access/request', { method: 'POST', body: JSON.stringify({ message: msg }) }); toast('Заявка отправлена администратору'); }
+  catch (e) { toast('Не удалось отправить: ' + e.message, true); }
+}
+function firstAllowedTab() {
+  const order = ['gantt', 'matrix', 'salesplan', 'fact', 'fabric', 'dashboard', 'season', 'unit', 'data'];
+  return order.find(tabAllowed) || 'dashboard';
+}
+// Спрятать запрещённые вкладки, пометить листы «только просмотр» классом ro,
+// скрыть глобальную кнопку «Сохранить», если редактировать нечего.
+function applyAccessUI() {
+  if (!PERMS) return; // полный доступ — ничего не трогаем
+  for (const btn of document.querySelectorAll('.tab')) {
+    const key = btn.dataset.tab;
+    const vis = tabAllowed(key);
+    btn.style.display = vis ? '' : 'none';
+    const view = document.getElementById('view-' + key);
+    if (view) {
+      const ro = vis && !tabEditable(key);
+      view.classList.toggle('ro', ro);
+      // баннер «режим просмотра» (один раз на лист)
+      let b = view.querySelector(':scope > .ro-banner');
+      if (ro && !b) {
+        b = document.createElement('div');
+        b.className = 'ro-banner';
+        b.innerHTML = '👁 Режим просмотра — изменения недоступны. '
+          + '<button data-nav class="ro-req btn" style="margin-left:8px;padding:2px 10px">Запросить доступ</button>';
+        b.querySelector('.ro-req').addEventListener('click', requestAccess);
+        view.insertBefore(b, view.firstChild);
+      } else if (!ro && b) { b.remove(); }
+    }
+  }
+  const save = document.getElementById('btn-save');
+  if (save && !canEditAny()) save.style.display = 'none';
+}
+// Блокировка ввода в листах «только просмотр» (класс ro на .view). Один перехватчик на
+// документе — переживает перерисовки. Селекты (навигация/фильтры) не трогаем; правки
+// всё равно режутся на сервере, здесь — только чтобы поля были недоступны на ввод.
+function installReadonlyGuard() {
+  const inRO = (el) => !!(el && el.closest && el.closest('.view.ro'));
+  const isField = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA');
+  const NAV_KEYS = new Set(['Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', 'Shift', 'Control', 'Meta', 'Alt']);
+  const guard = (e) => {
+    const t = e.target;
+    if (!inRO(t)) return;
+    if (isField(t)) {
+      if (e.type === 'beforeinput' || e.type === 'paste' || e.type === 'drop') { e.preventDefault(); e.stopPropagation(); return; }
+      if (e.type === 'keydown') { if (!(e.ctrlKey || e.metaKey || NAV_KEYS.has(e.key))) { e.preventDefault(); e.stopPropagation(); } return; }
+      if ((t.type === 'checkbox' || t.type === 'radio') && e.type === 'click') { e.preventDefault(); e.stopPropagation(); return; }
+    }
+    if (e.type === 'click') {
+      const btn = t.closest && t.closest('button');
+      if (btn && !btn.hasAttribute('data-nav')) { e.preventDefault(); e.stopPropagation(); }
+    }
+  };
+  ['beforeinput', 'paste', 'drop', 'keydown', 'click'].forEach((ev) => document.addEventListener(ev, guard, true));
 }
 
 // ---------- статус / тосты ----------
@@ -2255,9 +2325,12 @@ async function init() {
     renderCurrent();
   });
 
+  installReadonlyGuard();
   try {
+    await loadPerms();
+    applyAccessUI();
     await loadAll();
-    switchTab('gantt');
+    switchTab(firstAllowedTab());
     setStatus();
   } catch (e) {
     document.getElementById('gantt').innerHTML = `<div style="padding:24px;color:var(--danger)">Ошибка загрузки: ${e.message}</div>`;

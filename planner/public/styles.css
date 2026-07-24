@@ -481,3 +481,19 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .u-card .u-art td, .u-card .u-art th { padding: 4px 6px; }
 .u-card .u-art td:first-child, .u-card .u-art th:first-child { padding-left: 2px; }
 .u-card .u-art td:last-child, .u-card .u-art th:last-child { padding-right: 2px; }
+
+/* ---------- Права доступа: режим «только просмотр» ---------- */
+.ro-banner {
+  margin: 0 0 12px; padding: 8px 12px; border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 16%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  color: var(--text); font-size: 13px; line-height: 1.4;
+}
+.view.ro input:not([type=button]):not([type=submit]),
+.view.ro textarea {
+  opacity: .6; cursor: not-allowed; pointer-events: none;
+}
+.view.ro button:not([data-nav]) {
+  opacity: .5; cursor: not-allowed;
+}
+.view.ro select { cursor: pointer; } /* селекты-фильтры/навигация остаются рабочими */
