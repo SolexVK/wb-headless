@@ -171,7 +171,8 @@ export function installAuth(app) {
   // Кто я (для фронта: показать имя, признак админа).
   app.get('/api/me', (req, res) => {
     const u = currentUser(req);
-    if (!u) return res.json({ authEnabled: true, user: null });
+    // botUsername нужен странице логина ДО входа (для виджета Telegram) — отдаём всегда.
+    if (!u) return res.json({ authEnabled: true, user: null, botUsername: BOT_USERNAME });
     res.json({
       authEnabled: true,
       user: {
