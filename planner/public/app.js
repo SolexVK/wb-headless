@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-rules-persist-2026-07-24g';
+const APP_BUILD = 'season-flow-2026-07-24h';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1171,14 +1171,18 @@ function seasonBuilderPanel() {
   hydrateSeasonSel(f); // восстановить ранее выбранные признаки/включения для предмета
   const warn = seasonHasToken ? ''
     : '<div class="season-warn">⚠ Не задан <b>MPSTATS_TOKEN</b> в окружении службы — построение недоступно. Добавь токен в <code>planner/data/.env</code> на Mac mini (см. DEPLOY.md) и перезапусти службу.</div>';
+  const selNow = featureSel[f.path] || { plus: new Set(), minus: new Set() };
+  const selCount = selNow.plus.size + selNow.minus.size;
+  const incCount = (seasonIncludeByPath[f.path] || new Set()).size;
   return `<div class="panel season-builder">
     <div class="subhead"><h3>Часть 1 — Построение плана продаж (по конкурентам)</h3></div>
     ${warn}
     <div class="season-form se-builder-grid">
 
-      <div class="u-pg">
-        <div class="u-pg-t">Артикул и предмет WB</div>
-        <div class="se-fields">
+      <!-- 1. Предмет -->
+      <div class="u-pg se-wide">
+        <div class="u-pg-t">1 · Артикул и предмет WB</div>
+        <div class="se-fields se-fields-2">
           <div class="field"><label>Артикул</label><select id="se-article">${arts.map((x) => `<option value="${x.id}"${x.id === aid ? ' selected' : ''}>${x.id} — ${seEsc(x.name)}</option>`).join('')}</select></div>
           <div class="field"><label>Путь предмета WB</label>
             <div class="se-path-row">
@@ -1191,11 +1195,50 @@ function seasonBuilderPanel() {
         </div>
       </div>
 
-      <div class="u-pg">
-        <div class="u-pg-t">Параметры плана</div>
+      <!-- 2. Признаки предмета (широкий сбор без фильтров) -->
+      <details class="se-comp se-feat se-wide" id="se-feat"${featureOpen ? ' open' : ''}>
+        <summary>2 · 🧠 Признаки предмета <span class="mini">${selCount ? `(отмечено: ${selCount})` : '(собрать все слова-признаки по предмету и отметить + / −)'}</span></summary>
+        <div class="se-comp-body">
+          <div class="se-feat-bar">
+            <button class="btn btn-primary" id="se-feat-load" type="button">Собрать признаки предмета</button>
+            <button class="btn" id="se-feat-save" type="button" title="Зафиксировать выбранные признаки в базе">💾 Сохранить признаки</button>
+            <button class="btn btn-danger" id="se-feat-reset" type="button" title="Сбросить выбранные плюс/минус-признаки">✕ Сбросить признаки</button>
+            <button class="btn" id="se-feat-refresh" type="button" title="Пересобрать словарь заново (обновить кэш)">↻ обновить</button>
+            <span class="mini" id="se-feat-status"></span>
+          </div>
+          <div class="mini">Широкий сбор по <b>всему предмету</b> (без фильтров): слова-признаки из названий, описаний и характеристик группируются. Отметьте <b>+</b> (нужный признак) или <b>−</b> (лишний). Правило: достаточно <b>любого одного</b> плюс-признака; <b>любой один</b> минус — исключает; товар без плюс и без минус — уходит в проверку «неопределённых» (шаг 3).</div>
+          <div class="se-key-box" style="margin-top:8px">
+            <label>🎯 Ключевое слово — строго (необязательно)</label>
+            <input id="se-must" value="${seEsc(f.mustHave || '')}" placeholder="напр. муслин — только если есть в характеристиках">
+          </div>
+          <div id="se-feat-body"></div>
+        </div>
+      </details>
+
+      <!-- 3. Неопределённые артикулы -->
+      <details class="se-comp se-undet se-wide" id="se-undet">
+        <summary>3 · 🔎 Неопределённые артикулы (ручная проверка) <span class="mini">${incCount ? `(добавлено вручную: ${incCount})` : '(релевантные с продажами, но без явных признаков)'}</span></summary>
+        <div class="se-comp-body">
+          <div class="se-feat-bar">
+            <button class="btn btn-primary" id="se-undet-load" type="button">Проверить неопределённые</button>
+            <span class="mini" id="se-undet-status"></span>
+          </div>
+          <div class="mini">Товары без плюс- и без минус-слов, в вашем ценовом сегменте, с выручкой ≥ 100 000 ₽/мес. ТОП-20 по выручке — отметьте релевантные визуально и «Сохранить», они войдут в выборку.${incCount ? ` <b style="color:var(--accent-2)">Уже добавлено вручную: ${incCount}.</b>` : ''}</div>
+          <div id="se-undet-body"></div>
+        </div>
+      </details>
+
+      <!-- 4. Остальные фильтры и параметры плана -->
+      <div class="u-pg se-wide">
+        <div class="u-pg-t">4 · Фильтры и параметры плана</div>
         <div class="se-fields se-fields-2">
+          <div class="field"><label>Размер группы аналогов</label><input id="se-limit" type="number" value="${f.limit ?? 60}"></div>
+          <div class="field"><label>Цена от, ₽</label><input id="se-pmin" type="number" value="${f.priceMin ?? ''}"></div>
+          <div class="field"><label>Цена до, ₽</label><input id="se-pmax" type="number" value="${f.priceMax ?? ''}"></div>
+          <div class="field"><label>Мин. продаж/мес</label><input id="se-minsales" type="number" value="${f.minSales ?? ''}"></div>
+          <div class="field"><label>Мин. выручка/мес, ₽</label><input id="se-minrev" type="number" value="${f.minRevenue ?? ''}"></div>
           <div class="field"><label title="Год старта сезона. Вход, пик и распродажу движок выбирает сам из годового анализа рынка.">Целевой сезон (год старта)</label><input id="se-year" type="number" min="2024" max="2032" value="${f.targetYear || (new Date().getUTCFullYear())}"></div>
-          <div class="field"><label title="Уровень, на который движок выводит пик плана. ТОП-3 — средняя трёх сильнейших аналогов (реалистично). ТОП-1 — уровень самого сильного аналога по выручке в вашем ценовом сегменте (амбициозно: цель занять ТОП-1, максимальный объём и заказ на производство).">Целевой уровень (пик плана)</label>
+          <div class="field span2"><label title="ТОП-3 — средняя трёх сильнейших аналогов (реалистично). ТОП-1 — уровень самого сильного аналога по выручке в сегменте (амбициозно).">Целевой уровень (пик плана)</label>
             <select id="se-level">
               <option value="top3"${f.targetLevel === 'top1' ? '' : ' selected'}>ТОП-3 — средний (реалистично)</option>
               <option value="top1"${f.targetLevel === 'top1' ? ' selected' : ''}>ТОП-1 — максимум (амбициозно)</option>
@@ -1204,58 +1247,16 @@ function seasonBuilderPanel() {
           <div class="field span2 se-opts">
             <label class="se-check"><input type="checkbox" id="se-oos"${f.oos !== false ? ' checked' : ''}> OOS-поправка</label>
             <label class="se-check"><input type="checkbox" id="se-weekly"${f.weekly !== false ? ' checked' : ''}> недельный профиль</label>
-            <label class="se-check" title="Слова фильтра ищутся не в коротком названии, а в полной карточке WB: заголовок + описание + характеристики (состав, сезон, крой, пол, стиль). Точнее отбирает конкурентов. Первый раз чуть дольше — карточки кэшируются."><input type="checkbox" id="se-deep"${f.deepMatch !== false ? ' checked' : ''}> глубокий анализ (описание + характеристики)</label>
+            <label class="se-check" title="Поиск слов-признаков в полной карточке WB (описание+характеристики), а не в коротком названии. Нужен для работы признаков."><input type="checkbox" id="se-deep"${f.deepMatch !== false ? ' checked' : ''}> глубокий анализ (описание + характеристики)</label>
+            <button class="btn btn-danger" id="se-filter-reset" type="button" title="Сбросить числовые фильтры к значениям по умолчанию">✕ Сбросить фильтры</button>
           </div>
         </div>
       </div>
 
-      <div class="u-pg se-wide">
-        <div class="u-pg-t">Фильтр аналогов</div>
-        <div class="se-key-box">
-          <label>🎯 Ключевое слово — строго (только этот товар)</label>
-          <input id="se-must" value="${seEsc(f.mustHave || '')}" placeholder="напр. муслин  (несколько слов = все обязательны)">
-          <div class="mini">Товар пройдёт, только если ключ есть в <b>заголовке или характеристиках</b> карточки (состав, фактура, сезон) — не в маркетинговом описании. Требует «глубокого анализа».</div>
-        </div>
-        <div class="se-fields se-fields-2">
-          <div class="field"><label>Размер группы аналогов</label><input id="se-limit" type="number" value="${f.limit ?? 60}"></div>
-          <div class="field"><label>Слова в названии (любое из)</label><input id="se-words" value="${seEsc(f.words || '')}" placeholder="рубашка"></div>
-          <div class="field"><label>Доп. слова-признаки</label><input id="se-allwords" value="${seEsc(f.allWords || '')}" placeholder="оверсайз, длинный рукав"></div>
-          <div class="field span2"><label>Исключить слова</label><input id="se-exclude" value="${seEsc(f.exclude || '')}" placeholder="детск, мужск, блузка"></div>
-          <div class="field"><label>Цена от, ₽</label><input id="se-pmin" type="number" value="${f.priceMin ?? ''}"></div>
-          <div class="field"><label>Цена до, ₽</label><input id="se-pmax" type="number" value="${f.priceMax ?? ''}"></div>
-          <div class="field"><label>Мин. продаж/мес</label><input id="se-minsales" type="number" value="${f.minSales ?? ''}"></div>
-          <div class="field"><label>Мин. выручка/мес, ₽</label><input id="se-minrev" type="number" value="${f.minRevenue ?? ''}"></div>
-        </div>
-      </div>
-
-      <details class="se-comp se-feat se-wide" id="se-feat"${featureOpen ? ' open' : ''}>
-        <summary>🧠 Словарь признаков предмета <span class="mini">(собрать все слова-признаки и отметить + / −)</span></summary>
-        <div class="se-comp-body">
-          <div class="se-feat-bar">
-            <button class="btn btn-primary" id="se-feat-load" type="button">Собрать признаки предмета</button>
-            <button class="btn" id="se-feat-refresh" type="button" title="Пересобрать (обновить кэш)">↻ обновить</button>
-            <span class="mini" id="se-feat-status"></span>
-          </div>
-          <div class="mini">По выбранному предмету собираются все слова-признаки из <b>названий, описаний и характеристик</b> топ-товаров и группируются. Отметьте <b>+</b> (нужный признак) или <b>−</b> (лишний) — они добавятся в плюс/минус-слова фильтра. Первый сбор — несколько секунд, потом из кэша.</div>
-          <div id="se-feat-body"></div>
-        </div>
-      </details>
-
-      <details class="se-comp se-undet se-wide" id="se-undet">
-        <summary>🔎 Неопределённые артикулы (ручная проверка) <span class="mini">(добавить релевантные с хорошими продажами, но без явных признаков)</span></summary>
-        <div class="se-comp-body">
-          <div class="se-feat-bar">
-            <button class="btn btn-primary" id="se-undet-load" type="button">Проверить неопределённые</button>
-            <span class="mini" id="se-undet-status"></span>
-          </div>
-          <div class="mini">После фильтрации по плюс/минус-словам сюда попадают товары в вашем ценовом сегменте с выручкой ≥ 100 000 ₽/мес, которые НЕ прошли плюс-слова (мало явных признаков), но могут быть релевантны. Отметьте нужные и «Сохранить» — они добавятся в выборку к построению плана. ${(function(){const p=(document.getElementById?.('se-path')?.value)||'';const n=(seasonIncludeByPath[p]||new Set()).size;return n?`<b style="color:var(--accent-2)">Уже добавлено вручную: ${n}.</b>`:'';})()}</div>
-          <div id="se-undet-body"></div>
-        </div>
-      </details>
-
+      <!-- 5. Построить план -->
       <div class="se-wide season-actions">
         <button class="btn btn-primary" id="se-build"${seasonHasToken && !seasonBuilding ? '' : ' disabled'}>${seasonBuilding ? '⏳ Строю план…' : '▶ Построить план'}</button>
-        <span class="mini">Данные берутся из MPStats по конкурентам-аналогам (несколько секунд, ~3–4 запроса). Готовый план сохранится в накопитель ниже.</span>
+        <span class="mini">Формируется список релевантных артикулов (признаки + одобренные вручную) → графики ранга сезонности и план продаж.</span>
       </div>
     </div>
   </div>`;
@@ -1339,10 +1340,15 @@ function seasonSelPersist(path) {
 // Восстановить выбор признаков/включений для предмета из сохранённого фильтра артикула.
 function hydrateSeasonSel(f) {
   if (!f || !f.path) return;
-  if ((f.featurePlus?.length || f.featureMinus?.length) && !featureSel[f.path]) {
+  if (!featureSel[f.path]) {
     const s = featSelFor(f.path);
     (f.featurePlus || []).forEach((w) => s.plus.add(w));
     (f.featureMinus || []).forEach((w) => s.minus.add(w));
+    // Миграция прежнего ручного ввода (words/exclude) в признаки — чтобы старые планы
+    // не теряли слова после перехода на выбор признаков.
+    const csv = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (!(f.featurePlus?.length)) csv(f.words).forEach((w) => s.plus.add(w));
+    if (!(f.featureMinus?.length)) csv(f.exclude).forEach((w) => s.minus.add(w));
   }
   if ((f.includeWb || []).length && !seasonIncludeByPath[f.path]) {
     const inc = seasonIncludeFor(f.path); (f.includeWb || []).forEach((w) => inc.add(String(w)));
@@ -1428,6 +1434,23 @@ function bindSeasonBuilder() {
   if (featureDictCache[featPath]) renderFeatureDictBody(featureDictCache[featPath]);
   g('se-feat-load')?.addEventListener('click', () => loadFeatureDict(false));
   g('se-feat-refresh')?.addEventListener('click', () => loadFeatureDict(true));
+  g('se-feat-save')?.addEventListener('click', () => { seasonSelPersist(); toast('Признаки сохранены в базе'); });
+  g('se-feat-reset')?.addEventListener('click', () => {
+    const p = (g('se-path')?.value || '').trim();
+    if (featureSel[p]) { featureSel[p].plus.clear(); featureSel[p].minus.clear(); }
+    if (g('se-must')) g('se-must').value = '';
+    seasonSelPersist(p);
+    const dict = featureDictCache[p]; if (dict) renderFeatureDictBody(dict); // снять подсветку чипов
+    toast('Признаки сброшены');
+  });
+  g('se-filter-reset')?.addEventListener('click', () => {
+    const set = (id, val) => { const el = g(id); if (el) el.value = val; };
+    set('se-limit', '60'); set('se-pmin', ''); set('se-pmax', ''); set('se-minsales', ''); set('se-minrev', '');
+    set('se-year', String(new Date().getUTCFullYear()));
+    if (g('se-level')) g('se-level').value = 'top3';
+    ['se-oos', 'se-weekly', 'se-deep'].forEach((id) => { const el = g(id); if (el) el.checked = true; });
+    toast('Фильтры сброшены');
+  });
   g('se-path-find')?.addEventListener('click', async () => {
     const q = g('se-path-q').value.trim();
     const box = g('se-path-list');
