@@ -1320,7 +1320,7 @@ async function renderSeasonView(articleId) {
   const staleBanner = stale
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
-  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonCompetitorsBlock(rep) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   bindSeasonView(p);
   // Пересборка в один клик прямо из баннера (тем же cfg, что сохранён у плана).
   if (canRebuild) {
@@ -1336,6 +1336,42 @@ async function renderSeasonView(articleId) {
       }
     });
   }
+}
+
+// Разворачиваемый блок «Топ-10 конкурентов в выборке» — чтобы проверить релевантность
+// фильтра: на каких именно аналогах построена аналитика. Свёрнут по умолчанию.
+function seasonCompetitorsBlock(rep) {
+  const items = (rep.perItem || []).filter((m) => m && ((+m.revenue > 0) || (+m.unitsSold > 0)));
+  if (!items.length) return '';
+  const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
+  const top = items.slice().sort((a, b) => (+b.revenue || 0) - (+a.revenue || 0)).slice(0, 10);
+  const rows = top.map((m, i) => {
+    const nm = m.wb != null ? String(m.wb) : '';
+    const link = nm ? `https://www.wildberries.ru/catalog/${nm}/detail.aspx` : '';
+    const perMonth = m.days > 0 ? Math.round((+m.revenue || 0) / m.days * 30) : null;
+    const title = seEsc(m.name || (nm ? 'арт. ' + nm : '—'));
+    return `<tr>
+      <td class="num">${i + 1}</td>
+      <td class="se-comp-name">${nm ? `<a href="${link}" target="_blank" rel="noopener">${title}</a>` : title}</td>
+      <td class="num">${nm || '—'}</td>
+      <td class="num">${fmt(m.unitsSold)}</td>
+      <td class="num">${fmt(m.revenue)} ₽</td>
+      <td class="num">${perMonth != null ? fmt(perMonth) + ' ₽' : '—'}</td>
+      <td class="num">${m.days || 0}</td>
+    </tr>`;
+  }).join('');
+  const totalKept = rep.groupSize != null ? rep.groupSize : items.length;
+  const withData = rep.itemsWithData != null ? rep.itemsWithData : items.length;
+  return `<details class="se-comp">
+    <summary>🔍 Топ-10 конкурентов в выборке — проверка релевантности фильтра <span class="mini">(в выборке ${totalKept}, с данными ${withData})</span></summary>
+    <div class="se-comp-body">
+      <div class="mini">Отсортировано по выручке за период анализа (2 года). Клик по названию — карточка на Wildberries. Так можно убедиться, что фильтр отобрал именно релевантных конкурентов.</div>
+      <div class="se-comp-scroll"><table class="se-comp-table">
+        <thead><tr><th class="num">#</th><th>Название</th><th class="num">Артикул WB</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num">Дней</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>
+  </details>`;
 }
 
 function seasonPhaseLegend() {

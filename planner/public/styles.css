@@ -561,3 +561,23 @@ html { overflow-x: hidden; }
 .se-fields .se-opts { flex-direction: row; flex-wrap: wrap; gap: 16px; align-items: center; }
 .season-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 @media (max-width: 720px) { .se-builder-grid { grid-template-columns: 1fr; } }
+
+/* Ранг сезонности — разворачиваемый блок «Топ-10 конкурентов» (проверка фильтра) */
+.se-comp { margin: 14px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+.se-comp > summary {
+  cursor: pointer; user-select: none; list-style: none; padding: 11px 14px;
+  font-weight: 600; font-size: 14px; color: var(--text); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.se-comp > summary::-webkit-details-marker { display: none; }
+.se-comp > summary::before { content: '▸'; color: var(--muted); font-size: 12px; }
+.se-comp[open] > summary::before { content: '▾'; }
+.se-comp > summary:hover { color: var(--accent); }
+.se-comp-body { padding: 0 14px 14px; }
+.se-comp-scroll { overflow-x: auto; margin-top: 8px; }
+.se-comp-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; }
+.se-comp-table th, .se-comp-table td { padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.se-comp-table th { color: var(--muted); font-weight: 600; font-size: 12px; }
+.se-comp-table .se-comp-name { white-space: normal; min-width: 180px; max-width: 320px; }
+.se-comp-table .se-comp-name a { color: var(--accent); text-decoration: none; }
+.se-comp-table .se-comp-name a:hover { text-decoration: underline; }
+.se-comp-table tbody tr:hover { background: var(--g-row-alt); }
