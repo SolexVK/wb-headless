@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-strictkey-2026-07-24d';
+const APP_BUILD = 'season-featuredict-2026-07-24e';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1100,6 +1100,10 @@ let seasonGran = 'day';          // день/неделя/месяц в табл
 let seasonBuilding = false;
 let seasonPlansIndex = [];
 let seasonHasToken = null;
+let featureOpen = false;                 // раскрыт ли блок «Словарь признаков»
+const featureDictCache = {};             // path -> собранный словарь признаков
+const featureSel = {};                   // path -> { plus:Set, minus:Set } выбранные признаки
+function featSelFor(path) { if (!featureSel[path]) featureSel[path] = { plus: new Set(), minus: new Set() }; return featureSel[path]; }
 const SE_CHARTS = {};            // реестр графиков для тултипа: id → {rows, геометрия, valueKey}
 let seChartSeq = 0;
 
@@ -1221,6 +1225,19 @@ function seasonBuilderPanel() {
         </div>
       </div>
 
+      <details class="se-comp se-feat se-wide" id="se-feat"${featureOpen ? ' open' : ''}>
+        <summary>🧠 Словарь признаков предмета <span class="mini">(собрать все слова-признаки и отметить + / −)</span></summary>
+        <div class="se-comp-body">
+          <div class="se-feat-bar">
+            <button class="btn btn-primary" id="se-feat-load" type="button">Собрать признаки предмета</button>
+            <button class="btn" id="se-feat-refresh" type="button" title="Пересобрать (обновить кэш)">↻ обновить</button>
+            <span class="mini" id="se-feat-status"></span>
+          </div>
+          <div class="mini">По выбранному предмету собираются все слова-признаки из <b>названий, описаний и характеристик</b> топ-товаров и группируются. Отметьте <b>+</b> (нужный признак) или <b>−</b> (лишний) — они добавятся в плюс/минус-слова фильтра. Первый сбор — несколько секунд, потом из кэша.</div>
+          <div id="se-feat-body"></div>
+        </div>
+      </details>
+
       <div class="se-wide season-actions">
         <button class="btn btn-primary" id="se-build"${seasonHasToken && !seasonBuilding ? '' : ' disabled'}>${seasonBuilding ? '⏳ Строю план…' : '▶ Построить план'}</button>
         <span class="mini">Данные берутся из MPStats по конкурентам-аналогам (несколько секунд, ~3–4 запроса). Готовый план сохранится в накопитель ниже.</span>
@@ -1229,11 +1246,25 @@ function seasonBuilderPanel() {
   </div>`;
 }
 
+// объединить ручной ввод слов (через запятую) с выбранными в словаре признаками (уникально)
+function mergeWords(manual, extra) {
+  const seen = new Set(); const out = [];
+  for (const w of String(manual || '').split(',').concat([...extra])) {
+    const s = String(w || '').trim(); const k = s.toLowerCase();
+    if (s && !seen.has(k)) { seen.add(k); out.push(s); }
+  }
+  return out.join(', ');
+}
 function collectSeasonForm() {
   const v = (id) => (document.getElementById(id)?.value || '').trim();
+  const path = v('se-path');
+  const sel = featureSel[path];
   return {
     articleId: seasonBuildArticle,
-    path: v('se-path'), words: v('se-words'), allWords: v('se-allwords'), exclude: v('se-exclude'),
+    path,
+    words: mergeWords(v('se-words'), sel ? sel.plus : []),
+    allWords: v('se-allwords'),
+    exclude: mergeWords(v('se-exclude'), sel ? sel.minus : []),
     mustHave: v('se-must'),
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
     limit: v('se-limit'), targetYear: v('se-year'),
@@ -1244,9 +1275,58 @@ function collectSeasonForm() {
   };
 }
 
+// Отрисовать словарь признаков: группы характеристик + частые слова, у каждого +/−.
+function renderFeatureDictBody(dict) {
+  const body = document.getElementById('se-feat-body'); if (!body) return;
+  if (!dict) { body.innerHTML = ''; return; }
+  const sel = featSelFor(dict.path);
+  const chip = (w) => {
+    const p = sel.plus.has(w) ? ' on' : '', m = sel.minus.has(w) ? ' on' : '';
+    return `<span class="se-fw">
+      <button class="se-fw-b plus${p}" data-fw-plus="${seEsc(w)}" title="плюс-слово">+</button>
+      <button class="se-fw-b minus${m}" data-fw-minus="${seEsc(w)}" title="минус-слово">−</button>
+      <span class="se-fw-t">${seEsc(w)}</span></span>`;
+  };
+  const groups = (dict.attributes || []).map((a) => `<div class="se-fg">
+      <div class="se-fg-h">${seEsc(a.name)} <span class="mini">${a.values.length}</span></div>
+      <div class="se-fg-vals">${a.values.map((v) => chip(v.value)).join('')}</div></div>`).join('');
+  const kw = (dict.keywords || []).length ? `<div class="se-fg">
+      <div class="se-fg-h">Частые слова из названий/описаний <span class="mini">${dict.keywords.length}</span></div>
+      <div class="se-fg-vals">${dict.keywords.map((k) => chip(k.word)).join('')}</div></div>` : '';
+  body.innerHTML = `<div class="mini" style="margin:8px 0">Собрано по ${dict.sample} товарам${dict.withCards ? ` (карточек: ${dict.withCards})` : ' (карточки WB недоступны — только названия)'}. ${dict.cached ? 'из кэша' : 'свежий сбор'}.</div>
+    <div class="se-fg-list">${groups}${kw}</div>`;
+  // обработчики +/− (взаимоисключающие)
+  body.querySelectorAll('[data-fw-plus]').forEach((b) => b.addEventListener('click', () => {
+    const w = b.dataset.fwPlus; if (sel.plus.has(w)) sel.plus.delete(w); else { sel.plus.add(w); sel.minus.delete(w); }
+    renderFeatureDictBody(dict);
+  }));
+  body.querySelectorAll('[data-fw-minus]').forEach((b) => b.addEventListener('click', () => {
+    const w = b.dataset.fwMinus; if (sel.minus.has(w)) sel.minus.delete(w); else { sel.minus.add(w); sel.plus.delete(w); }
+    renderFeatureDictBody(dict);
+  }));
+}
+async function loadFeatureDict(force) {
+  const path = (document.getElementById('se-path')?.value || '').trim();
+  const status = document.getElementById('se-feat-status');
+  if (!path) { toast('Сначала укажи путь предмета WB', true); return; }
+  if (status) status.textContent = 'Собираю признаки…';
+  try {
+    const r = await api('/api/season/features?path=' + encodeURIComponent(path) + (force ? '&force=1' : ''));
+    featureDictCache[path] = r.dict;
+    if (status) status.textContent = '';
+    renderFeatureDictBody(r.dict);
+  } catch (e) { if (status) status.textContent = ''; toast('Ошибка сбора признаков: ' + e.message, true); }
+}
+
 function bindSeasonBuilder() {
   const g = (id) => document.getElementById(id);
   g('se-article')?.addEventListener('change', (e) => { seasonBuildArticle = e.target.value; renderSeason(); });
+  // словарь признаков: раскрытие запоминаем; если для пути уже собран — показываем сразу
+  g('se-feat')?.addEventListener('toggle', (e) => { featureOpen = e.target.open; });
+  const featPath = (g('se-path')?.value || '').trim();
+  if (featureDictCache[featPath]) renderFeatureDictBody(featureDictCache[featPath]);
+  g('se-feat-load')?.addEventListener('click', () => loadFeatureDict(false));
+  g('se-feat-refresh')?.addEventListener('click', () => loadFeatureDict(true));
   g('se-path-find')?.addEventListener('click', async () => {
     const q = g('se-path-q').value.trim();
     const box = g('se-path-list');

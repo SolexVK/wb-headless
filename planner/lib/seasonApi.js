@@ -7,7 +7,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildSeasonPlanReport } from './season/seasonPlanReport.js';
-import { dbAvailable, planSave, planLoad, planDelete, planList } from './db.js';
+import { buildFeatureDict } from './season/featureDict.js';
+import { dbAvailable, planSave, planLoad, planDelete, planList, featureDictLoad, featureDictSave } from './db.js';
+
+const FEATURE_TTL_MS = 30 * 24 * 3600 * 1000; // словарь признаков кэшируем на 30 дней
 
 const MPSTATS_BASE = process.env.MPSTATS_BASE_URL || 'https://mpstats.io/api';
 // Дерево категорий MPStats (пути предметов) — для подсказки в UI.
@@ -75,6 +78,21 @@ export async function runForecast(cfg = {}) {
     baseSource: 'market',
     plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false, rampDays: num(cfg.rampDays), seasonFrac: num(cfg.seasonFrac), targetLevel: cfg.targetLevel === 'top1' ? 'top1' : 'top3', deepMatch: cfg.deepMatch !== false },
   });
+}
+
+// Словарь признаков предмета: из кэша (БД) или собрать заново. Кэш по path на 30 дней.
+export async function getFeatureDict(cfg = {}) {
+  if (!process.env.MPSTATS_TOKEN) throw new Error('MPSTATS_TOKEN не задан в окружении службы (planner/data/.env)');
+  const path = String(cfg.path || '').trim();
+  if (!path) throw new Error('Не указан путь предмета WB (path)');
+  if (!cfg.force && dbAvailable()) {
+    const hit = featureDictLoad(path, FEATURE_TTL_MS);
+    if (hit) return { ...hit, cached: true };
+  }
+  const hist = default2Years();
+  const dict = await buildFeatureDict({ path, d1: hist.d1, d2: hist.d2, sample: num(cfg.sample) || 250 });
+  if (dbAvailable()) featureDictSave(path, dict);
+  return { ...dict, cached: false };
 }
 
 // Поиск пути предмета по корню слова (для подсказки в UI).

@@ -44,12 +44,12 @@ async function mapPool(items, concurrency, worker, shouldStop) {
   return results;
 }
 
-const lc = (s) => String(s ?? '').toLowerCase().replace(/ё/g, 'е'); // ё=е для совпадений
+export const lc = (s) => String(s ?? '').toLowerCase().replace(/ё/g, 'е'); // ё=е для совпадений
 
 // Лёгкий стем русского слова: срезаем распространённое окончание, чтобы «клетка»
 // матчила «в клетку», «лето» — «летняя» и т.п. (учёт словоформ).
 const RU_ENDINGS = ['ами', 'ями', 'ого', 'его', 'ому', 'ему', 'ыми', 'ими', 'ый', 'ий', 'ой', 'ая', 'яя', 'ое', 'ее', 'ые', 'ие', 'ах', 'ях', 'ам', 'ям', 'ов', 'ев', 'ью', 'ья', 'ье', 'ем', 'ом', 'а', 'я', 'о', 'е', 'ы', 'и', 'у', 'ю', 'й', 'ь'];
-function stem(word) {
+export function stem(word) {
   let w = lc(word).trim();
   for (const e of RU_ENDINGS) {
     if (w.length - e.length >= 3 && w.endsWith(e)) return w.slice(0, w.length - e.length);

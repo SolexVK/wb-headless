@@ -8,7 +8,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { defaultState, normalizeState } from './lib/model.js';
 import { buildSchedule } from './lib/scheduler.js';
-import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories } from './lib/seasonApi.js';
+import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
 import { dbAvailable, stateLoadJson, stateSaveJson } from './lib/db.js';
@@ -226,6 +226,11 @@ app.get('/api/season/status', (req, res) => {
 // подсказка пути предмета по слову
 app.get('/api/season/categories', requireView('season'), async (req, res) => {
   try { res.json({ ok: true, paths: await searchCategories(req.query.q || '', 40) }); }
+  catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+// словарь признаков предмета (характеристики по группам + частые слова), кэш по path
+app.get('/api/season/features', requireView('season'), async (req, res) => {
+  try { res.json({ ok: true, dict: await getFeatureDict({ path: req.query.path, force: req.query.force === '1', sample: req.query.sample }) }); }
   catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 // список сохранённых планов (краткий индекс)

@@ -612,3 +612,15 @@ html { overflow-x: hidden; }
 .se-attr-chip:hover { border-color: var(--accent); color: var(--accent); }
 .se-attr-cnt { color: var(--muted); font-size: 11px; margin-left: 2px; }
 @media (max-width: 560px) { .se-attr-row { grid-template-columns: 1fr; gap: 4px; } }
+
+/* Словарь признаков предмета: группы + чипы +/− */
+.se-feat-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.se-fg-list { display: flex; flex-direction: column; gap: 12px; margin-top: 6px; }
+.se-fg { border-top: 1px solid var(--line); padding-top: 8px; }
+.se-fg-h { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 6px; }
+.se-fg-vals { display: flex; flex-wrap: wrap; gap: 6px; }
+.se-fw { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--panel-2); font-size: 12px; }
+.se-fw-b { border: 0; background: transparent; color: var(--muted); padding: 3px 8px; font-weight: 700; line-height: 1; cursor: pointer; }
+.se-fw-b.plus:hover, .se-fw-b.plus.on { background: color-mix(in srgb, var(--accent-2) 26%, transparent); color: var(--accent-2); }
+.se-fw-b.minus:hover, .se-fw-b.minus.on { background: color-mix(in srgb, var(--danger) 24%, transparent); color: var(--danger); }
+.se-fw-t { padding: 3px 8px 3px 4px; color: var(--text); }

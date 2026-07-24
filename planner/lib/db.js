@@ -51,6 +51,9 @@ function migrate(db) {
       id INTEGER PRIMARY KEY CHECK (id = 1),
       json TEXT, updatedAt TEXT
     );
+    CREATE TABLE IF NOT EXISTS feature_dict (
+      path TEXT PRIMARY KEY, json TEXT, fetchedAt TEXT
+    );
     CREATE TABLE IF NOT EXISTS users (
       telegramId INTEGER PRIMARY KEY,
       username TEXT, name TEXT, photoUrl TEXT,
@@ -253,6 +256,21 @@ export function userMarkLogin(telegramId, patch = {}, sessionId = null) {
   const db = getDb(); if (!db) return false;
   db.prepare('UPDATE users SET username=COALESCE(?,username), name=COALESCE(?,name), photoUrl=COALESCE(?,photoUrl), lastLoginAt=?, activeSession=? WHERE telegramId=?')
     .run(patch.username ?? null, patch.name ?? null, patch.photoUrl ?? null, new Date().toISOString(), sessionId, Number(telegramId));
+  return true;
+}
+
+// ── Словарь признаков предмета (кэш по path) ──
+export function featureDictLoad(path, maxAgeMs) {
+  const db = getDb(); if (!db) return null;
+  const r = db.prepare('SELECT json, fetchedAt FROM feature_dict WHERE path = ?').get(String(path));
+  if (!r) return null;
+  if (maxAgeMs != null && r.fetchedAt && (Date.now() - Date.parse(r.fetchedAt) > maxAgeMs)) return null;
+  try { return JSON.parse(r.json); } catch { return null; }
+}
+export function featureDictSave(path, data) {
+  const db = getDb(); if (!db) return false;
+  db.prepare('INSERT INTO feature_dict(path,json,fetchedAt) VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET json=excluded.json, fetchedAt=excluded.fetchedAt')
+    .run(String(path), JSON.stringify(data), new Date().toISOString());
   return true;
 }
 
