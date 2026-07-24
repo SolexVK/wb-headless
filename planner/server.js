@@ -8,7 +8,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { defaultState, normalizeState } from './lib/model.js';
 import { buildSchedule } from './lib/scheduler.js';
-import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict } from './lib/seasonApi.js';
+import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
 import { dbAvailable, stateLoadJson, stateSaveJson } from './lib/db.js';
@@ -247,6 +247,14 @@ app.get('/api/season/plan', requireView('season'), (req, res) => {
 // удалить сохранённый план
 app.delete('/api/season/plan', requireEdit('season'), (req, res) => {
   res.json({ ok: true, deleted: deletePlan((req.query.articleId) || (req.body && req.body.articleId) || '') });
+});
+// ТОП-20 «неопределённых» на ручную проверку (сбор + фильтр, без построения плана)
+app.post('/api/season/candidates', requireEdit('season'), async (req, res) => {
+  try {
+    const cfg = req.body || {};
+    if (!cfg.path) return res.status(400).json({ ok: false, error: 'не указан путь предмета' });
+    res.json({ ok: true, ...(await runCandidates(cfg)) });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 // построить прогноз по фильтру артикула и сохранить (это сетевой вызов к MPStats, ~секунды)
 app.post('/api/season/build', requireEdit('season'), async (req, res) => {

@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-featuredict-2026-07-24e';
+const APP_BUILD = 'season-undetermined-2026-07-24f';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1104,6 +1104,8 @@ let featureOpen = false;                 // раскрыт ли блок «Сл�
 const featureDictCache = {};             // path -> собранный словарь признаков
 const featureSel = {};                   // path -> { plus:Set, minus:Set } выбранные признаки
 function featSelFor(path) { if (!featureSel[path]) featureSel[path] = { plus: new Set(), minus: new Set() }; return featureSel[path]; }
+const seasonIncludeByPath = {};          // path -> Set(wb) вручную одобренные «неопределённые»
+function seasonIncludeFor(path) { if (!seasonIncludeByPath[path]) seasonIncludeByPath[path] = new Set(); return seasonIncludeByPath[path]; }
 const SE_CHARTS = {};            // реестр графиков для тултипа: id → {rows, геометрия, valueKey}
 let seChartSeq = 0;
 
@@ -1238,6 +1240,18 @@ function seasonBuilderPanel() {
         </div>
       </details>
 
+      <details class="se-comp se-undet se-wide" id="se-undet">
+        <summary>🔎 Неопределённые артикулы (ручная проверка) <span class="mini">(добавить релевантные с хорошими продажами, но без явных признаков)</span></summary>
+        <div class="se-comp-body">
+          <div class="se-feat-bar">
+            <button class="btn btn-primary" id="se-undet-load" type="button">Проверить неопределённые</button>
+            <span class="mini" id="se-undet-status"></span>
+          </div>
+          <div class="mini">После фильтрации по плюс/минус-словам сюда попадают товары в вашем ценовом сегменте с выручкой ≥ 100 000 ₽/мес, которые НЕ прошли плюс-слова (мало явных признаков), но могут быть релевантны. Отметьте нужные и «Сохранить» — они добавятся в выборку к построению плана. ${(function(){const p=(document.getElementById?.('se-path')?.value)||'';const n=(seasonIncludeByPath[p]||new Set()).size;return n?`<b style="color:var(--accent-2)">Уже добавлено вручную: ${n}.</b>`:'';})()}</div>
+          <div id="se-undet-body"></div>
+        </div>
+      </details>
+
       <div class="se-wide season-actions">
         <button class="btn btn-primary" id="se-build"${seasonHasToken && !seasonBuilding ? '' : ' disabled'}>${seasonBuilding ? '⏳ Строю план…' : '▶ Построить план'}</button>
         <span class="mini">Данные берутся из MPStats по конкурентам-аналогам (несколько секунд, ~3–4 запроса). Готовый план сохранится в накопитель ниже.</span>
@@ -1266,6 +1280,7 @@ function collectSeasonForm() {
     allWords: v('se-allwords'),
     exclude: mergeWords(v('se-exclude'), sel ? sel.minus : []),
     mustHave: v('se-must'),
+    includeWb: [...(seasonIncludeByPath[path] || [])],
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
     limit: v('se-limit'), targetYear: v('se-year'),
     targetLevel: (document.getElementById('se-level')?.value === 'top1') ? 'top1' : 'top3',
@@ -1318,9 +1333,65 @@ async function loadFeatureDict(force) {
   } catch (e) { if (status) status.textContent = ''; toast('Ошибка сбора признаков: ' + e.message, true); }
 }
 
+// ТОП-20 «неопределённых»: превью (с зумом), продажи, средняя цена, чекбокс + Сохранить.
+let _undetSel = new Set();
+function renderUndetermined(list, path) {
+  const body = document.getElementById('se-undet-body'); if (!body) return;
+  if (!list || !list.length) { body.innerHTML = '<div class="mini">Неопределённых артикулов не найдено (все прошли фильтр либо ниже порога выручки/сегмента).</div>'; return; }
+  _undetSel = new Set();
+  const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
+  const rows = list.map((m) => {
+    const nm = String(m.wb);
+    const link = `https://www.wildberries.ru/catalog/${nm}/detail.aspx`;
+    return `<tr>
+      <td><input type="checkbox" class="se-undet-cb" data-wb="${nm}"></td>
+      <td class="se-comp-name"><span class="se-comp-thumb"><img loading="lazy" alt="" data-nm="${nm}" src="${wbThumbUrl(nm, 'tm')}"></span><a href="${link}" target="_blank" rel="noopener">${seEsc(m.name || ('арт. ' + nm))}</a></td>
+      <td>${seEsc(m.brand || '—')}</td>
+      <td class="num">${m.avgPrice != null ? fmt(m.avgPrice) + ' ₽' : '—'}</td>
+      <td class="num">${fmt(m.unitsSold)}</td>
+      <td class="num">${fmt(m.revenue)} ₽</td>
+      <td class="num">${fmt(m.monthlyRevenue)} ₽</td>
+    </tr>`;
+  }).join('');
+  body.innerHTML = `<div class="se-comp-scroll"><table class="se-comp-table" style="min-width:640px">
+      <thead><tr><th>✓</th><th>Название</th><th>Бренд</th><th class="num">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num">₽/мес</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div class="se-feat-bar" style="margin-top:10px">
+      <button class="btn btn-primary" id="se-undet-save" type="button">Сохранить выбранные в выборку</button>
+      <span class="mini" id="se-undet-selinfo">Выбрано: 0</span>
+    </div>`;
+  installSeasonZoom();
+  const selinfo = document.getElementById('se-undet-selinfo');
+  body.querySelectorAll('.se-undet-cb').forEach((cb) => cb.addEventListener('change', () => {
+    if (cb.checked) _undetSel.add(cb.dataset.wb); else _undetSel.delete(cb.dataset.wb);
+    if (selinfo) selinfo.textContent = 'Выбрано: ' + _undetSel.size;
+  }));
+  document.getElementById('se-undet-save')?.addEventListener('click', () => {
+    if (!_undetSel.size) { toast('Отметьте хотя бы один артикул'); return; }
+    const inc = seasonIncludeFor(path);
+    _undetSel.forEach((w) => inc.add(w));
+    const added = _undetSel.size;
+    _undetSel = new Set();
+    renderSeason(); // самоочистка блока + обновление счётчика «добавлено вручную»
+    toast(`Добавлено в выборку: ${added}. Теперь «Построить план».`);
+  });
+}
+async function loadUndetermined() {
+  const cfg = collectSeasonForm();
+  if (!cfg.path) { toast('Сначала укажи путь предмета WB', true); return; }
+  const status = document.getElementById('se-undet-status');
+  if (status) status.textContent = 'Собираю кандидатов…';
+  try {
+    const r = await api('/api/season/candidates', { method: 'POST', body: JSON.stringify(cfg) });
+    if (status) status.textContent = `в выборке: ${r.acceptedCount}, кандидатов: ${(r.undetermined || []).length}`;
+    renderUndetermined(r.undetermined || [], cfg.path);
+  } catch (e) { if (status) status.textContent = ''; toast('Ошибка: ' + e.message, true); }
+}
+
 function bindSeasonBuilder() {
   const g = (id) => document.getElementById(id);
   g('se-article')?.addEventListener('change', (e) => { seasonBuildArticle = e.target.value; renderSeason(); });
+  g('se-undet-load')?.addEventListener('click', loadUndetermined);
   // словарь признаков: раскрытие запоминаем; если для пути уже собран — показываем сразу
   g('se-feat')?.addEventListener('toggle', (e) => { featureOpen = e.target.open; });
   const featPath = (g('se-path')?.value || '').trim();

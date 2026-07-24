@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { buildSeasonPlanReport } from './season/seasonPlanReport.js';
+import { buildSeasonPlanReport, collectFromCategory } from './season/seasonPlanReport.js';
 import { buildFeatureDict } from './season/featureDict.js';
 import { dbAvailable, planSave, planLoad, planDelete, planList, featureDictLoad, featureDictSave } from './db.js';
 
@@ -77,7 +77,23 @@ export async function runForecast(cfg = {}) {
     forecast: { targetYear },
     baseSource: 'market',
     plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false, rampDays: num(cfg.rampDays), seasonFrac: num(cfg.seasonFrac), targetLevel: cfg.targetLevel === 'top1' ? 'top1' : 'top3', deepMatch: cfg.deepMatch !== false },
+    includeWb: list(cfg.includeWb) ? new Set(list(cfg.includeWb).map(String)) : null,
   });
+}
+
+// Кандидаты на ручную проверку: собрать выборку и вернуть ТОП-20 «неопределённых»
+// (высокая выручка, в сегменте, не исключены, но не прошли плюс-слова) + размер выборки.
+export async function runCandidates(cfg = {}) {
+  if (!process.env.MPSTATS_TOKEN) throw new Error('MPSTATS_TOKEN не задан в окружении службы (planner/data/.env)');
+  if (!cfg.path) throw new Error('Не указан путь предмета WB (path)');
+  const hist = default2Years();
+  const col = await collectFromCategory({
+    path: cfg.path, d1: hist.d1, d2: hist.d2,
+    filter: buildFilter(cfg.filter || cfg),
+    limit: num(cfg.limit), maxPages: num(cfg.maxPages),
+    deepMatch: cfg.deepMatch !== false,
+  });
+  return { acceptedCount: col.kept || 0, sampled: col.fetched || 0, undetermined: col.undetermined || [] };
 }
 
 // Словарь признаков предмета: из кэша (БД) или собрать заново. Кэш по path на 30 дней.

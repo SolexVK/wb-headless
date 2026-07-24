@@ -121,6 +121,32 @@ export function filterGroupItems(items, f = {}) {
 const WORD_KEYS = ['words', 'allWords', 'exclude', 'mustHave'];
 function structuralOnly(f) { const g = { ...f }; for (const k of WORD_KEYS) delete g[k]; return g; }
 
+// Пул «неопределённых» товаров на ручную проверку: НЕ прошли плюс-слова, но при этом
+// в ценовом сегменте, с выручкой/мес ≥ порога и НЕ исключены минус-словами. Такой товар
+// может быть релевантным (напр. «рубашка женская» без прочих признаков, но с продажами).
+const UNDET_MIN_MONTHLY = 100000; // ₽/мес — минимальная выручка «кандидата»
+const UNDET_TOP = 20;
+function computeUndetermined(pool, f, acceptedWb, months) {
+  const excl = stems(f.exclude);
+  const out = [];
+  for (const it of pool) {
+    if (acceptedWb.has(String(it.wb))) continue;                 // уже в выборке
+    if (f.priceMin != null && it.price < f.priceMin) continue;   // ценовой сегмент
+    if (f.priceMax != null && it.price > f.priceMax) continue;
+    if ((Number(it.revenue) || 0) / Math.max(1, months) < UNDET_MIN_MONTHLY) continue;
+    const charText = it._charText || lc(it.name);
+    if (excl.length && hasStem(charText, excl)) continue;        // явно исключённые — не «неопределённые»
+    out.push(it);
+  }
+  out.sort((a, b) => (Number(b.revenue) || 0) - (Number(a.revenue) || 0));
+  return out.slice(0, UNDET_TOP).map((it) => ({
+    wb: it.wb, name: it.name, brand: it.brand, price: it.price,
+    unitsSold: Number(it.sales) || 0, revenue: Number(it.revenue) || 0,
+    avgPrice: (Number(it.sales) > 0) ? (Number(it.revenue) / it.sales) : (it.price || null),
+    monthlyRevenue: Math.round((Number(it.revenue) || 0) / Math.max(1, months)),
+  }));
+}
+
 // Агрегировать характеристики отобранных карточек: {name -> [{value,count}]}. Значения
 // вроде «хлопок 60%; шерсть 30%» бьём по ';' на отдельные признаки. Для блока «Характеристики
 // выборки» — видно реальный состав/сезон/крой и можно подобрать строгий ключ.
@@ -172,6 +198,7 @@ export async function collectFromCategory({
   maxPages = 8,
   oos = false,
   deepMatch = true, // обогащать карточками WB (описание+характеристики) для матчинга слов
+  includeWb = null, // Set nmID — вручную отобранные «неопределённые», включить принудительно
 } = {}) {
   // Размер страницы: ответ несёт дневные графики по каждому товару (≈15 рядов ×
   // дни). При 5000 строках это сотни МБ и минуты загрузки. 1000 — компромисс:
@@ -233,15 +260,17 @@ export async function collectFromCategory({
     }
   }
 
-  let items = raw
+  const allItems = raw
     .map((r) => ({ ...normalizeCategoryItem(r), _raw: r }))
     .filter((it) => it.wb != null);
+  let items;
+  let basePool = allItems;   // пул кандидатов (для «неопределённых»)
   let cardsEnriched = 0;
   if (wbSet) {
-    items = items.filter((it) => wbSet.has(String(it.wb)));
+    items = allItems.filter((it) => wbSet.has(String(it.wb)));
   } else if (deep) {
     // 1) Структурный пул (цена/живость), топ по выручке — кандидаты на обогащение.
-    let pool = filterGroupItems(items, structuralOnly(fWin));
+    let pool = filterGroupItems(allItems, structuralOnly(fWin));
     pool.sort((a, b) => (b.revenue || 0) - (a.revenue || 0) || (b.sales || 0) - (a.sales || 0));
     if (pool.length > enrichCap) pool = pool.slice(0, enrichCap);
     // 2) Обогащаем карточками WB (бесплатный CDN): matchText = название + описание + характеристики.
@@ -257,13 +286,26 @@ export async function collectFromCategory({
         }
       }
     } catch { /* CDN недоступен → откат на матчинг по названию */ }
+    basePool = pool;
     // 3) Применяем слова к обогащённому тексту. НО если ни одна карточка не подтянулась
     // (CDN недоступен) — полный откат на прежнее поведение (матчинг по НАЗВАНИЮ на всей
     // выдаче), чтобы недоступность CDN не давала пустую выборку. Без регресса.
-    items = cardsEnriched > 0 ? filterGroupItems(pool, fWin) : filterGroupItems(items, fWin);
+    items = cardsEnriched > 0 ? filterGroupItems(pool, fWin) : filterGroupItems(allItems, fWin);
   } else {
-    items = filterGroupItems(items, fWin);
+    basePool = filterGroupItems(allItems, structuralOnly(fWin));
+    items = filterGroupItems(allItems, fWin);
   }
+  // Принудительное включение вручную отобранных «неопределённых» (по nmID) — минуя слова.
+  if (includeWb && includeWb.size) {
+    const have = new Set(items.map((it) => String(it.wb)));
+    for (const it of allItems) {
+      if (includeWb.has(String(it.wb)) && !have.has(String(it.wb))) { items.push(it); have.add(String(it.wb)); }
+    }
+  }
+  // Пул «неопределённых» на ручную проверку (только режим B со словами).
+  const undetermined = (!wbSet && hasWords)
+    ? computeUndetermined(basePool, fWin, new Set(items.map((it) => String(it.wb))), windowMonths)
+    : [];
   // Сортировка (Правило п.3): релевантность → ОБЪЁМ ПРОДАЖ ↓ → ЦЕНА ↓.
   items.sort((a, b) =>
     (b._relevance || 0) - (a._relevance || 0) ||
@@ -336,6 +378,7 @@ export async function collectFromCategory({
     priceAnchor: priceAnchorBelowMedian, // конкурентная цена: медиана −10%
     deepMatch: deep,
     cardsEnriched, // сколько карточек обогащено (матчинг по описанию+характеристикам)
+    undetermined,  // ТОП-20 «неопределённых» на ручную проверку
   };
 }
 
@@ -413,13 +456,15 @@ export async function buildSeasonPlanReport({
   forecast = null, // {from, to} — прогноз на будущий период (Правило 3)
   concurrency = 5,
   onProgress,
+  includeWb = null, // Set nmID — вручную одобренные «неопределённые», включить принудительно
 } = {}) {
   const oos = !!plan.oos;
+  const includeSet = includeWb && includeWb.size ? includeWb : (Array.isArray(plan.includeWb) && plan.includeWb.length ? new Set(plan.includeWb.map(String)) : null);
 
   // Замыкание: собрать «форму» (аналоги/группу) за произвольное окно тем же источником.
   const collectShape = async (w1, w2) => {
     if (subject) {
-      return { method: 'category-bulk', ...(await collectFromCategory({ path: subject.path, d1: w1, d2: w2, filter: subject.filter || {}, limit: subject.limit, maxPages: subject.maxPages, oos, deepMatch: plan.deepMatch !== false })) };
+      return { method: 'category-bulk', ...(await collectFromCategory({ path: subject.path, d1: w1, d2: w2, filter: subject.filter || {}, limit: subject.limit, maxPages: subject.maxPages, oos, deepMatch: plan.deepMatch !== false, includeWb: includeSet })) };
     } else if (group && path) {
       const wbSet = new Set(group.map((g) => String(g.wb ?? g)));
       return { method: 'category-bulk', ...(await collectFromCategory({ path, d1: w1, d2: w2, wbSet, oos })) };
