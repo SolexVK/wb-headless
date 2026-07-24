@@ -92,12 +92,13 @@ export function filterGroupItems(items, f = {}) {
     if (f.priceMin != null && it.price < f.priceMin) continue;
     if (f.priceMax != null && it.price > f.priceMax) continue;
     // Строгий ключ («кровь из носа»): ВСЕ термины обязаны быть в заголовке/характеристиках
-    // (не в маркетинговом описании). Нет карточки — подтвердить нельзя → отсев.
-    if (must.length) {
-      const charText = it._charText || (it._matchText ? text : null);
-      if (!charText || !must.every((s) => charText.includes(s))) continue;
-    }
-    if (exclude.length && hasStem(text, exclude)) continue;
+    // (не в маркетинговом описании-воде). Если карточки нет — матчим по названию (без «воды»),
+    // чтобы недоступность CDN не обнуляла выборку.
+    // Строгий ключ и ИСКЛЮЧЕНИЯ — по заголовку+характеристикам (не по описанию-воде):
+    // иначе описание, лишь УПОМИНАЮЩЕЕ «блузку», ошибочно исключит рубашку.
+    const charText = it._charText || lc(it.name);
+    if (must.length && !must.every((s) => charText.includes(s))) continue;
+    if (exclude.length && hasStem(charText, exclude)) continue;
     // «слова»: по умолчанию любое из; при matchAll — ВСЕ обязательны (точная выборка).
     if (hard.length) { const ok = f.matchAll ? hard.every((s) => text.includes(s)) : hasStem(text, hard); if (!ok) continue; }
     if (brands.length && !hasStem(brand, brands)) continue;
@@ -256,8 +257,10 @@ export async function collectFromCategory({
         }
       }
     } catch { /* CDN недоступен → откат на матчинг по названию */ }
-    // 3) Применяем слова (words/allWords/exclude/mustHave) уже к ОБОГАЩЁННОМУ тексту.
-    items = filterGroupItems(pool, fWin);
+    // 3) Применяем слова к обогащённому тексту. НО если ни одна карточка не подтянулась
+    // (CDN недоступен) — полный откат на прежнее поведение (матчинг по НАЗВАНИЮ на всей
+    // выдаче), чтобы недоступность CDN не давала пустую выборку. Без регресса.
+    items = cardsEnriched > 0 ? filterGroupItems(pool, fWin) : filterGroupItems(items, fWin);
   } else {
     items = filterGroupItems(items, fWin);
   }
