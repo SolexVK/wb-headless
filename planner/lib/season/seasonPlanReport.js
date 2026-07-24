@@ -48,7 +48,7 @@ export const lc = (s) => String(s ?? '').toLowerCase().replace(/ё/g, 'е'); // 
 
 // Лёгкий стем русского слова: срезаем распространённое окончание, чтобы «клетка»
 // матчила «в клетку», «лето» — «летняя» и т.п. (учёт словоформ).
-const RU_ENDINGS = ['ами', 'ями', 'ого', 'его', 'ому', 'ему', 'ыми', 'ими', 'ый', 'ий', 'ой', 'ая', 'яя', 'ое', 'ее', 'ые', 'ие', 'ах', 'ях', 'ам', 'ям', 'ов', 'ев', 'ью', 'ья', 'ье', 'ем', 'ом', 'а', 'я', 'о', 'е', 'ы', 'и', 'у', 'ю', 'й', 'ь'];
+const RU_ENDINGS = ['ами', 'ями', 'ого', 'его', 'ому', 'ему', 'ыми', 'ими', 'ый', 'ий', 'ой', 'ая', 'яя', 'ое', 'ее', 'ые', 'ие', 'ых', 'их', 'ым', 'им', 'ах', 'ях', 'ам', 'ям', 'ов', 'ев', 'ью', 'ья', 'ье', 'ем', 'ом', 'а', 'я', 'о', 'е', 'ы', 'и', 'у', 'ю', 'й', 'ь'];
 export function stem(word) {
   let w = lc(word).trim();
   for (const e of RU_ENDINGS) {
@@ -58,6 +58,18 @@ export function stem(word) {
 }
 const stems = (arr) => (arr || []).map(stem).filter(Boolean);
 const hasStem = (text, stemList) => stemList.some((s) => text.includes(s));
+
+// ── Сопоставление ПО СЛОВАМ (не по подстроке) ──
+// Множество стемов ЦЕЛЫХ слов текста. Так «лен» больше не совпадёт с «маленький».
+function wordStemSet(text) {
+  const set = new Set();
+  for (const w of lc(text).split(/[^a-zа-я0-9]+/)) if (w.length >= 2) set.add(stem(w));
+  return set;
+}
+// Значение фильтра может быть многословным («свободный крой») → массив стемов слов.
+// Матч: ВСЕ слова значения присутствуют в множестве слов текста (значение как фраза).
+const valueStemList = (arr) => (arr || []).map((v) => stems(String(v).split(/\s+/))).filter((a) => a.length);
+const valueIn = (valueStems, set) => valueStems.length > 0 && valueStems.every((s) => set.has(s));
 
 /**
  * Детальная фильтрация выдачи по предмету до релевантных аналогов.
@@ -71,10 +83,14 @@ const hasStem = (text, stemList) => stemList.some((s) => text.includes(s));
  * @returns items (прошедшие жёсткие), у каждого проставлен `_relevance` (число).
  */
 export function filterGroupItems(items, f = {}) {
-  const hard = stems(f.words); // «слова» — ОБЯЗАТЕЛЬНЫ (любое из), не только релевантность
-  const soft = [...new Set(stems([...(f.words || []), ...(f.allWords || [])]))]; // уникальные признаки
-  const must = stems(f.mustHave); // строгий ключ: ВСЕ термины обязательны, ищем в характеристиках
-  const exclude = stems(f.exclude);
+  // Значения фильтра (могут быть многословными) → списки стемов слов.
+  const plusVals = valueStemList(f.words);                                   // плюс: «любое из»
+  const softVals = valueStemList([...(f.words || []), ...(f.allWords || [])]); // для релевантности
+  const mustVals = valueStemList(f.mustHave);                               // строгий ключ: «все»
+  const plusKey = new Set(plusVals.map((vs) => vs.join(' ')));
+  // Минус, совпадающий по стему с плюсом (напр. «длинным»+ и «длинный»−), — конфликт;
+  // плюс имеет приоритет («я это хочу»), поэтому такой минус игнорируем.
+  const exclVals = valueStemList(f.exclude).filter((vs) => !plusKey.has(vs.join(' ')));
   const brands = stems(f.brands);
   const excludeBrands = stems(f.excludeBrands);
   const months = f.windowMonths || 1;
@@ -85,22 +101,19 @@ export function filterGroupItems(items, f = {}) {
 
   const out = [];
   for (const it of items) {
-    // Текст для сопоставления СЛОВ: обогащённая карточка (заголовок+описание+характеристики),
-    // если она подтянута (см. wbCard.js), иначе — короткое название из выдачи.
-    const text = it._matchText || lc(it.name);
     const brand = lc(it.brand);
     if (f.priceMin != null && it.price < f.priceMin) continue;
     if (f.priceMax != null && it.price > f.priceMax) continue;
-    // Строгий ключ («кровь из носа»): ВСЕ термины обязаны быть в заголовке/характеристиках
-    // (не в маркетинговом описании-воде). Если карточки нет — матчим по названию (без «воды»),
-    // чтобы недоступность CDN не обнуляла выборку.
-    // Строгий ключ и ИСКЛЮЧЕНИЯ — по заголовку+характеристикам (не по описанию-воде):
-    // иначе описание, лишь УПОМИНАЮЩЕЕ «блузку», ошибочно исключит рубашку.
-    const charText = it._charText || lc(it.name);
-    if (must.length && !must.every((s) => charText.includes(s))) continue;
-    if (exclude.length && hasStem(charText, exclude)) continue;
-    // «слова»: по умолчанию любое из; при matchAll — ВСЕ обязательны (точная выборка).
-    if (hard.length) { const ok = f.matchAll ? hard.every((s) => text.includes(s)) : hasStem(text, hard); if (!ok) continue; }
+    // Множества слов: полный текст (заголовок+описание+характеристики) — для ПЛЮС/релевантности;
+    // только заголовок+характеристики — для СТРОГОГО КЛЮЧА и МИНУСА (без маркетинговой «воды»).
+    const fullSet = it._wordSetFull || (it._wordSetFull = wordStemSet(it._matchText || lc(it.name)));
+    const charSet = it._wordSetChar || (it._wordSetChar = wordStemSet(it._charText || it._matchText || lc(it.name)));
+    // Строгий ключ: ВСЕ значения (как фразы) должны быть в характеристиках.
+    if (mustVals.length && !mustVals.every((vs) => valueIn(vs, charSet))) continue;
+    // Минус: если ЛЮБОЕ одно минус-значение совпало (по словам в характеристиках) — исключаем.
+    if (exclVals.length && exclVals.some((vs) => valueIn(vs, charSet))) continue;
+    // Плюс: если заданы — нужно совпадение ЛЮБОГО одного плюс-значения (в полном тексте).
+    if (plusVals.length && !plusVals.some((vs) => valueIn(vs, fullSet))) continue;
     if (brands.length && !hasStem(brand, brands)) continue;
     if (excludeBrands.length && hasStem(brand, excludeBrands)) continue;
     // Живость: проходит, если ЛИБО продажи/мес ≥ порога, ЛИБО выручка/мес ≥ порога.
@@ -110,7 +123,7 @@ export function filterGroupItems(items, f = {}) {
       if (!(okSales || okRev)) continue;
     }
     if (minSalesAbs != null && it.sales < minSalesAbs) continue;
-    it._relevance = soft.length ? soft.filter((s) => text.includes(s)).length : 0;
+    it._relevance = softVals.length ? softVals.filter((vs) => valueIn(vs, fullSet)).length : 0;
     out.push(it);
   }
   return out;
@@ -127,15 +140,15 @@ function structuralOnly(f) { const g = { ...f }; for (const k of WORD_KEYS) dele
 const UNDET_MIN_MONTHLY = 100000; // ₽/мес — минимальная выручка «кандидата»
 const UNDET_TOP = 20;
 function computeUndetermined(pool, f, acceptedWb, months) {
-  const excl = stems(f.exclude);
+  const exclVals = valueStemList(f.exclude);
   const out = [];
   for (const it of pool) {
     if (acceptedWb.has(String(it.wb))) continue;                 // уже в выборке
     if (f.priceMin != null && it.price < f.priceMin) continue;   // ценовой сегмент
     if (f.priceMax != null && it.price > f.priceMax) continue;
     if ((Number(it.revenue) || 0) / Math.max(1, months) < UNDET_MIN_MONTHLY) continue;
-    const charText = it._charText || lc(it.name);
-    if (excl.length && hasStem(charText, excl)) continue;        // явно исключённые — не «неопределённые»
+    const charSet = it._wordSetChar || wordStemSet(it._charText || lc(it.name));
+    if (exclVals.length && exclVals.some((vs) => valueIn(vs, charSet))) continue; // явно исключённые — не «неопределённые»
     out.push(it);
   }
   out.sort((a, b) => (Number(b.revenue) || 0) - (Number(a.revenue) || 0));
