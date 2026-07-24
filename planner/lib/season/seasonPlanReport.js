@@ -218,12 +218,14 @@ export async function collectFromCategory({
   const perItem = items.map((it) => ({
     wb: it.wb,
     name: it.name,
+    price: it.price,
     daily: extractItemDailyFromGraphs(it._raw, d1, d2),
   }));
   const groupDaily = buildGroupDailySeries(maybeOOS(perItem.map((p) => p.daily), oos));
   const perItemMeta = perItem.map((p) => ({
     wb: p.wb,
     name: p.name,
+    price: p.price,
     days: p.daily.length,
     unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
     revenue: p.daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0),

@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'rbac-2026-07-24a';
+const APP_BUILD = 'season-comp-2026-07-24b';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1321,6 +1321,7 @@ async function renderSeasonView(articleId) {
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
   box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonCompetitorsBlock(rep) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  installSeasonZoom();
   bindSeasonView(p);
   // Пересборка в один клик прямо из баннера (тем же cfg, что сохранён у плана).
   if (canRebuild) {
@@ -1338,6 +1339,22 @@ async function renderSeasonView(articleId) {
   }
 }
 
+// Хост basket-CDN Wildberries по «тому» (vol) nmID. Диапазоны расширяются со временем;
+// при промахе есть перебор соседних хостов на onerror (см. installSeasonZoom).
+function wbBasketHost(vol) {
+  const t = [143, 287, 431, 719, 1007, 1061, 1115, 1169, 1313, 1601, 1655, 1919, 2045, 2189, 2405, 2621, 2833, 3061, 3299, 3537, 3823, 3959, 4193, 4293, 4483, 4783];
+  for (let i = 0; i < t.length; i++) if (vol <= t[i]) return String(i + 1).padStart(2, '0');
+  return String(t.length + 1).padStart(2, '0');
+}
+// URL превью первого слайда карточки WB по nmID. size: 'tm' (мелкое) | 'big' (крупное).
+function wbThumbUrl(nmId, size = 'big', hostShift = 0) {
+  const id = Number(nmId); if (!Number.isFinite(id) || id <= 0) return '';
+  const vol = Math.floor(id / 100000), part = Math.floor(id / 1000);
+  let host = Number(wbBasketHost(vol)) + hostShift;
+  if (host < 1) host = 1;
+  return `https://basket-${String(host).padStart(2, '0')}.wbbasket.ru/vol${vol}/part${part}/${id}/images/${size}/1.webp`;
+}
+
 // Разворачиваемый блок «Топ-10 конкурентов в выборке» — чтобы проверить релевантность
 // фильтра: на каких именно аналогах построена аналитика. Свёрнут по умолчанию.
 function seasonCompetitorsBlock(rep) {
@@ -1349,11 +1366,18 @@ function seasonCompetitorsBlock(rep) {
     const nm = m.wb != null ? String(m.wb) : '';
     const link = nm ? `https://www.wildberries.ru/catalog/${nm}/detail.aspx` : '';
     const perMonth = m.days > 0 ? Math.round((+m.revenue || 0) / m.days * 30) : null;
+    // Средняя цена продажи = выручка / штук (реальная средневзвешенная цена за период).
+    const avgPrice = (+m.unitsSold > 0) ? (+m.revenue || 0) / m.unitsSold : (+m.price || null);
     const title = seEsc(m.name || (nm ? 'арт. ' + nm : '—'));
+    const thumb = nm
+      ? `<span class="se-comp-thumb"><img loading="lazy" alt="" data-nm="${nm}" src="${wbThumbUrl(nm, 'tm')}"></span>`
+      : '<span class="se-comp-thumb noimg"></span>';
+    const nameCell = nm ? `${thumb}<a href="${link}" target="_blank" rel="noopener">${title}</a>` : `${thumb}${title}`;
     return `<tr>
       <td class="num">${i + 1}</td>
-      <td class="se-comp-name">${nm ? `<a href="${link}" target="_blank" rel="noopener">${title}</a>` : title}</td>
+      <td class="se-comp-name">${nameCell}</td>
       <td class="num">${nm || '—'}</td>
+      <td class="num">${avgPrice != null ? fmt(avgPrice) + ' ₽' : '—'}</td>
       <td class="num">${fmt(m.unitsSold)}</td>
       <td class="num">${fmt(m.revenue)} ₽</td>
       <td class="num">${perMonth != null ? fmt(perMonth) + ' ₽' : '—'}</td>
@@ -1365,13 +1389,50 @@ function seasonCompetitorsBlock(rep) {
   return `<details class="se-comp">
     <summary>🔍 Топ-10 конкурентов в выборке — проверка релевантности фильтра <span class="mini">(в выборке ${totalKept}, с данными ${withData})</span></summary>
     <div class="se-comp-body">
-      <div class="mini">Отсортировано по выручке за период анализа (2 года). Клик по названию — карточка на Wildberries. Так можно убедиться, что фильтр отобрал именно релевантных конкурентов.</div>
+      <div class="mini">Отсортировано по выручке за период анализа (2 года). Наведите на превью — увеличится; клик по названию — карточка на Wildberries. Так можно убедиться, что фильтр отобрал именно релевантных конкурентов.</div>
       <div class="se-comp-scroll"><table class="se-comp-table">
-        <thead><tr><th class="num">#</th><th>Название</th><th class="num">Артикул WB</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num">Дней</th></tr></thead>
+        <thead><tr><th class="num">#</th><th>Название</th><th class="num">Артикул WB</th><th class="num" title="Средняя цена продажи = выручка / штук">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num">Дней</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>
   </details>`;
+}
+
+// Наведение на превью конкурента → увеличенное фото над строкой; + перебор basket-хостов
+// WB при промахе URL. Один перехватчик на документе (переживает перерисовки блока).
+let _seZoomBound = false;
+function installSeasonZoom() {
+  if (_seZoomBound) return; _seZoomBound = true;
+  let zoom = null;
+  const show = (img) => {
+    const nm = img.getAttribute('data-nm'); if (!nm) return;
+    if (!zoom) { zoom = document.createElement('div'); zoom.className = 'se-zoom'; zoom.innerHTML = '<img alt="">'; document.body.appendChild(zoom); }
+    const shift = +(img.dataset.shift || 0);
+    const w = Math.min(Math.round(window.innerWidth * 0.7), 300); // 4–5× от превью, адаптивно
+    zoom.style.width = w + 'px';
+    zoom.querySelector('img').src = wbThumbUrl(nm, 'big', shift);
+    zoom.style.display = 'block';
+    const r = img.getBoundingClientRect();
+    const zh = w * 4 / 3 + 10;                 // карточка WB ~3:4
+    let top = r.top - zh - 8;                  // над строкой
+    if (top < 8) top = r.bottom + 8;           // не влезло сверху — показать снизу
+    let left = r.left + r.width / 2 - w / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+    zoom.style.left = left + 'px'; zoom.style.top = Math.max(8, top) + 'px';
+  };
+  const hide = () => { if (zoom) zoom.style.display = 'none'; };
+  document.addEventListener('mouseover', (e) => { const img = e.target.closest && e.target.closest('.se-comp-thumb img'); if (img) show(img); });
+  document.addEventListener('mouseout', (e) => { const img = e.target.closest && e.target.closest('.se-comp-thumb img'); if (img) hide(); });
+  document.addEventListener('scroll', hide, true);
+  // Перебор соседних basket-хостов при промахе URL превью.
+  document.addEventListener('error', (e) => {
+    const img = e.target; if (!(img instanceof HTMLImageElement) || !img.closest || !img.closest('.se-comp-thumb')) return;
+    const nm = img.getAttribute('data-nm'); if (!nm) return;
+    const shifts = [1, -1, 2, -2, 3, 4];
+    const att = +(img.dataset.att || 0);
+    if (att < shifts.length) { img.dataset.att = att + 1; img.dataset.shift = shifts[att]; img.src = wbThumbUrl(nm, 'tm', shifts[att]); }
+    else { const w = img.closest('.se-comp-thumb'); if (w) w.classList.add('noimg'); img.remove(); }
+  }, true);
 }
 
 function seasonPhaseLegend() {
