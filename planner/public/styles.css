@@ -544,3 +544,8 @@ html { overflow-x: hidden; }
   .swatch-item { width: 100px; }
   .ro-banner { font-size: 12px; }
 }
+
+/* Детализация юнита лежит в ячейке .u-table td (white-space:nowrap) — сбрасываем
+   перенос для свободного текста, числа в .u-art td.num остаются nowrap. */
+.u-detail-inner { white-space: normal; }
+.u-detail .u-rev, .u-detail .mini, .u-detail .u-card-h { white-space: normal; overflow-wrap: anywhere; }
