@@ -497,3 +497,50 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   opacity: .5; cursor: not-allowed;
 }
 .view.ro select { cursor: pointer; } /* селекты-фильтры/навигация остаются рабочими */
+
+/* ============ Адаптивность / кроссплатформенность ============ */
+/* Предохранитель от горизонтального выхода за экран + перенос длинных строк. */
+html { overflow-x: hidden; }
+.view, .panel, .mini-card, .card { max-width: 100%; }
+.panel, .mini-card { overflow-wrap: anywhere; }
+/* Любая таблица внутри листа не должна растягивать страницу — прокрутка внутри блока. */
+.view table { max-width: 100%; }
+.view table:not(.matrix-table) { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* Планшет и уже */
+@media (max-width: 820px) {
+  .topbar { flex-wrap: wrap; gap: 10px 12px; padding: 8px 12px; }
+  .tabs { order: 3; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
+  .tabs::-webkit-scrollbar { height: 4px; }
+  .tab { white-space: nowrap; flex: 0 0 auto; }
+  .actions { flex-wrap: wrap; gap: 6px; }
+  .view { padding: 12px; }
+  .form-grid, .mini-grid { grid-template-columns: 1fr; }
+  .season-grid { grid-template-columns: 1fr; }
+  .cards { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  .sp-filters { gap: 16px; }
+  .fab-summary { gap: 16px; }
+  table { font-size: 12px; }
+}
+
+/* Легенда Ганта и путь предмета в сезонности — переносим, не растягиваем экран */
+.legend { flex-wrap: wrap; }
+@media (max-width: 820px) {
+  .se-path-row { flex-wrap: wrap; }
+  .se-path-row #se-path, .se-path-row #se-path-q { flex: 1 1 100%; min-width: 0; max-width: none; width: 100%; }
+  .season-form .field, .season-form .field.grow { min-width: 0; }
+  .season-form select, .season-form input, .season-form textarea { max-width: 100%; }
+}
+
+/* Телефон */
+@media (max-width: 520px) {
+  .brand { font-size: 15px; }
+  .view { padding: 10px; }
+  .actions .btn { padding: 6px 10px; }
+  .btn { padding: 6px 10px; }
+  .season-pick { font-size: 12px; }
+  .toolbar { gap: 10px; }
+  .cards { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
+  .swatch-item { width: 100px; }
+  .ro-banner { font-size: 12px; }
+}
