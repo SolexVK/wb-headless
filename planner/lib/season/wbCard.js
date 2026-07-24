@@ -111,3 +111,11 @@ export function cardMatchText(info) {
   return [info.imtName, info.subjRoot, info.subjName, info.vendorCode, info.description, opt]
     .filter(Boolean).join(' \n ').toLowerCase();
 }
+
+/** Текст ТОЛЬКО заголовка + характеристик (без маркетингового описания) — для строгого
+ *  ключевого слова: материал/сезон/крой в характеристиках указаны честно, без «воды». */
+export function cardCharText(info) {
+  if (!info) return '';
+  const opt = (info.options || []).map((o) => `${o.name} ${o.value}`).join(' \n ');
+  return [info.imtName, info.subjName, opt].filter(Boolean).join(' \n ').toLowerCase();
+}

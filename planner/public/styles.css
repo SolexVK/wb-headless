@@ -594,3 +594,21 @@ html { overflow-x: hidden; }
   border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.5); pointer-events: none;
 }
 .se-zoom img { width: 100%; height: auto; border-radius: 5px; display: block; }
+
+/* Строгий ключ («кровь из носа») и блок характеристик выборки */
+.se-key-box { border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.se-key-box > label { display: block; font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.se-key-box input { width: 100%; background: var(--panel); border: 1px solid var(--line); color: var(--text);
+  border-radius: 7px; padding: 8px 10px; font-size: 14px; }
+.se-key-box input:focus { outline: none; border-color: var(--accent); }
+.se-key-box .mini { margin-top: 6px; }
+.se-attr-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.se-attr-row { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: start; }
+.se-attr-name { font-size: 12px; font-weight: 700; color: var(--muted); padding-top: 4px; }
+.se-attr-vals { display: flex; flex-wrap: wrap; gap: 6px; }
+.se-attr-chip { background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.se-attr-chip:hover { border-color: var(--accent); color: var(--accent); }
+.se-attr-cnt { color: var(--muted); font-size: 11px; margin-left: 2px; }
+@media (max-width: 560px) { .se-attr-row { grid-template-columns: 1fr; gap: 4px; } }

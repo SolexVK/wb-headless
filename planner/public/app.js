@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-deepmatch-2026-07-24c';
+const APP_BUILD = 'season-strictkey-2026-07-24d';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1204,6 +1204,11 @@ function seasonBuilderPanel() {
 
       <div class="u-pg se-wide">
         <div class="u-pg-t">Фильтр аналогов</div>
+        <div class="se-key-box">
+          <label>🎯 Ключевое слово — строго (только этот товар)</label>
+          <input id="se-must" value="${seEsc(f.mustHave || '')}" placeholder="напр. муслин  (несколько слов = все обязательны)">
+          <div class="mini">Товар пройдёт, только если ключ есть в <b>заголовке или характеристиках</b> карточки (состав, фактура, сезон) — не в маркетинговом описании. Требует «глубокого анализа».</div>
+        </div>
         <div class="se-fields se-fields-2">
           <div class="field"><label>Размер группы аналогов</label><input id="se-limit" type="number" value="${f.limit ?? 60}"></div>
           <div class="field"><label>Слова в названии (любое из)</label><input id="se-words" value="${seEsc(f.words || '')}" placeholder="рубашка"></div>
@@ -1229,6 +1234,7 @@ function collectSeasonForm() {
   return {
     articleId: seasonBuildArticle,
     path: v('se-path'), words: v('se-words'), allWords: v('se-allwords'), exclude: v('se-exclude'),
+    mustHave: v('se-must'),
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
     limit: v('se-limit'), targetYear: v('se-year'),
     targetLevel: (document.getElementById('se-level')?.value === 'top1') ? 'top1' : 'top3',
@@ -1264,6 +1270,7 @@ function bindSeasonBuilder() {
       const a = state.articles.find((x) => x.id === cfg.articleId);
       if (a) {
         a.seasonFilter = { path: cfg.path, words: cfg.words, allWords: cfg.allWords, exclude: cfg.exclude,
+          mustHave: cfg.mustHave,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
           limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, oos: cfg.oos, weekly: cfg.weekly, deepMatch: cfg.deepMatch };
         await recalc(true).catch(() => {});
@@ -1322,8 +1329,15 @@ async function renderSeasonView(articleId) {
   const staleBanner = stale
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
-  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonCompetitorsBlock(rep) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   installSeasonZoom();
+  // Клик по значению характеристики → вписать строгий ключ в конструктор (Часть 1).
+  box.querySelectorAll('.se-attr-chip').forEach((b) => b.addEventListener('click', () => {
+    const inp = document.getElementById('se-must'); if (!inp) return;
+    inp.value = b.dataset.attrVal || '';
+    inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus();
+    toast('Ключ вписан в конструктор — нажмите «Построить план»');
+  }));
   bindSeasonView(p);
   // Пересборка в один клик прямо из баннера (тем же cfg, что сохранён у плана).
   if (canRebuild) {
@@ -1440,6 +1454,24 @@ function installSeasonZoom() {
     if (att < shifts.length) { img.dataset.att = att + 1; img.dataset.shift = shifts[att]; img.src = wbThumbUrl(nm, 'tm', shifts[att]); }
     else { const w = img.closest('.se-comp-thumb'); if (w) w.classList.add('noimg'); img.remove(); }
   }, true);
+}
+
+// Блок «Характеристики выборки» — реальные Состав/Сезон/Крой с количеством из карточек
+// отобранных конкурентов. Помогает проверить состав выборки и подобрать строгий ключ.
+function seasonAttributesBlock(rep) {
+  const attrs = rep.attributesFound || [];
+  if (!attrs.length) return '';
+  const rows = attrs.map((a) => {
+    const chips = a.values.map((v) => `<button class="se-attr-chip" data-attr-val="${seEsc(v.value)}" title="Вписать как строгий ключ">${seEsc(v.value)} <span class="se-attr-cnt">${v.count}</span></button>`).join('');
+    return `<div class="se-attr-row"><div class="se-attr-name">${seEsc(a.name)}</div><div class="se-attr-vals">${chips}</div></div>`;
+  }).join('');
+  return `<details class="se-comp se-attrs">
+    <summary>🧩 Характеристики выборки — состав, сезон, крой <span class="mini">(клик по значению → строгий ключ)</span></summary>
+    <div class="se-comp-body">
+      <div class="mini">Реальные характеристики карточек отобранных конкурентов (с количеством). Клик по значению впишет его как строгий ключ в конструктор (Часть 1) — затем «Построить план», чтобы оставить только такие товары.</div>
+      <div class="se-attr-list">${rows}</div>
+    </div>
+  </details>`;
 }
 
 function seasonPhaseLegend() {

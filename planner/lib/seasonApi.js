@@ -44,6 +44,7 @@ const num = (v) => (v == null || v === '' || v === true ? undefined : Number(v))
 function buildFilter(f = {}) {
   const filter = {
     words: list(f.words), allWords: list(f.allWords), exclude: list(f.exclude),
+    mustHave: list(f.mustHave), // строгий ключ («кровь из носа»): ВСЕ термины обязательны
     brands: list(f.brands), excludeBrands: list(f.excludeBrands),
     priceMin: num(f.priceMin), priceMax: num(f.priceMax),
     minSalesPerMonth: num(f.minSales), minRevenuePerMonth: num(f.minRevenue),

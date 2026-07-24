@@ -16,7 +16,7 @@ import {
 } from './mpstats.js';
 import { buildGroupDailySeries, buildSeasonPlan, applyOOSCorrection, trimToActive } from './salesPlan.js';
 import { buildForecast } from './forecast.js';
-import { fetchCardsInfo, cardMatchText } from './wbCard.js';
+import { fetchCardsInfo, cardMatchText, cardCharText } from './wbCard.js';
 
 /** Сдвиг 'YYYY-MM-DD' на N дней. */
 function offsetDate(ymd, days) {
@@ -73,6 +73,7 @@ const hasStem = (text, stemList) => stemList.some((s) => text.includes(s));
 export function filterGroupItems(items, f = {}) {
   const hard = stems(f.words); // «слова» — ОБЯЗАТЕЛЬНЫ (любое из), не только релевантность
   const soft = [...new Set(stems([...(f.words || []), ...(f.allWords || [])]))]; // уникальные признаки
+  const must = stems(f.mustHave); // строгий ключ: ВСЕ термины обязательны, ищем в характеристиках
   const exclude = stems(f.exclude);
   const brands = stems(f.brands);
   const excludeBrands = stems(f.excludeBrands);
@@ -90,6 +91,12 @@ export function filterGroupItems(items, f = {}) {
     const brand = lc(it.brand);
     if (f.priceMin != null && it.price < f.priceMin) continue;
     if (f.priceMax != null && it.price > f.priceMax) continue;
+    // Строгий ключ («кровь из носа»): ВСЕ термины обязаны быть в заголовке/характеристиках
+    // (не в маркетинговом описании). Нет карточки — подтвердить нельзя → отсев.
+    if (must.length) {
+      const charText = it._charText || (it._matchText ? text : null);
+      if (!charText || !must.every((s) => charText.includes(s))) continue;
+    }
     if (exclude.length && hasStem(text, exclude)) continue;
     // «слова»: по умолчанию любое из; при matchAll — ВСЕ обязательны (точная выборка).
     if (hard.length) { const ok = f.matchAll ? hard.every((s) => text.includes(s)) : hasStem(text, hard); if (!ok) continue; }
@@ -110,8 +117,32 @@ export function filterGroupItems(items, f = {}) {
 
 // Только структурные жёсткие фильтры (цена/живость/бренды), БЕЗ слов — чтобы собрать
 // пул кандидатов ДО обогащения карточек (иначе короткое название отсеет релевантных).
-const WORD_KEYS = ['words', 'allWords', 'exclude'];
+const WORD_KEYS = ['words', 'allWords', 'exclude', 'mustHave'];
 function structuralOnly(f) { const g = { ...f }; for (const k of WORD_KEYS) delete g[k]; return g; }
+
+// Агрегировать характеристики отобранных карточек: {name -> [{value,count}]}. Значения
+// вроде «хлопок 60%; шерсть 30%» бьём по ';' на отдельные признаки. Для блока «Характеристики
+// выборки» — видно реальный состав/сезон/крой и можно подобрать строгий ключ.
+function aggregateAttributes(items, topValues = 8, topAttrs = 14) {
+  const byName = new Map();
+  for (const it of items) {
+    const opts = it._card && Array.isArray(it._card.options) ? it._card.options : [];
+    for (const o of opts) {
+      const name = String(o.name || '').trim(); if (!name) continue;
+      const vals = String(o.value || '').split(/[;,]/).map((v) => v.trim().replace(/\s+\d+%$/, '').trim()).filter(Boolean);
+      if (!byName.has(name)) byName.set(name, new Map());
+      const vm = byName.get(name);
+      for (const v of vals) vm.set(v, (vm.get(v) || 0) + 1);
+    }
+  }
+  const out = [];
+  for (const [name, vm] of byName) {
+    const values = [...vm.entries()].map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count).slice(0, topValues);
+    out.push({ name, total: values.reduce((s, v) => s + v.count, 0), values });
+  }
+  return out.sort((a, b) => b.total - a.total).slice(0, topAttrs);
+}
 
 /**
  * BULK-СБОР: собирает группу И её дневные ряды ОДНИМ (или несколькими при
@@ -151,7 +182,7 @@ export async function collectFromCategory({
   const windowMonths = Math.max(1, (Date.parse(d2) - Date.parse(d1)) / (30.4 * 86400000));
   const fWin = { ...filter, windowMonths };
   const hasSoft = (filter.words?.length || filter.allWords?.length);
-  const hasWords = !!(filter.words?.length || filter.allWords?.length || filter.exclude?.length);
+  const hasWords = !!(filter.words?.length || filter.allWords?.length || filter.exclude?.length || filter.mustHave?.length);
   const deep = deepMatch && hasWords && !wbSet; // обогащение имеет смысл только при словах
   const enrichCap = Math.max((limit || 60) * 3, 120); // сколько кандидатов обогащать максимум
   const raw = [];
@@ -217,10 +248,15 @@ export async function collectFromCategory({
       const cards = await fetchCardsInfo(pool.map((it) => it.wb), { concurrency: 8 });
       for (const it of pool) {
         const info = cards.get(Number(it.wb));
-        if (info) { it._matchText = lc(it.name) + ' \n ' + cardMatchText(info); cardsEnriched++; }
+        if (info) {
+          it._matchText = lc(it.name) + ' \n ' + cardMatchText(info);
+          it._charText = cardCharText(info); // заголовок+характеристики — для строгого ключа
+          it._card = info;
+          cardsEnriched++;
+        }
       }
     } catch { /* CDN недоступен → откат на матчинг по названию */ }
-    // 3) Применяем слова (words/allWords/exclude) уже к ОБОГАЩЁННОМУ тексту.
+    // 3) Применяем слова (words/allWords/exclude/mustHave) уже к ОБОГАЩЁННОМУ тексту.
     items = filterGroupItems(pool, fWin);
   } else {
     items = filterGroupItems(items, fWin);
@@ -240,6 +276,10 @@ export async function collectFromCategory({
   }
   const keptBeforeLimit = items.length;
   if (limit && items.length > limit) items = items.slice(0, limit);
+
+  // Характеристики отобранной выборки (Состав/Сезон/Крой…) — для блока проверки и подбора
+  // строгого ключа. Только при глубоком режиме (когда карточки обогащены).
+  const attributesFound = deep ? aggregateAttributes(items) : [];
 
   // Ценовой якорь «по медиане и ниже на 10%» (конкурентная цена входа среди ТОПов):
   // медиана цен отобранных конкурентов минус 10%.
@@ -278,9 +318,10 @@ export async function collectFromCategory({
   });
 
   return {
-    group: items.map(({ _raw, ...g }) => g),
+    group: items.map(({ _raw, _card, _charText, _matchText, ...g }) => g),
     groupDaily,
     perItemMeta,
+    attributesFound,
     total: Number.isFinite(total) ? total : raw.length,
     fetched: raw.length,
     kept: keptBeforeLimit,
@@ -503,6 +544,7 @@ export async function buildSeasonPlanReport({
       groupSize: perItemMeta.length,
       itemsWithData: perItemMeta.filter((m) => m.days > 0).length,
       perItem: perItemMeta,
+      attributesFound: collected.attributesFound || [],
       plan: fc,
       errors,
       dailyLimit,
@@ -526,6 +568,7 @@ export async function buildSeasonPlanReport({
     groupSize: perItemMeta.length,
     itemsWithData: perItemMeta.filter((m) => m.days > 0).length,
     perItem: perItemMeta,
+    attributesFound: collected.attributesFound || [],
     plan: seasonPlan,
     errors,
     dailyLimit,
