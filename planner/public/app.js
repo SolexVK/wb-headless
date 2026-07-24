@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-comp-2026-07-24b';
+const APP_BUILD = 'season-deepmatch-2026-07-24c';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1197,6 +1197,7 @@ function seasonBuilderPanel() {
           <div class="field span2 se-opts">
             <label class="se-check"><input type="checkbox" id="se-oos"${f.oos !== false ? ' checked' : ''}> OOS-поправка</label>
             <label class="se-check"><input type="checkbox" id="se-weekly"${f.weekly !== false ? ' checked' : ''}> недельный профиль</label>
+            <label class="se-check" title="Слова фильтра ищутся не в коротком названии, а в полной карточке WB: заголовок + описание + характеристики (состав, сезон, крой, пол, стиль). Точнее отбирает конкурентов. Первый раз чуть дольше — карточки кэшируются."><input type="checkbox" id="se-deep"${f.deepMatch !== false ? ' checked' : ''}> глубокий анализ (описание + характеристики)</label>
           </div>
         </div>
       </div>
@@ -1233,6 +1234,7 @@ function collectSeasonForm() {
     targetLevel: (document.getElementById('se-level')?.value === 'top1') ? 'top1' : 'top3',
     oos: document.getElementById('se-oos')?.checked !== false,
     weekly: document.getElementById('se-weekly')?.checked !== false,
+    deepMatch: document.getElementById('se-deep')?.checked !== false,
   };
 }
 
@@ -1263,7 +1265,7 @@ function bindSeasonBuilder() {
       if (a) {
         a.seasonFilter = { path: cfg.path, words: cfg.words, allWords: cfg.allWords, exclude: cfg.exclude,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
-          limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, oos: cfg.oos, weekly: cfg.weekly };
+          limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, oos: cfg.oos, weekly: cfg.weekly, deepMatch: cfg.deepMatch };
         await recalc(true).catch(() => {});
       }
       seasonSelArticle = cfg.articleId;
@@ -1394,6 +1396,7 @@ function seasonCompetitorsBlock(rep) {
     <summary>🔍 Топ-10 конкурентов в выборке — проверка релевантности фильтра <span class="mini">(в выборке ${totalKept}, с данными ${withData})</span></summary>
     <div class="se-comp-body">
       <div class="mini">Отсортировано по выручке за период анализа (2 года). Наведите на превью — увеличится; клик по названию — карточка на Wildberries. Так можно убедиться, что фильтр отобрал именно релевантных конкурентов.</div>
+      ${(rep.groupInfo && rep.groupInfo.deepMatch) ? `<div class="mini" style="color:var(--accent-2)">🧠 Глубокий анализ: слова фильтра искались в полной карточке (заголовок + описание + характеристики) у ${rep.groupInfo.cardsEnriched || 0} товаров, а не только в коротком названии.</div>` : ''}
       <div class="se-comp-scroll"><table class="se-comp-table">
         <thead><tr><th class="num">#</th><th>Название</th><th>Бренд</th><th class="num">Артикул WB</th><th class="num" title="Средняя цена продажи = выручка / штук">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num" title="Оборачиваемость = средний остаток / среднесуточные продажи. Меньше — быстрее распродаётся. Доступно для планов, построенных новой версией.">Оборачив.</th></tr></thead>
         <tbody>${rows}</tbody>

@@ -16,6 +16,7 @@ import {
 } from './mpstats.js';
 import { buildGroupDailySeries, buildSeasonPlan, applyOOSCorrection, trimToActive } from './salesPlan.js';
 import { buildForecast } from './forecast.js';
+import { fetchCardsInfo, cardMatchText } from './wbCard.js';
 
 /** Сдвиг 'YYYY-MM-DD' на N дней. */
 function offsetDate(ymd, days) {
@@ -83,13 +84,15 @@ export function filterGroupItems(items, f = {}) {
 
   const out = [];
   for (const it of items) {
-    const name = lc(it.name);
+    // Текст для сопоставления СЛОВ: обогащённая карточка (заголовок+описание+характеристики),
+    // если она подтянута (см. wbCard.js), иначе — короткое название из выдачи.
+    const text = it._matchText || lc(it.name);
     const brand = lc(it.brand);
     if (f.priceMin != null && it.price < f.priceMin) continue;
     if (f.priceMax != null && it.price > f.priceMax) continue;
-    if (exclude.length && hasStem(name, exclude)) continue;
+    if (exclude.length && hasStem(text, exclude)) continue;
     // «слова»: по умолчанию любое из; при matchAll — ВСЕ обязательны (точная выборка).
-    if (hard.length) { const ok = f.matchAll ? hard.every((s) => name.includes(s)) : hasStem(name, hard); if (!ok) continue; }
+    if (hard.length) { const ok = f.matchAll ? hard.every((s) => text.includes(s)) : hasStem(text, hard); if (!ok) continue; }
     if (brands.length && !hasStem(brand, brands)) continue;
     if (excludeBrands.length && hasStem(brand, excludeBrands)) continue;
     // Живость: проходит, если ЛИБО продажи/мес ≥ порога, ЛИБО выручка/мес ≥ порога.
@@ -99,11 +102,16 @@ export function filterGroupItems(items, f = {}) {
       if (!(okSales || okRev)) continue;
     }
     if (minSalesAbs != null && it.sales < minSalesAbs) continue;
-    it._relevance = soft.length ? soft.filter((s) => name.includes(s)).length : 0;
+    it._relevance = soft.length ? soft.filter((s) => text.includes(s)).length : 0;
     out.push(it);
   }
   return out;
 }
+
+// Только структурные жёсткие фильтры (цена/живость/бренды), БЕЗ слов — чтобы собрать
+// пул кандидатов ДО обогащения карточек (иначе короткое название отсеет релевантных).
+const WORD_KEYS = ['words', 'allWords', 'exclude'];
+function structuralOnly(f) { const g = { ...f }; for (const k of WORD_KEYS) delete g[k]; return g; }
 
 /**
  * BULK-СБОР: собирает группу И её дневные ряды ОДНИМ (или несколькими при
@@ -131,6 +139,7 @@ export async function collectFromCategory({
   pageSize,
   maxPages = 8,
   oos = false,
+  deepMatch = true, // обогащать карточками WB (описание+характеристики) для матчинга слов
 } = {}) {
   // Размер страницы: ответ несёт дневные графики по каждому товару (≈15 рядов ×
   // дни). При 5000 строках это сотни МБ и минуты загрузки. 1000 — компромисс:
@@ -142,6 +151,9 @@ export async function collectFromCategory({
   const windowMonths = Math.max(1, (Date.parse(d2) - Date.parse(d1)) / (30.4 * 86400000));
   const fWin = { ...filter, windowMonths };
   const hasSoft = (filter.words?.length || filter.allWords?.length);
+  const hasWords = !!(filter.words?.length || filter.allWords?.length || filter.exclude?.length);
+  const deep = deepMatch && hasWords && !wbSet; // обогащение имеет смысл только при словах
+  const enrichCap = Math.max((limit || 60) * 3, 120); // сколько кандидатов обогащать максимум
   const raw = [];
   let total = Infinity;
   let requests = 0;
@@ -166,6 +178,15 @@ export async function collectFromCategory({
       // Режим A: нашли все нужные WB — либо страница не добавила ни одного нового
       // (остальные, вероятно, архивные и в предмете отсутствуют).
       if (matched >= wbSet.size || matched === matchedBefore) break;
+    } else if (deep) {
+      // Режим B + глубокий матчинг: слова проверяются ПОСЛЕ обогащения карточками,
+      // поэтому останавливаемся, когда собрали достаточно СТРУКТУРНЫХ кандидатов
+      // (по цене/живости), которых затем обогатим и отфильтруем по словам.
+      const passedStruct = filterGroupItems(
+        raw.map((r) => normalizeCategoryItem(r)).filter((it) => it.wb != null),
+        structuralOnly(fWin)
+      ).length;
+      if (passedStruct >= enrichCap) break;
     } else {
       // Режим B: набрали достаточно РЕЛЕВАНТНЫХ аналогов. Со «мягкими» словами
       // считаем товары с совпадением стема (_relevance>0); без слов — просто
@@ -183,9 +204,27 @@ export async function collectFromCategory({
   let items = raw
     .map((r) => ({ ...normalizeCategoryItem(r), _raw: r }))
     .filter((it) => it.wb != null);
-  items = wbSet
-    ? items.filter((it) => wbSet.has(String(it.wb)))
-    : filterGroupItems(items, fWin);
+  let cardsEnriched = 0;
+  if (wbSet) {
+    items = items.filter((it) => wbSet.has(String(it.wb)));
+  } else if (deep) {
+    // 1) Структурный пул (цена/живость), топ по выручке — кандидаты на обогащение.
+    let pool = filterGroupItems(items, structuralOnly(fWin));
+    pool.sort((a, b) => (b.revenue || 0) - (a.revenue || 0) || (b.sales || 0) - (a.sales || 0));
+    if (pool.length > enrichCap) pool = pool.slice(0, enrichCap);
+    // 2) Обогащаем карточками WB (бесплатный CDN): matchText = название + описание + характеристики.
+    try {
+      const cards = await fetchCardsInfo(pool.map((it) => it.wb), { concurrency: 8 });
+      for (const it of pool) {
+        const info = cards.get(Number(it.wb));
+        if (info) { it._matchText = lc(it.name) + ' \n ' + cardMatchText(info); cardsEnriched++; }
+      }
+    } catch { /* CDN недоступен → откат на матчинг по названию */ }
+    // 3) Применяем слова (words/allWords/exclude) уже к ОБОГАЩЁННОМУ тексту.
+    items = filterGroupItems(pool, fWin);
+  } else {
+    items = filterGroupItems(items, fWin);
+  }
   // Сортировка (Правило п.3): релевантность → ОБЪЁМ ПРОДАЖ ↓ → ЦЕНА ↓.
   items.sort((a, b) =>
     (b._relevance || 0) - (a._relevance || 0) ||
@@ -251,6 +290,8 @@ export async function collectFromCategory({
     dailyLimit,
     medianPrice,
     priceAnchor: priceAnchorBelowMedian, // конкурентная цена: медиана −10%
+    deepMatch: deep,
+    cardsEnriched, // сколько карточек обогащено (матчинг по описанию+характеристикам)
   };
 }
 
@@ -334,7 +375,7 @@ export async function buildSeasonPlanReport({
   // Замыкание: собрать «форму» (аналоги/группу) за произвольное окно тем же источником.
   const collectShape = async (w1, w2) => {
     if (subject) {
-      return { method: 'category-bulk', ...(await collectFromCategory({ path: subject.path, d1: w1, d2: w2, filter: subject.filter || {}, limit: subject.limit, maxPages: subject.maxPages, oos })) };
+      return { method: 'category-bulk', ...(await collectFromCategory({ path: subject.path, d1: w1, d2: w2, filter: subject.filter || {}, limit: subject.limit, maxPages: subject.maxPages, oos, deepMatch: plan.deepMatch !== false })) };
     } else if (group && path) {
       const wbSet = new Set(group.map((g) => String(g.wb ?? g)));
       return { method: 'category-bulk', ...(await collectFromCategory({ path, d1: w1, d2: w2, wbSet, oos })) };
@@ -350,7 +391,7 @@ export async function buildSeasonPlanReport({
   requests += collected.requests || 0;
   const method = collected.method;
   const groupInfo = subject
-    ? { path: subject.path, total: collected.total, fetched: collected.fetched, kept: collected.kept, truncated: collected.truncated, maxPages: collected.maxPages }
+    ? { path: subject.path, total: collected.total, fetched: collected.fetched, kept: collected.kept, truncated: collected.truncated, maxPages: collected.maxPages, deepMatch: collected.deepMatch, cardsEnriched: collected.cardsEnriched }
     : path ? { path, total: collected.total, fetched: collected.fetched, kept: collected.kept } : null;
 
   const { groupDaily, perItemMeta, dailyLimit } = collected;

@@ -72,7 +72,7 @@ export async function runForecast(cfg = {}) {
     },
     forecast: { targetYear },
     baseSource: 'market',
-    plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false, rampDays: num(cfg.rampDays), seasonFrac: num(cfg.seasonFrac), targetLevel: cfg.targetLevel === 'top1' ? 'top1' : 'top3' },
+    plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false, rampDays: num(cfg.rampDays), seasonFrac: num(cfg.seasonFrac), targetLevel: cfg.targetLevel === 'top1' ? 'top1' : 'top3', deepMatch: cfg.deepMatch !== false },
   });
 }
 
