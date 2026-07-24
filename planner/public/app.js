@@ -1373,15 +1373,19 @@ function seasonCompetitorsBlock(rep) {
       ? `<span class="se-comp-thumb"><img loading="lazy" alt="" data-nm="${nm}" src="${wbThumbUrl(nm, 'tm')}"></span>`
       : '<span class="se-comp-thumb noimg"></span>';
     const nameCell = nm ? `${thumb}<a href="${link}" target="_blank" rel="noopener">${title}</a>` : `${thumb}${title}`;
+    // Оборачиваемость (дн) = средний остаток / среднесуточные продажи (avgStock·days/units).
+    const turnover = (m.avgStock > 0 && +m.unitsSold > 0 && m.days > 0)
+      ? Math.round(m.avgStock * m.days / m.unitsSold) : null;
     return `<tr>
       <td class="num">${i + 1}</td>
       <td class="se-comp-name">${nameCell}</td>
+      <td>${seEsc(m.brand || '—')}</td>
       <td class="num">${nm || '—'}</td>
       <td class="num">${avgPrice != null ? fmt(avgPrice) + ' ₽' : '—'}</td>
       <td class="num">${fmt(m.unitsSold)}</td>
       <td class="num">${fmt(m.revenue)} ₽</td>
       <td class="num">${perMonth != null ? fmt(perMonth) + ' ₽' : '—'}</td>
-      <td class="num">${m.days || 0}</td>
+      <td class="num">${turnover != null ? turnover + ' дн' : '—'}</td>
     </tr>`;
   }).join('');
   const totalKept = rep.groupSize != null ? rep.groupSize : items.length;
@@ -1391,7 +1395,7 @@ function seasonCompetitorsBlock(rep) {
     <div class="se-comp-body">
       <div class="mini">Отсортировано по выручке за период анализа (2 года). Наведите на превью — увеличится; клик по названию — карточка на Wildberries. Так можно убедиться, что фильтр отобрал именно релевантных конкурентов.</div>
       <div class="se-comp-scroll"><table class="se-comp-table">
-        <thead><tr><th class="num">#</th><th>Название</th><th class="num">Артикул WB</th><th class="num" title="Средняя цена продажи = выручка / штук">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num">Дней</th></tr></thead>
+        <thead><tr><th class="num">#</th><th>Название</th><th>Бренд</th><th class="num">Артикул WB</th><th class="num" title="Средняя цена продажи = выручка / штук">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num" title="Оборачиваемость = средний остаток / среднесуточные продажи. Меньше — быстрее распродаётся. Доступно для планов, построенных новой версией.">Оборачив.</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>
