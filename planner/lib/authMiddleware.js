@@ -21,11 +21,43 @@ import crypto from 'crypto';
 import {
   dbAvailable, metaGet, metaSet,
   userGet, userList, userUpsert, userSetStatus, userSetExpiry, userDelete, userMarkLogin,
+  userSetPerms, userSetAccessRequest,
 } from './db.js';
 import { verifyTelegramAuth, verifySession, signSession, newSessionId } from './auth.js';
+import { permsFor, canView, canEdit, TABS, TAB_KEYS, presetTabs, DEFAULT_VIEWER_TABS } from './permissions.js';
+
+// Мидлвары-гейты для маршрутов server.js. Если авторизация выключена (req.perms нет) —
+// пропускаем (локальная сеть). Иначе проверяем право просмотра/редактирования листа.
+export function requireView(tab) {
+  return (req, res, next) => {
+    if (!req.perms) return next();
+    if (canView(req.perms, tab)) return next();
+    return res.status(403).json({ ok: false, error: 'forbidden', tab });
+  };
+}
+export function requireEdit(tab) {
+  return (req, res, next) => {
+    if (!req.perms) return next();
+    if (canEdit(req.perms, tab)) return next();
+    return res.status(403).json({ ok: false, error: 'forbidden', tab });
+  };
+}
 
 const COOKIE = 'planner_session';
 const SESSION_TTL_SEC = 30 * 24 * 3600; // 30 дней
+const LEVELS = new Set(['none', 'view', 'edit']);
+
+// Оставить только валидные листы и уровни (защита от мусора в запросе админа).
+function sanitizeTabs(tabs) {
+  const out = {};
+  if (tabs && typeof tabs === 'object') {
+    for (const k of TAB_KEYS) {
+      const v = tabs[k];
+      if (LEVELS.has(v)) out[k] = v;
+    }
+  }
+  return out;
+}
 
 // ── cookie helpers (без внешних зависимостей) ──
 function parseCookies(req) {
@@ -133,22 +165,25 @@ export function installAuth(app) {
     }
     const tid = Number(data.id);
     let user = userGet(tid);
+    const profile = {
+      username: data.username || null,
+      name: [data.first_name, data.last_name].filter(Boolean).join(' ') || null,
+      photoUrl: data.photo_url || null,
+    };
     // Владелец может войти всегда (на случай пустого allowlist).
     if (!user && tid === OWNER_ID) { userUpsert({ telegramId: tid, isAdmin: 1, status: 'active', note: 'owner' }); user = userGet(tid); }
-    const denial = accessDenial(user);
-    if (denial) {
-      // Регистрируем «ожидающего»: создаём заблокированную запись, чтобы админ видел заявку.
-      if (!user) {
-        userUpsert({
-          telegramId: tid,
-          username: data.username || null,
-          name: [data.first_name, data.last_name].filter(Boolean).join(' ') || null,
-          photoUrl: data.photo_url || null,
-          status: 'blocked', isAdmin: 0, note: 'заявка на доступ',
-        });
-      }
-      return res.status(403).send(deniedPage(denial, tid, data.username));
+    // Автоприём: новый аккаунт сразу активен, но с минимальными правами (роль viewer,
+    // только Дашборд на просмотр). Расширение доступа — по заявке админу.
+    if (!user) {
+      userUpsert({
+        telegramId: tid, ...profile,
+        status: 'active', isAdmin: 0, role: 'viewer',
+        perms: { tabs: { ...DEFAULT_VIEWER_TABS } }, note: 'автоприём',
+      });
+      user = userGet(tid);
     }
+    const denial = accessDenial(user); // теперь блокирует только явно blocked/expired
+    if (denial) return res.status(403).send(deniedPage(denial, tid, data.username));
     // Успех: ротируем сессию (вытесняем прочие), пишем профиль, ставим cookie.
     const sid = newSessionId();
     userMarkLogin(tid, {
@@ -168,22 +203,34 @@ export function installAuth(app) {
     res.json({ ok: true });
   });
 
-  // Кто я (для фронта: показать имя, признак админа).
+  // Кто я (для фронта: показать имя, признак админа, карту прав по листам).
   app.get('/api/me', (req, res) => {
     const u = currentUser(req);
     // botUsername нужен странице логина ДО входа (для виджета Telegram) — отдаём всегда.
     if (!u) return res.json({ authEnabled: true, user: null, botUsername: BOT_USERNAME });
+    const perms = permsFor(u);
     res.json({
       authEnabled: true,
       user: {
         telegramId: u.telegramId, username: u.username, name: u.name, photoUrl: u.photoUrl,
-        isAdmin: !!u.isAdmin, expiresAt: u.expiresAt || null,
+        isAdmin: !!u.isAdmin, role: perms.role, expiresAt: u.expiresAt || null,
       },
+      perms: { isAdmin: perms.isAdmin, tabs: perms.tabs },
+      tabs: TABS,
       botUsername: BOT_USERNAME,
     });
   });
 
-  // ── Guard: всё остальное требует активной сессии ──
+  // Пользователь просит расширить доступ (заявка админу).
+  app.post('/api/access/request', (req, res) => {
+    const u = currentUser(req);
+    if (!u) return res.status(401).json({ ok: false, error: 'auth_required' });
+    const msg = String((req.body && req.body.message) || '').slice(0, 500);
+    userSetAccessRequest(u.telegramId, msg || 'Запрос доступа');
+    res.json({ ok: true });
+  });
+
+  // ── Guard: всё остальное требует активной сессии; вычисляем права ──
   app.use((req, res, next) => {
     if (isPublic(req.path)) return next();
     const u = currentUser(req);
@@ -192,6 +239,7 @@ export function installAuth(app) {
       return res.redirect('/login');
     }
     req.user = u;
+    req.perms = permsFor(u);
     next();
   });
 
@@ -201,22 +249,37 @@ export function installAuth(app) {
     next();
   };
   app.get('/api/admin/users', adminOnly, (req, res) => {
-    res.json({ ok: true, users: userList(), ownerId: OWNER_ID });
+    res.json({ ok: true, users: userList(), ownerId: OWNER_ID, tabs: TABS });
   });
-  // Выдать/обновить доступ: { telegramId, status?, isAdmin?, expiresAt?, note?, name?, username? }
+  // Выдать/обновить доступ: { telegramId, status?, isAdmin?, role?, perms?, expiresAt?, note?, name?, username? }
   app.post('/api/admin/users', adminOnly, (req, res) => {
     const b = req.body || {};
     const tid = Number(b.telegramId);
     if (!tid) return res.status(400).json({ ok: false, error: 'нужен числовой telegramId' });
+    // Роль-пресет заполняет карту прав, если perms не передан явно.
+    const role = b.role || 'viewer';
+    const perms = b.perms != null ? { tabs: sanitizeTabs(b.perms.tabs || b.perms) } : { tabs: presetTabs(role) };
     userUpsert({
       telegramId: tid,
       status: b.status || 'active',
       isAdmin: b.isAdmin ? 1 : 0,
+      role: b.isAdmin ? 'admin' : role,
+      perms,
       expiresAt: b.expiresAt || null,
       note: b.note ?? null,
       name: b.name ?? null,
       username: b.username ?? null,
     });
+    userSetAccessRequest(tid, null); // выдали доступ — снимаем заявку
+    res.json({ ok: true, user: userGet(tid) });
+  });
+  // Точечно задать роль/права листов: { role?, perms:{tabs:{…}} }
+  app.post('/api/admin/users/:id/perms', adminOnly, (req, res) => {
+    const tid = Number(req.params.id);
+    const b = req.body || {};
+    if (tid === OWNER_ID) return res.status(400).json({ ok: false, error: 'права владельца менять нельзя' });
+    userSetPerms(tid, b.role || 'custom', { tabs: sanitizeTabs((b.perms && b.perms.tabs) || b.perms || {}) });
+    userSetAccessRequest(tid, null);
     res.json({ ok: true, user: userGet(tid) });
   });
   app.post('/api/admin/users/:id/status', adminOnly, (req, res) => {

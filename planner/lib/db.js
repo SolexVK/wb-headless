@@ -57,9 +57,16 @@ function migrate(db) {
       status TEXT DEFAULT 'active',   -- active | blocked
       isAdmin INTEGER DEFAULT 0,
       grantedAt TEXT, expiresAt TEXT, -- срок подписки (NULL = бессрочно)
-      lastLoginAt TEXT, activeSession TEXT, note TEXT
+      lastLoginAt TEXT, activeSession TEXT, note TEXT,
+      role TEXT DEFAULT 'viewer',     -- admin | editor | viewer | custom
+      perms TEXT,                     -- JSON карта прав по листам {tab: none|view|edit}
+      accessRequest TEXT              -- текст заявки на расширение доступа (NULL = нет)
     );
   `);
+  // Идемпотентно добавить новые колонки в уже существующую таблицу users (старые БД).
+  for (const [col, decl] of [['role', "TEXT DEFAULT 'viewer'"], ['perms', 'TEXT'], ['accessRequest', 'TEXT']]) {
+    try { db.exec(`ALTER TABLE users ADD COLUMN ${col} ${decl}`); } catch { /* колонка уже есть */ }
+  }
 }
 
 /** Открыть (лениво) БД. Возвращает объект БД или null, если SQLite недоступен. */
@@ -196,17 +203,35 @@ export function userList() {
 export function userUpsert(u) {
   const db = getDb(); if (!db) return false;
   const now = new Date().toISOString();
-  db.prepare(`INSERT INTO users(telegramId,username,name,photoUrl,status,isAdmin,grantedAt,expiresAt,note)
-    VALUES(?,?,?,?,?,?,?,?,?)
+  const permsJson = u.perms == null ? null : (typeof u.perms === 'string' ? u.perms : JSON.stringify(u.perms));
+  db.prepare(`INSERT INTO users(telegramId,username,name,photoUrl,status,isAdmin,grantedAt,expiresAt,note,role,perms)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(telegramId) DO UPDATE SET
       username=COALESCE(excluded.username,users.username),
       name=COALESCE(excluded.name,users.name),
       photoUrl=COALESCE(excluded.photoUrl,users.photoUrl),
       status=COALESCE(excluded.status,users.status),
       isAdmin=COALESCE(excluded.isAdmin,users.isAdmin),
-      expiresAt=excluded.expiresAt, note=COALESCE(excluded.note,users.note)`)
+      expiresAt=excluded.expiresAt, note=COALESCE(excluded.note,users.note),
+      role=COALESCE(excluded.role,users.role),
+      perms=COALESCE(excluded.perms,users.perms)`)
     .run(Number(u.telegramId), u.username ?? null, u.name ?? null, u.photoUrl ?? null,
-      u.status ?? 'active', u.isAdmin ? 1 : 0, u.grantedAt ?? now, u.expiresAt ?? null, u.note ?? null);
+      u.status ?? 'active', u.isAdmin ? 1 : 0, u.grantedAt ?? now, u.expiresAt ?? null, u.note ?? null,
+      u.role ?? null, permsJson);
+  return true;
+}
+/** Задать роль и карту прав пользователю (перезаписывает perms целиком). */
+export function userSetPerms(telegramId, role, perms) {
+  const db = getDb(); if (!db) return false;
+  const permsJson = perms == null ? null : (typeof perms === 'string' ? perms : JSON.stringify(perms));
+  db.prepare('UPDATE users SET role=COALESCE(?,role), perms=? WHERE telegramId=?')
+    .run(role ?? null, permsJson, Number(telegramId));
+  return true;
+}
+/** Записать/снять заявку пользователя на расширение доступа. */
+export function userSetAccessRequest(telegramId, text) {
+  const db = getDb(); if (!db) return false;
+  db.prepare('UPDATE users SET accessRequest=? WHERE telegramId=?').run(text ?? null, Number(telegramId));
   return true;
 }
 export function userSetStatus(telegramId, status) {

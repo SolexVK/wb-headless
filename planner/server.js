@@ -12,7 +12,8 @@ import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategorie
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
 import { dbAvailable, stateLoadJson, stateSaveJson } from './lib/db.js';
-import { installAuth } from './lib/authMiddleware.js';
+import { installAuth, requireView, requireEdit } from './lib/authMiddleware.js';
+import { applyWritePolicy, filterStateForRead, canEditAnything } from './lib/permissions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
@@ -156,23 +157,27 @@ app.use(express.static(path.join(__dirname, 'public'), {
 }));
 app.use('/samples', express.static(SAMPLES_DIR)); // образцы ткани (за той же авторизацией)
 
-// текущее состояние
+// текущее состояние (коммерческая юнит-экономика скрывается, если нет доступа к 'unit')
 app.get('/api/state', (req, res) => {
-  res.json(loadState());
+  const st = loadState();
+  res.json(req.perms ? filterStateForRead(st, req.perms) : st);
 });
 
-// сохранить состояние целиком
+// сохранить состояние целиком (запись режется по правам: принимаем только те секции,
+// которые пользователю разрешено редактировать; остальное берём из сохранённого)
 app.put('/api/state', (req, res) => {
   try {
-    const norm = saveState(req.body);
-    res.json({ ok: true, state: norm });
+    if (req.perms && !canEditAnything(req.perms)) return res.status(403).json({ ok: false, error: 'read_only' });
+    const incoming = req.perms ? applyWritePolicy(loadState(), req.body, req.perms) : req.body;
+    const norm = saveState(incoming);
+    res.json({ ok: true, state: req.perms ? filterStateForRead(norm, req.perms) : norm });
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.message || e) });
   }
 });
 
 // сбросить к сиду
-app.post('/api/state/reset', (req, res) => {
+app.post('/api/state/reset', requireEdit('data'), (req, res) => {
   res.json({ ok: true, state: saveState(defaultState()) });
 });
 
@@ -188,7 +193,7 @@ app.post('/api/schedule', (req, res) => {
 });
 
 // сохранить ручную правку блока (перетаскивание на Ганте) и вернуть пересчёт
-app.post('/api/override', (req, res) => {
+app.post('/api/override', requireEdit('gantt'), (req, res) => {
   try {
     const { cycleId, cutStart, clear } = req.body || {};
     const state = loadState();
@@ -203,7 +208,7 @@ app.post('/api/override', (req, res) => {
 });
 
 // загрузка образца ткани: принимает data:-URL, пишет файл, возвращает путь /samples/<файл>
-app.post('/api/sample', (req, res) => {
+app.post('/api/sample', requireEdit('fabric'), (req, res) => {
   try {
     const p = saveSampleDataUrl((req.body || {}).dataUrl);
     if (!p) return res.status(400).json({ ok: false, error: 'некорректное изображение' });
@@ -219,27 +224,27 @@ app.get('/api/season/status', (req, res) => {
   res.json({ ok: true, hasToken: !!process.env.MPSTATS_TOKEN });
 });
 // подсказка пути предмета по слову
-app.get('/api/season/categories', async (req, res) => {
+app.get('/api/season/categories', requireView('season'), async (req, res) => {
   try { res.json({ ok: true, paths: await searchCategories(req.query.q || '', 40) }); }
   catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 // список сохранённых планов (краткий индекс)
-app.get('/api/season/plans', (req, res) => {
+app.get('/api/season/plans', requireView('season'), (req, res) => {
   try { res.json({ ok: true, plans: listPlans() }); }
   catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
 });
 // один план целиком
-app.get('/api/season/plan', (req, res) => {
+app.get('/api/season/plan', requireView('season'), (req, res) => {
   const rec = loadPlan(req.query.articleId || '');
   if (!rec) return res.status(404).json({ ok: false, error: 'план не найден' });
   res.json({ ok: true, ...rec });
 });
 // удалить сохранённый план
-app.delete('/api/season/plan', (req, res) => {
+app.delete('/api/season/plan', requireEdit('season'), (req, res) => {
   res.json({ ok: true, deleted: deletePlan((req.query.articleId) || (req.body && req.body.articleId) || '') });
 });
 // построить прогноз по фильтру артикула и сохранить (это сетевой вызов к MPStats, ~секунды)
-app.post('/api/season/build', async (req, res) => {
+app.post('/api/season/build', requireEdit('season'), async (req, res) => {
   try {
     const cfg = req.body || {};
     if (!cfg.articleId) return res.status(400).json({ ok: false, error: 'не указан articleId' });
@@ -254,12 +259,12 @@ app.post('/api/season/build', async (req, res) => {
 // ── Wildberries API: карточки (маппинг+габариты) и логистика по тарифам ──
 app.get('/api/wb/status', (req, res) => res.json({ ok: true, hasToken: hasWbToken() }));
 // список карточек продавца для пикера «Артикул WB» (nmID/vendorCode/объём), кэш сутки
-app.get('/api/wb/cards', async (req, res) => {
+app.get('/api/wb/cards', requireView('unit'), async (req, res) => {
   try { res.json({ ok: true, cards: await fetchCards({ force: req.query.force === '1' }) }); }
   catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 // логистика/хранение для артикула (по nmID или объёму) на складе (Коледино по умолчанию)
-app.get('/api/wb/logistics', async (req, res) => {
+app.get('/api/wb/logistics', requireView('unit'), async (req, res) => {
   try {
     const warehouse = req.query.warehouse || 'Коледино';
     const days = req.query.days != null ? +req.query.days : 60;
