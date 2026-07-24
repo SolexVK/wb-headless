@@ -87,16 +87,18 @@ export async function runCandidates(cfg = {}) {
   if (!process.env.MPSTATS_TOKEN) throw new Error('MPSTATS_TOKEN не задан в окружении службы (planner/data/.env)');
   if (!cfg.path) throw new Error('Не указан путь предмета WB (path)');
   const hist = default2Years();
+  const log = [];
   const col = await collectFromCategory({
     path: cfg.path, d1: hist.d1, d2: hist.d2,
     filter: buildFilter(cfg.filter || cfg),
     limit: num(cfg.limit), maxPages: num(cfg.maxPages),
-    deepMatch: cfg.deepMatch !== false,
+    deepMatch: cfg.deepMatch !== false, log,
   });
   return {
     acceptedCount: col.kept || 0, sampled: col.fetched || 0,
     cardsEnriched: col.cardsEnriched || 0, deepMatch: !!col.deepMatch,
-    undetermined: col.undetermined || [],
+    structuralPool: col.structuralPool || 0, total: col.total || 0,
+    undetermined: col.undetermined || [], log,
   };
 }
 
@@ -110,7 +112,8 @@ export async function getFeatureDict(cfg = {}) {
     if (hit) return { ...hit, cached: true };
   }
   const hist = default2Years();
-  const dict = await buildFeatureDict({ path, d1: hist.d1, d2: hist.d2, sample: num(cfg.sample) || 250 });
+  const log = [];
+  const dict = await buildFeatureDict({ path, d1: hist.d1, d2: hist.d2, sample: num(cfg.sample) || 400, log });
   if (dbAvailable()) featureDictSave(path, dict);
   return { ...dict, cached: false };
 }

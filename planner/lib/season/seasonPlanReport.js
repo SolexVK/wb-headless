@@ -199,7 +199,9 @@ export async function collectFromCategory({
   oos = false,
   deepMatch = true, // обогащать карточками WB (описание+характеристики) для матчинга слов
   includeWb = null, // Set nmID — вручную отобранные «неопределённые», включить принудительно
+  log = null,       // массив для расширенного лога этапов (необязательно)
 } = {}) {
+  const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'сбор', msg }); };
   // Размер страницы: ответ несёт дневные графики по каждому товару (≈15 рядов ×
   // дни). При 5000 строках это сотни МБ и минуты загрузки. 1000 — компромисс:
   // грузится за ~секунды, а т.к. 1 запрос = 1 единица лимита, крупная страница
@@ -212,53 +214,39 @@ export async function collectFromCategory({
   const hasSoft = (filter.words?.length || filter.allWords?.length);
   const hasWords = !!(filter.words?.length || filter.allWords?.length || filter.exclude?.length || filter.mustHave?.length);
   const deep = deepMatch && hasWords && !wbSet; // обогащение имеет смысл только при словах
-  const enrichCap = Math.max((limit || 60) * 3, 120); // сколько кандидатов обогащать максимум
+  // Сколько карточек максимум обогащать. Раньше было 120 (сильно резало — отбор шёл
+  // только по топ-120 выручки). Теперь тянем ВСЮ выдачу предмета и обогащаем весь
+  // структурный пул (в сегменте) до этого потолка.
+  const MAX_ENRICH = 1200;
   const raw = [];
   let total = Infinity;
   let requests = 0;
   let dailyLimit = null;
 
+  L(`Запрос выдачи MPStats по предмету "${path}" (сортировка по выручке ↓), период ${d1}…${d2}.`);
   for (let startRow = 0; startRow < total && requests < maxPages; startRow += pageSize) {
     let res;
     try {
       res = await fetchCategoryItems({ path, d1, d2, startRow, endRow: startRow + pageSize });
     } catch (err) {
-      if (err?.dailyLimit) { dailyLimit = String(err?.message || err); break; }
+      if (err?.dailyLimit) { dailyLimit = String(err?.message || err); L(`Достигнут дневной лимит MPStats: ${dailyLimit}`); break; }
       throw err;
     }
     requests += 1;
     total = res.total || res.data.length;
     const matchedBefore = wbSet ? raw.filter((r) => wbSet.has(String(r.id ?? r.nmId))).length : 0;
     raw.push(...res.data);
+    L(`Страница ${requests}: получено ${res.data.length}, всего в предмете ${total}, накоплено ${raw.length}.`);
     if (res.data.length < pageSize) break;
-    // Ранняя остановка — не тянем лишние страницы (экономия лимита и трафика):
+    // Режим A (по списку WB): ранняя остановка, когда все нужные найдены.
     if (wbSet) {
       const matched = raw.filter((r) => wbSet.has(String(r.id ?? r.nmId))).length;
-      // Режим A: нашли все нужные WB — либо страница не добавила ни одного нового
-      // (остальные, вероятно, архивные и в предмете отсутствуют).
       if (matched >= wbSet.size || matched === matchedBefore) break;
-    } else if (deep) {
-      // Режим B + глубокий матчинг: слова проверяются ПОСЛЕ обогащения карточками,
-      // поэтому останавливаемся, когда собрали достаточно СТРУКТУРНЫХ кандидатов
-      // (по цене/живости), которых затем обогатим и отфильтруем по словам.
-      const passedStruct = filterGroupItems(
-        raw.map((r) => normalizeCategoryItem(r)).filter((it) => it.wb != null),
-        structuralOnly(fWin)
-      ).length;
-      if (passedStruct >= enrichCap) break;
-    } else {
-      // Режим B: набрали достаточно РЕЛЕВАНТНЫХ аналогов. Со «мягкими» словами
-      // считаем товары с совпадением стема (_relevance>0); без слов — просто
-      // прошедшие жёсткие фильтры.
-      const target = limit || 60;
-      const passed = filterGroupItems(
-        raw.map((r) => normalizeCategoryItem(r)).filter((it) => it.wb != null),
-        fWin
-      );
-      const kept = hasSoft ? passed.filter((it) => it._relevance > 0).length : passed.length;
-      if (kept >= target) break;
     }
+    // Режим B: тянем ВСЮ выдачу предмета (до maxPages), чтобы фильтр применялся ко всей
+    // базе, а не к топ-выдаче по выручке. Ранней остановки по числу совпадений больше нет.
   }
+  L(`Итого получено артикулов из предмета: ${raw.length} (страниц ${requests}${requests >= maxPages ? `, упёрлись в лимит ${maxPages} страниц` : ''}).`);
 
   const allItems = raw
     .map((r) => ({ ...normalizeCategoryItem(r), _raw: r }))
@@ -266,13 +254,18 @@ export async function collectFromCategory({
   let items;
   let basePool = allItems;   // пул кандидатов (для «неопределённых»)
   let cardsEnriched = 0;
+  const segMsg = (filter.priceMin != null || filter.priceMax != null)
+    ? `сегмент ${filter.priceMin ?? '0'}–${filter.priceMax ?? '∞'} ₽` : 'без ценового сегмента';
   if (wbSet) {
     items = allItems.filter((it) => wbSet.has(String(it.wb)));
+    L(`Режим по списку WB: оставлено ${items.length} из ${allItems.length}.`);
   } else if (deep) {
-    // 1) Структурный пул (цена/живость), топ по выручке — кандидаты на обогащение.
+    // 1) Структурный пул (цена/живость) — ВСЕ подходящие по сегменту, топ по выручке.
     let pool = filterGroupItems(allItems, structuralOnly(fWin));
     pool.sort((a, b) => (b.revenue || 0) - (a.revenue || 0) || (b.sales || 0) - (a.sales || 0));
-    if (pool.length > enrichCap) pool = pool.slice(0, enrichCap);
+    L(`Структурный фильтр (${segMsg}, живость): прошло ${pool.length} из ${allItems.length}.`);
+    const poolFull = pool.length;
+    if (pool.length > MAX_ENRICH) { pool = pool.slice(0, MAX_ENRICH); L(`⚠ Кандидатов ${poolFull} > потолка обогащения ${MAX_ENRICH} — обогащаем топ-${MAX_ENRICH} по выручке (остальные не проверены по признакам).`); }
     // 2) Обогащаем карточками WB (бесплатный CDN): matchText = название + описание + характеристики.
     try {
       const cards = await fetchCardsInfo(pool.map((it) => it.wb), { concurrency: 8 });
@@ -286,26 +279,32 @@ export async function collectFromCategory({
         }
       }
     } catch { /* CDN недоступен → откат на матчинг по названию */ }
+    L(`Обогащение карточек WB: успешно ${cardsEnriched} из ${pool.length}${cardsEnriched === 0 ? ' — ⚠ карточки не загрузились (wbbasket.ru недоступен?); отбор по названию' : ''}.`);
     basePool = pool;
     // 3) Применяем слова к обогащённому тексту. НО если ни одна карточка не подтянулась
     // (CDN недоступен) — полный откат на прежнее поведение (матчинг по НАЗВАНИЮ на всей
     // выдаче), чтобы недоступность CDN не давала пустую выборку. Без регресса.
     items = cardsEnriched > 0 ? filterGroupItems(pool, fWin) : filterGroupItems(allItems, fWin);
+    L(`Фильтр плюс/минус (плюс «любое из»: [${(filter.words || []).join(', ') || '—'}]; минус «любой исключает»: [${(filter.exclude || []).join(', ') || '—'}]; строгий ключ: [${(filter.mustHave || []).join(', ') || '—'}]) → принято ${items.length}.`);
   } else {
     basePool = filterGroupItems(allItems, structuralOnly(fWin));
     items = filterGroupItems(allItems, fWin);
+    L(`Фильтр (без глубокого анализа): структурных ${basePool.length}, принято ${items.length} из ${allItems.length}.`);
   }
   // Принудительное включение вручную отобранных «неопределённых» (по nmID) — минуя слова.
   if (includeWb && includeWb.size) {
     const have = new Set(items.map((it) => String(it.wb)));
+    let added = 0;
     for (const it of allItems) {
-      if (includeWb.has(String(it.wb)) && !have.has(String(it.wb))) { items.push(it); have.add(String(it.wb)); }
+      if (includeWb.has(String(it.wb)) && !have.has(String(it.wb))) { items.push(it); have.add(String(it.wb)); added++; }
     }
+    L(`Добавлено вручную одобренных «неопределённых»: ${added}.`);
   }
   // Пул «неопределённых» на ручную проверку (только режим B со словами).
   const undetermined = (!wbSet && hasWords)
     ? computeUndetermined(basePool, fWin, new Set(items.map((it) => String(it.wb))), windowMonths)
     : [];
+  if (!wbSet && hasWords) L(`«Неопределённых» кандидатов (без плюс/минус, ${segMsg}, ≥100 000 ₽/мес): ${undetermined.length}.`);
   // Сортировка (Правило п.3): релевантность → ОБЪЁМ ПРОДАЖ ↓ → ЦЕНА ↓.
   items.sort((a, b) =>
     (b._relevance || 0) - (a._relevance || 0) ||
@@ -317,6 +316,7 @@ export async function collectFromCategory({
   // совпадением). Сортировка по релевантности выше — только для порядка топ-выдачи.
   const keptBeforeLimit = items.length;
   if (limit && items.length > limit) items = items.slice(0, limit);
+  L(`Итоговая выборка аналогов для плана: ${items.length}${keptBeforeLimit > items.length ? ` (из ${keptBeforeLimit} прошедших, ограничено размером группы ${limit})` : ''}.`);
 
   // Характеристики отобранной выборки (Состав/Сезон/Крой…) — для блока проверки и подбора
   // строгого ключа. Только при глубоком режиме (когда карточки обогащены).
@@ -375,6 +375,7 @@ export async function collectFromCategory({
     deepMatch: deep,
     cardsEnriched, // сколько карточек обогащено (матчинг по описанию+характеристикам)
     undetermined,  // ТОП-20 «неопределённых» на ручную проверку
+    structuralPool: basePool.length,
   };
 }
 
@@ -453,14 +454,16 @@ export async function buildSeasonPlanReport({
   concurrency = 5,
   onProgress,
   includeWb = null, // Set nmID — вручную одобренные «неопределённые», включить принудительно
+  log = [],         // расширенный лог этапов
 } = {}) {
   const oos = !!plan.oos;
   const includeSet = includeWb && includeWb.size ? includeWb : (Array.isArray(plan.includeWb) && plan.includeWb.length ? new Set(plan.includeWb.map(String)) : null);
+  const LP = (msg) => log.push({ t: new Date().toISOString(), stage: 'план', msg });
 
   // Замыкание: собрать «форму» (аналоги/группу) за произвольное окно тем же источником.
   const collectShape = async (w1, w2) => {
     if (subject) {
-      return { method: 'category-bulk', ...(await collectFromCategory({ path: subject.path, d1: w1, d2: w2, filter: subject.filter || {}, limit: subject.limit, maxPages: subject.maxPages, oos, deepMatch: plan.deepMatch !== false, includeWb: includeSet })) };
+      return { method: 'category-bulk', ...(await collectFromCategory({ path: subject.path, d1: w1, d2: w2, filter: subject.filter || {}, limit: subject.limit, maxPages: subject.maxPages, oos, deepMatch: plan.deepMatch !== false, includeWb: includeSet, log })) };
     } else if (group && path) {
       const wbSet = new Set(group.map((g) => String(g.wb ?? g)));
       return { method: 'category-bulk', ...(await collectFromCategory({ path, d1: w1, d2: w2, wbSet, oos })) };
@@ -481,6 +484,7 @@ export async function buildSeasonPlanReport({
 
   const { groupDaily, perItemMeta, dailyLimit } = collected;
   const errors = collected.errors || [];
+  LP(`Сбор аналогов завершён: в выборке ${perItemMeta.length}, с дневными данными ${perItemMeta.filter((m) => m.days > 0).length}. Строю уровень/ранг/фазы и план.`);
 
   // ── УРОВЕНЬ плана (baseDaily) ──
   const shapeBase = baseFromDaily(groupDaily);
@@ -574,6 +578,8 @@ export async function buildSeasonPlanReport({
       top3Daily: Math.round(top3Daily * 10) / 10,
       top1Name: strongest ? strongest.name : null,
     };
+    const rk = fc.plan && fc.plan.rank;
+    LP(`Прогноз построен: ранг ${rk ? (rk.rank ?? '—') : '—'}, уровень ${targetLevel === 'top1' ? 'ТОП-1' : 'ТОП-3'} (${Math.round(targetDaily)} шт/день), период прогноза ${fc.forecastPeriod ? fc.forecastPeriod.from + '…' + fc.forecastPeriod.to : '—'}.`);
 
     return {
       label,
@@ -592,6 +598,7 @@ export async function buildSeasonPlanReport({
       plan: fc,
       errors,
       dailyLimit,
+      log,
     };
   }
 
@@ -616,6 +623,7 @@ export async function buildSeasonPlanReport({
     plan: seasonPlan,
     errors,
     dailyLimit,
+    log,
   };
 }
 

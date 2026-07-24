@@ -624,3 +624,8 @@ html { overflow-x: hidden; }
 .se-fw-b.plus:hover, .se-fw-b.plus.on { background: color-mix(in srgb, var(--accent-2) 26%, transparent); color: var(--accent-2); }
 .se-fw-b.minus:hover, .se-fw-b.minus.on { background: color-mix(in srgb, var(--danger) 24%, transparent); color: var(--danger); }
 .se-fw-t { padding: 3px 8px 3px 4px; color: var(--text); }
+
+/* Лог этапов сезонности (комментарии внизу блоков) */
+.se-log { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+.se-log-line { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.se-log-line::first-letter { color: var(--accent-2); }

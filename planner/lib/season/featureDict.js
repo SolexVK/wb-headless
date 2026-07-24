@@ -42,11 +42,14 @@ const splitVals = (v) => clean(v).split(/[;,/]/).map((x) => x.replace(/\s*\d+\s*
  * @returns {Promise<{path, sample, withCards, attributes:[{name,total,values:[{value,count}]}],
  *                     keywords:[{word,count}], fetchedAt}>}
  */
-export async function buildFeatureDict({ path, d1, d2, sample = 250 } = {}) {
+export async function buildFeatureDict({ path, d1, d2, sample = 400, log = null } = {}) {
   if (!path) throw new Error('Не указан путь предмета (path)');
-  const res = await fetchCategoryItems({ path, d1, d2, startRow: 0, endRow: Math.max(sample, 300) });
+  const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'признаки', msg }); };
+  // Тянем ВСЮ выдачу предмета (до 5000) — слова-признаки собираем из НАЗВАНИЙ всех товаров.
+  const res = await fetchCategoryItems({ path, d1, d2, startRow: 0, endRow: 5000 });
   const all = (res.data || []).map((r) => normalizeCategoryItem(r)).filter((it) => it.wb != null);
-  const top = all.slice(0, sample); // выдача уже отсортирована по выручке ↓
+  L(`Выдача предмета: всего ${res.total || all.length}, получено ${all.length}. Слова из названий — со ВСЕХ; характеристики/описания — с топ-${sample} по выручке.`);
+  const top = all.slice(0, sample); // карточки тянем только для топ-N (характеристики/описание)
 
   let cards = new Map();
   try { cards = await fetchCardsInfo(top.map((it) => it.wb), { concurrency: 8 }); } catch { /* CDN недоступен → только названия */ }
@@ -77,8 +80,8 @@ export async function buildFeatureDict({ path, d1, d2, sample = 250 } = {}) {
     }
   };
 
+  for (const it of all) addKw(it.name);              // слова из названий — со ВСЕХ товаров
   for (const it of top) {
-    addKw(it.name);
     const info = cards.get(Number(it.wb));
     if (info) {
       withCards++;
@@ -86,6 +89,7 @@ export async function buildFeatureDict({ path, d1, d2, sample = 250 } = {}) {
       for (const o of (info.options || [])) addAttr(o.name, o.value);
     }
   }
+  L(`Карточки WB: обогащено ${withCards} из ${top.length}${withCards === 0 ? ' — ⚠ wbbasket.ru недоступен, характеристик нет (только слова из названий)' : ''}. Групп характеристик: ${attrGroups.size}.`);
 
   const attributes = [...attrGroups.entries()].map(([name, g]) => {
     const values = [...g.entries()].map(([value, count]) => ({ value, count }))
@@ -98,5 +102,5 @@ export async function buildFeatureDict({ path, d1, d2, sample = 250 } = {}) {
     .sort((a, b) => b.count - a.count).slice(0, 60)
     .map((k) => ({ word: k.form, count: k.count }));
 
-  return { path, sample: top.length, withCards, attributes, keywords, fetchedAt: new Date().toISOString() };
+  return { path, total: all.length, sample: top.length, withCards, attributes, keywords, fetchedAt: new Date().toISOString(), log: log || [] };
 }

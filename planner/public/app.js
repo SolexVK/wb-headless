@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-flow-2026-07-24h';
+const APP_BUILD = 'season-fullscan-log-2026-07-24i';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1104,6 +1104,17 @@ let featureOpen = false;                 // раскрыт ли блок «Сл�
 const featureDictCache = {};             // path -> собранный словарь признаков
 const featureSel = {};                   // path -> { plus:Set, minus:Set } выбранные признаки
 function featSelFor(path) { if (!featureSel[path]) featureSel[path] = { plus: new Set(), minus: new Set() }; return featureSel[path]; }
+let seasonRunLog = [];                    // расширенный лог этапов текущего прогона
+function seasonLogPush(lines) { if (Array.isArray(lines) && lines.length) seasonRunLog.push(...lines); }
+function seasonLogText() { return seasonRunLog.map((l) => `[${String(l.t || '').slice(11, 19)}] ${l.stage || ''}: ${l.msg}`).join('\n'); }
+function renderLogComment(el, lines) { if (!el) return; el.innerHTML = (lines || []).map((l) => `<div class="se-log-line">✓ ${seEsc(l.msg)}</div>`).join(''); }
+function downloadSeasonLog() {
+  const txt = seasonLogText() || 'Лог пуст. Соберите признаки / проверьте неопределённые / постройте план.';
+  const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'season-log.txt'; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+}
 const seasonIncludeByPath = {};          // path -> Set(wb) вручную одобренные «неопределённые»
 function seasonIncludeFor(path) { if (!seasonIncludeByPath[path]) seasonIncludeByPath[path] = new Set(); return seasonIncludeByPath[path]; }
 const SE_CHARTS = {};            // реестр графиков для тултипа: id → {rows, геометрия, valueKey}
@@ -1212,6 +1223,7 @@ function seasonBuilderPanel() {
             <input id="se-must" value="${seEsc(f.mustHave || '')}" placeholder="напр. муслин — только если есть в характеристиках">
           </div>
           <div id="se-feat-body"></div>
+          <div id="se-feat-log" class="se-log"></div>
         </div>
       </details>
 
@@ -1225,6 +1237,7 @@ function seasonBuilderPanel() {
           </div>
           <div class="mini">Товары без плюс- и без минус-слов, в вашем ценовом сегменте, с выручкой ≥ 100 000 ₽/мес. ТОП-20 по выручке — отметьте релевантные визуально и «Сохранить», они войдут в выборку.${incCount ? ` <b style="color:var(--accent-2)">Уже добавлено вручную: ${incCount}.</b>` : ''}</div>
           <div id="se-undet-body"></div>
+          <div id="se-undet-log" class="se-log"></div>
         </div>
       </details>
 
@@ -1256,8 +1269,10 @@ function seasonBuilderPanel() {
       <!-- 5. Построить план -->
       <div class="se-wide season-actions">
         <button class="btn btn-primary" id="se-build"${seasonHasToken && !seasonBuilding ? '' : ' disabled'}>${seasonBuilding ? '⏳ Строю план…' : '▶ Построить план'}</button>
+        <button class="btn" id="se-log-dl" type="button" title="Скачать расширенный лог всех этапов (.txt)">⬇ Скачать лог</button>
         <span class="mini">Формируется список релевантных артикулов (признаки + одобренные вручную) → графики ранга сезонности и план продаж.</span>
       </div>
+      <div id="se-build-log" class="se-log se-wide"></div>
     </div>
   </div>`;
 }
@@ -1362,8 +1377,9 @@ async function loadFeatureDict(force) {
   try {
     const r = await api('/api/season/features?path=' + encodeURIComponent(path) + (force ? '&force=1' : ''));
     featureDictCache[path] = r.dict;
-    if (status) status.textContent = '';
+    if (status) status.textContent = `всего в предмете: ${r.dict.total ?? '—'}, карточек: ${r.dict.withCards ?? 0}`;
     renderFeatureDictBody(r.dict);
+    seasonLogPush(r.dict.log); renderLogComment(document.getElementById('se-feat-log'), r.dict.log);
   } catch (e) { if (status) status.textContent = ''; toast('Ошибка сбора признаков: ' + e.message, true); }
 }
 
@@ -1419,8 +1435,9 @@ async function loadUndetermined() {
   try {
     const r = await api('/api/season/candidates', { method: 'POST', body: JSON.stringify(cfg) });
     const cdnWarn = (r.deepMatch && !r.cardsEnriched) ? ' · ⚠ карточки WB не загрузились (глубокий отбор по названию)' : (r.cardsEnriched ? ` · карточек: ${r.cardsEnriched}` : '');
-    if (status) status.textContent = `в выборке: ${r.acceptedCount}, кандидатов: ${(r.undetermined || []).length}${cdnWarn}`;
+    if (status) status.textContent = `всего в предмете: ${r.total}, в сегменте: ${r.structuralPool}, принято: ${r.acceptedCount}, кандидатов: ${(r.undetermined || []).length}${cdnWarn}`;
     renderUndetermined(r.undetermined || [], cfg.path);
+    seasonLogPush(r.log); renderLogComment(document.getElementById('se-undet-log'), r.log);
   } catch (e) { if (status) status.textContent = ''; toast('Ошибка: ' + e.message, true); }
 }
 
@@ -1428,6 +1445,7 @@ function bindSeasonBuilder() {
   const g = (id) => document.getElementById(id);
   g('se-article')?.addEventListener('change', (e) => { seasonBuildArticle = e.target.value; renderSeason(); });
   g('se-undet-load')?.addEventListener('click', loadUndetermined);
+  g('se-log-dl')?.addEventListener('click', downloadSeasonLog);
   // словарь признаков: раскрытие запоминаем; если для пути уже собран — показываем сразу
   g('se-feat')?.addEventListener('toggle', (e) => { featureOpen = e.target.open; });
   const featPath = (g('se-path')?.value || '').trim();
@@ -1469,7 +1487,9 @@ function bindSeasonBuilder() {
     if (!cfg.path) { toast('Укажи путь предмета WB', true); return; }
     seasonBuilding = true; renderSeason();
     try {
-      await api('/api/season/build', { method: 'POST', body: JSON.stringify(cfg) });
+      const built = await api('/api/season/build', { method: 'POST', body: JSON.stringify(cfg) });
+      const blog = (built && built.report && built.report.log) || [];
+      seasonLogPush(blog); renderLogComment(document.getElementById('se-build-log'), blog);
       // запомнить фильтр в артикуле, чтобы перестраивать в один клик
       const a = state.articles.find((x) => x.id === cfg.articleId);
       if (a) {
