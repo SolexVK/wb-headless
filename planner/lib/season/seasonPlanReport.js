@@ -311,14 +311,10 @@ export async function collectFromCategory({
     (b._relevance || 0) - (a._relevance || 0) ||
     (b.sales || 0) - (a.sales || 0) ||
     (b.price || 0) - (a.price || 0));
-  // Отсев СЛАБО-релевантных: если задан фильтр слов, отбрасываем карточки, совпавшие по
-  // слишком малому числу признаков — устойчивее к «чужим» товарам в выдаче (напр. летние
-  // рубашки при поиске зимних). Порог — 45% от максимума совпавших признаков.
-  let relFloor = 0;
-  if (!wbSet && hasSoft) {
-    const maxRel = items.reduce((m, it) => Math.max(m, it._relevance || 0), 0);
-    if (maxRel >= 3) { relFloor = Math.ceil(0.45 * maxRel); items = items.filter((it) => (it._relevance || 0) >= relFloor); }
-  }
+  // ПРАВИЛО ПЛЮС/МИНУС (по требованию): плюс-слова — «любое из» (достаточно одного
+  // совпадения, не обязательно всех); минус-слова — «любое одно исключает». Дополнительный
+  // отсев по доле совпавших признаков НЕ применяем (иначе теряются релевантные с одним
+  // совпадением). Сортировка по релевантности выше — только для порядка топ-выдачи.
   const keptBeforeLimit = items.length;
   if (limit && items.length > limit) items = items.slice(0, limit);
 

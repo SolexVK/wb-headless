@@ -93,7 +93,11 @@ export async function runCandidates(cfg = {}) {
     limit: num(cfg.limit), maxPages: num(cfg.maxPages),
     deepMatch: cfg.deepMatch !== false,
   });
-  return { acceptedCount: col.kept || 0, sampled: col.fetched || 0, undetermined: col.undetermined || [] };
+  return {
+    acceptedCount: col.kept || 0, sampled: col.fetched || 0,
+    cardsEnriched: col.cardsEnriched || 0, deepMatch: !!col.deepMatch,
+    undetermined: col.undetermined || [],
+  };
 }
 
 // Словарь признаков предмета: из кэша (БД) или собрать заново. Кэш по path на 30 дней.

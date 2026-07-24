@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-undetermined-2026-07-24f';
+const APP_BUILD = 'season-rules-persist-2026-07-24g';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1168,6 +1168,7 @@ function seasonBuilderPanel() {
   seasonBuildArticle = aid;
   const a = arts.find((x) => x.id === aid);
   const f = a.seasonFilter || {};
+  hydrateSeasonSel(f); // восстановить ранее выбранные признаки/включения для предмета
   const warn = seasonHasToken ? ''
     : '<div class="season-warn">⚠ Не задан <b>MPSTATS_TOKEN</b> в окружении службы — построение недоступно. Добавь токен в <code>planner/data/.env</code> на Mac mini (см. DEPLOY.md) и перезапусти службу.</div>';
   return `<div class="panel season-builder">
@@ -1310,15 +1311,42 @@ function renderFeatureDictBody(dict) {
       <div class="se-fg-vals">${dict.keywords.map((k) => chip(k.word)).join('')}</div></div>` : '';
   body.innerHTML = `<div class="mini" style="margin:8px 0">Собрано по ${dict.sample} товарам${dict.withCards ? ` (карточек: ${dict.withCards})` : ' (карточки WB недоступны — только названия)'}. ${dict.cached ? 'из кэша' : 'свежий сбор'}.</div>
     <div class="se-fg-list">${groups}${kw}</div>`;
-  // обработчики +/− (взаимоисключающие)
+  // обработчики +/− (взаимоисключающие); выбор запоминаем на артикул
   body.querySelectorAll('[data-fw-plus]').forEach((b) => b.addEventListener('click', () => {
     const w = b.dataset.fwPlus; if (sel.plus.has(w)) sel.plus.delete(w); else { sel.plus.add(w); sel.minus.delete(w); }
-    renderFeatureDictBody(dict);
+    renderFeatureDictBody(dict); seasonSelPersist(dict.path);
   }));
   body.querySelectorAll('[data-fw-minus]').forEach((b) => b.addEventListener('click', () => {
     const w = b.dataset.fwMinus; if (sel.minus.has(w)) sel.minus.delete(w); else { sel.minus.add(w); sel.plus.delete(w); }
-    renderFeatureDictBody(dict);
+    renderFeatureDictBody(dict); seasonSelPersist(dict.path);
   }));
+}
+// Запомнить выбранные признаки и одобренные «неопределённые» в артикуле (переживает
+// перезагрузку и повторные итерации). Дебаунс-сейв тем же механизмом, что юнит-данные.
+function seasonSelPersist(path) {
+  const a = (state.articles || []).find((x) => x.id === seasonBuildArticle);
+  if (!a) return;
+  const p = path || (document.getElementById('se-path')?.value || (a.seasonFilter && a.seasonFilter.path) || '').trim();
+  if (!p) return;
+  const sel = featureSel[p];
+  a.seasonFilter = a.seasonFilter || {};
+  if (!a.seasonFilter.path) a.seasonFilter.path = p;
+  a.seasonFilter.featurePlus = sel ? [...sel.plus] : [];
+  a.seasonFilter.featureMinus = sel ? [...sel.minus] : [];
+  a.seasonFilter.includeWb = [...(seasonIncludeByPath[p] || [])];
+  unitPersist();
+}
+// Восстановить выбор признаков/включений для предмета из сохранённого фильтра артикула.
+function hydrateSeasonSel(f) {
+  if (!f || !f.path) return;
+  if ((f.featurePlus?.length || f.featureMinus?.length) && !featureSel[f.path]) {
+    const s = featSelFor(f.path);
+    (f.featurePlus || []).forEach((w) => s.plus.add(w));
+    (f.featureMinus || []).forEach((w) => s.minus.add(w));
+  }
+  if ((f.includeWb || []).length && !seasonIncludeByPath[f.path]) {
+    const inc = seasonIncludeFor(f.path); (f.includeWb || []).forEach((w) => inc.add(String(w)));
+  }
 }
 async function loadFeatureDict(force) {
   const path = (document.getElementById('se-path')?.value || '').trim();
@@ -1372,6 +1400,7 @@ function renderUndetermined(list, path) {
     _undetSel.forEach((w) => inc.add(w));
     const added = _undetSel.size;
     _undetSel = new Set();
+    seasonSelPersist(path); // запомнить одобренные в артикуле
     renderSeason(); // самоочистка блока + обновление счётчика «добавлено вручную»
     toast(`Добавлено в выборку: ${added}. Теперь «Построить план».`);
   });
@@ -1383,7 +1412,8 @@ async function loadUndetermined() {
   if (status) status.textContent = 'Собираю кандидатов…';
   try {
     const r = await api('/api/season/candidates', { method: 'POST', body: JSON.stringify(cfg) });
-    if (status) status.textContent = `в выборке: ${r.acceptedCount}, кандидатов: ${(r.undetermined || []).length}`;
+    const cdnWarn = (r.deepMatch && !r.cardsEnriched) ? ' · ⚠ карточки WB не загрузились (глубокий отбор по названию)' : (r.cardsEnriched ? ` · карточек: ${r.cardsEnriched}` : '');
+    if (status) status.textContent = `в выборке: ${r.acceptedCount}, кандидатов: ${(r.undetermined || []).length}${cdnWarn}`;
     renderUndetermined(r.undetermined || [], cfg.path);
   } catch (e) { if (status) status.textContent = ''; toast('Ошибка: ' + e.message, true); }
 }
@@ -1420,10 +1450,15 @@ function bindSeasonBuilder() {
       // запомнить фильтр в артикуле, чтобы перестраивать в один клик
       const a = state.articles.find((x) => x.id === cfg.articleId);
       if (a) {
-        a.seasonFilter = { path: cfg.path, words: cfg.words, allWords: cfg.allWords, exclude: cfg.exclude,
+        const rawV = (id) => (document.getElementById(id)?.value || '').trim();
+        a.seasonFilter = { ...(a.seasonFilter || {}), path: cfg.path,
+          // сохраняем РУЧНОЙ ввод (без подмешанных словарных слов — они хранятся отдельно
+          // в featurePlus/featureMinus и подмешиваются заново при построении)
+          words: rawV('se-words'), allWords: cfg.allWords, exclude: rawV('se-exclude'),
           mustHave: cfg.mustHave,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
           limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, oos: cfg.oos, weekly: cfg.weekly, deepMatch: cfg.deepMatch };
+        seasonSelPersist(cfg.path); // добавить актуальные featurePlus/Minus/includeWb
         await recalc(true).catch(() => {});
       }
       seasonSelArticle = cfg.articleId;
