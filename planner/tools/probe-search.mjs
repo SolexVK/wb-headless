@@ -1,13 +1,15 @@
-// probe-search.mjs — пробник MPStats (v5). Добиваем два эндпоинта:
-//   /wb/get/search   — выдача ТОВАРОВ по фразе (даёт 200, но пустое тело — ищем тело)
-//   /wb/get/keywords — ключи КАТЕГОРИИ (нужен path=категория + корректный filterModel)
-// Печатаем сырой ответ (длина + первые символы) на каждый вариант.
+// probe-search.mjs — ДОКАЗАТЕЛЬСТВО подхода «обратная релевантность» (v6).
+// Берём топ категории, для каждого товара тянем by_keywords (реальные поисковые
+// фразы с трафиком) и проверяем, ранжируется ли он по целевому слову «муслин».
+// Показываем совпавшие/не совпавшие + скорость. Всё на подтверждённых эндпоинтах.
 // Запуск на Mac mini из planner/:  node --env-file=data/.env tools/probe-search.mjs
 
 const BASE = process.env.MPSTATS_BASE_URL || 'https://mpstats.io/api';
 const TOKEN = process.env.MPSTATS_TOKEN;
 const CAT = 'Женщинам/Блузки и рубашки/Рубашка';
-const KW = 'муслиновая рубашка';
+const TARGET = 'муслин';       // целевое слово (по стему)
+const SCAN = 120;              // сколько товаров из топа проверить
+const CONC = 6;                // параллелизм by_keywords
 const ymd = (d) => d.toISOString().slice(0, 10);
 const d2 = new Date(); d2.setUTCDate(d2.getUTCDate() - 1);
 const d1 = new Date(d2); d1.setUTCDate(d1.getUTCDate() - 30);
@@ -15,40 +17,61 @@ const D1 = ymd(d1), D2 = ymd(d2);
 const line = (...a) => console.log(...a);
 if (!TOKEN) { line('⚠ нет MPSTATS_TOKEN — запусти с --env-file=data/.env'); process.exit(1); }
 
-let N = 0;
-async function hit(tag, method, pathAndQuery, body) {
-  const url = `${BASE}${pathAndQuery}`;
-  const shown = pathAndQuery.replace(encodeURIComponent(KW), '{kw}').replace(encodeURIComponent(CAT), '{cat}');
-  try {
-    const r = await fetch(url, {
-      method,
-      headers: { 'X-Mpstats-TOKEN': TOKEN, 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: body != null ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(30000),
-    });
-    const t = await r.text();
-    line(`\n [${++N}] ${tag}`);
-    line(`     ${method} ${shown.slice(0, 78)}`);
-    if (body) line(`     body: ${JSON.stringify(body).slice(0, 90)}`);
-    line(`     → ${r.status}  len=${t.length}  ${t.slice(0, 260).replace(/\s+/g, ' ')}`);
-    return t;
-  } catch (e) { line(`\n [${++N}] ${tag} → ERR ${e.message}`); return ''; }
+const H = { 'X-Mpstats-TOKEN': TOKEN, 'Content-Type': 'application/json', Accept: 'application/json' };
+const sum = (a) => (Array.isArray(a) ? a.reduce((s, x) => s + (Number(x) || 0), 0) : 0);
+
+async function category(endRow) {
+  const r = await fetch(`${BASE}/wb/get/category?path=${encodeURIComponent(CAT)}&d1=${D1}&d2=${D2}`, {
+    method: 'POST', headers: H, body: JSON.stringify({ startRow: 0, endRow, sortModel: [{ colId: 'revenue', sort: 'desc' }] }),
+    signal: AbortSignal.timeout(120000),
+  });
+  const j = await r.json();
+  return (j.data || j || []).map((x) => ({ id: x.id, name: x.name, brand: x.brand, revenue: x.revenue }));
 }
 
-const kwe = encodeURIComponent(KW);
-const cate = encodeURIComponent(CAT);
+async function byKeywords(id) {
+  try {
+    const r = await fetch(`${BASE}/wb/get/item/${id}/by_keywords?d1=${D1}&d2=${D2}`, { headers: H, signal: AbortSignal.timeout(25000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const words = j.words || {};
+    const phrases = Object.entries(words).map(([phrase, v]) => ({ phrase, traffic: sum(v.traffic_volume) }))
+      .filter((p) => p.traffic > 0).sort((a, b) => b.traffic - a.traffic);
+    return phrases;
+  } catch { return null; }
+}
 
-line('=== A. /wb/get/search — товары по фразе ===');
-await hit('search GET path=kw + rows', 'GET', `/wb/get/search?path=${kwe}&d1=${D1}&d2=${D2}&startRow=0&endRow=20`);
-await hit('search POST path=kw sortRevenue', 'POST', `/wb/get/search?path=${kwe}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20, sortModel: [{ colId: 'revenue', sort: 'desc' }], filterModel: {} });
-await hit('search POST path=cat word=kw', 'POST', `/wb/get/search?path=${cate}&d1=${D1}&d2=${D2}`, { word: KW, startRow: 0, endRow: 20 });
-await hit('search POST path=cat keyword=kw', 'POST', `/wb/get/search?path=${cate}&d1=${D1}&d2=${D2}`, { keyword: KW, startRow: 0, endRow: 20 });
-await hit('search GET path=cat keyword=kw', 'GET', `/wb/get/search?path=${cate}&keyword=${kwe}&d1=${D1}&d2=${D2}`);
+line(`Целевое слово: "${TARGET}" | сканируем топ-${SCAN} категории | период ${D1}…${D2}\n`);
+const t0 = Date.now();
+const items = await category(SCAN);
+line(`Категория: получено ${items.length} товаров за ${((Date.now() - t0) / 1000).toFixed(1)}с\n`);
 
-line('\n=== B. /wb/get/keywords — ключи категории ===');
-await hit('keywords POST cat sort=count', 'POST', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 30, sortModel: [{ colId: 'count', sort: 'desc' }], filterModel: {} });
-await hit('keywords POST cat sort=sum_count', 'POST', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 30, sortModel: [{ colId: 'sum_count', sort: 'desc' }], filterModel: {} });
-await hit('keywords POST cat no-sort', 'POST', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 30, sortModel: [], filterModel: {} });
-await hit('keywords GET cat', 'GET', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`);
+let ok = 0, matched = 0, failed = 0;
+const hits = [], misses = [];
+const t1 = Date.now();
+for (let i = 0; i < items.length; i += CONC) {
+  const batch = items.slice(i, i + CONC);
+  const res = await Promise.all(batch.map((it) => byKeywords(it.id).then((ph) => ({ it, ph }))));
+  for (const { it, ph } of res) {
+    if (!ph) { failed++; continue; }
+    ok++;
+    const total = ph.reduce((s, p) => s + p.traffic, 0) || 1;
+    const mus = ph.filter((p) => p.phrase.toLowerCase().includes(TARGET));
+    const musTraffic = mus.reduce((s, p) => s + p.traffic, 0);
+    const share = musTraffic / total;
+    if (mus.length) { matched++; hits.push({ it, top: ph[0], mus: mus[0], share }); }
+    else if (misses.length < 8) misses.push({ it, top: ph[0] });
+  }
+  process.stdout.write(`\r  by_keywords: ${ok + failed}/${items.length} (ok ${ok}, matched ${matched}, fail ${failed})`);
+}
+const dt = (Date.now() - t1) / 1000;
+line(`\n\nby_keywords: ${ok} ok, ${failed} без данных, ${dt.toFixed(1)}с (${(dt / Math.max(1, ok)).toFixed(2)}с/товар)\n`);
 
+line(`=== СОВПАЛИ по "${TARGET}" (${matched}) ===`);
+for (const h of hits.slice(0, 25)) {
+  line(`  ${h.it.id}  муслин-доля ${(h.share * 100).toFixed(0)}%  «${h.mus.phrase}» (${h.mus.traffic})`);
+  line(`         ${(h.it.name || '').slice(0, 60)}  [топ-фраза: «${h.top.phrase}»]`);
+}
+line(`\n=== НЕ совпали (примеры) — топ-фраза товара ===`);
+for (const m of misses) line(`  ${m.it.id}  «${m.top.phrase}» — ${(m.it.name || '').slice(0, 50)}`);
 line('\n=== DONE ===');
