@@ -1,6 +1,7 @@
-// probe-search.mjs — пробник MPStats (v4). Эндпоинты search/keyword/keywords
-// требуют параметр path — проверяем path=<ФРАЗА> (и path=<категория>).
-// Плюс сырой дамп by_keywords, чтобы увидеть структуру частотности.
+// probe-search.mjs — пробник MPStats (v5). Добиваем два эндпоинта:
+//   /wb/get/search   — выдача ТОВАРОВ по фразе (даёт 200, но пустое тело — ищем тело)
+//   /wb/get/keywords — ключи КАТЕГОРИИ (нужен path=категория + корректный filterModel)
+// Печатаем сырой ответ (длина + первые символы) на каждый вариант.
 // Запуск на Mac mini из planner/:  node --env-file=data/.env tools/probe-search.mjs
 
 const BASE = process.env.MPSTATS_BASE_URL || 'https://mpstats.io/api';
@@ -14,9 +15,10 @@ const D1 = ymd(d1), D2 = ymd(d2);
 const line = (...a) => console.log(...a);
 if (!TOKEN) { line('⚠ нет MPSTATS_TOKEN — запусти с --env-file=data/.env'); process.exit(1); }
 
-async function hit(method, pathAndQuery, body, { raw = false } = {}) {
+let N = 0;
+async function hit(tag, method, pathAndQuery, body) {
   const url = `${BASE}${pathAndQuery}`;
-  const label = `${method} ${pathAndQuery.replace(encodeURIComponent(KW), '{kw}').replace(encodeURIComponent(CAT), '{cat}').slice(0, 66)}`;
+  const shown = pathAndQuery.replace(encodeURIComponent(KW), '{kw}').replace(encodeURIComponent(CAT), '{cat}');
   try {
     const r = await fetch(url, {
       method,
@@ -25,47 +27,28 @@ async function hit(method, pathAndQuery, body, { raw = false } = {}) {
       signal: AbortSignal.timeout(30000),
     });
     const t = await r.text();
-    let j = null; try { j = JSON.parse(t); } catch {}
-    if (r.ok && j) {
-      if (raw) { line(`  ✓ ${label} → 200`); line('     RAW:', t.slice(0, 500).replace(/\s+/g, ' ')); return { ok: true, json: j, text: t }; }
-      const dataArr = j.data || j.result || j.items || j.keywords || (Array.isArray(j.words) ? j.words : null);
-      let shape = `keys=${Object.keys(j).slice(0, 10).join(',')}`;
-      if (Array.isArray(dataArr)) shape += ` | arr[${dataArr.length}] itemKeys=${Object.keys(dataArr[0] || {}).slice(0, 12).join(',')}`;
-      else if (Array.isArray(j)) shape = `array[${j.length}] itemKeys=${Object.keys(j[0] || {}).slice(0, 12).join(',')}`;
-      line(`  ✓ ${label} → 200 | ${shape}`);
-      if (Array.isArray(dataArr)) line('     sample:', JSON.stringify(dataArr.slice(0, 3)).slice(0, 360));
-      return { ok: true, json: j, text: t };
-    }
-    const msg = (j && (j.message || j.detail || JSON.stringify(j))) || t.slice(0, 160);
-    line(`  ✗ ${label} → ${r.status} | ${String(msg).replace(/\s+/g, ' ').slice(0, 150)}`);
-    return { ok: false, status: r.status, json: j, text: t };
-  } catch (e) { line(`  ✗ ${label} → ERR ${e.message}`); return { ok: false }; }
+    line(`\n [${++N}] ${tag}`);
+    line(`     ${method} ${shown.slice(0, 78)}`);
+    if (body) line(`     body: ${JSON.stringify(body).slice(0, 90)}`);
+    line(`     → ${r.status}  len=${t.length}  ${t.slice(0, 260).replace(/\s+/g, ' ')}`);
+    return t;
+  } catch (e) { line(`\n [${++N}] ${tag} → ERR ${e.message}`); return ''; }
 }
 
 const kwe = encodeURIComponent(KW);
 const cate = encodeURIComponent(CAT);
 
-line('=== 0. nmID ===');
-let nmId = null;
-{
-  const r = await hit('POST', `/wb/get/category?path=${cate}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 3, sortModel: [{ colId: 'revenue', sort: 'desc' }] });
-  try { nmId = (r.json.data || r.json)[0]?.id; } catch {}
-  line('  nmID:', nmId);
-}
+line('=== A. /wb/get/search — товары по фразе ===');
+await hit('search GET path=kw + rows', 'GET', `/wb/get/search?path=${kwe}&d1=${D1}&d2=${D2}&startRow=0&endRow=20`);
+await hit('search POST path=kw sortRevenue', 'POST', `/wb/get/search?path=${kwe}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20, sortModel: [{ colId: 'revenue', sort: 'desc' }], filterModel: {} });
+await hit('search POST path=cat word=kw', 'POST', `/wb/get/search?path=${cate}&d1=${D1}&d2=${D2}`, { word: KW, startRow: 0, endRow: 20 });
+await hit('search POST path=cat keyword=kw', 'POST', `/wb/get/search?path=${cate}&d1=${D1}&d2=${D2}`, { keyword: KW, startRow: 0, endRow: 20 });
+await hit('search GET path=cat keyword=kw', 'GET', `/wb/get/search?path=${cate}&keyword=${kwe}&d1=${D1}&d2=${D2}`);
 
-line('\n=== 1. path = ФРАЗА (товары/аналитика по запросу) ===');
-await hit('GET', `/wb/get/keywords?path=${kwe}&d1=${D1}&d2=${D2}`);
-await hit('POST', `/wb/get/keywords?path=${kwe}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20 });
-await hit('GET', `/wb/get/keyword?path=${kwe}&d1=${D1}&d2=${D2}`);
-await hit('POST', `/wb/get/keyword?path=${kwe}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20 });
-await hit('GET', `/wb/get/search?path=${kwe}&d1=${D1}&d2=${D2}`);
-await hit('POST', `/wb/get/search?path=${kwe}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20, sortModel: [], filterModel: {} });
-
-line('\n=== 2. path = КАТЕГОРИЯ (ключи категории) ===');
-await hit('GET', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`);
-await hit('POST', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20 });
-
-line('\n=== 3. by_keywords — сырой дамп структуры ===');
-if (nmId) await hit('GET', `/wb/get/item/${nmId}/by_keywords?d1=${D1}&d2=${D2}`, null, { raw: true });
+line('\n=== B. /wb/get/keywords — ключи категории ===');
+await hit('keywords POST cat sort=count', 'POST', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 30, sortModel: [{ colId: 'count', sort: 'desc' }], filterModel: {} });
+await hit('keywords POST cat sort=sum_count', 'POST', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 30, sortModel: [{ colId: 'sum_count', sort: 'desc' }], filterModel: {} });
+await hit('keywords POST cat no-sort', 'POST', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 30, sortModel: [], filterModel: {} });
+await hit('keywords GET cat', 'GET', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`);
 
 line('\n=== DONE ===');
