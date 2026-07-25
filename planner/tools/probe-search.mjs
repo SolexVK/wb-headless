@@ -1,70 +1,78 @@
-// probe-search.mjs — разовый пробник для нового «поискового» подхода к сбору аналогов.
-// Проверяет: (1) отдаёт ли публичный поиск WB нишу (муслиновые рубашки) с этой машины,
-// (2) каким эндпоинтом MPStats берём дневные продажи по nmID,
-// (3) доступна ли частотность ключей товара (для расширения через конкурентов).
-// Запуск на Mac mini из каталога planner/:  node --env-file=data/.env tools/probe-search.mjs
+// probe-search.mjs — разовый пробник keyword-возможностей MPStats для нового
+// «поискового» подхода к сбору аналогов (публичный поиск WB отпал: режет по 429).
+// Задача: выяснить, какими эндпоинтами MPStats можно (а) искать товары по фразе,
+// (б) брать частотность ключей товара, (в) расширять семантику.
+// Запуск на Mac mini из planner/:  node --env-file=data/.env tools/probe-search.mjs
 // Токен нигде не печатается.
 
+const BASE = process.env.MPSTATS_BASE_URL || 'https://mpstats.io/api';
 const TOKEN = process.env.MPSTATS_TOKEN;
-const MP = 'https://mpstats.io/api';
-const H = { 'X-Mpstats-TOKEN': TOKEN, Accept: 'application/json', 'Content-Type': 'application/json' };
+const PATH = 'Женщинам/Блузки и рубашки/Рубашка';
+const KW = 'муслиновая рубашка';
 const ymd = (d) => d.toISOString().slice(0, 10);
 const d2 = new Date(); d2.setUTCDate(d2.getUTCDate() - 1);
 const d1 = new Date(d2); d1.setUTCDate(d1.getUTCDate() - 30);
+const D1 = ymd(d1), D2 = ymd(d2);
 const line = (...a) => console.log(...a);
 
-if (!TOKEN) { line('⚠ MPSTATS_TOKEN не найден (нужен запуск с --env-file=data/.env). WB-поиск проверю всё равно.'); }
+if (!TOKEN) { line('⚠ MPSTATS_TOKEN не найден — запусти с  --env-file=data/.env'); process.exit(1); }
 
-// ── 1. Публичный поиск WB (источник релевантности ниши) ──
-async function wbSearch(q) {
-  const enc = encodeURIComponent(q);
-  const urls = [
-    `https://search.wb.ru/exactmatch/ru/common/v9/search?ab_testing=false&appType=1&curr=rub&dest=-1257786&query=${enc}&resultset=catalog&sort=popular&spp=30&suppressSpellcheck=false`,
-    `https://search.wb.ru/exactmatch/ru/common/v4/search?appType=1&curr=rub&dest=-1257786&query=${enc}&resultset=catalog&sort=popular&spp=0`,
-  ];
-  for (const u of urls) {
+async function hit(method, pathAndQuery, body) {
+  const url = `${BASE}${pathAndQuery}`;
+  try {
+    const r = await fetch(url, {
+      method,
+      headers: { 'X-Mpstats-TOKEN': TOKEN, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: body != null ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(30000),
+    });
+    const t = await r.text();
+    let shape = '';
     try {
-      const r = await fetch(u, { headers: { Accept: '*/*', 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20000) });
-      if (!r.ok) { line(`  WB HTTP ${r.status} (${u.includes('v9') ? 'v9' : 'v4'})`); continue; }
-      const j = await r.json();
-      const p = j?.data?.products || [];
-      if (p.length) return { products: p, ver: u.includes('v9') ? 'v9' : 'v4' };
-    } catch (e) { line('  WB ERR', e.message); }
-  }
-  return { products: [], ver: null };
+      const j = JSON.parse(t);
+      if (Array.isArray(j)) shape = `array[${j.length}] keys=${Object.keys(j[0] || {}).slice(0, 8).join(',')}`;
+      else if (j && typeof j === 'object') {
+        const dataArr = j.data || j.result || j.items || j.keywords;
+        shape = `obj keys=${Object.keys(j).slice(0, 8).join(',')}`;
+        if (Array.isArray(dataArr)) shape += ` | data[${dataArr.length}] itemKeys=${Object.keys(dataArr[0] || {}).slice(0, 10).join(',')}`;
+      }
+    } catch { shape = t.slice(0, 90).replace(/\s+/g, ' '); }
+    line(`  ${method} ${pathAndQuery.split('?')[0]} → ${r.status} | ${shape}`);
+    return { ok: r.ok, status: r.status, text: t };
+  } catch (e) { line(`  ${method} ${pathAndQuery.split('?')[0]} → ERR ${e.message}`); return { ok: false }; }
 }
 
-line('=== 1. WB SEARCH ===');
-let firstId = null;
-for (const q of ['муслиновая рубашка женская', 'рубашка муслин оверсайз', 'рубашка из муслина']) {
-  const { products, ver } = await wbSearch(q);
-  line(`\n"${q}" → ${products.length} товаров${ver ? ` (${ver})` : ''}`);
-  for (const x of products.slice(0, 8)) line(`   ${x.id}  ${(x.brand || '').slice(0, 16).padEnd(16)} ${(x.name || '').slice(0, 46)}`);
-  if (!firstId && products.length) firstId = products[0].id;
+// ── 0. nmID из категории (заведомо рабочий вызов) ──
+line('=== 0. category → nmID ===');
+let nmId = null;
+{
+  const qs = `path=${encodeURIComponent(PATH)}&d1=${D1}&d2=${D2}`;
+  const r = await hit('POST', `/wb/get/category?${qs}`, { startRow: 0, endRow: 5, sortModel: [{ colId: 'revenue', sort: 'desc' }] });
+  try { const j = JSON.parse(r.text); nmId = (j.data || j)[0]?.id; } catch {}
+  line('  nmID для проверок:', nmId);
 }
 
-// ── 2. MPStats: дневные продажи по nmID ──
-line('\n=== 2. MPStats item sales ===');
-if (firstId && TOKEN) {
-  for (const path of [`/wb/get/item/${firstId}/sales`]) {
-    try {
-      const r = await fetch(`${MP}${path}?d1=${ymd(d1)}&d2=${ymd(d2)}`, { headers: H, signal: AbortSignal.timeout(25000) });
-      const t = await r.text();
-      line(`GET ${path} → ${r.status} | ${t.slice(0, 160).replace(/\s+/g, ' ')}`);
-    } catch (e) { line(path, 'ERR', e.message); }
-  }
-} else line('  пропуск (нет nmID или токена)');
+// ── 1. Товары по фразе (выдача по запросу) — кандидаты ──
+line('\n=== 1. ТОВАРЫ ПО ФРАЗЕ ===');
+const kwEnc = encodeURIComponent(KW);
+await hit('GET', `/wb/get/search/${kwEnc}?d1=${D1}&d2=${D2}`);
+await hit('POST', `/wb/get/search?query=${kwEnc}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20 });
+await hit('GET', `/wb/get/keywords/${kwEnc}?d1=${D1}&d2=${D2}`);
+await hit('POST', `/wb/get/keyword?d1=${D1}&d2=${D2}`, { keyword: KW, startRow: 0, endRow: 20 });
+await hit('POST', `/wb/get/in_category?path=${encodeURIComponent(PATH)}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 5 });
 
-// ── 3. MPStats: ключи товара по частотности ──
-line('\n=== 3. MPStats item keywords (частотность) ===');
-if (firstId && TOKEN) {
-  for (const path of [`/wb/get/item/${firstId}/by_keywords`, `/wb/get/item/${firstId}/keywords`]) {
-    try {
-      const r = await fetch(`${MP}${path}?d1=${ymd(d1)}&d2=${ymd(d2)}`, { headers: H, signal: AbortSignal.timeout(25000) });
-      const t = await r.text();
-      line(`GET ${path} → ${r.status} | ${t.slice(0, 180).replace(/\s+/g, ' ')}`);
-    } catch (e) { line(path, 'ERR', e.message); }
-  }
-} else line('  пропуск (нет nmID или токена)');
+// ── 2. Частотность ключей товара ──
+line('\n=== 2. КЛЮЧИ ТОВАРА (частотность) ===');
+if (nmId) {
+  await hit('GET', `/wb/get/item/${nmId}/by_keywords?d1=${D1}&d2=${D2}`);
+  await hit('GET', `/wb/get/item/${nmId}/keywords?d1=${D1}&d2=${D2}`);
+  await hit('POST', `/wb/get/item/${nmId}/by_keywords?d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20 });
+}
+
+// ── 3. Расширение семантики (по сид-фразе) ──
+line('\n=== 3. РАСШИРЕНИЕ СЕМАНТИКИ ===');
+await hit('POST', `/wb/get/keywords/expanding?d1=${D1}&d2=${D2}`, { keyword: KW });
+await hit('POST', `/wb/get/keywords/report?d1=${D1}&d2=${D2}`, { keywords: [KW, 'рубашка муслин'] });
+await hit('POST', `/wb/get/keywords?d1=${D1}&d2=${D2}`, { keyword: KW });
 
 line('\n=== DONE ===');
