@@ -77,7 +77,24 @@ function nextWeekday(iso, weekday) {
   return cur;
 }
 
-// Основная функция. Возвращает { cycles, workshops, stages, warnings, fabricOrders }.
+// Выбрать «свой» цех (приоритетный). Явный флаг w.own; иначе — цех с ролью 'own';
+// иначе первый 'main'; иначе первый в списке.
+function pickOwnWorkshop(workshops) {
+  return (workshops.find((w) => w.own) || workshops.find((w) => w.role === 'own')
+    || workshops.find((w) => w.role === 'main') || workshops[0] || null);
+}
+
+// Основная функция — НЕПРЕРЫВНЫЙ КОНВЕЙЕР (Производство 2.0, Фаза 1).
+//
+// Уходим от жёсткой привязки к месяцам. Все партии сезона — единый пул заданий.
+// От старта сезона гоним событийную очередь: цех, который освободится раньше,
+// берёт следующую партию. Приоритет — своему цеху; порядок — по близости дедлайна
+// (EDF) с чередованием артикулов (при равном дедлайне берём тот артикул, что
+// меньше в работе, — чтобы товар шёл параллельно, а не «сначала весь А»).
+// Партия, которой вручную задан цех, — закреплена (только на нём). Месяц отшива
+// (productionMonth) больше не ограничивает — задаёт лишь старт сезона и дедлайны.
+// Дробление партии между цехами тут не делаем: каждая партия идёт целиком в один
+// цех (дробление под дедлайн — Фаза 3). Возвращает { cycles, warnings, fabricOrders }.
 export function buildSchedule(state) {
   const cal = makeCalendar(state.settings.calendar);
   const flow = state.settings.flow;
@@ -86,226 +103,168 @@ export function buildSchedule(state) {
   const riskBuf = state.settings.riskBufferDays || 0;
 
   const wsById = Object.fromEntries(state.workshops.map((w) => [w.id, w]));
+  const stageById = Object.fromEntries(state.stages.map((s) => [s.id, s]));
+  const stageOrder = {}; state.stages.forEach((s, i) => { stageOrder[s.id] = i; });
+  const articleById = Object.fromEntries(state.articles.map((a) => [a.id, a]));
   const warnings = [];
   const cycles = [];
 
-  // курсор занятости цеха в рамках текущего этапа: WD-смещение, с которого
-  // может стартовать крой следующего цикла (= конец пошива предыдущего)
-  // сбрасывается на каждом этапе (месяц отшива фиксирован календарно).
+  if (!state.stages.length || !state.workshops.length) {
+    return { cycles, warnings, fabricOrders: aggregateFabric(cycles, state), generatedFor: [] };
+  }
 
-  for (const stage of state.stages) {
-    const ym = stage.productionMonth;
-    const [y, mIdx] = ym.split('-').map(Number);
-    const monthFirstWork = cal.nextWorkingDay(monthStartISO(ym));
-    const wdInMonth = cal.workingDaysInMonth(y, mIdx - 1);
+  // старт конвейера — самый ранний рабочий день среди месяцев отшива этапов
+  let seasonStart = null;
+  for (const s of state.stages) {
+    if (!s.productionMonth) continue;
+    const d = cal.nextWorkingDay(monthStartISO(s.productionMonth));
+    if (seasonStart === null || d < seasonStart) seasonStart = d;
+  }
+  if (!seasonStart) seasonStart = cal.nextWorkingDay(toISO(new Date()));
 
-    // 1) собрать работы этапа — по ПАРТИЯМ (каждая партия = задание)
-    const articleById = Object.fromEntries(state.articles.map((a) => [a.id, a]));
-    const jobs = [];
-    for (const p of state.partias) {
-      if (p.stageId !== stage.id) continue;
-      const article = articleById[p.articleId];
-      if (!article) continue;
-      const units = partiaPlanUnits(p);
-      if (units > 0) jobs.push({ partia: p, article, units });
+  const ownWs = pickOwnWorkshop(state.workshops);
+  const ownId = ownWs ? ownWs.id : null;
+  const roleRank = (w) => (w.id === ownId ? 0 : w.role === 'main' ? 1 : 2);
+
+  // задания = партии (не прошлые, объём>0)
+  const jobs = [];
+  for (const p of state.partias) {
+    if (p.historical) continue;
+    const article = articleById[p.articleId];
+    if (!article) continue;
+    const units = partiaPlanUnits(p);
+    if (units <= 0) continue;
+    const stage = stageById[p.stageId];
+    jobs.push({
+      partia: p, article, units, stage,
+      deadline: stage ? stage.deadline : null,
+      stageOrd: stageOrder[p.stageId] ?? 99,
+      lockedWs: (p.workshopId && wsById[p.workshopId]) ? p.workshopId : null,
+      done: false,
+    });
+  }
+
+  // дата, когда цех свободен для след. кроя (изначально — старт сезона)
+  const freeDate = {}; for (const w of state.workshops) freeDate[w.id] = seasonStart;
+  const idxByWs = {}; for (const w of state.workshops) idxByWs[w.id] = 0;
+  const startedUnits = {}; // по артикулу — для чередования
+
+  const cmp = (a, b) => (a === b ? 0 : a < b ? -1 : 1);
+  const dl = (j) => j.deadline || '9999-12-31';
+
+  // лучший (самый срочный) job для цеха w среди доступных
+  const bestJobFor = (w) => {
+    let best = null;
+    for (const j of jobs) {
+      if (j.done) continue;
+      if (j.lockedWs && j.lockedWs !== w.id) continue; // закреплён за другим цехом
+      if (best === null) { best = j; continue; }
+      const c = cmp(dl(j), dl(best))
+        || ((startedUnits[j.article.id] || 0) - (startedUnits[best.article.id] || 0))
+        || (best.units - j.units);
+      if (c < 0) best = j;
     }
-    // крупные — первыми (лучше распределяются)
-    jobs.sort((x, y2) => y2.units - x.units);
+    return best;
+  };
 
-    // 2) распределение по цехам.
-    // Цель: держать все цеха загруженными И выдерживать месяц. Балансируем по
-    // проектному времени завершения пошива: цех, который освободится раньше,
-    // берёт следующую работу. loadWD — уже назначенные цеху раб.дни пошива.
-    const loadWD = {};
-    for (const w of state.workshops) loadWD[w.id] = 0;
-
-    const sewDaysNeeded = (units, w) => opDurationWD(units, w.capacities.sew);
-    // резерв рабочих дней под «хвост» потока (разгон кроя + утюжка/ОТК после
-    // конца пошива), чтобы готовность партии не вылезала за календарный месяц
-    const tailReserve = Math.ceil((flow.ironAfterSew || 300) / 250)
-      + Math.ceil((flow.otkAfterIron || 1000) / 500) + 2;
-    const capacityWD = Math.max(1, wdInMonth - tailReserve); // полезных раб. дней пошива в месяце
-
-    // список под-партий: { article, units, workshopId, primary }
-    const subBatches = [];
-    const roleRank = (w) => (w.role === 'main' ? 0 : 1);
-    const freeUnits = (w) => Math.max(0, (capacityWD - loadWD[w.id]) * w.capacities.sew);
-    const fitsWhole = (w, units) => loadWD[w.id] + sewDaysNeeded(units, w) <= capacityWD;
-    const pushBatch = (job, units, w, primary, overflow) => {
-      subBatches.push({ article: job.article, partia: job.partia, units: Math.round(units), workshopId: w.id, primary, overflow });
-      loadWD[w.id] += sewDaysNeeded(units, w);
-    };
-
-    for (const job of jobs) {
-      const preferredId = (job.partia && job.partia.workshopId) || null;
-      const preferred = preferredId ? wsById[preferredId] : null;
-
-      // 2a) цельная партия в один цех.
-      // Приоритет: если у партии задан цех и он тянет объём — ставим туда.
-      if (preferred && fitsWhole(preferred, job.units)) {
-        pushBatch(job, job.units, preferred, true); continue;
+  // событийная очередь: пока есть нераспределённые — назначаем по одному
+  let remaining = jobs.length;
+  let guard = 0;
+  while (remaining > 0 && guard++ < jobs.length + 5) {
+    let bw = null, bj = null;
+    for (const w of state.workshops) {
+      const j = bestJobFor(w);
+      if (!j) continue;
+      if (bw === null
+        || cmp(freeDate[w.id], freeDate[bw.id]) < 0
+        || (freeDate[w.id] === freeDate[bw.id] && roleRank(w) < roleRank(bw))) {
+        bw = w; bj = j;
       }
-      if (!preferred) {
-        // авто: цех, который освободится раньше (догружаем простаивающие)
-        const whole = state.workshops.filter((w) => fitsWhole(w, job.units))
-          .sort((a, b) => (loadWD[a.id] + sewDaysNeeded(job.units, a)) - (loadWD[b.id] + sewDaysNeeded(job.units, b))
-            || roleRank(a) - roleRank(b))[0];
-        if (whole) { pushBatch(job, job.units, whole, true); continue; }
-      }
+    }
+    if (!bw || !bj) break; // не осталось доступных пар (напр., все закреплены на несуществующие)
 
-      // 2b) не влезает целиком — делим между МИНИМАЛЬНЫМ числом цехов
-      // (обычно 2: основной + вспомогательный; 3-й только если двух не хватает),
-      // пропорционально свободной мощности — без мелких хвостов.
-      let pool = state.workshops.filter((w) => !preferred || w.id !== preferred.id)
-        .sort((a, b) => roleRank(a) - roleRank(b) || freeUnits(b) - freeUnits(a));
-      if (preferred) pool = [preferred, ...pool];
+    const w = bw, job = bj;
+    const i = idxByWs[w.id]++;
+    const cid = cycleId(job.partia.id, w.id, i);
+    const ovr = (state.overrides || {})[cid];
 
-      const chosen = [];
-      let cum = 0;
-      for (const w of pool) {
-        if (freeUnits(w) <= 0) continue;
-        chosen.push(w); cum += freeUnits(w);
-        if (cum >= job.units) break;
-      }
-      const totalFree = chosen.reduce((s, w) => s + freeUnits(w), 0) || 1;
-      const overflow = totalFree < job.units;
+    let anchorFirstWork = freeDate[w.id];
+    if (ovr && ovr.cutStart) anchorFirstWork = cal.nextWorkingDay(ovr.cutStart); // ручной сдвиг
 
-      // распределяем пропорционально свободной мощности выбранных цехов
-      const pieces = chosen.map((w) => ({ w, units: Math.round(job.units * freeUnits(w) / totalFree) }));
-      const assigned = pieces.reduce((s, p) => s + p.units, 0);
-      if (pieces.length) {
-        const big = pieces.reduce((m, p) => (p.units > m.units ? p : m), pieces[0]);
-        big.units += Math.round(job.units) - assigned; // остаток округления — в самый крупный кусок
-      }
-      const primaryPiece = preferred
-        ? (pieces.find((p) => p.w.id === preferred.id) || pieces.reduce((m, p) => (p.units > m.units ? p : m), pieces[0]))
-        : pieces.reduce((m, p) => (p.units > m.units ? p : m), pieces[0]);
-      for (const p of pieces) {
-        if (p.units <= 0) continue;
-        pushBatch(job, p.units, p.w, p === primaryPiece, overflow);
-      }
-      if (overflow) {
+    const wsOffsets = resolveFlowOffsets(w, flow);
+    const f = computeFlowWD(job.units, w.capacities, wsOffsets, 0);
+    const toDate = (wd) => cal.addWorkingDays(anchorFirstWork, wd);
+    const dates = {};
+    for (const op of OPS) dates[op] = { start: toDate(f[op].start), end: toDate(f[op].end) };
+    const cutStart = dates.cut.start;
+    const sewStart = dates.sew.start;
+    const readyDate = dates.otk.end;
+
+    // следующий крой этого цеха — по концу пошива текущего цикла
+    freeDate[w.id] = dates.sew.end;
+
+    // ткань
+    const fabricMeters = Math.ceil(job.units * job.article.fabricPerUnit * (1 + (fabricCfg.wastagePct || 0) / 100));
+    const fabricAtWorkshop = addDays(cutStart, -(fabricCfg.bufferDays || 0));
+    const fabricOrderDate = addDays(fabricAtWorkshop, -(fabricCfg.leadTimeDays || 21));
+
+    // логистика: ближайший вывоз карго после готовности + срок доставки
+    const shipment = nextWeekday(readyDate, logi.cargoPickupWeekday ?? 1);
+    const wbArrival = addDays(shipment, Math.round(((logi.minDays || 10) + (logi.maxDays || 15)) / 2));
+    const pFact = partiaFactUnits(job.partia);
+    const hasFact = pFact > 0;
+    const wbUnits = hasFact ? pFact : job.units;
+
+    const deadline = job.deadline;
+    const lateDays = deadline ? diffDays(deadline, wbArrival) : null;
+    if (lateDays != null && lateDays > 0) {
+      warnings.push({
+        level: 'error', stage: job.stageId, article: job.article.id, workshop: w.id,
+        message: `Срыв срока: артикул ${job.article.id} (${job.units} шт, ${w.name}) приходит на WB ${wbArrival}, дедлайн ${deadline} (опоздание ${lateDays} дн).`,
+      });
+    } else if (deadline != null && riskBuf > 0) {
+      // буфер под форс-мажор: ранний сигнал «впритык» (см. Вариант А)
+      const cushionEnd = cal.addWorkingDays(wbArrival, riskBuf);
+      if (diffDays(deadline, cushionEnd) > 0) {
         warnings.push({
-          level: 'error', stage: stage.id, article: job.article.id,
-          message: `Этап «${stage.name}»: суммарной мощности цехов не хватает на артикул ${job.article.id} (${job.units} шт) — план не помещается в месяц.`,
+          level: 'warn', stage: job.stageId, article: job.article.id, workshop: w.id,
+          message: `Впритык к дедлайну: артикул ${job.article.id} (${job.units} шт, ${w.name}) приходит на WB ${wbArrival}, дедлайн ${deadline} (запас ${-lateDays} дн < буфер ${riskBuf} раб. дн). Любой сбой — риск срыва.`,
         });
       }
     }
 
-    // на сколько цехов дроблена каждая партия (для метки «дроблёно»)
-    const wsCountByPartia = {};
-    for (const sb of subBatches) {
-      (wsCountByPartia[sb.partia.id] ||= new Set()).add(sb.workshopId);
-    }
+    cycles.push({
+      id: cid,
+      partiaId: job.partia.id,
+      partiaNo: job.partia.no,
+      status: job.partia.status,
+      statusRu: PARTIA_STATUS_RU[job.partia.status] || job.partia.status,
+      historical: !!job.partia.historical,
+      stageId: job.partia.stageId,
+      stageName: job.stage ? job.stage.name : '',
+      articleId: job.article.id,
+      articleName: job.article.name,
+      workshopId: w.id,
+      workshopName: w.name,
+      workshopRole: w.role,
+      own: w.id === ownId,
+      units: job.units,
+      wbUnits, hasFact,
+      primary: true,
+      split: false,
+      overflow: false,
+      manual: !!(ovr && ovr.cutStart),
+      locked: !!job.lockedWs,
+      ops: dates,
+      cutStart, sewStart, readyDate,
+      fabric: { meters: fabricMeters, orderDate: fabricOrderDate, atWorkshop: fabricAtWorkshop },
+      logistics: { shipment, wbArrival, deadline, lateDays },
+      milestones: buildMilestones({ fabricOrderDate, fabricAtWorkshop, cutStart, sewStart, readyDate, shipment, wbArrival }),
+    });
 
-    // 3) даты по каждому цеху (без простоя): сортируем под-партии цеха и гоним поток
-    const byWs = {};
-    for (const sb of subBatches) (byWs[sb.workshopId] ||= []).push(sb);
-
-    for (const [wsId, batches] of Object.entries(byWs)) {
-      const w = wsById[wsId];
-      // порядок внутри цеха: крупные раньше (стабильно и плотно)
-      batches.sort((a, b) => b.units - a.units);
-      let cursorWD = 0; // конец пошива предыдущего цикла
-
-      for (let i = 0; i < batches.length; i++) {
-        const sb = batches[i];
-        const cid = cycleId(sb.partia.id, wsId, i);
-        const ovr = (state.overrides || {})[cid];
-
-        let cutStartWD = Math.max(cursorWD, 0);
-        let anchorFirstWork = monthFirstWork;
-        // ручной сдвиг блока на Ганте (перетаскивание): фиксируем дату старта кроя
-        if (ovr && ovr.cutStart) {
-          anchorFirstWork = cal.nextWorkingDay(ovr.cutStart);
-          cutStartWD = 0; // якорь — сама дата
-        }
-
-        const wsOffsets = resolveFlowOffsets(w, flow);
-        const f = computeFlowWD(sb.units, w.capacities, wsOffsets, cutStartWD);
-
-        const toDate = (wd) => cal.addWorkingDays(anchorFirstWork, wd);
-        const dates = {};
-        for (const op of OPS) {
-          dates[op] = { start: toDate(f[op].start), end: toDate(f[op].end) };
-        }
-        const cutStart = dates.cut.start;
-        const sewStart = dates.sew.start;
-        const readyDate = dates.otk.end;
-
-        // сдвигаем курсор цеха: следующий крой — по концу пошива этого цикла
-        cursorWD = f.sew.end;
-
-        // ткань
-        const fabricMeters = Math.ceil(sb.units * sb.article.fabricPerUnit * (1 + (fabricCfg.wastagePct || 0) / 100));
-        const fabricAtWorkshop = addDays(cutStart, -(fabricCfg.bufferDays || 0));
-        const fabricOrderDate = addDays(fabricAtWorkshop, -(fabricCfg.leadTimeDays || 21));
-
-        // логистика: ближайший вывоз карго после готовности + срок доставки
-        const shipment = nextWeekday(readyDate, logi.cargoPickupWeekday ?? 1);
-        const wbArrival = addDays(shipment, Math.round(((logi.minDays || 10) + (logi.maxDays || 15)) / 2));
-        // количество, уезжающее на WB: факт (если введён по партии), иначе план
-        const pPlan = partiaPlanUnits(sb.partia);
-        const pFact = partiaFactUnits(sb.partia);
-        const hasFact = pFact > 0;
-        const wbUnits = hasFact && pPlan > 0 ? Math.round(pFact * sb.units / pPlan) : sb.units;
-
-        // проверки
-        const monthEnd = monthEndISO(ym);
-        if (diffDays(readyDate, monthEnd) < 0) {
-          warnings.push({
-            level: 'warn', stage: stage.id, article: sb.article.id, workshop: wsId,
-            message: `Цех ${w.name}: цикл ${sb.article.id} (${sb.units} шт) выходит за календарный месяц отшива (готовность ${readyDate}, конец месяца ${monthEnd}).`,
-          });
-        }
-        const deadline = stage.deadline;
-        const lateDays = deadline ? diffDays(deadline, wbArrival) : null;
-        if (lateDays != null && lateDays > 0) {
-          warnings.push({
-            level: 'error', stage: stage.id, article: sb.article.id, workshop: wsId,
-            message: `Срыв срока: артикул ${sb.article.id} приходит на WB ${wbArrival}, дедлайн ${deadline} (опоздание ${lateDays} дн).`,
-          });
-        } else if (deadline != null && riskBuf > 0) {
-          // Буфер под форс-мажор (Вариант А): подушка перед дедлайном. Если партия
-          // формально успевает, но приходит менее чем за riskBuf раб. дней до
-          // дедлайна — ранний сигнал «впритык» (любой сбой = срыв). Даты не сдвигаем.
-          const cushionEnd = cal.addWorkingDays(wbArrival, riskBuf);
-          if (diffDays(deadline, cushionEnd) > 0) {
-            warnings.push({
-              level: 'warn', stage: stage.id, article: sb.article.id, workshop: wsId,
-              message: `Впритык к дедлайну: артикул ${sb.article.id} приходит на WB ${wbArrival}, дедлайн ${deadline} (запас ${-lateDays} дн < буфер ${riskBuf} раб. дн). Любой сбой на производстве — риск срыва.`,
-            });
-          }
-        }
-
-        cycles.push({
-          id: cid,
-          partiaId: sb.partia.id,
-          partiaNo: sb.partia.no,
-          status: sb.partia.status,
-          statusRu: PARTIA_STATUS_RU[sb.partia.status] || sb.partia.status,
-          historical: !!sb.partia.historical,
-          stageId: stage.id,
-          stageName: stage.name,
-          articleId: sb.article.id,
-          articleName: sb.article.name,
-          workshopId: wsId,
-          workshopName: w.name,
-          workshopRole: w.role,
-          units: sb.units,
-          wbUnits, hasFact,
-          primary: sb.primary,
-          split: (wsCountByPartia[sb.partia.id]?.size || 1) > 1,
-          overflow: !!sb.overflow,
-          manual: !!(ovr && ovr.cutStart),
-          ops: dates,
-          cutStart, sewStart, readyDate,
-          fabric: { meters: fabricMeters, orderDate: fabricOrderDate, atWorkshop: fabricAtWorkshop },
-          logistics: { shipment, wbArrival, deadline: stage.deadline, lateDays },
-          milestones: buildMilestones({ fabricOrderDate, fabricAtWorkshop, cutStart, sewStart, readyDate, shipment, wbArrival }),
-        });
-      }
-    }
+    startedUnits[job.article.id] = (startedUnits[job.article.id] || 0) + job.units;
+    job.done = true;
+    remaining--;
   }
 
   cycles.sort((a, b) => (a.cutStart < b.cutStart ? -1 : a.cutStart > b.cutStart ? 1 : 0));

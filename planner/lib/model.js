@@ -68,7 +68,7 @@ function seedStages() {
 // ---- сид: цеха (4 основных + 2 вспомогательных) ----
 function seedWorkshops() {
   const list = [
-    { id: 'w_choro',  name: 'Чоро',   role: 'main', capacities: { cut: 500, sew: 250, iron: 500, otk: 1000 } },
+    { id: 'w_choro',  name: 'Чоро',   role: 'main', own: true, capacities: { cut: 500, sew: 250, iron: 500, otk: 1000 } },
     { id: 'w_ala',    name: 'Ала',    role: 'main', capacities: { cut: 500, sew: 240, iron: 500, otk: 1000 } },
     { id: 'w_naryn',  name: 'Нарын',  role: 'main', capacities: { cut: 450, sew: 220, iron: 450, otk: 900 } },
     { id: 'w_osh',    name: 'Ош',     role: 'main', capacities: { cut: 450, sew: 200, iron: 450, otk: 900 } },
@@ -191,6 +191,7 @@ export function normalizeState(input) {
   // подчистка мощностей
   for (const w of s.workshops) {
     w.role = w.role === 'aux' ? 'aux' : 'main';
+    w.own = !!w.own; // свой цех (приоритет в очереди); остальные — аутсорс
     w.capacities = { cut: 1, sew: 1, iron: 1, otk: 1, ...(w.capacities || {}) };
     for (const k of ['cut', 'sew', 'iron', 'otk']) w.capacities[k] = Math.max(1, +w.capacities[k] || 1);
     // смещения операций внутри цикла (раб. дней): пошив от кроя, утюжка от пошива, ОТК от утюжки
@@ -199,6 +200,12 @@ export function normalizeState(input) {
       sew: cleanOffset(fo.sew), iron: cleanOffset(fo.iron), otk: cleanOffset(fo.otk),
     };
     delete w.cycleOffsetDays; // устаревшее поле
+  }
+  // свой цех — единственный: если отмечено несколько, оставляем первый
+  let ownSeen = false;
+  for (const w of s.workshops) {
+    if (w.own && !ownSeen) ownSeen = true;
+    else if (w.own) w.own = false;
   }
   for (const a of s.articles) {
     a.plan = a.plan && typeof a.plan === 'object' ? a.plan : {};

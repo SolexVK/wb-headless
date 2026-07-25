@@ -2475,7 +2475,7 @@ function dataSuppliersPanel() {
 function dataWorkshopsPanel() {
   return `<div class="panel"><div class="subhead"><h3>Цеха</h3><button class="btn" id="btn-add-ws">+ Цех</button></div>
     <table><thead><tr>
-      <th>Название</th><th>Роль</th>
+      <th>Название</th><th>Роль</th><th title="Свой цех (наш, приоритет в очереди). Остальные — аутсорс.">Свой</th>
       <th class="num">Крой</th><th class="num">Пошив</th><th class="num">Утюжка</th><th class="num">ОТК</th>
       <th class="num" title="На сколько раб. дней старт пошива смещён относительно старта кроя">Сдвиг пошива</th>
       <th class="num" title="На сколько раб. дней старт утюжки смещён относительно старта пошива">Сдвиг утюжки</th>
@@ -2484,6 +2484,7 @@ function dataWorkshopsPanel() {
     <tbody>${state.workshops.map((w, i) => `<tr>
       <td><input data-ws="${i}" data-f="name" value="${w.name}" style="width:110px"></td>
       <td><select data-ws="${i}" data-f="role"><option value="main"${w.role === 'main' ? ' selected' : ''}>основной</option><option value="aux"${w.role === 'aux' ? ' selected' : ''}>вспомог.</option></select></td>
+      <td style="text-align:center"><input type="checkbox" data-ws="${i}" data-own${w.own ? ' checked' : ''} title="свой цех"></td>
       ${['cut', 'sew', 'iron', 'otk'].map((k) => `<td class="num"><input data-ws="${i}" data-cap="${k}" value="${w.capacities[k]}" style="width:66px;text-align:right"></td>`).join('')}
       ${['sew', 'iron', 'otk'].map((k) => `<td class="num"><input data-ws="${i}" data-off="${k}" value="${(w.flowOffsets && w.flowOffsets[k] != null) ? w.flowOffsets[k] : ''}" placeholder="авто" style="width:62px;text-align:right"></td>`).join('')}
       <td><button class="btn btn-danger" data-del-ws="${i}">✕</button></td>
@@ -2664,6 +2665,11 @@ function bindDataEvents() {
 
   root.querySelectorAll('input[data-ws],select[data-ws]').forEach((inp) => inp.addEventListener('change', (e) => {
     const w = state.workshops[+e.target.dataset.ws];
+    if ('own' in e.target.dataset) {
+      // свой цех — единственный: снимаем флаг у остальных
+      for (const ws of state.workshops) ws.own = false;
+      w.own = e.target.checked; mark(); renderData(); return;
+    }
     if (e.target.dataset.cap) w.capacities[e.target.dataset.cap] = Math.max(1, +e.target.value || 1);
     else if (e.target.dataset.off) {
       w.flowOffsets = w.flowOffsets || {};
