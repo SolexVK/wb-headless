@@ -2533,7 +2533,7 @@ function dataSettingsPanel() {
       <div class="field"><label>Пошив стартует после кроя</label><input data-set="flow.sewAfterCut" value="${fl.sewAfterCut}"></div>
       <div class="field"><label>Утюжка после пошива</label><input data-set="flow.ironAfterSew" value="${fl.ironAfterSew}"></div>
       <div class="field"><label>ОТК после утюжки</label><input data-set="flow.otkAfterIron" value="${fl.otkAfterIron}"></div>
-      <div class="field"><label>Буфер под форс-мажор, раб. дней</label><input data-set="riskBufferDays" value="${state.settings.riskBufferDays}"></div>
+      <div class="field"><label title="Подушка перед дедлайном: если партия приходит на WB меньше чем за столько раб. дней до дедлайна — покажем предупреждение «впритык», даже если формально успели. Даты производства не сдвигает.">Буфер под форс-мажор, раб. дней</label><input data-set="riskBufferDays" value="${state.settings.riskBufferDays}"></div>
     </div>
   </div></div>`;
 }

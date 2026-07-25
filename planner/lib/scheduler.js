@@ -265,6 +265,17 @@ export function buildSchedule(state) {
             level: 'error', stage: stage.id, article: sb.article.id, workshop: wsId,
             message: `Срыв срока: артикул ${sb.article.id} приходит на WB ${wbArrival}, дедлайн ${deadline} (опоздание ${lateDays} дн).`,
           });
+        } else if (deadline != null && riskBuf > 0) {
+          // Буфер под форс-мажор (Вариант А): подушка перед дедлайном. Если партия
+          // формально успевает, но приходит менее чем за riskBuf раб. дней до
+          // дедлайна — ранний сигнал «впритык» (любой сбой = срыв). Даты не сдвигаем.
+          const cushionEnd = cal.addWorkingDays(wbArrival, riskBuf);
+          if (diffDays(deadline, cushionEnd) > 0) {
+            warnings.push({
+              level: 'warn', stage: stage.id, article: sb.article.id, workshop: wsId,
+              message: `Впритык к дедлайну: артикул ${sb.article.id} приходит на WB ${wbArrival}, дедлайн ${deadline} (запас ${-lateDays} дн < буфер ${riskBuf} раб. дн). Любой сбой на производстве — риск срыва.`,
+            });
+          }
         }
 
         cycles.push({
