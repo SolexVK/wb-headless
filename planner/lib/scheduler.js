@@ -238,9 +238,7 @@ export function buildSchedule(state) {
 
         // ткань
         const fabricMeters = Math.ceil(sb.units * sb.article.fabricPerUnit * (1 + (fabricCfg.wastagePct || 0) / 100));
-        const fabricAtWorkshop = cal.addWorkingDays(cutStart, -(fabricCfg.bufferDays || 0)) < cutStart
-          ? addDays(cutStart, -(fabricCfg.bufferDays || 0))
-          : cutStart;
+        const fabricAtWorkshop = addDays(cutStart, -(fabricCfg.bufferDays || 0));
         const fabricOrderDate = addDays(fabricAtWorkshop, -(fabricCfg.leadTimeDays || 21));
 
         // логистика: ближайший вывоз карго после готовности + срок доставки
