@@ -215,6 +215,15 @@ export function buildSchedule(state) {
     const hasFact = pFact > 0;
     const wbUnits = hasFact ? pFact : job.units;
 
+    // диагностика битой мощности: одна партия физически не шьётся дольше ~90 раб.
+    // дней. Если дольше — почти всегда у цеха не задана (=1) мощность пошива.
+    if (f.otk.end > 90) {
+      warnings.push({
+        level: 'error', stage: job.stageId, article: job.article.id, workshop: w.id,
+        message: `Подозрительно низкая мощность: цех ${w.name} шьёт ${w.capacities.sew} шт/день — партия ${job.article.id} (${job.units} шт) шьётся ${f.otk.end} раб. дней (готовность ${readyDate}). Проверьте мощность пошива цеха в «Данные → Цеха».`,
+      });
+    }
+
     const deadline = job.deadline;
     const lateDays = deadline ? diffDays(deadline, wbArrival) : null;
     if (lateDays != null && lateDays > 0) {

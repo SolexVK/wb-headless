@@ -43,6 +43,15 @@ export function renderGantt(container, schedule, state, opts = {}) {
     if (minD === null || parse(lo) < parse(minD)) minD = lo;
     if (maxD === null || parse(hi) > parse(maxD)) maxD = hi;
   }
+  // защита от «монстров»: если из-за битой мощности цеха партия уходит на годы,
+  // не растягиваем всю шкалу — ограничиваем правый край горизонтом плана
+  // (последний дедлайн + 60 дней). Такие блоки просто обрежутся по краю.
+  const deadlines = (state.stages || []).map((s) => s.deadline).filter(Boolean);
+  if (deadlines.length) {
+    const latest = deadlines.reduce((m, d) => (parse(d) > parse(m) ? d : m), deadlines[0]);
+    const cap = parse(latest) + 60 * MS;
+    if (parse(maxD) > cap) maxD = iso(cap);
+  }
   minD = iso(parse(minD) - 3 * MS);
   maxD = iso(parse(maxD) + 3 * MS);
   const totalDays = days(minD, maxD) + 1;
