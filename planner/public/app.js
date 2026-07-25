@@ -1025,7 +1025,7 @@ function renderDashboard() {
       <table><thead><tr><th>Цех</th><th>Роль</th><th class="num">Пошив, шт/дн</th><th class="num">Занято дней</th><th class="num">Циклов</th><th style="width:220px">Загрузка</th></tr></thead>
       <tbody>${wsLoad.map((r) => `<tr>
         <td>${r.name}</td>
-        <td><span class="badge ${r.role}">${r.role === 'main' ? 'основной' : 'вспом.'}</span></td>
+        <td>${r.own ? '<span class="badge main">свой</span>' : `<span class="badge ${r.role}">${r.role === 'main' ? 'основной' : 'вспом.'}</span>`}</td>
         <td class="num">${r.sew}</td>
         <td class="num">${r.busyDays} / ${r.availDays}</td>
         <td class="num">${r.cycles}</td>
@@ -1086,31 +1086,42 @@ function articleStageCell(a, s) {
 }
 
 function workshopLoad() {
-  // доступные дни: сумма рабочих дней месяцев этапов, где цех участвует
+  // Загрузка по РЕАЛЬНОМУ расписанию (конвейер): доступные дни = рабочие дни от
+  // старта производства до последней готовности, занятые = дни пошива (узкое
+  // горлышко). Окно ограничиваем горизонтом плана (последний дедлайн + 60 дн),
+  // чтобы битая мощность одного цеха не обнуляла загрузку всех.
+  const cycles = schedule.cycles || [];
+  const P = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d); };
+  let minCut = null, maxReady = null;
+  for (const c of cycles) {
+    if (minCut === null || P(c.ops.cut.start) < P(minCut)) minCut = c.ops.cut.start;
+    if (maxReady === null || P(c.readyDate) > P(maxReady)) maxReady = c.readyDate;
+  }
+  const deadlines = (state.stages || []).map((s) => s.deadline).filter(Boolean);
+  if (deadlines.length && maxReady) {
+    const latest = deadlines.reduce((m, d) => (P(d) > P(m) ? d : m), deadlines[0]);
+    const cap = P(latest) + 60 * 86400000;
+    if (P(maxReady) > cap) maxReady = new Date(cap).toISOString().slice(0, 10);
+  }
+  const availDays = (minCut && maxReady) ? countWorkingDays(minCut, maxReady) : 0;
+
   const rows = [];
   for (const w of state.workshops) {
-    const cs = schedule.cycles.filter((c) => c.workshopId === w.id);
-    // занятые дни пошива ≈ сумма ceil(units/sew)
-    const busyDays = cs.reduce((s, c) => s + Math.ceil(c.units / w.capacities.sew), 0);
-    const stagesUsed = new Set(cs.map((c) => c.stageId));
-    const availDays = [...stagesUsed].reduce((s, sid) => {
-      const st = state.stages.find((x) => x.id === sid);
-      return s + workingDaysInMonth(st?.productionMonth);
-    }, 0) || workingDaysInMonth(state.stages[0]?.productionMonth) * Math.max(1, stagesUsed.size);
+    const cs = cycles.filter((c) => c.workshopId === w.id);
+    const busyDays = cs.reduce((s, c) => s + Math.ceil(c.units / Math.max(1, w.capacities.sew)), 0);
     rows.push({
-      name: w.name, role: w.role, sew: w.capacities.sew,
+      name: w.name, role: w.role, own: !!w.own, sew: w.capacities.sew,
       busyDays, availDays, cycles: cs.length,
       pct: availDays ? Math.round((busyDays / availDays) * 100) : 0,
     });
   }
   return rows;
 }
-function workingDaysInMonth(ym) {
-  if (!ym) return 26;
-  const [y, m] = ym.split('-').map(Number);
-  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+// рабочих дней между датами включительно (без воскресений — 6-дневка)
+function countWorkingDays(fromISO, toISO) {
+  const P = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d); };
   let c = 0;
-  for (let d = 1; d <= last; d++) if (new Date(Date.UTC(y, m - 1, d)).getUTCDay() !== 0) c++;
+  for (let t = P(fromISO); t <= P(toISO); t += 86400000) if (new Date(t).getUTCDay() !== 0) c++;
   return c;
 }
 
