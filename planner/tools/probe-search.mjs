@@ -1,12 +1,11 @@
-// probe-search.mjs — пробник keyword-возможностей MPStats (v3, диагностический).
-// Печатает ПОЛНЫЙ текст ошибок (405/422 → узнаём нужный метод/тело) и структуру
-// ответа by_keywords. Публичный поиск WB отпал (429). Ищем: (1) товары по фразе,
-// (2) частотность ключей товара, (3) расширение семантики — всё через MPStats.
+// probe-search.mjs — пробник MPStats (v4). Эндпоинты search/keyword/keywords
+// требуют параметр path — проверяем path=<ФРАЗА> (и path=<категория>).
+// Плюс сырой дамп by_keywords, чтобы увидеть структуру частотности.
 // Запуск на Mac mini из planner/:  node --env-file=data/.env tools/probe-search.mjs
 
 const BASE = process.env.MPSTATS_BASE_URL || 'https://mpstats.io/api';
 const TOKEN = process.env.MPSTATS_TOKEN;
-const PATH = 'Женщинам/Блузки и рубашки/Рубашка';
+const CAT = 'Женщинам/Блузки и рубашки/Рубашка';
 const KW = 'муслиновая рубашка';
 const ymd = (d) => d.toISOString().slice(0, 10);
 const d2 = new Date(); d2.setUTCDate(d2.getUTCDate() - 1);
@@ -15,9 +14,9 @@ const D1 = ymd(d1), D2 = ymd(d2);
 const line = (...a) => console.log(...a);
 if (!TOKEN) { line('⚠ нет MPSTATS_TOKEN — запусти с --env-file=data/.env'); process.exit(1); }
 
-async function hit(method, pathAndQuery, body, { dump = false } = {}) {
+async function hit(method, pathAndQuery, body, { raw = false } = {}) {
   const url = `${BASE}${pathAndQuery}`;
-  const label = `${method} ${pathAndQuery.replace(encodeURIComponent(KW), '{kw}').slice(0, 70)}`;
+  const label = `${method} ${pathAndQuery.replace(encodeURIComponent(KW), '{kw}').replace(encodeURIComponent(CAT), '{cat}').slice(0, 66)}`;
   try {
     const r = await fetch(url, {
       method,
@@ -28,49 +27,45 @@ async function hit(method, pathAndQuery, body, { dump = false } = {}) {
     const t = await r.text();
     let j = null; try { j = JSON.parse(t); } catch {}
     if (r.ok && j) {
-      const dataArr = j.data || j.result || j.items || j.keywords || j.words;
+      if (raw) { line(`  ✓ ${label} → 200`); line('     RAW:', t.slice(0, 500).replace(/\s+/g, ' ')); return { ok: true, json: j, text: t }; }
+      const dataArr = j.data || j.result || j.items || j.keywords || (Array.isArray(j.words) ? j.words : null);
       let shape = `keys=${Object.keys(j).slice(0, 10).join(',')}`;
       if (Array.isArray(dataArr)) shape += ` | arr[${dataArr.length}] itemKeys=${Object.keys(dataArr[0] || {}).slice(0, 12).join(',')}`;
       else if (Array.isArray(j)) shape = `array[${j.length}] itemKeys=${Object.keys(j[0] || {}).slice(0, 12).join(',')}`;
       line(`  ✓ ${label} → 200 | ${shape}`);
-      if (dump && Array.isArray(dataArr)) {
-        line('     sample:', JSON.stringify(dataArr.slice(0, 4)).slice(0, 400));
-      }
-    } else {
-      const msg = (j && (j.message || j.detail || JSON.stringify(j))) || t.slice(0, 160);
-      line(`  ✗ ${label} → ${r.status} | ${String(msg).replace(/\s+/g, ' ').slice(0, 160)}`);
+      if (Array.isArray(dataArr)) line('     sample:', JSON.stringify(dataArr.slice(0, 3)).slice(0, 360));
+      return { ok: true, json: j, text: t };
     }
-    return { ok: r.ok, status: r.status, text: t, json: j };
+    const msg = (j && (j.message || j.detail || JSON.stringify(j))) || t.slice(0, 160);
+    line(`  ✗ ${label} → ${r.status} | ${String(msg).replace(/\s+/g, ' ').slice(0, 150)}`);
+    return { ok: false, status: r.status, json: j, text: t };
   } catch (e) { line(`  ✗ ${label} → ERR ${e.message}`); return { ok: false }; }
 }
 
-line('=== 0. category → nmID ===');
+const kwe = encodeURIComponent(KW);
+const cate = encodeURIComponent(CAT);
+
+line('=== 0. nmID ===');
 let nmId = null;
 {
-  const r = await hit('POST', `/wb/get/category?path=${encodeURIComponent(PATH)}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 5, sortModel: [{ colId: 'revenue', sort: 'desc' }] });
+  const r = await hit('POST', `/wb/get/category?path=${cate}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 3, sortModel: [{ colId: 'revenue', sort: 'desc' }] });
   try { nmId = (r.json.data || r.json)[0]?.id; } catch {}
   line('  nmID:', nmId);
 }
 
-const kwe = encodeURIComponent(KW);
-line('\n=== 1. ТОВАРЫ ПО ФРАЗЕ (перебор метод/тело) ===');
-await hit('POST', `/wb/get/search/${kwe}?d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20 });
-await hit('POST', `/wb/get/search?d1=${D1}&d2=${D2}`, { query: KW, startRow: 0, endRow: 20 });
-await hit('POST', `/wb/get/search?d1=${D1}&d2=${D2}`, { word: KW, startRow: 0, endRow: 20 });
-await hit('POST', `/wb/get/search?query=${kwe}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20, sortModel: [], filterModel: {} });
-await hit('GET', `/wb/get/keywords/${kwe}?d1=${D1}&d2=${D2}`);
-await hit('POST', `/wb/get/keyword?d1=${D1}&d2=${D2}`, { word: KW });
-await hit('POST', `/wb/get/keyword/${kwe}?d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20 });
+line('\n=== 1. path = ФРАЗА (товары/аналитика по запросу) ===');
+await hit('GET', `/wb/get/keywords?path=${kwe}&d1=${D1}&d2=${D2}`);
+await hit('POST', `/wb/get/keywords?path=${kwe}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20 });
+await hit('GET', `/wb/get/keyword?path=${kwe}&d1=${D1}&d2=${D2}`);
+await hit('POST', `/wb/get/keyword?path=${kwe}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20 });
+await hit('GET', `/wb/get/search?path=${kwe}&d1=${D1}&d2=${D2}`);
+await hit('POST', `/wb/get/search?path=${kwe}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20, sortModel: [], filterModel: {} });
 
-line('\n=== 2. КЛЮЧИ ТОВАРА (частотность) — рабочий, дамп структуры ===');
-if (nmId) await hit('GET', `/wb/get/item/${nmId}/by_keywords?d1=${D1}&d2=${D2}`, null, { dump: true });
+line('\n=== 2. path = КАТЕГОРИЯ (ключи категории) ===');
+await hit('GET', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`);
+await hit('POST', `/wb/get/keywords?path=${cate}&d1=${D1}&d2=${D2}`, { startRow: 0, endRow: 20 });
 
-line('\n=== 3. РАСШИРЕНИЕ СЕМАНТИКИ (перебор метод/тело) ===');
-await hit('GET', `/wb/get/keywords/expanding?keyword=${kwe}&d1=${D1}&d2=${D2}`);
-await hit('POST', `/wb/get/keywords/expanding?d1=${D1}&d2=${D2}`, { word: KW });
-await hit('GET', `/wb/get/keywords/report?keyword=${kwe}&d1=${D1}&d2=${D2}`);
-await hit('POST', `/wb/get/keywords/report?d1=${D1}&d2=${D2}`, { words: [KW] });
-await hit('POST', `/wb/get/keywords?d1=${D1}&d2=${D2}`, { words: [KW] });
-await hit('POST', `/wb/get/keywords?d1=${D1}&d2=${D2}`, { word: KW, startRow: 0, endRow: 20 });
+line('\n=== 3. by_keywords — сырой дамп структуры ===');
+if (nmId) await hit('GET', `/wb/get/item/${nmId}/by_keywords?d1=${D1}&d2=${D2}`, null, { raw: true });
 
 line('\n=== DONE ===');
