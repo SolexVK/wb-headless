@@ -32,8 +32,9 @@ export function defaultSettings() {
     // ткань
     fabric: {
       leadTimeDays: 21,   // от заказа до склада цеха (3 недели)
-      safetyStages: 2,    // держать запас минимум на N этапов
-      wastagePct: 8,      // запас по количеству (%)
+      wastagePct: 8,      // запас по количеству на раскрой (%)
+      safetyPct: 10,      // страховой запас закупки (%), СВЕРХ раскроя; переходящая
+                          // подушка — в последнем заказе по ткани вычитается (true-up)
       bufferDays: 4,      // ткань должна быть на складе на N дней раньше кроя
     },
     // логистика до WB
@@ -78,6 +79,21 @@ function seedWorkshops() {
   return list;
 }
 
+// ---- ПОСТАВЩИКИ ТКАНИ ----
+// Режим заказа:
+//   'season' — оплата/бронь сразу: один заказ на весь сезон, по самой ранней дате;
+//   'draw'   — рассрочка/выборка: заказ на каждые N этапов (drawStages), под партии.
+export const SUPPLIER_ORDER_MODES = ['season', 'draw'];
+export const SUPPLIER_ORDER_MODE_RU = { season: 'оплата сразу (заказ на сезон)', draw: 'рассрочка (выборка по этапам)' };
+
+// ---- сид: поставщики ткани ----
+function seedSuppliers() {
+  return [
+    { id: 'sup_a', name: 'Поставщик А', orderMode: 'season', drawStages: 1 },
+    { id: 'sup_b', name: 'Поставщик Б', orderMode: 'draw', drawStages: 1 },
+  ];
+}
+
 // ---- сид: артикулы (реальные номера/цвета из Google-таблицы, суммы по этапам — из неё же) ----
 // Распределить суммарное кол-во total по цветам×размерам (детерминированно):
 // размеры — колоколом (средние ходовее), цвета — примерно поровну.
@@ -116,21 +132,21 @@ export function buildMatrix(total, colors, sizes) {
 function seedArticles() {
   const S = ['S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'];
   // matrix: этап -> цвет -> размер -> штук; plan (сумма по этапу) выводится из matrix
-  const mk = (id, name, comment, colors, sizes, fabricPerUnit, price, totals) => {
+  const mk = (id, name, comment, colors, sizes, fabricPerUnit, price, totals, supplierId) => {
     const stageIds = ['stage1', 'stage2', 'stage3', 'stage4'];
     const matrix = {}; const plan = {};
     stageIds.forEach((sid, i) => {
       matrix[sid] = buildMatrix(totals[i], colors, sizes);
       plan[sid] = totals[i];
     });
-    return { id, name, comment, colors, sizes, fabricPerUnit, fabricPricePerMeter: price, matrix, plan };
+    return { id, name, comment, colors, sizes, fabricPerUnit, fabricPricePerMeter: price, supplierId: supplierId || '', matrix, plan };
   };
   return [
-    mk('026', 'Рубашка мужская 026', 'клетка, приталенная', ['розовый-серый', 'белый-серый', 'голубой', 'синий'], S, 1.6, 3.5, [1403, 1413, 1711, 1978]),
-    mk('027', 'Рубашка мужская 027', 'однотонная, классика', ['голубой', 'белая', 'серый'], S, 1.6, 3.2, [1674, 1769, 2017, 2399]),
-    mk('031', 'Рубашка мужская 031', 'твид, отложной воротник', ['чёрный', 'синяя', 'коричневая', 'зелёный', 'белая'], S, 1.7, 4.8, [1008, 1219, 1476, 1706]),
-    mk('035', 'Рубашка мужская 035', 'лён, свободный крой', ['розовый', 'серый', 'шоколад'], S, 1.6, 4.1, [2087, 2502, 3301, 3800]),
-    mk('004', 'Рубашка мужская 004', 'оксфорд, на пуговицах', ['голубой', 'серый', 'чёрный'], S, 1.6, 3.6, [1245, 1404, 2600, 3692]),
+    mk('026', 'Рубашка мужская 026', 'клетка, приталенная', ['розовый-серый', 'белый-серый', 'голубой', 'синий'], S, 1.6, 3.5, [1403, 1413, 1711, 1978], 'sup_a'),
+    mk('027', 'Рубашка мужская 027', 'однотонная, классика', ['голубой', 'белая', 'серый'], S, 1.6, 3.2, [1674, 1769, 2017, 2399], 'sup_a'),
+    mk('031', 'Рубашка мужская 031', 'твид, отложной воротник', ['чёрный', 'синяя', 'коричневая', 'зелёный', 'белая'], S, 1.7, 4.8, [1008, 1219, 1476, 1706], 'sup_b'),
+    mk('035', 'Рубашка мужская 035', 'лён, свободный крой', ['розовый', 'серый', 'шоколад'], S, 1.6, 4.1, [2087, 2502, 3301, 3800], 'sup_b'),
+    mk('004', 'Рубашка мужская 004', 'оксфорд, на пуговицах', ['голубой', 'серый', 'чёрный'], S, 1.6, 3.6, [1245, 1404, 2600, 3692], 'sup_a'),
   ];
 }
 
@@ -141,6 +157,7 @@ export function defaultState() {
     seasons: seedSeasons(),
     stages: seedStages(),
     workshops: seedWorkshops(),
+    suppliers: seedSuppliers(),
     articles: seedArticles(),
     partias: [], // партии (план-заявки/производство) — источник истины по количествам
     overrides: {}, // ручные правки Ганта: cycleId -> { cutStart?, workshopId? }
@@ -160,6 +177,7 @@ export function normalizeState(input) {
   s.seasons = Array.isArray(input.seasons) && input.seasons.length ? input.seasons : base.seasons;
   s.stages = Array.isArray(input.stages) ? input.stages : base.stages;
   s.workshops = Array.isArray(input.workshops) ? input.workshops : base.workshops;
+  s.suppliers = normalizeSuppliers(input.suppliers);
   s.articles = Array.isArray(input.articles) ? input.articles : base.articles;
   // партии: берём из input; если их нет — ensurePartias мигрирует из article.matrix
   s.partias = Array.isArray(input.partias) ? input.partias : [];
@@ -188,6 +206,8 @@ export function normalizeState(input) {
     a.comment = typeof a.comment === 'string' ? a.comment : '';
     a.fabricPerUnit = +a.fabricPerUnit > 0 ? +a.fabricPerUnit : 1.6;
     a.fabricPricePerMeter = +a.fabricPricePerMeter >= 0 ? +a.fabricPricePerMeter : 0; // $/м
+    // поставщик ткани (ссылка на s.suppliers[].id); пустая строка = не задан
+    a.supplierId = (typeof a.supplierId === 'string' && s.suppliers.some((sup) => sup.id === a.supplierId)) ? a.supplierId : '';
     // процент выкупа (WB): доля заказов, которые реально выкупают. Для одежды ~30–60%.
     // MPStats отдаёт «продажи» = выкупы; заказы = выкупы / (buyoutPct/100).
     a.buyoutPct = (+a.buyoutPct > 0 && +a.buyoutPct <= 100) ? +a.buyoutPct : 40;
@@ -325,6 +345,26 @@ export function sumMatrixStage(stageMatrix) {
     }
   }
   return Math.round(s);
+}
+
+// ---- нормализация справочника поставщиков ----
+function normalizeSuppliers(input) {
+  if (!Array.isArray(input)) return seedSuppliers();
+  const out = [];
+  const seen = new Set();
+  for (const raw of input) {
+    if (!raw || typeof raw !== 'object') continue;
+    let id = typeof raw.id === 'string' && raw.id ? raw.id : genId('sup');
+    while (seen.has(id)) id = genId('sup');
+    seen.add(id);
+    out.push({
+      id,
+      name: (typeof raw.name === 'string' && raw.name.trim()) ? raw.name.trim() : 'Поставщик',
+      orderMode: SUPPLIER_ORDER_MODES.includes(raw.orderMode) ? raw.orderMode : 'draw',
+      drawStages: Math.max(1, Math.round(+raw.drawStages || 1)),
+    });
+  }
+  return out;
 }
 
 function deepMergeSettings(base, over) {

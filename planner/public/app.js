@@ -360,87 +360,120 @@ function colorUnits(a, stageId, color) {
   let s = 0; for (const k in row) s += +row[k] || 0;
   return Math.round(s);
 }
+// короткая метка этапа: «Э1», «Э2» …
+function stageShort(sid) {
+  const i = state.stages.findIndex((s) => s.id === sid);
+  return i >= 0 ? 'Э' + (i + 1) : '—';
+}
+
 function renderFabricOrder() {
   const root = document.getElementById('fabric');
   if (!state.stages.length || !state.articles.length) {
     root.innerHTML = '<div class="panel"><div class="mini">Нет этапов или артикулов.</div></div>';
     return;
   }
+  const money = (v) => '$' + Math.round(v || 0).toLocaleString('ru');
+  const fo = schedule?.fabricOrders;
+
+  // ── БЛОК 1. Консолидированный план закупки по поставщикам ──
+  let planHTML;
+  if (!fo || !(fo.suppliers || []).length) {
+    planHTML = '<div class="panel"><div class="mini">План закупки появится после расчёта — нажми «Пересчитать».</div></div>';
+  } else {
+    const supBlocks = fo.suppliers.map((g) => {
+      const modeTxt = g.orderMode === 'season'
+        ? 'оплата сразу — один заказ на сезон'
+        : `рассрочка — выборка по ${g.drawStages} эт.`;
+      const rows = g.fabrics.map((f) => {
+        const head = `<tr class="fab-grp">
+          <td>${f.image ? `<img class="fab-thumb" src="${f.image}" alt="">` : ''}</td>
+          <td colspan="5"><b>${f.label}</b> <span class="mini">· арт ${f.articleIds.join(', ')} · план ${f.totalNeed.toLocaleString('ru')} м${f.orders.length > 1 ? ` · заказано ${f.totalOrdered.toLocaleString('ru')} м в ${f.orders.length} заказа` : ''}</span></td>
+        </tr>`;
+        const ordRows = f.orders.map((o) => `<tr>
+          <td class="num mini">#${o.seq}${o.isLast && f.orders.length > 1 ? ' <span title="итоговый заказ: остаток за вычетом набранных излишков">✓</span>' : ''}</td>
+          <td>${fmt(o.orderDate)}</td>
+          <td>${fmt(o.needBy)}</td>
+          <td class="mini">${o.coversStages.map(stageShort).join('+')}</td>
+          <td class="num">${o.meters.toLocaleString('ru')} м</td>
+          <td class="num">${o.cost ? money(o.cost) : '<span class="mini">—</span>'}</td>
+        </tr>`).join('');
+        return head + ordRows;
+      }).join('');
+      return `<div class="panel">
+        <div class="subhead"><h3>${g.supplierName}</h3>
+          <span class="mini">${modeTxt} · заказать к <b>${fmt(g.earliestOrderDate)}</b></span></div>
+        <table><thead><tr><th>Образец</th><th>Заказ / разместить</th><th>Нужно на складе</th><th>Этапы</th><th class="num">Метраж</th><th class="num">Стоимость</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><th colspan="4">Итого по поставщику</th><th class="num">${g.totalMeters.toLocaleString('ru')} м</th><th class="num">${money(g.totalCost)}</th></tr></tfoot></table>
+      </div>`;
+    }).join('');
+    planHTML = `
+      <div class="panel">
+        <div class="fab-summary">
+          <div><div class="k">Поставщиков</div><div class="v">${fo.suppliers.length}</div></div>
+          <div><div class="k">Всего ткани к заказу</div><div class="v good">${fo.totals.meters.toLocaleString('ru')} м</div></div>
+          <div><div class="k">Стоимость ткани</div><div class="v good">${money(fo.totals.cost)}</div></div>
+        </div>
+        <div class="mini" style="margin-top:6px">Консолидация по «№ планшета + № цвета» через все артикулы и партии. Дата заказа — по самой ранней партии окна. Промежуточные заказы идут со страховым +${state.settings.fabric.safetyPct}%, итоговый заказ по ткани берёт остаток (излишки вычитаются). Режим и глубина выборки — из справочника поставщиков в «Данные».</div>
+      </div>
+      ${supBlocks}`;
+  }
+
+  // ── БЛОК 2. Детализация по артикулам/цветам (проверка данных, по этапу) ──
   const sStages = seasonStages();
   if (!fabricStageId || !sStages.find((s) => s.id === fabricStageId)) fabricStageId = sStages[0]?.id;
   const stage = state.stages.find((s) => s.id === fabricStageId);
-  if (!stage) { document.getElementById('fabric').innerHTML = '<div class="panel"><div class="mini">В выбранном сезоне нет этапов.</div></div>'; return; }
-  const stageIdx = state.stages.findIndex((s) => s.id === stage.id) + 1;
   const wastage = +(state.settings.fabric.wastagePct) || 0;
   const meters = (units, perUnit) => Math.ceil(units * perUnit * (1 + wastage / 100));
-
-  const cyc = (schedule?.cycles || []).filter((c) => c.stageId === stage.id);
-  const earliest = cyc.map((c) => c.fabric.orderDate).sort()[0];
-
-  const money = (v) => '$' + Math.round(v || 0).toLocaleString('ru');
-  const arts = articlesSorted().filter((a) => articleStageTotal(a, stage.id) > 0);
-  let grand = 0, grandCost = 0;
-  const consolidated = {}; // планшет/№цвета -> { meters, image, cost }
-
-  const sections = arts.map((a) => {
-    a.fabricInfo = a.fabricInfo || {};
-    const price = +a.fabricPricePerMeter || 0;
-    let sub = 0, subCost = 0;
-    const rows = a.colors.map((c) => {
-      const u = colorUnits(a, stage.id, c);
-      if (u <= 0) return '';
-      const info = (a.fabricInfo[c] = a.fabricInfo[c] || {});
-      const m = meters(u, a.fabricPerUnit); sub += m; grand += m;
-      const cost = m * price; subCost += cost; grandCost += cost;
-      const key = (info.plansheet || info.colorNo) ? `${info.plansheet || '—'} / цвет ${info.colorNo || '—'}` : `${a.id} · ${c}`;
-      if (!consolidated[key]) consolidated[key] = { meters: 0, image: info.image || '', cost: 0 };
-      consolidated[key].meters += m; consolidated[key].cost += cost;
-      if (!consolidated[key].image && info.image) consolidated[key].image = info.image;
-      return `<tr>
-        <td>${c}</td>
-        <td>${info.plansheet ? info.plansheet : '<span class="mini">—</span>'}</td>
-        <td>${info.image ? `<img class="fab-thumb" src="${info.image}" alt="">` : '<span class="mini">—</span>'}</td>
-        <td>${info.colorNo ? info.colorNo : '<span class="mini">—</span>'}</td>
-        <td class="num">${u.toLocaleString('ru')}</td>
-        <td class="num">${m.toLocaleString('ru')}</td>
-        <td class="num">${price ? money(cost) : '<span class="mini">—</span>'}</td>
-      </tr>`;
+  let detailHTML = '';
+  if (stage) {
+    const arts = articlesSorted().filter((a) => articleStageTotal(a, stage.id) > 0);
+    const sections = arts.map((a) => {
+      a.fabricInfo = a.fabricInfo || {};
+      const price = +a.fabricPricePerMeter || 0;
+      const supName = (state.suppliers.find((s) => s.id === a.supplierId) || {}).name || '— не задан';
+      let sub = 0, subCost = 0;
+      const rows = a.colors.map((c) => {
+        const u = colorUnits(a, stage.id, c);
+        if (u <= 0) return '';
+        const info = (a.fabricInfo[c] = a.fabricInfo[c] || {});
+        const m = meters(u, a.fabricPerUnit); sub += m;
+        const cost = m * price; subCost += cost;
+        return `<tr>
+          <td>${c}</td>
+          <td>${info.plansheet ? info.plansheet : '<span class="mini">—</span>'}</td>
+          <td>${info.image ? `<img class="fab-thumb" src="${info.image}" alt="">` : '<span class="mini">—</span>'}</td>
+          <td>${info.colorNo ? info.colorNo : '<span class="mini">—</span>'}</td>
+          <td class="num">${u.toLocaleString('ru')}</td>
+          <td class="num">${m.toLocaleString('ru')}</td>
+          <td class="num">${price ? money(cost) : '<span class="mini">—</span>'}</td>
+        </tr>`;
+      }).join('');
+      return `<div class="panel">
+        <div class="subhead"><h3>${a.id} — ${a.name}</h3>
+          <span class="mini">поставщик: ${supName} · расход ${a.fabricPerUnit} м/шт · цена ${price ? '$' + price + '/м' : '— (задай в «Данные»)'}</span></div>
+        <table><thead><tr><th>Цвет</th><th>Планшет поставщика</th><th>Образец</th><th>№ цвета</th><th class="num">Штук</th><th class="num">Метраж (с раскроем)</th><th class="num">Стоимость</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><th colspan="5">Итого по артикулу</th><th class="num">${sub.toLocaleString('ru')} м</th><th class="num">${price ? money(subCost) : '—'}</th></tr></tfoot></table>
+      </div>`;
     }).join('');
-    return `<div class="panel">
-      <div class="subhead"><h3>${a.id} — ${a.name}</h3>
-        <span class="mini">расход ${a.fabricPerUnit} м/шт · цена ${price ? '$' + price + '/м' : '— (задай в «Данные»)'}</span></div>
-      <table><thead><tr><th>Цвет</th><th>Планшет поставщика</th><th>Образец</th><th>№ цвета</th><th class="num">Штук</th><th class="num">Метраж</th><th class="num">Стоимость</th></tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr><th colspan="5">Итого по артикулу</th><th class="num">${sub.toLocaleString('ru')} м</th><th class="num">${price ? money(subCost) : '—'}</th></tr></tfoot></table>
-    </div>`;
-  }).join('');
-
-  const consRows = Object.entries(consolidated).sort((a, b) => b[1].meters - a[1].meters)
-    .map(([k, v]) => `<tr><td>${v.image ? `<img class="fab-thumb" src="${v.image}" alt="">` : ''}</td><td>${k}</td><td class="num">${v.meters.toLocaleString('ru')} м</td><td class="num">${v.cost ? money(v.cost) : '<span class="mini">—</span>'}</td></tr>`).join('');
-
-  root.innerHTML = `
-    <div class="panel">
-      <div class="matrix-controls">
-        <label>Партия:
-          <select id="fab-stage">${seasonStages().map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>Этап ${state.stages.findIndex((x) => x.id === s.id) + 1}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
-        </label>
-        <span class="mini">Консолидированный заказ на партию, запас +${wastage}%. Образец, № планшета, № цвета и цена ткани берутся из «Данных».</span>
+    detailHTML = `
+      <div class="panel">
+        <div class="matrix-controls">
+          <h3 style="margin:0">Детализация по артикулам и цветам</h3>
+          <label>Этап:
+            <select id="fab-stage">${sStages.map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>Этап ${state.stages.findIndex((x) => x.id === s.id) + 1}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
+          </label>
+          <span class="mini">Проверка исходных данных: штук, метраж (с раскроем +${wastage}%), планшет, цвет, образец. Это НЕ заказ — заказ формируется выше по поставщикам.</span>
+        </div>
       </div>
-      <div class="fab-summary">
-        <div><div class="k">Разместить заказ</div><div class="v">${earliest ? fmt(earliest) : '—'}</div><div class="mini">самая ранняя дата из артикулов этапа${earliest ? '' : ' (нажми «Пересчитать»)'}</div></div>
-        <div><div class="k">Итого ткани на партию</div><div class="v good">${grand.toLocaleString('ru')} м</div></div>
-        <div><div class="k">Стоимость ткани на партию</div><div class="v good">${money(grandCost)}</div></div>
-      </div>
-    </div>
-    ${sections || '<div class="panel"><div class="mini">На эту партию нет плана.</div></div>'}
-    ${consRows ? `<div class="panel"><h3>Консолидировано к заказу (по планшету/цвету)</h3>
-      <table><thead><tr><th>Образец</th><th>Планшет / цвет</th><th class="num">Метраж</th><th class="num">Стоимость</th></tr></thead>
-      <tbody>${consRows}</tbody>
-      <tfoot><tr><th colspan="2">ВСЕГО</th><th class="num">${grand.toLocaleString('ru')} м</th><th class="num">${money(grandCost)}</th></tr></tfoot></table>
-      <div class="mini" style="margin-top:8px">Строки с общим планшетом и номером цвета суммируются в одну позицию заказа. Форму заказа доработаем позже.</div></div>` : ''}
-  `;
+      ${sections || '<div class="panel"><div class="mini">На этот этап нет плана.</div></div>'}`;
+  }
 
-  document.getElementById('fab-stage').addEventListener('change', (e) => { fabricStageId = e.target.value; renderFabricOrder(); });
+  root.innerHTML = planHTML + detailHTML;
+
+  const sel = document.getElementById('fab-stage');
+  if (sel) sel.addEventListener('change', (e) => { fabricStageId = e.target.value; renderFabricOrder(); });
   applyCollapsibles();
 }
 
@@ -969,7 +1002,7 @@ function renderDashboard() {
   const totalUnits = cy.reduce((s, c) => s + c.units, 0);
   const errs = schedule.warnings.filter((w) => w.level === 'error');
   const warns = schedule.warnings.filter((w) => w.level === 'warn');
-  const totalMeters = (schedule.fabricOrders || []).reduce((s, o) => s + o.totalMeters, 0);
+  const totalMeters = schedule.fabricOrders?.totals?.meters || 0;
 
   // загрузка цехов (сумма дней пошива / доступные дни в месяцах этапов)
   const wsLoad = workshopLoad();
@@ -1024,14 +1057,19 @@ function renderDashboard() {
       </tr>`).join('')}</tbody></table>
     </div>
 
-    <div class="panel"><h3>Заказ ткани (запас на ${state.settings.fabric.safetyStages} этапа, лид-тайм ${state.settings.fabric.leadTimeDays} дн)</h3>
-      <table><thead><tr><th>Артикул</th><th class="num">Всего метров</th><th>Первый заказ</th><th>Разбивка по этапам</th></tr></thead>
-      <tbody>${(schedule.fabricOrders || []).map((o) => `<tr>
-        <td><b>${o.articleId}</b></td>
-        <td class="num">${o.totalMeters.toLocaleString('ru')}</td>
-        <td>${fmt(o.firstOrderDate)}</td>
-        <td class="mini">${o.byStage.map((b) => `${b.stageId}: ${b.meters}м (заказ ${fmt(b.orderDate)})`).join(' · ')}</td>
-      </tr>`).join('')}</tbody></table>
+    <div class="panel"><h3>Заказ ткани по поставщикам (лид-тайм ${state.settings.fabric.leadTimeDays} дн, страховой +${state.settings.fabric.safetyPct}%)</h3>
+      <table><thead><tr><th>Поставщик</th><th>Режим</th><th>Ближайший заказ</th><th class="num">Заказов</th><th class="num">Метраж</th><th class="num">Стоимость</th></tr></thead>
+      <tbody>${(schedule.fabricOrders?.suppliers || []).map((g) => `<tr>
+        <td><b>${g.supplierName}</b></td>
+        <td class="mini">${g.orderMode === 'season' ? 'оплата сразу' : `выборка по ${g.drawStages} эт.`}</td>
+        <td>${fmt(g.earliestOrderDate)}</td>
+        <td class="num">${g.fabrics.reduce((s, f) => s + f.orders.length, 0)}</td>
+        <td class="num">${g.totalMeters.toLocaleString('ru')} м</td>
+        <td class="num">$${g.totalCost.toLocaleString('ru')}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="mini">Нажми «Пересчитать».</td></tr>'}</tbody>
+      ${schedule.fabricOrders?.totals ? `<tfoot><tr><th colspan="4">ВСЕГО</th><th class="num">${schedule.fabricOrders.totals.meters.toLocaleString('ru')} м</th><th class="num">$${schedule.fabricOrders.totals.cost.toLocaleString('ru')}</th></tr></tfoot>` : ''}
+      </table>
+      <div class="mini" style="margin-top:6px">Подробный план заказа — на листе «Заказ ткани».</div>
     </div>
   `;
 }
@@ -2370,6 +2408,7 @@ function renderData() {
   const root = document.getElementById('data-forms');
   root.innerHTML = `
     <div class="panel"><div class="mini">Ввод количеств по размерам — вкладка «План по размерам». Сводка плана — вкладка «План продаж».</div></div>
+    ${dataSuppliersPanel()}
     ${dataArticlesPanel()}
     ${dataWorkshopsPanel()}
     ${dataSeasonsPanel()}
@@ -2395,6 +2434,10 @@ function dataArticlesPanel() {
           <div class="field"><label>Цена ткани, $/м</label><input data-art="${i}" data-f="fabricPricePerMeter" value="${a.fabricPricePerMeter || 0}" style="width:90px"></div>
           <div class="field"><label title="Доля заказов, которые выкупают. Для одежды ~30–60%. Заказы = выкупы / (%выкупа)">% выкупа</label><input data-art="${i}" data-f="buyoutPct" type="number" min="1" max="100" value="${a.buyoutPct ?? 40}" style="width:80px"></div>
         </div>
+        <div class="field"><label>Поставщик ткани</label><select data-art="${i}" data-f="supplierId">
+          <option value="">— не задан —</option>
+          ${state.suppliers.map((sup) => `<option value="${sup.id}"${sup.id === a.supplierId ? ' selected' : ''}>${sup.name}</option>`).join('')}
+        </select></div>
         <div class="field"><label>Размерный ряд (через запятую)</label><input data-art="${i}" data-f="sizes" value="${(a.sizes || []).join(', ')}"></div>
         <div class="field"><label>Цвета и образцы ткани (название · образец 80×40 · № планшета · № цвета)</label>
           <div class="swatch-row">${(a.colors || []).map((c, ci) => { const fi = (a.fabricInfo && a.fabricInfo[c]) || {}; return `<div class="swatch-item" data-swatch-art="${i}" data-swatch-idx="${ci}">
@@ -2412,6 +2455,21 @@ function dataArticlesPanel() {
         </div>
         <button class="btn btn-danger" data-del-art="${i}">Удалить</button>
       </div>`).join('')}</div></div>`;
+}
+
+function dataSuppliersPanel() {
+  return `<div class="panel"><div class="subhead"><h3>Поставщики ткани</h3><button class="btn" id="btn-add-supplier">+ Поставщик</button></div>
+    <div class="mini" style="margin-bottom:8px">Режим заказа управляет тем, как консолидируется закупка ткани: «оплата сразу» — один заказ на весь сезон; «рассрочка» — выборка отдельными заказами каждые N этапов.</div>
+    <table><thead><tr><th>Название</th><th>Режим заказа</th><th class="num" title="Для рассрочки: один заказ покрывает столько этапов">Выборка, этапов</th><th></th></tr></thead>
+    <tbody>${(state.suppliers || []).map((sup, i) => `<tr>
+      <td><input data-sup="${i}" data-f="name" value="${(sup.name || '').replace(/"/g, '&quot;')}" style="width:180px"></td>
+      <td><select data-sup="${i}" data-f="orderMode">
+        <option value="season"${sup.orderMode === 'season' ? ' selected' : ''}>оплата сразу (заказ на сезон)</option>
+        <option value="draw"${sup.orderMode === 'draw' ? ' selected' : ''}>рассрочка (выборка по этапам)</option>
+      </select></td>
+      <td class="num"><input data-sup="${i}" data-f="drawStages" type="number" min="1" value="${sup.drawStages || 1}" style="width:70px"${sup.orderMode === 'season' ? ' disabled' : ''}></td>
+      <td><button class="btn btn-danger" data-del-sup="${i}" title="удалить поставщика">✕</button></td>
+    </tr>`).join('') || '<tr><td colspan="4" class="mini">Поставщиков пока нет.</td></tr>'}</tbody></table></div>`;
 }
 
 function dataWorkshopsPanel() {
@@ -2462,8 +2520,8 @@ function dataSettingsPanel() {
   return `<div class="panel"><h3>Параметры расчёта</h3><div class="form-grid">
     <div class="card"><div class="mini" style="margin-bottom:8px">Ткань</div>
       <div class="field"><label>Лид-тайм заказа, дней</label><input data-set="fabric.leadTimeDays" value="${f.leadTimeDays}"></div>
-      <div class="field"><label>Запас, этапов</label><input data-set="fabric.safetyStages" value="${f.safetyStages}"></div>
-      <div class="field"><label>Запас по кол-ву, %</label><input data-set="fabric.wastagePct" value="${f.wastagePct}"></div>
+      <div class="field"><label>Запас на раскрой, %</label><input data-set="fabric.wastagePct" value="${f.wastagePct}"></div>
+      <div class="field"><label>Страховой запас закупки, %</label><input data-set="fabric.safetyPct" value="${f.safetyPct}"></div>
       <div class="field"><label>Буфер «ткань раньше кроя», дней</label><input data-set="fabric.bufferDays" value="${f.bufferDays}"></div>
     </div>
     <div class="card"><div class="mini" style="margin-bottom:8px">Логистика до WB</div>
@@ -2527,7 +2585,7 @@ function bindDataEvents() {
   const root = document.getElementById('data-forms');
   const mark = () => { dirty = true; setStatus(); };
 
-  root.querySelectorAll('input[data-art]').forEach((inp) => inp.addEventListener('change', (e) => {
+  root.querySelectorAll('input[data-art],select[data-art]').forEach((inp) => inp.addEventListener('change', (e) => {
     const a = state.articles[+e.target.dataset.art]; const f = e.target.dataset.f;
     if (f === 'colors') { a.colors = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); pruneArticlePartias(a); mark(); renderData(); return; }
     else if (f === 'sizes') { a.sizes = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); pruneArticlePartias(a); mark(); renderData(); return; }
@@ -2614,6 +2672,23 @@ function bindDataEvents() {
     } else w[e.target.dataset.f] = e.target.value; mark();
   }));
   root.querySelectorAll('[data-del-ws]').forEach((b) => b.addEventListener('click', () => { state.workshops.splice(+b.dataset.delWs, 1); mark(); renderData(); }));
+
+  // поставщики ткани
+  root.querySelectorAll('input[data-sup],select[data-sup]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const sup = state.suppliers[+e.target.dataset.sup]; if (!sup) return;
+    const f = e.target.dataset.f;
+    if (f === 'drawStages') { sup.drawStages = Math.max(1, Math.round(+e.target.value || 1)); mark(); }
+    else if (f === 'orderMode') { sup.orderMode = e.target.value === 'season' ? 'season' : 'draw'; mark(); renderData(); }
+    else { sup[f] = e.target.value; mark(); renderData(); } // имя влияет на списки у артикулов
+  }));
+  root.querySelectorAll('[data-del-sup]').forEach((b) => b.addEventListener('click', () => {
+    const sup = state.suppliers[+b.dataset.delSup];
+    if (sup) for (const a of state.articles) if (a.supplierId === sup.id) a.supplierId = '';
+    state.suppliers.splice(+b.dataset.delSup, 1); mark(); renderData();
+  }));
+  root.querySelector('#btn-add-supplier')?.addEventListener('click', () => {
+    state.suppliers.push({ id: uid('sup'), name: 'Новый поставщик', orderMode: 'draw', drawStages: 1 }); mark(); renderData();
+  });
   root.querySelector('#btn-add-ws')?.addEventListener('click', () => {
     state.workshops.push({ id: uid('w'), name: 'Новый цех', role: 'aux', capacities: { cut: 300, sew: 150, iron: 300, otk: 600 } }); mark(); renderData();
   });

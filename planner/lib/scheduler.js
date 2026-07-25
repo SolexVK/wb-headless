@@ -320,29 +320,158 @@ function buildMilestones(m) {
   ];
 }
 
-// Заказы ткани с учётом запаса на N этапов и всех параллельно работающих цехов.
-// Группируем по (артикул) и суммируем метраж, показываем дату заказа = самый
-// ранний заказ среди циклов группы, объём = сумма метража ближайших safetyStages этапов.
+// Консолидированный план заказа ткани.
+//
+// Логика (см. пункт #34):
+//  1. Снимаем потребность в ткани в разрезе (партия × цвет): метраж = штук цвета ×
+//     расход/шт × (1 + раскрой%). Ключ ткани = «№ планшета + № цвета» (у одного
+//     поставщика). Даты берём с циклов партии: «заказать не позже» и «нужно на
+//     складе» = самые ранние среди циклов (ткань успевает ко всем цехам партии).
+//  2. Группируем метраж по ключу ткани — консолидация ЧЕРЕЗ разные артикулы/партии.
+//  3. Режимом поставщика режем на окна закупки: 'season' — одно окно на весь сезон;
+//     'draw' — окно = drawStages этапов подряд.
+//  4. Дата заказа окна = самая ранняя «заказать не позже» в окне.
+//  5. Объём заказа = метраж окна × (1 + страховой%). ИСКЛЮЧЕНИЕ — последний заказ по
+//     ткани: берём ровно недостающий остаток (весь план − уже заказано), чтобы
+//     накопленные страховые излишки не осели мёртвым остатком (true-up).
+//  6. Заказы группируем по поставщику (для оформления одной заявкой).
+//
+// Прошлые (historical) партии в закупку не берём — ткань под них уже куплена.
+
+function sumRow(row) {
+  if (!row || typeof row !== 'object') return 0;
+  let s = 0;
+  for (const k of Object.keys(row)) s += +row[k] || 0;
+  return Math.round(s);
+}
+
+function resolveSupplier(article, supById) {
+  const sup = article && article.supplierId && supById[article.supplierId];
+  if (sup) return { id: sup.id, name: sup.name, orderMode: sup.orderMode, drawStages: Math.max(1, sup.drawStages || 1) };
+  return { id: '__none__', name: 'Поставщик не указан', orderMode: 'draw', drawStages: 1 };
+}
+
 function aggregateFabric(cycles, state) {
-  const orders = [];
-  const byArticle = {};
+  const safetyMul = 1 + (state.settings.fabric.safetyPct || 0) / 100;
+  const artById = Object.fromEntries(state.articles.map((a) => [a.id, a]));
+  const supById = Object.fromEntries((state.suppliers || []).map((s) => [s.id, s]));
+  const stageIdx = {}; state.stages.forEach((st, i) => { stageIdx[st.id] = i; });
+
+  // 1a) самые ранние даты заказа/прихода по каждой партии (из её циклов, без прошлых)
+  const partiaDates = {};
   for (const c of cycles) {
-    (byArticle[c.articleId] ||= []).push(c);
+    if (c.historical) continue;
+    const d = partiaDates[c.partiaId];
+    if (!d) {
+      partiaDates[c.partiaId] = { orderBy: c.fabric.orderDate, needBy: c.fabric.atWorkshop };
+    } else {
+      if (c.fabric.orderDate < d.orderBy) d.orderBy = c.fabric.orderDate;
+      if (c.fabric.atWorkshop < d.needBy) d.needBy = c.fabric.atWorkshop;
+    }
   }
-  for (const [articleId, list] of Object.entries(byArticle)) {
-    list.sort((a, b) => (a.fabric.orderDate < b.fabric.orderDate ? -1 : 1));
-    // разбиваем по этапам, чтобы формировать заказ «на 2 этапа вперёд»
-    orders.push({
-      articleId,
-      totalMeters: list.reduce((s, c) => s + c.fabric.meters, 0),
-      firstOrderDate: list[0]?.fabric.orderDate,
-      byStage: list.map((c) => ({
-        stageId: c.stageId, workshopId: c.workshopId, units: c.units,
-        meters: c.fabric.meters, orderDate: c.fabric.orderDate, atWorkshop: c.fabric.atWorkshop,
-      })),
+
+  // 1b) потребности в разрезе (партия × цвет)
+  const demands = [];
+  for (const p of state.partias || []) {
+    if (p.historical) continue;
+    const dts = partiaDates[p.id];
+    if (!dts) continue; // партия без циклов (0 шт)
+    const a = artById[p.articleId];
+    if (!a) continue;
+    const sup = resolveSupplier(a, supById);
+    const wastageMul = 1 + (state.settings.fabric.wastagePct || 0) / 100;
+    const M = p.planMatrix || {};
+    for (const color of Object.keys(M)) {
+      const units = sumRow(M[color]);
+      if (units <= 0) continue;
+      const meters = units * (a.fabricPerUnit || 0) * wastageMul; // с раскроем, дробное — округлим в конце
+      const fi = (a.fabricInfo && a.fabricInfo[color]) || {};
+      const plansheet = (fi.plansheet || '').trim();
+      const colorNo = (fi.colorNo || '').trim();
+      const hasSku = plansheet || colorNo;
+      const fabricKey = hasSku
+        ? `${sup.id}|ps:${plansheet || '—'}|cn:${colorNo || '—'}`
+        : `${sup.id}|art:${a.id}|col:${color}`;
+      const label = hasSku ? `планшет ${plansheet || '—'} / цвет ${colorNo || '—'}` : `${a.id} · ${color}`;
+      demands.push({
+        fabricKey, label, supplier: sup,
+        articleId: a.id, color, stageId: p.stageId, stageIdx: stageIdx[p.stageId] ?? 99,
+        meters, price: +a.fabricPricePerMeter || 0,
+        image: fi.image || '', orderBy: dts.orderBy, needBy: dts.needBy,
+      });
+    }
+  }
+
+  // 2) группировка по ключу ткани
+  const byFabric = {};
+  for (const d of demands) (byFabric[d.fabricKey] ||= []).push(d);
+
+  const fabrics = [];
+  for (const [key, list] of Object.entries(byFabric)) {
+    const sup = list[0].supplier;
+    const totalNeed = list.reduce((s, d) => s + d.meters, 0); // план (с раскроем, без страхового)
+    const avgPrice = totalNeed > 0 ? list.reduce((s, d) => s + d.meters * d.price, 0) / totalNeed : 0;
+    const articleIds = [...new Set(list.map((d) => d.articleId))];
+    const image = (list.find((d) => d.image) || {}).image || '';
+
+    // 3) окна закупки по режиму поставщика
+    const bucketOf = (d) => (sup.orderMode === 'season' ? 0 : Math.floor(d.stageIdx / Math.max(1, sup.drawStages)));
+    const buckets = {};
+    for (const d of list) (buckets[bucketOf(d)] ||= []).push(d);
+    const bucketKeys = Object.keys(buckets).map(Number).sort((x, y) => x - y);
+
+    const orders = [];
+    let orderedSoFar = 0;
+    bucketKeys.forEach((bk, i) => {
+      const items = buckets[bk];
+      const windowMeters = items.reduce((s, d) => s + d.meters, 0);
+      const orderDate = items.reduce((m, d) => (d.orderBy < m ? d.orderBy : m), items[0].orderBy);
+      const needBy = items.reduce((m, d) => (d.needBy < m ? d.needBy : m), items[0].needBy);
+      const stages = [...new Set(items.map((d) => d.stageId))];
+      const isLast = i === bucketKeys.length - 1;
+      // 5) объём: промежуточный = окно + страховой; последний = остаток плана (true-up)
+      const qty = isLast ? Math.max(0, totalNeed - orderedSoFar) : windowMeters * safetyMul;
+      orderedSoFar += qty;
+      orders.push({
+        seq: i + 1, orderDate, needBy,
+        meters: Math.ceil(qty), planMeters: Math.ceil(windowMeters),
+        cost: Math.round(qty * avgPrice), coversStages: stages, isLast,
+      });
+    });
+
+    fabrics.push({
+      fabricKey: key, label: list[0].label, image,
+      supplierId: sup.id, supplierName: sup.name, orderMode: sup.orderMode, drawStages: sup.drawStages,
+      articleIds, totalNeed: Math.ceil(totalNeed),
+      totalOrdered: orders.reduce((s, o) => s + o.meters, 0),
+      totalCost: orders.reduce((s, o) => s + o.cost, 0),
+      orders,
     });
   }
-  return orders;
+
+  // 6) группировка по поставщику
+  const bySup = {};
+  for (const f of fabrics) {
+    const g = (bySup[f.supplierId] ||= {
+      supplierId: f.supplierId, supplierName: f.supplierName,
+      orderMode: f.orderMode, drawStages: f.drawStages, fabrics: [],
+    });
+    g.fabrics.push(f);
+  }
+  const suppliers = Object.values(bySup).map((g) => {
+    const allOrders = g.fabrics.flatMap((f) => f.orders);
+    g.earliestOrderDate = allOrders.reduce((m, o) => (!m || o.orderDate < m ? o.orderDate : m), null);
+    g.totalMeters = g.fabrics.reduce((s, f) => s + f.totalOrdered, 0);
+    g.totalCost = g.fabrics.reduce((s, f) => s + f.totalCost, 0);
+    g.fabrics.sort((a, b) => String(a.label).localeCompare(String(b.label), 'ru'));
+    return g;
+  }).sort((a, b) => (String(a.earliestOrderDate || '') < String(b.earliestOrderDate || '') ? -1 : 1));
+
+  const totals = {
+    meters: suppliers.reduce((s, g) => s + g.totalMeters, 0),
+    cost: suppliers.reduce((s, g) => s + g.totalCost, 0),
+  };
+  return { suppliers, totals };
 }
 
 export { OPS, OP_RU };

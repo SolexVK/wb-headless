@@ -79,7 +79,7 @@ export function canEditAnything(perms) {
 // ── Политика записи state: берём серверную версию за базу и накладываем ТОЛЬКО те
 // секции, которые пользователю разрешено редактировать. Остальное остаётся как в БД. ──
 // Владельцы секций (какое право открывает запись какой части state):
-//   data    → settings, seasons, stages, workshops, version, СТРУКТУРА articles
+//   data    → settings, seasons, stages, workshops, suppliers, version, СТРУКТУРА articles
 //   unit    → state.unit и article.unit (коммерческая юнит-экономика/себестоимость)
 //   fabric  → article.fabricInfo (метаданные/образцы ткани)
 //   matrix|fact|salesplan → state.partias (партии/количества/факт)
@@ -115,6 +115,7 @@ export function applyWritePolicy(stored, incoming, perms) {
   if (cap.data) {
     out.settings = incoming.settings; out.seasons = incoming.seasons;
     out.stages = incoming.stages; out.workshops = incoming.workshops;
+    out.suppliers = incoming.suppliers;
     if (incoming.version != null) out.version = incoming.version;
   }
   if (cap.unit) out.unit = incoming.unit;
