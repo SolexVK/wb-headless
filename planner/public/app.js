@@ -361,9 +361,7 @@ function colorUnits(a, stageId, color) {
   let s = 0; for (const k in row) s += +row[k] || 0;
   return Math.round(s);
 }
-// ---------- КОНТРОЛЬ СРОКОВ (факт по операциям + отставание) ----------
-const TIMING_OPS = ['cut', 'sew', 'iron', 'otk'];
-const TIMING_OP_RU = { cut: 'Крой', sew: 'Пошив', iron: 'Утюжка', otk: 'ОТК' };
+// ---------- КОНТРОЛЬ СРОКОВ («тихий контроль» — список исключений) ----------
 function renderTiming() {
   const root = document.getElementById('timing');
   const cyc = (schedule?.cycles || []).filter((c) => stageInSeason(c.stageId) && !c.historical);
@@ -371,67 +369,60 @@ function renderTiming() {
   const threshold = state.settings.delayThresholdDays ?? 6;
   const today = /^\d{4}-\d{2}-\d{2}$/.test(state.settings.planningDate || '') ? state.settings.planningDate : new Date().toISOString().slice(0, 10);
   const gIdx = (id) => state.stages.findIndex((z) => z.id === id) + 1;
+  const pById = (id) => (state.partias || []).find((p) => p.id === id);
 
-  const cellBg = (d) => {
-    if (d == null) return '';
-    if (d <= 0) return 'background:rgba(52,211,153,.14)';
-    if (d <= threshold) return 'background:rgba(245,158,11,.16)';
-    return 'background:rgba(248,113,113,.18)';
-  };
-  const dLabel = (d, done) => (d == null ? '<span class="mini">—</span>' : d <= 0 ? `<span class="mini">${done ? 'в срок' : ''}</span>` : `<b style="color:${d > threshold ? 'var(--danger)' : '#d97706'}">+${d} дн</b>`);
+  const attention = cyc.filter((c) => c.delay && c.delay.attention)
+    .sort((a, b) => (Number(b.delay.willMiss) - Number(a.delay.willMiss)) || (b.delay.days - a.delay.days));
 
-  const byArt = {};
-  for (const c of cyc) (byArt[c.articleId] ||= []).push(c);
-  const arts = Object.keys(byArt).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const actions = (c) => `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
+    <button class="btn" data-tm-done="${c.partiaId}">✓ Готово вовремя</button>
+    <label style="display:flex;gap:4px;align-items:center;font-size:12px">⏱ Задержка до:
+      <input type="date" data-tm-exp="${c.partiaId}" value="${(pById(c.partiaId) && pById(c.partiaId).expectedReady) || ''}" style="padding:3px 5px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px"></label>
+    <button class="btn" data-tm-snooze="${c.partiaId}">Идёт по плану</button>
+  </div>`;
 
-  const sections = arts.map((aid) => {
-    const list = byArt[aid].sort((x, y) => (gIdx(x.stageId) - gIdx(y.stageId)) || (x.partiaNo - y.partiaNo));
-    const rows = list.map((c) => {
-      const opCells = TIMING_OPS.map((op) => {
-        const plan = c.ops[op].end;
-        const fact = (c.progress && c.progress[op]) || '';
-        const d = c.delay && c.delay.perOp ? c.delay.perOp[op] : null;
-        return `<td style="${cellBg(d)};text-align:center;min-width:118px">
-          <div class="mini">план ${fmt(plan)}</div>
-          <input type="date" data-prog-partia="${c.partiaId}" data-prog-op="${op}" value="${fact}" style="width:116px">
-          <div>${dLabel(d, !!fact)}</div>
-        </td>`;
-      }).join('');
-      const dl = c.delay;
-      let prog;
-      if (dl && dl.days > 0) {
-        prog = dl.willMiss
-          ? `<span style="color:var(--danger)">⚠ срыв: WB ~${fmt(dl.projWb)} > дедлайн ${fmt(c.logistics.deadline)}</span>`
-          : `WB ~${fmt(dl.projWb)} <span class="mini">(дедлайн ${fmt(c.logistics.deadline)})</span>`;
-      } else if (c.logistics.lateDays > 0) {
-        prog = `<span style="color:var(--danger)">план опаздывает на ${c.logistics.lateDays} дн</span>`;
-      } else {
-        prog = '<span style="color:var(--accent-2)">в срок</span>';
-      }
-      return `<tr>
-        <td><b>П${c.partiaNo}</b> · ${c.workshopName}${c.own ? ' <span class="mini">свой</span>' : ''}<div class="mini">Этап ${gIdx(c.stageId)} · ${c.statusRu || '—'}</div></td>
-        ${opCells}
-        <td>${prog}</td>
-      </tr>`;
-    }).join('');
-    return `<div class="panel"><div class="subhead"><h3>${aid}</h3><span class="mini">${byArt[aid][0].articleName}</span></div>
-      <div style="overflow-x:auto"><table><thead><tr><th>Партия</th>${TIMING_OPS.map((op) => `<th>${TIMING_OP_RU[op]}</th>`).join('')}<th>Прогноз прихода на WB</th></tr></thead>
-      <tbody>${rows}</tbody></table></div></div>`;
+  const attnItems = attention.map((c) => {
+    const d = c.delay;
+    const problem = d.state === 'overdue'
+      ? `<span style="color:var(--danger)">просрочена готовность: план ${fmt(c.readyDate)}, статус ещё «${c.statusRu}» (${d.overdueDays} дн без подтверждения)</span>`
+      : (d.willMiss
+        ? `<span style="color:var(--danger)">риск срыва: приход на WB ~${fmt(d.projWb)} позже дедлайна ${fmt(c.logistics.deadline)}</span>`
+        : `<span style="color:#d97706">задержка: ожидается ${fmt(d.expectedReady)} (в пределах дедлайна ${fmt(c.logistics.deadline)})</span>`);
+    return `<div style="padding:10px 0;border-top:1px solid var(--line)">
+      <div><b>${c.articleId}</b> · Партия ${c.partiaNo} · ${c.workshopName}${c.own ? ' <span class="mini">свой</span>' : ''} <span class="mini">· Этап ${gIdx(c.stageId)}</span></div>
+      <div class="mini" style="margin-top:2px">${problem}</div>
+      ${actions(c)}
+    </div>`;
   }).join('');
 
-  root.innerHTML = `
-    <div class="panel"><div class="mini">Контроль сроков на «сегодня»: <b>${fmt(today)}</b> · порог отставания ${threshold} дн. Отмечай <b>факт завершения</b> каждой операции — система считает отставание по каждому внутреннему этапу и прогноз прихода на WB. «Сегодня» и порог — в «Данные → Контроль сроков». Зелёный — в срок, жёлтый — впритык, красный — срыв.</div></div>
-    ${sections}`;
+  // полный список (свёрнуто) — все партии по состоянию
+  const stateBadge = (c) => {
+    const d = c.delay;
+    if (d && d.state === 'done') return d.days > 0 ? `<span style="color:#d97706">готово (+${d.days} дн)</span>` : '<span style="color:var(--accent-2)">готово в срок</span>';
+    if (d && d.state === 'overdue') return '<span style="color:var(--danger)">просрочка</span>';
+    if (d && d.state === 'delayed') return `<span style="color:#d97706">задержка до ${fmt(d.expectedReady)}</span>`;
+    if (c.logistics.lateDays > 0) return `<span style="color:var(--danger)">план опаздывает</span>`;
+    return '<span style="color:var(--accent-2)">в срок</span>';
+  };
+  const allRows = [...cyc].sort((a, b) => (a.readyDate < b.readyDate ? -1 : 1)).map((c) => `<tr>
+    <td><b>${c.articleId}</b> · П${c.partiaNo}</td><td>${c.workshopName}</td><td class="mini">Этап ${gIdx(c.stageId)}</td>
+    <td>${c.statusRu || '—'}</td><td>${fmt(c.readyDate)}</td><td>${fmt(c.logistics.deadline)}</td><td>${stateBadge(c)}</td>
+  </tr>`).join('');
 
-  root.querySelectorAll('input[data-prog-partia]').forEach((inp) => inp.addEventListener('change', async (e) => {
-    const p = (state.partias || []).find((x) => x.id === e.target.dataset.progPartia);
-    if (!p) return;
-    p.progress = p.progress || { cut: '', sew: '', iron: '', otk: '' };
-    p.progress[e.target.dataset.progOp] = e.target.value || '';
-    dirty = true;
-    try { await recalc(true); toast('Факт сохранён, отставание пересчитано'); }
-    catch (err) { toast('Ошибка: ' + err.message, true); }
-  }));
+  root.innerHTML = `
+    <div class="panel"><div class="mini">Тихий контроль: тревожим только по исключениям. Сегодня <b>${fmt(today)}</b> · порог ${threshold} дн (меняется в «Данные → Контроль сроков»). Статусы партий двигай как обычно — система сама запомнит даты и посчитает готовность. «Готово вовремя» ставит статус «готово» сегодняшним числом; «Задержка» фиксирует новую ожидаемую дату; «Идёт по плану» откладывает вопрос на 3 дня.</div></div>
+    <div class="panel"><h3>Требует внимания${attention.length ? ` (${attention.length})` : ''}</h3>
+      ${attention.length ? attnItems : '<div style="color:var(--accent-2)">Всё по плану ✓ Ничего не требует внимания.</div>'}
+    </div>
+    <details class="panel"><summary style="cursor:pointer;font-weight:600">Все партии (${cyc.length})</summary>
+      <div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>Партия</th><th>Цех</th><th>Этап</th><th>Статус</th><th>План готов</th><th>Дедлайн WB</th><th>Состояние</th></tr></thead>
+      <tbody>${allRows}</tbody></table></div>
+    </details>`;
+
+  const save = async (fn) => { fn(); dirty = true; try { await recalc(true); toast('Сохранено, пересчитано'); } catch (e) { toast('Ошибка: ' + e.message, true); } };
+  root.querySelectorAll('[data-tm-done]').forEach((b) => b.addEventListener('click', () => { const p = pById(b.dataset.tmDone); if (p) save(() => { p.status = 'done'; p.expectedReady = ''; p.snoozeUntil = ''; }); }));
+  root.querySelectorAll('[data-tm-exp]').forEach((inp) => inp.addEventListener('change', () => { const p = pById(inp.dataset.tmExp); if (p) save(() => { p.expectedReady = inp.value || ''; p.snoozeUntil = ''; }); }));
+  root.querySelectorAll('[data-tm-snooze]').forEach((b) => b.addEventListener('click', () => { const p = pById(b.dataset.tmSnooze); if (!p) return; const dt = new Date(Date.parse(today) + 3 * 86400000).toISOString().slice(0, 10); save(() => { p.snoozeUntil = dt; }); }));
 }
 
 // короткая метка этапа: «Э1», «Э2» …
@@ -2507,6 +2498,7 @@ function renderData() {
     ${dataSuppliersPanel()}
     ${dataArticlesPanel()}
     ${dataWorkshopsPanel()}
+    ${dataResponsiblesPanel()}
     ${dataSeasonsPanel()}
     ${dataStagesPanel()}
     ${dataSettingsPanel()}
@@ -2514,6 +2506,29 @@ function renderData() {
   `;
   bindDataEvents();
   applyCollapsibles();
+  loadResponsibles();
+}
+
+function dataResponsiblesPanel() {
+  return `<div class="panel"><div class="subhead"><h3>Ответственные (цех × роль)</h3></div>
+    <div class="mini" style="margin-bottom:8px">Кто отвечает за этап в цехе. Нужно для будущих Telegram-опросов (Шаг 2): система будет спрашивать именно ответственного по его этапу. Список людей — те, кто входил через Telegram.</div>
+    <div id="responsibles-box"><div class="mini">Загрузка…</div></div></div>`;
+}
+async function loadResponsibles() {
+  const box = document.getElementById('responsibles-box'); if (!box) return;
+  let data;
+  try { data = await api('/api/responsibles'); } catch { box.innerHTML = '<div class="mini">Раздел доступен при включённой БД и праве на «Данные».</div>'; return; }
+  const roles = data.roles || [], users = data.users || [];
+  const respMap = {}; for (const r of (data.responsibles || [])) respMap[r.workshopId + '|' + r.role] = r.telegramId;
+  const opt = (sel) => '<option value="">— не задан —</option>' + users.map((u) => `<option value="${u.telegramId}"${String(u.telegramId) === String(sel) ? ' selected' : ''}>${u.name}${u.username ? ' (@' + u.username + ')' : ''}</option>`).join('');
+  box.innerHTML = `<div style="overflow-x:auto"><table><thead><tr><th>Цех</th>${roles.map((r) => `<th>${r.name}</th>`).join('')}</tr></thead>
+    <tbody>${state.workshops.map((w) => `<tr><td><b>${w.name}</b>${w.own ? ' <span class="mini">свой</span>' : ''}</td>
+      ${roles.map((r) => `<td><select data-resp-ws="${w.id}" data-resp-role="${r.key}">${opt(respMap[w.id + '|' + r.key])}</select></td>`).join('')}
+    </tr>`).join('')}</tbody></table></div>${users.length ? '' : '<div class="mini" style="margin-top:6px">Пользователей пока нет — появятся после входа через Telegram.</div>'}`;
+  box.querySelectorAll('select[data-resp-ws]').forEach((sel) => sel.addEventListener('change', async (e) => {
+    try { await api('/api/responsibles', { method: 'PUT', body: JSON.stringify({ workshopId: e.target.dataset.respWs, role: e.target.dataset.respRole, telegramId: e.target.value || null }) }); toast('Ответственный обновлён'); }
+    catch (err) { toast('Ошибка: ' + err.message, true); }
+  }));
 }
 
 function dataArticlesPanel() {

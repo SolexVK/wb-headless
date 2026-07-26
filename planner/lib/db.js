@@ -54,6 +54,36 @@ function migrate(db) {
     CREATE TABLE IF NOT EXISTS feature_dict (
       path TEXT PRIMARY KEY, json TEXT, fetchedAt TEXT
     );
+    -- Журнал производственных событий (append-only): смены статусов, новые даты,
+    -- выполненные количества (Шаг 2), заметки. Источник истории/аудита/динамики.
+    CREATE TABLE IF NOT EXISTS prod_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT,                -- ISO-время события
+      actor INTEGER,          -- telegramId автора (NULL = система)
+      kind TEXT,              -- status | expected | qty | note
+      partiaId TEXT,
+      articleId TEXT,
+      color TEXT,
+      workshopId TEXT,
+      op TEXT,                -- операция cut|sew|iron|otk (или NULL)
+      qty INTEGER,            -- количество (kind=qty)
+      dateValue TEXT,         -- дата (kind=status/expected)
+      fromValue TEXT,
+      toValue TEXT,
+      note TEXT,
+      payload TEXT            -- доп. JSON
+    );
+    CREATE INDEX IF NOT EXISTS idx_prod_events_partia ON prod_events(partiaId);
+    CREATE INDEX IF NOT EXISTS idx_prod_events_article ON prod_events(articleId);
+    CREATE INDEX IF NOT EXISTS idx_prod_events_ts ON prod_events(ts);
+    -- Ответственные по (цех × роль). role — ключ из реестра ролей (cut|flow|otk|…).
+    CREATE TABLE IF NOT EXISTS responsibles (
+      workshopId TEXT,
+      role TEXT,
+      telegramId INTEGER,
+      updatedAt TEXT,
+      PRIMARY KEY (workshopId, role)
+    );
     CREATE TABLE IF NOT EXISTS users (
       telegramId INTEGER PRIMARY KEY,
       username TEXT, name TEXT, photoUrl TEXT,
@@ -284,6 +314,43 @@ export function stateSaveJson(json) {
   const db = getDb(); if (!db) return false;
   db.prepare('INSERT INTO app_state(id,json,updatedAt) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET json=excluded.json, updatedAt=excluded.updatedAt')
     .run(String(json), new Date().toISOString());
+  return true;
+}
+
+// ── Журнал производственных событий (append-only) ──
+export function eventAdd(e) {
+  const db = getDb(); if (!db) return false;
+  db.prepare(`INSERT INTO prod_events(ts,actor,kind,partiaId,articleId,color,workshopId,op,qty,dateValue,fromValue,toValue,note,payload)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(e.ts || new Date().toISOString(), e.actor ?? null, e.kind || 'note',
+      e.partiaId ?? null, e.articleId ?? null, e.color ?? null, e.workshopId ?? null,
+      e.op ?? null, e.qty ?? null, e.dateValue ?? null, e.fromValue ?? null, e.toValue ?? null,
+      e.note ?? null, e.payload == null ? null : (typeof e.payload === 'string' ? e.payload : JSON.stringify(e.payload)));
+  return true;
+}
+export function eventsForPartia(partiaId, limit = 200) {
+  const db = getDb(); if (!db) return [];
+  return db.prepare('SELECT * FROM prod_events WHERE partiaId = ? ORDER BY id DESC LIMIT ?').all(String(partiaId), limit);
+}
+export function eventsRecent(limit = 200) {
+  const db = getDb(); if (!db) return [];
+  return db.prepare('SELECT * FROM prod_events ORDER BY id DESC LIMIT ?').all(limit);
+}
+
+// ── Ответственные (цех × роль → пользователь) ──
+export function responsibleList() {
+  const db = getDb(); if (!db) return [];
+  return db.prepare('SELECT workshopId, role, telegramId FROM responsibles').all();
+}
+export function responsibleSet(workshopId, role, telegramId) {
+  const db = getDb(); if (!db) return false;
+  if (telegramId == null || telegramId === '') {
+    db.prepare('DELETE FROM responsibles WHERE workshopId=? AND role=?').run(String(workshopId), String(role));
+    return true;
+  }
+  db.prepare(`INSERT INTO responsibles(workshopId,role,telegramId,updatedAt) VALUES(?,?,?,?)
+    ON CONFLICT(workshopId,role) DO UPDATE SET telegramId=excluded.telegramId, updatedAt=excluded.updatedAt`)
+    .run(String(workshopId), String(role), Number(telegramId), new Date().toISOString());
   return true;
 }
 

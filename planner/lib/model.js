@@ -263,6 +263,28 @@ function normalizeProgress(input) {
   return out;
 }
 
+// Реестр ролей ответственных (расширяемый): роль → название + операции, за которые
+// она отвечает. Добавить этап/ответственного = дописать сюда запись. «Поток» покрывает
+// пошив и утюжку вместе. Ключи ролей используются в таблице responsibles и «ядре внимания».
+export const PARTIA_ROLES = [
+  { key: 'cut', name: 'Раскрой', ops: ['cut'] },
+  { key: 'flow', name: 'Поток (пошив/утюжка)', ops: ['sew', 'iron'] },
+  { key: 'otk', name: 'ОТК', ops: ['otk'] },
+];
+// операция → ключ роли (для «кто отвечает за этот этап»)
+export const OP_ROLE = (() => { const m = {}; for (const r of PARTIA_ROLES) for (const op of r.ops) m[op] = r.key; return m; })();
+
+// Даты смены статуса партии: { статус: 'YYYY-MM-DD' } — когда партия вошла в статус.
+// Проставляются автоматически сервером при смене статуса. Источник «факта готовности».
+function normalizeStatusDates(input) {
+  const src = input && typeof input === 'object' ? input : {};
+  const out = {};
+  for (const st of PARTIA_STATUSES) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(src[st])) out[st] = src[st];
+  }
+  return out;
+}
+
 // Гарантировать наличие и корректность s.partias.
 // Если партий нет — мигрируем из article.matrix (1 партия на артикул+этап).
 function ensurePartias(s) {
@@ -296,7 +318,10 @@ function ensurePartias(s) {
     p.factMatrix = pruneMatrix(p.factMatrix, a);
     p.status = PARTIA_STATUSES.includes(p.status) ? p.status : 'plan';
     p.historical = !!p.historical;
-    p.progress = normalizeProgress(p.progress); // факт завершения операций (крой/пошив/утюжка/ОТК)
+    p.progress = normalizeProgress(p.progress); // факт завершения операций (необязательный разбор)
+    p.statusDates = normalizeStatusDates(p.statusDates); // авто-даты смены статуса (факт готовности)
+    p.expectedReady = /^\d{4}-\d{2}-\d{2}$/.test(p.expectedReady) ? p.expectedReady : ''; // ручная новая дата при задержке
+    p.snoozeUntil = /^\d{4}-\d{2}-\d{2}$/.test(p.snoozeUntil) ? p.snoozeUntil : ''; // «идёт по плану» — не тревожить до этой даты
   }
   assignPartiaNumbers(s.partias, s.stages);
   // article.matrix больше не источник истины — не храним, чтобы не расходилось

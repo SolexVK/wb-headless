@@ -6,12 +6,12 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { defaultState, normalizeState } from './lib/model.js';
+import { defaultState, normalizeState, PARTIA_ROLES } from './lib/model.js';
 import { buildSchedule } from './lib/scheduler.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
-import { dbAvailable, stateLoadJson, stateSaveJson } from './lib/db.js';
+import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList } from './lib/db.js';
 import { installAuth, requireView, requireEdit } from './lib/authMiddleware.js';
 import { applyWritePolicy, filterStateForRead, canEditAnything } from './lib/permissions.js';
 
@@ -110,6 +110,30 @@ function saveState(state) {
   return norm;
 }
 
+// Диф партий при сохранении: авто-штамп даты смены статуса (в incoming, чтобы
+// сохранилось) + запись событий в prod_events (append-only). Мягко: без БД — no-op.
+function applyProductionEvents(oldState, newState, actor) {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const oldById = Object.fromEntries((oldState.partias || []).map((p) => [p.id, p]));
+    for (const np of (newState.partias || [])) {
+      const op = oldById[np.id];
+      // сохранить историю дат статусов, если клиент их не прислал
+      np.statusDates = { ...((op && op.statusDates) || {}), ...(np.statusDates || {}) };
+      const oldStatus = op ? op.status : undefined;
+      if (np.status && np.status !== oldStatus) {
+        np.statusDates[np.status] = today; // авто-штамп реального «сегодня»
+        eventAdd({ actor, kind: 'status', partiaId: np.id, articleId: np.articleId, workshopId: np.workshopId || '', dateValue: today, fromValue: oldStatus || '', toValue: np.status });
+      }
+      const newExp = np.expectedReady || '';
+      const oldExp = op ? (op.expectedReady || '') : '';
+      if (newExp !== oldExp) {
+        eventAdd({ actor, kind: 'expected', partiaId: np.id, articleId: np.articleId, workshopId: np.workshopId || '', dateValue: newExp, fromValue: oldExp, toValue: newExp });
+      }
+    }
+  } catch (e) { console.error('[planner] applyProductionEvents:', String(e.message || e)); }
+}
+
 const app = express();
 app.set('trust proxy', true); // за Tailscale Funnel: доверяем X-Forwarded-Proto/For
 
@@ -168,7 +192,10 @@ app.get('/api/state', (req, res) => {
 app.put('/api/state', (req, res) => {
   try {
     if (req.perms && !canEditAnything(req.perms)) return res.status(403).json({ ok: false, error: 'read_only' });
-    const incoming = req.perms ? applyWritePolicy(loadState(), req.body, req.perms) : req.body;
+    const old = loadState();
+    const incoming = req.perms ? applyWritePolicy(old, req.body, req.perms) : req.body;
+    // авто-штамп даты смены статуса + журнал производственных событий (append-only)
+    applyProductionEvents(old, incoming, req.user ? req.user.telegramId : null);
     const norm = saveState(incoming);
     res.json({ ok: true, state: req.perms ? filterStateForRead(norm, req.perms) : norm });
   } catch (e) {
@@ -179,6 +206,18 @@ app.put('/api/state', (req, res) => {
 // сбросить к сиду
 app.post('/api/state/reset', requireEdit('data'), (req, res) => {
   res.json({ ok: true, state: saveState(defaultState()) });
+});
+
+// ответственные (цех × роль → пользователь) + лёгкий список пользователей для выбора
+app.get('/api/responsibles', requireView('data'), (req, res) => {
+  const users = userList().map((u) => ({ telegramId: u.telegramId, name: u.name || u.username || String(u.telegramId), username: u.username || '' }));
+  res.json({ ok: true, responsibles: responsibleList(), users, roles: PARTIA_ROLES });
+});
+app.put('/api/responsibles', requireEdit('data'), (req, res) => {
+  const { workshopId, role, telegramId } = req.body || {};
+  if (!workshopId || !role) return res.status(400).json({ ok: false, error: 'workshopId и role обязательны' });
+  responsibleSet(workshopId, role, telegramId === '' || telegramId == null ? null : telegramId);
+  res.json({ ok: true, responsibles: responsibleList() });
 });
 
 // расчёт расписания по текущему (или переданному) состоянию

@@ -246,37 +246,53 @@ export function buildSchedule(state) {
       }
     }
 
-    // Отставание ПО ОПЕРАЦИЯМ (Фаза 3, 3a): факт завершения операций (progress)
-    // vs план. Считаем только для партий, где начали учёт (статус не «план» или
-    // есть хоть одна отметка факта) и которые ещё не завершены.
+    // Контроль сроков (Фаза 3, «тихий контроль»). Главный сигнал — СТАТУС партии +
+    // авто-дата смены статуса (готовность) + ручная «ожидаемая дата» при задержке.
+    // Тишина = всё по плану; в «Требует внимания» попадают только исключения.
+    // Пооперационные даты (progress) — опциональный разбор, тут не обязательны.
     let delayInfo = null;
-    const prog = job.partia.progress || {};
-    const finished = job.partia.status === 'done' || job.partia.status === 'shipped';
-    const anyProgress = OPS.some((op) => prog[op]);
-    if (!job.partia.historical && !finished && (job.partia.status !== 'plan' || anyProgress)) {
-      let currentIdx = OPS.findIndex((op) => !prog[op]);
-      if (currentIdx === -1) currentIdx = OPS.length - 1; // все с фактом → фронтир = ОТК
-      const perOp = {};
-      for (let i = 0; i < OPS.length; i++) {
-        const op = OPS[i];
-        const plannedEnd = dates[op].end;
-        if (prog[op]) perOp[op] = diffDays(plannedEnd, prog[op]);          // факт − план (может быть <0 = раньше)
-        else if (i === currentIdx) perOp[op] = Math.max(0, diffDays(plannedEnd, todayISO)); // текущая: просрочка на сегодня
-        else perOp[op] = null;                                            // ещё не начата
-      }
-      const days = Math.max(0, perOp[OPS[currentIdx]] || 0); // отставание на фронтире
-      const projWb = addDays(wbArrival, days);
-      const willMiss = !!(deadline && diffDays(deadline, projWb) > 0);
-      delayInfo = { days, currentOp: OPS[currentIdx], perOp, projWb, willMiss };
-      if (days > delayThreshold) {
-        const opRu = OP_RU[OPS[currentIdx]];
-        warnings.push({
-          level: willMiss ? 'error' : 'warn',
-          stage: job.stageId, article: job.article.id, workshop: w.id, kind: 'delay',
-          message: willMiss
-            ? `Отставание: цех ${w.name}, партия ${job.article.id} — ${opRu} отстаёт на ${days} дн, прогноз прихода на WB ~${projWb}, риск срыва дедлайна ${deadline}.`
-            : `Отставание: цех ${w.name}, партия ${job.article.id} — ${opRu} отстаёт на ${days} дн, пока в пределах дедлайна ${deadline}.`,
-        });
+    {
+      const st = job.partia.status;
+      const sd = job.partia.statusDates || {};
+      const expReady = job.partia.expectedReady || '';
+      const plannedReady = readyDate;
+      const finished = st === 'done' || st === 'shipped';
+      const started = st !== 'plan' || expReady || Object.keys(sd).length > 0;
+      if (!job.partia.historical && started) {
+        if (finished) {
+          const actualReady = sd[st] || sd.done || sd.shipped || '';
+          const days = actualReady ? diffDays(plannedReady, actualReady) : 0;
+          delayInfo = { days, state: 'done', attention: false, projWb: null, willMiss: false, expectedReady: '', overdueDays: 0 };
+        } else {
+          const expected = expReady || plannedReady;
+          const overdueDays = Math.max(0, diffDays(plannedReady, todayISO)); // на сколько сегодня позже плановой готовности
+          // прогнозная готовность — не раньше сегодня, если уже просрочено
+          const projReady = diffDays(expected, todayISO) > 0 ? todayISO : expected;
+          const days = Math.max(0, diffDays(plannedReady, projReady));
+          const projWb = addDays(wbArrival, days);
+          const willMiss = !!(deadline && diffDays(deadline, projWb) > 0);
+          // состояние: с ручной датой — 'delayed' (или 'overdue', если и её прошли);
+          // без даты — 'overdue' после льготного порога; иначе 'ok'.
+          // «идёт по плану»: пока snoozeUntil не прошёл — не тревожим по просрочке
+          const snoozed = !expReady && job.partia.snoozeUntil && diffDays(todayISO, job.partia.snoozeUntil) >= 0;
+          let state = 'ok';
+          if (expReady) state = diffDays(expReady, todayISO) > 0 ? 'overdue' : 'delayed';
+          else if (overdueDays > delayThreshold && !snoozed) state = 'overdue';
+          const attention = state === 'overdue' || (willMiss && days > 0);
+          delayInfo = { days, state, attention, projWb, willMiss, expectedReady: expReady, overdueDays };
+          if (attention) {
+            const stRu = PARTIA_STATUS_RU[st] || st;
+            let message;
+            if (state === 'overdue') {
+              message = `Требует внимания: цех ${w.name}, партия ${job.article.id} — по плану готова ${plannedReady}, статус ещё «${stRu}» (${overdueDays} дн без подтверждения). Подтверди готовность или укажи новую дату.`;
+            } else if (expReady) {
+              message = `Задержка: цех ${w.name}, партия ${job.article.id} — ожидаемая готовность ${expReady}, приход на WB ~${projWb}${willMiss ? `, риск срыва дедлайна ${deadline}` : ''}.`;
+            } else {
+              message = `Риск срыва: цех ${w.name}, партия ${job.article.id} (${stRu}) — прогноз прихода на WB ~${projWb} позже дедлайна ${deadline}.`;
+            }
+            warnings.push({ level: willMiss ? 'error' : 'warn', kind: 'delay', stage: job.stageId, article: job.article.id, workshop: w.id, message });
+          }
+        }
       }
     }
 
@@ -304,7 +320,7 @@ export function buildSchedule(state) {
       locked: !!job.lockedWs,
       ops: dates,
       cutStart, sewStart, readyDate,
-      progress: { ...prog },
+      progress: { ...(job.partia.progress || {}) },
       delay: delayInfo,
       fabric: { meters: fabricMeters, orderDate: fabricOrderDate, atWorkshop: fabricAtWorkshop },
       logistics: { shipment, wbArrival, deadline, lateDays },
