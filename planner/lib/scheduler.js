@@ -101,6 +101,10 @@ export function buildSchedule(state) {
   const fabricCfg = state.settings.fabric;
   const logi = state.settings.logistics;
   const riskBuf = state.settings.riskBufferDays || 0;
+  // контроль отставания (3a): «сегодня» и порог
+  const todayISO = /^\d{4}-\d{2}-\d{2}$/.test(state.settings.planningDate || '')
+    ? state.settings.planningDate : toISO(new Date());
+  const delayThreshold = state.settings.delayThresholdDays ?? 6;
 
   const wsById = Object.fromEntries(state.workshops.map((w) => [w.id, w]));
   const stageById = Object.fromEntries(state.stages.map((s) => [s.id, s]));
@@ -238,6 +242,26 @@ export function buildSchedule(state) {
         warnings.push({
           level: 'warn', stage: job.stageId, article: job.article.id, workshop: w.id,
           message: `Впритык к дедлайну: артикул ${job.article.id} (${job.units} шт, ${w.name}) приходит на WB ${wbArrival}, дедлайн ${deadline} (запас ${-lateDays} дн < буфер ${riskBuf} раб. дн). Любой сбой — риск срыва.`,
+        });
+      }
+    }
+
+    // Отставание (Фаза 3, 3a): для АКТИВНЫХ партий (крой/пошив) сверяем факт со
+    // сроком на «сегодня». Если статус не дошёл до планового конца текущей
+    // операции больше чем на порог — тревога с прогнозом сдвига прихода на WB.
+    if (!job.partia.historical && (job.partia.status === 'cutting' || job.partia.status === 'sewing')) {
+      const checkpoint = job.partia.status === 'cutting' ? dates.cut.end : dates.sew.end;
+      const delay = diffDays(checkpoint, todayISO); // сегодня − плановый конец операции
+      if (delay > delayThreshold) {
+        const projWb = addDays(wbArrival, delay);
+        const willMiss = deadline && diffDays(deadline, projWb) > 0;
+        const stRu = PARTIA_STATUS_RU[job.partia.status] || job.partia.status;
+        warnings.push({
+          level: willMiss ? 'error' : 'warn',
+          stage: job.stageId, article: job.article.id, workshop: w.id, kind: 'delay',
+          message: willMiss
+            ? `Отставание: цех ${w.name}, партия ${job.article.id} (${stRu}) отстаёт на ${delay} дн от плана — прогноз прихода на WB ~${projWb}, риск срыва дедлайна ${deadline}.`
+            : `Отставание: цех ${w.name}, партия ${job.article.id} (${stRu}) отстаёт на ${delay} дн, пока в пределах дедлайна ${deadline}.`,
         });
       }
     }

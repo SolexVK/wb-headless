@@ -2547,6 +2547,10 @@ function dataSettingsPanel() {
       <div class="field"><label>ОТК после утюжки</label><input data-set="flow.otkAfterIron" value="${fl.otkAfterIron}"></div>
       <div class="field"><label title="Подушка перед дедлайном: если партия приходит на WB меньше чем за столько раб. дней до дедлайна — покажем предупреждение «впритык», даже если формально успели. Даты производства не сдвигает.">Буфер под форс-мажор, раб. дней</label><input data-set="riskBufferDays" value="${state.settings.riskBufferDays}"></div>
     </div>
+    <div class="card"><div class="mini" style="margin-bottom:8px">Контроль сроков</div>
+      <div class="field"><label title="«Сегодня» для контроля отставания. Пусто = реальная текущая дата. Отставание считается для партий в статусе «крой»/«пошив».">Дата планирования (YYYY-MM-DD, пусто = сегодня)</label><input data-set="planningDate" value="${state.settings.planningDate || ''}" placeholder="сегодня"></div>
+      <div class="field"><label title="Если активная партия (крой/пошив) отстаёт от плана больше чем на столько дней — тревога в «Рисках» с прогнозом срыва.">Порог отставания, дней</label><input data-set="delayThresholdDays" value="${state.settings.delayThresholdDays}"></div>
+    </div>
   </div></div>`;
 }
 

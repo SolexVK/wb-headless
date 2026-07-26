@@ -45,6 +45,10 @@ export function defaultSettings() {
     },
     // общий страховочный буфер под форс-мажоры (раб. дней на цикл)
     riskBufferDays: 2,
+    // контроль отставания (Фаза 3): дата «сегодня» ('' = реальная сегодня) и
+    // порог отставания в днях, при котором система бьёт тревогу
+    planningDate: '',
+    delayThresholdDays: 6,
   };
 }
 
@@ -173,6 +177,8 @@ export function normalizeState(input) {
   if (!input || typeof input !== 'object') return base;
   const s = { ...base, ...input };
   s.settings = deepMergeSettings(base.settings, input.settings || {});
+  s.settings.planningDate = /^\d{4}-\d{2}-\d{2}$/.test(s.settings.planningDate) ? s.settings.planningDate : '';
+  s.settings.delayThresholdDays = Math.max(0, Math.round(+s.settings.delayThresholdDays || 6));
   s.unit = normalizeUnitGlobal(input.unit); // глобальные параметры ВБ/налогов (юнит-экономика)
   s.seasons = Array.isArray(input.seasons) && input.seasons.length ? input.seasons : base.seasons;
   s.stages = Array.isArray(input.stages) ? input.stages : base.stages;
