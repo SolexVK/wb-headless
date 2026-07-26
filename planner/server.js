@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { defaultState, normalizeState, PARTIA_ROLES } from './lib/model.js';
 import { buildSchedule } from './lib/scheduler.js';
+import { findRescues } from './lib/rescue.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
@@ -226,6 +227,16 @@ app.post('/api/schedule', (req, res) => {
     const state = req.body && req.body.articles ? normalizeState(req.body) : loadState();
     const schedule = buildSchedule(state);
     res.json({ ok: true, schedule, state });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e.stack || e) });
+  }
+});
+
+// «спасатель сроков» (3b): предложения по спасению партий, срывающих дедлайн
+app.post('/api/rescue', (req, res) => {
+  try {
+    const state = req.body && req.body.articles ? normalizeState(req.body) : loadState();
+    res.json({ ok: true, proposals: findRescues(state) });
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.stack || e) });
   }

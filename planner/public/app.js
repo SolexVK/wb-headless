@@ -371,27 +371,33 @@ function renderTiming() {
   const gIdx = (id) => state.stages.findIndex((z) => z.id === id) + 1;
   const pById = (id) => (state.partias || []).find((p) => p.id === id);
 
-  const attention = cyc.filter((c) => c.delay && c.delay.attention)
-    .sort((a, b) => (Number(b.delay.willMiss) - Number(a.delay.willMiss)) || (b.delay.days - a.delay.days));
+  const attention = cyc.filter((c) => (c.delay && c.delay.attention) || c.logistics.lateDays > 0)
+    .sort((a, b) => (Number(b.logistics.lateDays > 0) - Number(a.logistics.lateDays > 0)) || ((b.delay ? b.delay.days : 0) - (a.delay ? a.delay.days : 0)));
 
-  const actions = (c) => `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
-    <button class="btn" data-tm-done="${c.partiaId}">✓ Готово вовремя</button>
-    <label style="display:flex;gap:4px;align-items:center;font-size:12px">⏱ Задержка до:
-      <input type="date" data-tm-exp="${c.partiaId}" value="${(pById(c.partiaId) && pById(c.partiaId).expectedReady) || ''}" style="padding:3px 5px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px"></label>
-    <button class="btn" data-tm-snooze="${c.partiaId}">Идёт по плану</button>
-  </div>`;
+  const actions = (c) => {
+    const p = pById(c.partiaId);
+    const canRescue = p && p.status === 'plan' && (c.logistics.lateDays > 0 || (c.delay && c.delay.willMiss));
+    return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
+      <button class="btn" data-tm-done="${c.partiaId}">✓ Готово вовремя</button>
+      <label style="display:flex;gap:4px;align-items:center;font-size:12px">⏱ Задержка до:
+        <input type="date" data-tm-exp="${c.partiaId}" value="${(p && p.expectedReady) || ''}" style="padding:3px 5px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px"></label>
+      <button class="btn" data-tm-snooze="${c.partiaId}">Идёт по плану</button>
+      ${canRescue ? `<button class="btn btn-primary" data-tm-rescue="${c.partiaId}">🛟 Показать спасение</button>` : ''}
+    </div>`;
+  };
 
   const attnItems = attention.map((c) => {
     const d = c.delay;
-    const problem = d.state === 'overdue'
-      ? `<span style="color:var(--danger)">просрочена готовность: план ${fmt(c.readyDate)}, статус ещё «${c.statusRu}» (${d.overdueDays} дн без подтверждения)</span>`
-      : (d.willMiss
-        ? `<span style="color:var(--danger)">риск срыва: приход на WB ~${fmt(d.projWb)} позже дедлайна ${fmt(c.logistics.deadline)}</span>`
-        : `<span style="color:#d97706">задержка: ожидается ${fmt(d.expectedReady)} (в пределах дедлайна ${fmt(c.logistics.deadline)})</span>`);
+    let problem;
+    if (d && d.state === 'overdue') problem = `<span style="color:var(--danger)">просрочена готовность: план ${fmt(c.readyDate)}, статус ещё «${c.statusRu}» (${d.overdueDays} дн без подтверждения)</span>`;
+    else if (d && d.willMiss) problem = `<span style="color:var(--danger)">риск срыва: приход на WB ~${fmt(d.projWb)} позже дедлайна ${fmt(c.logistics.deadline)}</span>`;
+    else if (d && d.state === 'delayed') problem = `<span style="color:#d97706">задержка: ожидается ${fmt(d.expectedReady)} (в пределах дедлайна ${fmt(c.logistics.deadline)})</span>`;
+    else problem = `<span style="color:var(--danger)">план не укладывается в дедлайн: приход на WB ${fmt(c.logistics.wbArrival)} позже ${fmt(c.logistics.deadline)} (опоздание ${c.logistics.lateDays} дн)</span>`;
     return `<div style="padding:10px 0;border-top:1px solid var(--line)">
-      <div><b>${c.articleId}</b> · Партия ${c.partiaNo} · ${c.workshopName}${c.own ? ' <span class="mini">свой</span>' : ''} <span class="mini">· Этап ${gIdx(c.stageId)}</span></div>
+      <div><b>${c.articleId}</b> · Партия ${c.partiaNo} · ${c.workshopName}${c.own ? ' <span class="mini">свой</span>' : ''} <span class="mini">· Этап ${gIdx(c.stageId)} · ${c.units.toLocaleString('ru')} шт</span></div>
       <div class="mini" style="margin-top:2px">${problem}</div>
       ${actions(c)}
+      <div id="rescue-${c.partiaId}"></div>
     </div>`;
   }).join('');
 
@@ -423,6 +429,36 @@ function renderTiming() {
   root.querySelectorAll('[data-tm-done]').forEach((b) => b.addEventListener('click', () => { const p = pById(b.dataset.tmDone); if (p) save(() => { p.status = 'done'; p.expectedReady = ''; p.snoozeUntil = ''; }); }));
   root.querySelectorAll('[data-tm-exp]').forEach((inp) => inp.addEventListener('change', () => { const p = pById(inp.dataset.tmExp); if (p) save(() => { p.expectedReady = inp.value || ''; p.snoozeUntil = ''; }); }));
   root.querySelectorAll('[data-tm-snooze]').forEach((b) => b.addEventListener('click', () => { const p = pById(b.dataset.tmSnooze); if (!p) return; const dt = new Date(Date.parse(today) + 3 * 86400000).toISOString().slice(0, 10); save(() => { p.snoozeUntil = dt; }); }));
+  root.querySelectorAll('[data-tm-rescue]').forEach((b) => b.addEventListener('click', async () => {
+    const id = b.dataset.tmRescue; const box = document.getElementById('rescue-' + id);
+    box.innerHTML = '<div class="mini" style="margin-top:6px">Ищу варианты спасения…</div>';
+    try {
+      const r = await api('/api/rescue', { method: 'POST', body: JSON.stringify(state) });
+      const pr = (r.proposals || []).find((x) => x.partiaId === id);
+      box.innerHTML = renderRescueCard(pr);
+      const ap = box.querySelector('[data-rescue-apply]');
+      if (ap) ap.addEventListener('click', () => { const p = pById(id); if (p) save(() => { p.workshopId = ap.dataset.rescueApply; }); });
+    } catch (e) { box.innerHTML = `<div class="mini" style="color:var(--danger)">Ошибка: ${e.message}</div>`; }
+  }));
+}
+
+function renderRescueCard(pr) {
+  if (!pr) return '<div class="mini" style="margin-top:6px">Партия уже не требует спасения (пересчитано).</div>';
+  const o = pr.options && pr.options[0];
+  if (pr.escalate || !o) {
+    return `<div style="margin-top:8px;padding:10px;border:1px solid var(--danger);border-radius:8px;background:rgba(248,113,113,.08)">
+      <div style="color:var(--danger);font-weight:700">⚠ СРОЧНО НУЖЕН ЕЩЁ ОДИН АУТСОРС-ЦЕХ</div>
+      <div class="mini" style="margin-top:4px">Ни один действующий цех не может взять эту партию целиком к дедлайну без срыва других партий. Варианты: подключить дополнительный цех, раздробить партию по размерам (уточняется в Фазе 2 и согласуется с ответственным) или осознанно сдвинуть срок.</div>
+    </div>`;
+  }
+  const shifted = o.affected && o.affected.length
+    ? ` Подвинутся во времени (но успевают к своим дедлайнам): ${o.affected.map((a) => `${a.articleId} (+${a.shiftDays} дн)`).join(', ')}.`
+    : ' Другие партии не затрагиваются.';
+  return `<div style="margin-top:8px;padding:10px;border:1px solid var(--accent-2);border-radius:8px;background:rgba(52,211,153,.08)">
+    <div style="font-weight:700">🛟 Переназначить целиком в цех «${o.toWorkshopName}»</div>
+    <div class="mini" style="margin-top:4px">Новый приход на WB: <b>${fmt(o.newWb)}</b> (запас ${o.slack} дн до дедлайна).${shifted} Ткань — заложить +${o.transferDays} дн на переброску в другой цех.</div>
+    <button class="btn btn-primary" style="margin-top:8px" data-rescue-apply="${o.toWorkshopId}">Применить</button>
+  </div>`;
 }
 
 // короткая метка этапа: «Э1», «Э2» …
@@ -2650,6 +2686,7 @@ function dataSettingsPanel() {
     <div class="card"><div class="mini" style="margin-bottom:8px">Контроль сроков</div>
       <div class="field"><label title="«Сегодня» для контроля отставания. Пусто = реальная текущая дата. Отставание считается для партий в статусе «крой»/«пошив».">Дата планирования (YYYY-MM-DD, пусто = сегодня)</label><input data-set="planningDate" value="${state.settings.planningDate || ''}" placeholder="сегодня"></div>
       <div class="field"><label title="Если активная партия (крой/пошив) отстаёт от плана больше чем на столько дней — тревога в «Рисках» с прогнозом срыва.">Порог отставания, дней</label><input data-set="delayThresholdDays" value="${state.settings.delayThresholdDays}"></div>
+      <div class="field"><label title="Спасатель сроков: сколько дней заложить на переброску части партии и ткани в другой цех (все цеха в одном городе).">Переброска в др. цех, дней</label><input data-set="transferDays" value="${state.settings.transferDays}"></div>
     </div>
   </div></div>`;
 }
