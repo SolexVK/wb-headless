@@ -250,6 +250,19 @@ function genPartiaId() {
   return `p_${(_idCounter++).toString(36)}${Math.floor(_idCounter * 7).toString(36)}`;
 }
 
+// Факт завершения внутренних операций партии: { cut, sew, iron, otk } — дата
+// (YYYY-MM-DD) или '' если операция ещё не завершена. Источник факта для контроля
+// отставания по каждому внутреннему этапу (Фаза 3).
+export const PARTIA_OPS = ['cut', 'sew', 'iron', 'otk'];
+function normalizeProgress(input) {
+  const src = input && typeof input === 'object' ? input : {};
+  const out = {};
+  for (const op of PARTIA_OPS) {
+    out[op] = /^\d{4}-\d{2}-\d{2}$/.test(src[op]) ? src[op] : '';
+  }
+  return out;
+}
+
 // Гарантировать наличие и корректность s.partias.
 // Если партий нет — мигрируем из article.matrix (1 партия на артикул+этап).
 function ensurePartias(s) {
@@ -283,6 +296,7 @@ function ensurePartias(s) {
     p.factMatrix = pruneMatrix(p.factMatrix, a);
     p.status = PARTIA_STATUSES.includes(p.status) ? p.status : 'plan';
     p.historical = !!p.historical;
+    p.progress = normalizeProgress(p.progress); // факт завершения операций (крой/пошив/утюжка/ОТК)
   }
   assignPartiaNumbers(s.partias, s.stages);
   // article.matrix больше не источник истины — не храним, чтобы не расходилось

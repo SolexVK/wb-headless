@@ -246,22 +246,36 @@ export function buildSchedule(state) {
       }
     }
 
-    // Отставание (Фаза 3, 3a): для АКТИВНЫХ партий (крой/пошив) сверяем факт со
-    // сроком на «сегодня». Если статус не дошёл до планового конца текущей
-    // операции больше чем на порог — тревога с прогнозом сдвига прихода на WB.
-    if (!job.partia.historical && (job.partia.status === 'cutting' || job.partia.status === 'sewing')) {
-      const checkpoint = job.partia.status === 'cutting' ? dates.cut.end : dates.sew.end;
-      const delay = diffDays(checkpoint, todayISO); // сегодня − плановый конец операции
-      if (delay > delayThreshold) {
-        const projWb = addDays(wbArrival, delay);
-        const willMiss = deadline && diffDays(deadline, projWb) > 0;
-        const stRu = PARTIA_STATUS_RU[job.partia.status] || job.partia.status;
+    // Отставание ПО ОПЕРАЦИЯМ (Фаза 3, 3a): факт завершения операций (progress)
+    // vs план. Считаем только для партий, где начали учёт (статус не «план» или
+    // есть хоть одна отметка факта) и которые ещё не завершены.
+    let delayInfo = null;
+    const prog = job.partia.progress || {};
+    const finished = job.partia.status === 'done' || job.partia.status === 'shipped';
+    const anyProgress = OPS.some((op) => prog[op]);
+    if (!job.partia.historical && !finished && (job.partia.status !== 'plan' || anyProgress)) {
+      let currentIdx = OPS.findIndex((op) => !prog[op]);
+      if (currentIdx === -1) currentIdx = OPS.length - 1; // все с фактом → фронтир = ОТК
+      const perOp = {};
+      for (let i = 0; i < OPS.length; i++) {
+        const op = OPS[i];
+        const plannedEnd = dates[op].end;
+        if (prog[op]) perOp[op] = diffDays(plannedEnd, prog[op]);          // факт − план (может быть <0 = раньше)
+        else if (i === currentIdx) perOp[op] = Math.max(0, diffDays(plannedEnd, todayISO)); // текущая: просрочка на сегодня
+        else perOp[op] = null;                                            // ещё не начата
+      }
+      const days = Math.max(0, perOp[OPS[currentIdx]] || 0); // отставание на фронтире
+      const projWb = addDays(wbArrival, days);
+      const willMiss = !!(deadline && diffDays(deadline, projWb) > 0);
+      delayInfo = { days, currentOp: OPS[currentIdx], perOp, projWb, willMiss };
+      if (days > delayThreshold) {
+        const opRu = OP_RU[OPS[currentIdx]];
         warnings.push({
           level: willMiss ? 'error' : 'warn',
           stage: job.stageId, article: job.article.id, workshop: w.id, kind: 'delay',
           message: willMiss
-            ? `Отставание: цех ${w.name}, партия ${job.article.id} (${stRu}) отстаёт на ${delay} дн от плана — прогноз прихода на WB ~${projWb}, риск срыва дедлайна ${deadline}.`
-            : `Отставание: цех ${w.name}, партия ${job.article.id} (${stRu}) отстаёт на ${delay} дн, пока в пределах дедлайна ${deadline}.`,
+            ? `Отставание: цех ${w.name}, партия ${job.article.id} — ${opRu} отстаёт на ${days} дн, прогноз прихода на WB ~${projWb}, риск срыва дедлайна ${deadline}.`
+            : `Отставание: цех ${w.name}, партия ${job.article.id} — ${opRu} отстаёт на ${days} дн, пока в пределах дедлайна ${deadline}.`,
         });
       }
     }
@@ -290,6 +304,8 @@ export function buildSchedule(state) {
       locked: !!job.lockedWs,
       ops: dates,
       cutStart, sewStart, readyDate,
+      progress: { ...prog },
+      delay: delayInfo,
       fabric: { meters: fabricMeters, orderDate: fabricOrderDate, atWorkshop: fabricAtWorkshop },
       logistics: { shipment, wbArrival, deadline, lateDays },
       milestones: buildMilestones({ fabricOrderDate, fabricAtWorkshop, cutStart, sewStart, readyDate, shipment, wbArrival }),
