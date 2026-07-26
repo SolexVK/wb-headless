@@ -15,6 +15,7 @@ export const TABS = [
   { key: 'matrix', label: 'План по размерам' },
   { key: 'salesplan', label: 'План продаж' },
   { key: 'fact', label: 'Факт' },
+  { key: 'timing', label: 'Контроль сроков' },
   { key: 'fabric', label: 'Заказ ткани' },
   { key: 'dashboard', label: 'Дашборд' },
   { key: 'season', label: 'Ранг сезонности' },
@@ -108,7 +109,7 @@ export function applyWritePolicy(stored, incoming, perms) {
     data: canEdit(perms, 'data'),
     unit: canEdit(perms, 'unit'),
     fabric: canEdit(perms, 'fabric'),
-    partias: canEdit(perms, 'matrix') || canEdit(perms, 'fact') || canEdit(perms, 'salesplan'),
+    partias: canEdit(perms, 'matrix') || canEdit(perms, 'fact') || canEdit(perms, 'salesplan') || canEdit(perms, 'timing'),
     gantt: canEdit(perms, 'gantt'),
   };
   const out = { ...stored };

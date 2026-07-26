@@ -169,11 +169,12 @@ function renderCurrent() {
   refreshSeasonFilter();
   if (activeTab === 'gantt') {
     const sch = { ...schedule, cycles: (schedule?.cycles || []).filter((c) => stageInSeason(c.stageId)) };
-    renderGantt(document.getElementById('gantt'), sch, state, { pxPerDay, onOverride });
+    renderGantt(document.getElementById('gantt'), sch, state, { pxPerDay, onOverride, onProgress });
   }
   else if (activeTab === 'matrix') renderMatrix();
   else if (activeTab === 'salesplan') renderSalesPlan();
   else if (activeTab === 'fact') renderFact();
+  else if (activeTab === 'timing') renderTiming();
   else if (activeTab === 'fabric') renderFabricOrder();
   else if (activeTab === 'dashboard') renderDashboard();
   else if (activeTab === 'season') renderSeason();
@@ -360,6 +361,79 @@ function colorUnits(a, stageId, color) {
   let s = 0; for (const k in row) s += +row[k] || 0;
   return Math.round(s);
 }
+// ---------- КОНТРОЛЬ СРОКОВ (факт по операциям + отставание) ----------
+const TIMING_OPS = ['cut', 'sew', 'iron', 'otk'];
+const TIMING_OP_RU = { cut: 'Крой', sew: 'Пошив', iron: 'Утюжка', otk: 'ОТК' };
+function renderTiming() {
+  const root = document.getElementById('timing');
+  const cyc = (schedule?.cycles || []).filter((c) => stageInSeason(c.stageId) && !c.historical);
+  if (!cyc.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет партий в плане. Заполни «План по размерам».</div></div>'; return; }
+  const threshold = state.settings.delayThresholdDays ?? 6;
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(state.settings.planningDate || '') ? state.settings.planningDate : new Date().toISOString().slice(0, 10);
+  const gIdx = (id) => state.stages.findIndex((z) => z.id === id) + 1;
+
+  const cellBg = (d) => {
+    if (d == null) return '';
+    if (d <= 0) return 'background:rgba(52,211,153,.14)';
+    if (d <= threshold) return 'background:rgba(245,158,11,.16)';
+    return 'background:rgba(248,113,113,.18)';
+  };
+  const dLabel = (d, done) => (d == null ? '<span class="mini">—</span>' : d <= 0 ? `<span class="mini">${done ? 'в срок' : ''}</span>` : `<b style="color:${d > threshold ? 'var(--danger)' : '#d97706'}">+${d} дн</b>`);
+
+  const byArt = {};
+  for (const c of cyc) (byArt[c.articleId] ||= []).push(c);
+  const arts = Object.keys(byArt).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  const sections = arts.map((aid) => {
+    const list = byArt[aid].sort((x, y) => (gIdx(x.stageId) - gIdx(y.stageId)) || (x.partiaNo - y.partiaNo));
+    const rows = list.map((c) => {
+      const opCells = TIMING_OPS.map((op) => {
+        const plan = c.ops[op].end;
+        const fact = (c.progress && c.progress[op]) || '';
+        const d = c.delay && c.delay.perOp ? c.delay.perOp[op] : null;
+        return `<td style="${cellBg(d)};text-align:center;min-width:118px">
+          <div class="mini">план ${fmt(plan)}</div>
+          <input type="date" data-prog-partia="${c.partiaId}" data-prog-op="${op}" value="${fact}" style="width:116px">
+          <div>${dLabel(d, !!fact)}</div>
+        </td>`;
+      }).join('');
+      const dl = c.delay;
+      let prog;
+      if (dl && dl.days > 0) {
+        prog = dl.willMiss
+          ? `<span style="color:var(--danger)">⚠ срыв: WB ~${fmt(dl.projWb)} > дедлайн ${fmt(c.logistics.deadline)}</span>`
+          : `WB ~${fmt(dl.projWb)} <span class="mini">(дедлайн ${fmt(c.logistics.deadline)})</span>`;
+      } else if (c.logistics.lateDays > 0) {
+        prog = `<span style="color:var(--danger)">план опаздывает на ${c.logistics.lateDays} дн</span>`;
+      } else {
+        prog = '<span style="color:var(--accent-2)">в срок</span>';
+      }
+      return `<tr>
+        <td><b>П${c.partiaNo}</b> · ${c.workshopName}${c.own ? ' <span class="mini">свой</span>' : ''}<div class="mini">Этап ${gIdx(c.stageId)} · ${c.statusRu || '—'}</div></td>
+        ${opCells}
+        <td>${prog}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="panel"><div class="subhead"><h3>${aid}</h3><span class="mini">${byArt[aid][0].articleName}</span></div>
+      <div style="overflow-x:auto"><table><thead><tr><th>Партия</th>${TIMING_OPS.map((op) => `<th>${TIMING_OP_RU[op]}</th>`).join('')}<th>Прогноз прихода на WB</th></tr></thead>
+      <tbody>${rows}</tbody></table></div></div>`;
+  }).join('');
+
+  root.innerHTML = `
+    <div class="panel"><div class="mini">Контроль сроков на «сегодня»: <b>${fmt(today)}</b> · порог отставания ${threshold} дн. Отмечай <b>факт завершения</b> каждой операции — система считает отставание по каждому внутреннему этапу и прогноз прихода на WB. «Сегодня» и порог — в «Данные → Контроль сроков». Зелёный — в срок, жёлтый — впритык, красный — срыв.</div></div>
+    ${sections}`;
+
+  root.querySelectorAll('input[data-prog-partia]').forEach((inp) => inp.addEventListener('change', async (e) => {
+    const p = (state.partias || []).find((x) => x.id === e.target.dataset.progPartia);
+    if (!p) return;
+    p.progress = p.progress || { cut: '', sew: '', iron: '', otk: '' };
+    p.progress[e.target.dataset.progOp] = e.target.value || '';
+    dirty = true;
+    try { await recalc(true); toast('Факт сохранён, отставание пересчитано'); }
+    catch (err) { toast('Ошибка: ' + err.message, true); }
+  }));
+}
+
 // короткая метка этапа: «Э1», «Э2» …
 function stageShort(sid) {
   const i = state.stages.findIndex((s) => s.id === sid);
@@ -993,6 +1067,17 @@ async function onOverride(cycleId, cutStart) {
     renderCurrent(); setStatus();
     toast(cutStart === null ? 'Ручной сдвиг сброшен' : 'Сдвиг сохранён, план пересчитан');
   } catch (e) { toast('Ошибка: ' + e.message, true); }
+}
+
+// отметка факта завершения операции партии (из детального окна Ганта)
+async function onProgress(partiaId, op, date) {
+  const p = (state.partias || []).find((x) => x.id === partiaId);
+  if (!p) return;
+  p.progress = p.progress || { cut: '', sew: '', iron: '', otk: '' };
+  p.progress[op] = date || '';
+  dirty = true;
+  try { await recalc(true); toast('Факт сохранён, отставание пересчитано'); }
+  catch (e) { toast('Ошибка: ' + e.message, true); }
 }
 
 // ---------- ДАШБОРД ----------

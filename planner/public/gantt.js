@@ -23,6 +23,7 @@ function el(tag, attrs = {}, parent) {
 export function renderGantt(container, schedule, state, opts = {}) {
   const pxPerDay = opts.pxPerDay || 14;
   const onOverride = opts.onOverride || (() => {});
+  const onProgress = opts.onProgress || (() => {});
   container.innerHTML = '';
 
   const cycles = schedule.cycles || [];
@@ -143,13 +144,13 @@ export function renderGantt(container, schedule, state, opts = {}) {
   // блоки-циклы
   for (const r of rows) {
     for (const c of r.items) {
-      drawCycle(svg, c, r, { xOf, pxPerDay, LANE_H, ROW_PAD, minD, tip, onOverride });
+      drawCycle(svg, c, r, { xOf, pxPerDay, LANE_H, ROW_PAD, minD, tip, onOverride, onProgress });
     }
   }
 }
 
 function drawCycle(svg, c, row, ctx) {
-  const { xOf, pxPerDay, LANE_H, ROW_PAD, tip, onOverride } = ctx;
+  const { xOf, pxPerDay, LANE_H, ROW_PAD, tip, onOverride, onProgress } = ctx;
   const laneY = row._y + ROW_PAD + c._lane * LANE_H;
   const barH = LANE_H - 8;
   const isDone = c.status === 'done' || c.status === 'shipped';
@@ -184,6 +185,16 @@ function drawCycle(svg, c, row, ctx) {
     stroke: 'rgba(0,0,0,0.75)', 'stroke-width': 2.5, 'paint-order': 'stroke', 'stroke-linejoin': 'round',
   }, g);
   t.textContent = label;
+
+  // значок отставания (⏱ +Nд) на правом краю блока — видно без двойного клика
+  if (c.delay && c.delay.days > 0) {
+    const col = c.delay.willMiss ? '#fca5a5' : '#fcd34d';
+    const bt = el('text', {
+      x: x1 - 6, y: laneY + barH / 2 + 4, fill: col, 'font-size': 10, 'font-weight': 700,
+      'text-anchor': 'end', stroke: 'rgba(0,0,0,0.8)', 'stroke-width': 2.5, 'paint-order': 'stroke', 'stroke-linejoin': 'round',
+    }, g);
+    bt.textContent = `⏱+${c.delay.days}д`;
+  }
   g.style.cursor = 'pointer';
 
   // тултип
@@ -219,12 +230,12 @@ function drawCycle(svg, c, row, ctx) {
   g.addEventListener('dblclick', (e) => {
     e.preventDefault();
     hideTip(tip);
-    openCycleDetail(c, onOverride);
+    openCycleDetail(c, onOverride, onProgress);
   });
 }
 
 // ── Детальное окно этапа: мини-шкала с внутренними операциями и пунктирами ──
-function openCycleDetail(c, onOverride) {
+function openCycleDetail(c, onOverride, onProgress = () => {}) {
   document.querySelector('.g-modal-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'g-modal-overlay';
@@ -328,6 +339,30 @@ function openCycleDetail(c, onOverride) {
     <div>Отгрузка ${fmt(c.logistics.shipment)} → приход на WB <b>${fmt(c.logistics.wbArrival)}</b> · дедлайн ${fmt(c.logistics.deadline)}</div>
     <div>На WB: <b>${(c.hasFact ? c.wbUnits : c.units).toLocaleString('ru')} шт</b> ${c.hasFact ? '(факт)' : '(план)'}${c.locked ? ' · <span style="color:var(--accent-2)">цех закреплён вручную</span>' : ''}${c.manual ? ' · сдвинут вручную' : ''}</div>`;
   modal.appendChild(info);
+
+  // Факт по операциям (ввод дат завершения) — считает отставание по каждому этапу
+  const OP_LABELS = { cut: 'Крой', sew: 'Пошив', iron: 'Утюжка', otk: 'ОТК' };
+  const prog = document.createElement('div');
+  prog.style.cssText = 'padding:6px 16px 12px;border-top:1px solid var(--line)';
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:grid;grid-template-columns:repeat(2,1fr);gap:8px';
+  ['cut', 'sew', 'iron', 'otk'].forEach((op) => {
+    const d = c.delay && c.delay.perOp ? c.delay.perOp[op] : null;
+    const dl = d == null ? '' : (d <= 0 ? ' · <span style="color:var(--accent-2)">в срок</span>' : ` · <span style="color:var(--danger)">+${d} дн</span>`);
+    const field = document.createElement('div');
+    field.style.cssText = 'display:flex;flex-direction:column;gap:2px';
+    field.innerHTML = `<label style="font-size:11px;color:var(--muted)">${OP_LABELS[op]} · план ${fmt(c.ops[op].end)}${dl}</label>`;
+    const inp = document.createElement('input');
+    inp.type = 'date';
+    inp.value = (c.progress && c.progress[op]) || '';
+    inp.style.cssText = 'padding:4px 6px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px';
+    inp.addEventListener('change', () => { close(); onProgress(c.partiaId, op, inp.value || ''); });
+    field.appendChild(inp);
+    grid.appendChild(field);
+  });
+  prog.innerHTML = '<div style="font-weight:600;margin-bottom:6px;font-size:13px">Факт завершения операций</div>';
+  prog.appendChild(grid);
+  modal.appendChild(prog);
 
   const foot = document.createElement('div');
   foot.style.cssText = 'padding:10px 16px 16px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--line)';

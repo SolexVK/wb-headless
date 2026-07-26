@@ -16,6 +16,7 @@
       <button class="tab" data-tab="matrix">План по размерам</button>
       <button class="tab" data-tab="salesplan">План продаж</button>
       <button class="tab" data-tab="fact">Факт</button>
+      <button class="tab" data-tab="timing">Контроль сроков</button>
       <button class="tab" data-tab="fabric">Заказ ткани</button>
       <button class="tab" data-tab="dashboard">Дашборд</button>
       <button class="tab" data-tab="season">Ранг сезонности</button>
@@ -39,14 +40,9 @@
           <input type="range" id="zoom" min="6" max="40" value="14" />
         </label>
         <span class="legend">
-          <i class="seg cut"></i>Крой
-          <i class="seg sew"></i>Пошив
-          <i class="seg iron"></i>Утюжка
-          <i class="seg otk"></i>ОТК
-          <i class="seg fabric-line"></i>Закуп ткани
-          <i class="mark deadline"></i>Дедлайн WB
+          <i class="mark deadline"></i>Дедлайн WB · блок = этап (крой→ОТК) · ⏱ отставание
         </span>
-        <span class="hint">Тяни блок мышью — сдвигаешь старт кроя. Двойной клик по блоку — сбросить ручной сдвиг.</span>
+        <span class="hint">Наведи — сводка. Двойной клик — детали этапа и ввод факта по операциям. Тяни блок — сдвиг старта кроя.</span>
       </div>
       <div id="gantt" class="gantt-wrap"></div>
     </section>
@@ -64,6 +60,11 @@
     <!-- ФАКТ (фактические количества по партиям) -->
     <section id="view-fact" class="view">
       <div id="fact"></div>
+    </section>
+
+    <!-- КОНТРОЛЬ СРОКОВ (факт по операциям + отставание) -->
+    <section id="view-timing" class="view">
+      <div id="timing"></div>
     </section>
 
     <!-- ЗАКАЗ ТКАНИ (консолидированный по этапу) -->
