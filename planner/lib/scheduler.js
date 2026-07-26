@@ -14,6 +14,7 @@
 
 import { makeCalendar, addDays, diffDays, parseISO, toISO, dayOfWeek } from './calendar.js';
 import { partiasOf, partiaPlanUnits, partiaFactUnits, partiaEffectiveUnits, PARTIA_STATUS_RU } from './model.js';
+import { validateMatrix } from './nesting.js';
 
 const OPS = ['cut', 'sew', 'iron', 'otk'];
 const OP_RU = { cut: 'Крой', sew: 'Пошив', iron: 'Утюжка', otk: 'ОТК' };
@@ -333,6 +334,21 @@ export function buildSchedule(state) {
   }
 
   cycles.sort((a, b) => (a.cutStart < b.cutStart ? -1 : a.cutStart > b.cutStart ? 1 : 0));
+
+  // Валидация настила (Фаза 2): мягкие предупреждения по партиям (ориентиры кроя).
+  const nestingRules = state.settings.nesting || { minSizeQty: 20, minColorQty: 400 };
+  for (const p of state.partias || []) {
+    if (p.historical || partiaPlanUnits(p) <= 0) continue;
+    const viol = validateMatrix(p.planMatrix, nestingRules);
+    for (const v of viol) {
+      warnings.push({
+        level: 'warn', kind: 'nesting', article: p.articleId, stage: p.stageId,
+        message: v.kind === 'color'
+          ? `Настил: артикул ${p.articleId}, цвет «${v.color}» — ${v.qty} шт (ориентир ≥ ${v.min}). Мелкий цвет лучше объединить.`
+          : `Настил: артикул ${p.articleId}, цвет «${v.color}», размер ${v.size} — ${v.qty} шт (ориентир ≥ ${v.min}).`,
+      });
+    }
+  }
 
   const fabricOrders = aggregateFabric(cycles, state);
 

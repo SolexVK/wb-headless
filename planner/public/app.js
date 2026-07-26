@@ -438,6 +438,19 @@ function renderTiming() {
       box.innerHTML = renderRescueCard(pr);
       const ap = box.querySelector('[data-rescue-apply]');
       if (ap) ap.addEventListener('click', () => { const p = pById(id); if (p) save(() => { p.workshopId = ap.dataset.rescueApply; }); });
+      const sp = box.querySelector('[data-rescue-split]');
+      if (sp) sp.addEventListener('click', () => {
+        const p = pById(id); if (!p) return;
+        const move = +sp.dataset.rescueMove || Math.round(matrixSum(p.planMatrix) / 2);
+        const { chunk, remainder } = splitMatrixClient(p.planMatrix, move, nestingRules());
+        if (matrixSum(chunk) <= 0 || matrixSum(remainder) <= 0) { toast('Не удалось разделить (настил)', true); return; }
+        save(() => {
+          const np = newPartia(p.articleId, p.stageId);
+          np.planMatrix = chunk; np.workshopId = sp.dataset.rescueSplit;
+          p.planMatrix = remainder;
+          state.partias.push(np); recomputePartiaNumbers();
+        });
+      });
     } catch (e) { box.innerHTML = `<div class="mini" style="color:var(--danger)">Ошибка: ${e.message}</div>`; }
   }));
 }
@@ -448,7 +461,15 @@ function renderRescueCard(pr) {
   if (pr.escalate || !o) {
     return `<div style="margin-top:8px;padding:10px;border:1px solid var(--danger);border-radius:8px;background:rgba(248,113,113,.08)">
       <div style="color:var(--danger);font-weight:700">⚠ СРОЧНО НУЖЕН ЕЩЁ ОДИН АУТСОРС-ЦЕХ</div>
-      <div class="mini" style="margin-top:4px">Ни один действующий цех не может взять эту партию целиком к дедлайну без срыва других партий. Варианты: подключить дополнительный цех, раздробить партию по размерам (уточняется в Фазе 2 и согласуется с ответственным) или осознанно сдвинуть срок.</div>
+      <div class="mini" style="margin-top:4px">Ни один действующий цех не может взять эту партию (даже частью) к дедлайну без срыва других партий. Варианты: подключить дополнительный цех или осознанно сдвинуть срок.</div>
+    </div>`;
+  }
+  if (o.type === 'split') {
+    return `<div style="margin-top:8px;padding:10px;border:1px solid var(--accent-2);border-radius:8px;background:rgba(52,211,153,.08)">
+      <div style="font-weight:700">✂ Разделить и передать часть в цех «${o.toWorkshopName}»</div>
+      <div class="mini" style="margin-top:4px">Оставить <b>${o.stayUnits.toLocaleString('ru')} шт</b> на «${pr.workshopName}» (WB ${fmt(o.wbStay)}), передать <b>${o.moveUnits.toLocaleString('ru')} шт</b> в «${o.toWorkshopName}» (WB ${fmt(o.wbMove)}). Ткань — +${o.transferDays} дн на переброску.</div>
+      <div class="mini" style="margin-top:4px;color:#d97706">⚠ Предварительно: согласуй точную раскладку по размерам с ответственным.</div>
+      <button class="btn btn-primary" style="margin-top:8px" data-rescue-split="${o.toWorkshopId}" data-rescue-move="${o.moveUnits}">Применить (создать под-партию)</button>
     </div>`;
   }
   const shifted = o.affected && o.affected.length
@@ -732,6 +753,41 @@ function recomputePartiaNumbers() {
 
 let matrixStageId = null, matrixArticleId = null, matrixPartiaId = null;
 
+// ── настил (клиентские хелперы, зеркало lib/nesting.js) ──
+function nestingRules() { const n = state.settings.nesting || {}; return { minSizeQty: +n.minSizeQty || 20, minColorQty: +n.minColorQty || 400 }; }
+function colorSum(row) { let s = 0; for (const k in (row || {})) s += +row[k] || 0; return Math.round(s); }
+function matrixSum(M) { let s = 0; for (const c in (M || {})) s += colorSum(M[c]); return Math.round(s); }
+function nestingViolations(M, r) {
+  const out = [];
+  for (const color of Object.keys(M || {})) {
+    const row = M[color] || {}; const tot = colorSum(row);
+    if (tot > 0 && tot < r.minColorQty) out.push({ kind: 'color', color, qty: tot });
+    for (const size of Object.keys(row)) { const q = +row[size] || 0; if (q > 0 && q < r.minSizeQty) out.push({ kind: 'size', color, size, qty: q }); }
+  }
+  return out;
+}
+function splitMatrixClient(M, target, r) {
+  // по целым цветам (крупные первыми)
+  const colors = Object.keys(M || {}).map((c) => ({ c, tot: colorSum(M[c]) })).filter((x) => x.tot > 0).sort((a, b) => b.tot - a.tot);
+  const chunk = {}, rem = {}; let acc = 0;
+  for (const { c, tot } of colors) { if (acc < target) { chunk[c] = { ...M[c] }; acc += tot; } else rem[c] = { ...M[c] }; }
+  if (matrixSum(chunk) > 0 && matrixSum(rem) > 0) return { chunk, remainder: rem };
+  // внутри цвета (один цвет): пропорционально, размер ≥ min иначе целиком
+  const total = matrixSum(M); const ratio = total ? Math.min(0.99, Math.max(0.01, target / total)) : 0.5;
+  const c2 = {}, r2 = {};
+  for (const c of Object.keys(M || {})) {
+    const ch = {}, rm = {};
+    for (const s of Object.keys(M[c] || {})) {
+      const q = +M[c][s] || 0; if (q <= 0) continue;
+      let a = Math.round(q * ratio), b = q - a;
+      if ((a > 0 && a < r.minSizeQty) || (b > 0 && b < r.minSizeQty)) { if (ratio >= 0.5) { a = q; b = 0; } else { a = 0; b = q; } }
+      if (a > 0) ch[s] = a; if (b > 0) rm[s] = b;
+    }
+    if (Object.keys(ch).length) c2[c] = ch; if (Object.keys(rm).length) r2[c] = rm;
+  }
+  return { chunk: c2, remainder: r2 };
+}
+
 function renderMatrix() {
   const root = document.getElementById('matrix');
   if (!state.articles.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет артикулов. Добавь их во вкладке «Данные».</div></div>'; return; }
@@ -787,6 +843,7 @@ function renderMatrix() {
             ${state.workshops.map((w) => `<option value="${w.id}"${w.id === p.workshopId ? ' selected' : ''}>${w.name}${w.role === 'aux' ? ' (вспом.)' : ''}</option>`).join('')}
           </select>
         </label>
+        <button id="mx-split-partia" class="btn" title="Разделить партию на две по правилам настила (цвета целиком; при необходимости — по размерам ≥ мин)">✂ Разделить партию</button>
         <button id="mx-del-partia" class="btn btn-danger">Удалить партию</button>
         <button id="mx-save" class="btn btn-primary">Сохранить план</button>
       </div>
@@ -798,6 +855,7 @@ function renderMatrix() {
       </div>
       <div class="mini" style="margin-bottom:12px">Введи количества и нажми <b>«Сохранить план»</b>. Номер партии — свой у каждого цеха. Статус производства и факт — на вкладке «Факт». Сейчас отшивает: <b>${cycInfo}</b>.</div>
       ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
+      ${(() => { const v = nestingViolations(M, nestingRules()); if (!v.length) return ''; const r = nestingRules(); return `<div style="margin-top:10px;padding:8px 10px;border:1px solid #d97706;border-radius:8px;background:rgba(245,158,11,.1)"><div class="mini"><b>Настил (ориентир):</b> ${v.map((x) => x.kind === 'color' ? `цвет «${x.color}» ${x.qty} шт (&lt;${r.minColorQty})` : `${x.color}/${x.size} ${x.qty} шт (&lt;${r.minSizeQty})`).join(' · ')}. Мягкое предупреждение — можно продолжать.</div></div>`; })()}
     </div>`;
 
   bindMatrixControls(a, stage);
@@ -811,6 +869,19 @@ function renderMatrix() {
     if (!confirm(`Удалить Партию ${p.no}?`)) return;
     state.partias = state.partias.filter((x) => x.id !== p.id);
     matrixPartiaId = null; dirty = true; renderMatrix();
+  });
+  document.getElementById('mx-split-partia').addEventListener('click', () => {
+    const total = matrixSum(p.planMatrix);
+    if (total < 2) { toast('Партия слишком мала для деления', true); return; }
+    if (p.status !== 'plan') { toast('Делить можно только не начатую партию (статус «план»)', true); return; }
+    const { chunk, remainder } = splitMatrixClient(p.planMatrix, Math.round(total / 2), nestingRules());
+    if (matrixSum(chunk) <= 0 || matrixSum(remainder) <= 0) { toast('Не удалось разделить (проверь настил-ориентиры)', true); return; }
+    const np = newPartia(a.id, stage.id);
+    np.planMatrix = chunk;
+    p.planMatrix = remainder;
+    state.partias.push(np);
+    recomputePartiaNumbers(); dirty = true; matrixPartiaId = np.id; renderMatrix();
+    toast(`Партия разделена: ${matrixSum(remainder)} + ${matrixSum(chunk)} шт`);
   });
   document.getElementById('mx-save').addEventListener('click', () => {
     recalc(true).then(() => { renderMatrix(); toast('План сохранён и пересчитан'); }).catch((err) => toast('Ошибка: ' + err.message, true));
@@ -2671,6 +2742,8 @@ function dataSettingsPanel() {
       <div class="field"><label>Запас на раскрой, %</label><input data-set="fabric.wastagePct" value="${f.wastagePct}"></div>
       <div class="field"><label>Страховой запас закупки, %</label><input data-set="fabric.safetyPct" value="${f.safetyPct}"></div>
       <div class="field"><label>Буфер «ткань раньше кроя», дней</label><input data-set="fabric.bufferDays" value="${f.bufferDays}"></div>
+      <div class="field"><label title="Настил: ориентир минимума на размер (мягкий).">Настил: мин. на размер, шт</label><input data-set="nesting.minSizeQty" value="${state.settings.nesting.minSizeQty}"></div>
+      <div class="field"><label title="Настил: ориентир минимума на цвет (мягкий).">Настил: мин. на цвет, шт</label><input data-set="nesting.minColorQty" value="${state.settings.nesting.minColorQty}"></div>
     </div>
     <div class="card"><div class="mini" style="margin-bottom:8px">Логистика до WB</div>
       <div class="field"><label>Мин. дней</label><input data-set="logistics.minDays" value="${l.minDays}"></div>

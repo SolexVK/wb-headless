@@ -13,6 +13,7 @@
 // сверяем множество срывов до/после (жадные «пожары» отсекаются).
 
 import { buildSchedule } from './scheduler.js';
+import { splitPartia, matrixTotal } from './nesting.js';
 
 const MS = 86400000;
 const parse = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d); };
@@ -88,6 +89,37 @@ export function findRescues(state) {
     }
     if (best) {
       options.push({ type: 'reassign', toWorkshopId: best.w.id, toWorkshopName: best.w.name, newWb: best.wb, slack: best.slack, transferDays, affected: best.shifted });
+    } else {
+      // целиком не спасти → пробуем настил-дробление: передать валидный кусок помощнику
+      const rules = state.settings.nesting || { minSizeQty: 20, minColorQty: 400 };
+      const srcMatrix = pById[rc.partiaId].planMatrix;
+      const totalUnits = matrixTotal(srcMatrix);
+      let found = null;
+      for (const frac of [0.5, 0.34, 0.66, 0.25]) {
+        const { chunk, remainder } = splitPartia(srcMatrix, Math.round(totalUnits * frac), rules);
+        if (matrixTotal(chunk) <= 0 || matrixTotal(remainder) <= 0) continue;
+        for (const w of state.workshops) {
+          if (w.id === rc.workshopId) continue;
+          const ts = clone(state);
+          for (const q of ts.partias) if (frozenWs[q.id]) q.workshopId = frozenWs[q.id];
+          const tp = ts.partias.find((x) => x.id === rc.partiaId);
+          tp.planMatrix = remainder;
+          const nid = 'rescue_' + rc.partiaId;
+          ts.partias.push({ id: nid, no: 0, articleId: rc.articleId, stageId: tp.stageId, workshopId: w.id, planMatrix: chunk, factMatrix: {}, status: 'plan', historical: false });
+          const sch = buildSchedule(ts);
+          const ncStay = sch.cycles.find((c) => c.partiaId === rc.partiaId);
+          const ncMove = sch.cycles.find((c) => c.partiaId === nid);
+          if (!ncStay || !ncMove || !makesDeadline(ncStay, deadline) || !makesDeadline(ncMove, deadline)) continue;
+          const nm = sch.cycles.filter((c) => c.logistics.lateDays > 0 && c.partiaId !== rc.partiaId && c.partiaId !== nid && !baseLate.has(c.partiaId));
+          if (nm.length) continue;
+          found = { w, moveUnits: matrixTotal(chunk), stayUnits: matrixTotal(remainder), wbStay: ncStay.logistics.wbArrival, wbMove: ncMove.logistics.wbArrival };
+          break;
+        }
+        if (found) break;
+      }
+      if (found) {
+        options.push({ type: 'split', toWorkshopId: found.w.id, toWorkshopName: found.w.name, moveUnits: found.moveUnits, stayUnits: found.stayUnits, wbStay: found.wbStay, wbMove: found.wbMove, transferDays });
+      }
     }
 
     proposals.push({
