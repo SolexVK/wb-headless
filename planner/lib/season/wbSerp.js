@@ -70,7 +70,10 @@ export async function fetchSerp(phrase, { d1, d2, endRow = SERP_MAX_ROWS } = {})
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'X-Mpstats-TOKEN': token, 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ startRow: 0, endRow: rows, filterModel: {}, sortModel: [], includeTotals: true, organicOnly: false }),
+    // Сортировка по ВЫРУЧКЕ: 200 верхних = топ-200 по выручке среди всех ранжирующихся по
+    // фразе (до 5000). Так в выборку попадают крупные ТОПы, даже если в названии нет
+    // ключевого слова (они ранжируются по фразе, но названы иначе). Проверено: serp это принимает.
+    body: JSON.stringify({ startRow: 0, endRow: rows, filterModel: {}, sortModel: [{ colId: 'revenue', sort: 'desc' }], includeTotals: true, organicOnly: false }),
     signal: AbortSignal.timeout(Number(process.env.MPSTATS_CATEGORY_TIMEOUT_MS) || 120000),
   });
   if (resp.status === 429) {

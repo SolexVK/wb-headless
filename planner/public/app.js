@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28e';
+const APP_BUILD = 'season-serp-2026-07-28f';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1442,8 +1442,8 @@ function seasonBuilderPanel() {
         <div class="u-pg-t">1 · Артикул и целевые фразы</div>
         <div class="se-fields se-fields-2">
           <div class="field"><label>Артикул</label><select id="se-article">${arts.map((x) => `<option value="${x.id}"${x.id === aid ? ' selected' : ''}>${x.id} — ${seEsc(x.name)}</option>`).join('')}</select></div>
-          <div class="field"><label title="Слова, которых быть не должно в НАЗВАНИИ товара — такие товары отсекаются. Осторожно: не пишите сюда слова, которыми часто называют вашу нишу (муслин нередко зовут «прозрачная» — минус «прозрач» вырежет муслиновые ТОПы).">Минус-слова <span class="mini">(в названии)</span></label><input id="se-minus" value="${seEsc(f.minusWords || '')}" placeholder="детск, мужск, для мальчик"></div>
         </div>
+        <div class="field span2" style="margin-top:10px"><label title="Слова, которых быть не должно в НАЗВАНИИ товара — такие товары отсекаются. Осторожно: не пишите сюда слова, которыми часто называют вашу нишу (муслин нередко зовут «прозрачная» — минус «прозрач» вырежет муслиновые ТОПы).">Минус-слова <span class="mini">(в названии, через запятую)</span></label><input id="se-minus" value="${seEsc(f.minusWords || '')}" placeholder="пижам, детск, мужск, для мальчик, комплект"></div>
         <div class="field" style="margin-top:10px"><label title="1–3 поисковые фразы, по которым покупатели находят товары вашей ниши. По каждой фразе — 1 запрос: система берёт ВСЕ товары, которые реально по ней находятся (даже если в названии нет вашего слова), с их продажами за 2 года.">🎯 Целевые фразы <span class="mini">(по одной в строке, 1–3 шт. — каждая = 1 запрос)</span></label>
           <textarea id="se-phrases" rows="3" placeholder="рубашка муслиновая женская&#10;рубашка из муслина&#10;марлевка рубашка">${seEsc(f.phrases || '')}</textarea>
         </div>
@@ -1699,6 +1699,14 @@ function bindSeasonBuilder() {
   const g = (id) => document.getElementById(id);
   g('se-article')?.addEventListener('change', (e) => { seasonBuildArticle = e.target.value; renderSeason(); });
   g('se-log-dl')?.addEventListener('click', downloadSeasonLog);
+  // Запоминаем фразы и минус-слова для артикула сразу при вводе (дебаунс-сейв в БД),
+  // чтобы в следующий раз не вводить заново.
+  const persistField = (id, key) => g(id)?.addEventListener('input', () => {
+    const a = state.articles.find((x) => x.id === seasonBuildArticle); if (!a) return;
+    a.seasonFilter = a.seasonFilter || {}; a.seasonFilter[key] = g(id).value; unitPersist();
+  });
+  persistField('se-phrases', 'phrases');
+  persistField('se-minus', 'minusWords');
   g('se-filter-reset')?.addEventListener('click', () => {
     const set = (id, val) => { const el = g(id); if (el) el.value = val; };
     set('se-limit', '60'); set('se-pmin', ''); set('se-pmax', ''); set('se-minsales', ''); set('se-minrev', '');
@@ -1837,8 +1845,10 @@ function seasonCompetitorsBlock(rep) {
     // Средняя цена продажи = выручка / штук (реальная средневзвешенная цена за период).
     const avgPrice = (+m.unitsSold > 0) ? (+m.revenue || 0) / m.unitsSold : (+m.price || null);
     const title = seEsc(m.name || (nm ? 'арт. ' + nm : '—'));
-    const thumb = nm
-      ? `<span class="se-comp-thumb"><img loading="lazy" alt="" data-nm="${nm}" src="${wbThumbUrl(nm, 'tm')}"></span>`
+    // Картинку берём из готового URL serp (m.thumb) — он точный; иначе гадаем хост по nmID.
+    const imgSrc = m.thumb || (nm ? wbThumbUrl(nm, 'tm') : '');
+    const thumb = imgSrc
+      ? `<span class="se-comp-thumb"><img loading="lazy" alt="" data-nm="${nm}" data-thumb="${seEsc(m.thumb || '')}" src="${imgSrc}"></span>`
       : '<span class="se-comp-thumb noimg"></span>';
     const nameCell = nm ? `${thumb}<a href="${link}" target="_blank" rel="noopener">${title}</a>` : `${thumb}${title}`;
     // Оборачиваемость (дн) = средний остаток / среднесуточные продажи (avgStock·days/units).
@@ -1886,7 +1896,9 @@ function installSeasonZoom() {
     const shift = +(img.dataset.shift || 0);
     const w = Math.min(Math.round(window.innerWidth * 0.7), 300); // 4–5× от превью, адаптивно
     zoom.style.width = w + 'px';
-    zoom.querySelector('img').src = wbThumbUrl(nm, 'big', shift);
+    // Крупное фото: из точного URL serp (заменяем размер на big), иначе гадаем хост.
+    const t = img.getAttribute('data-thumb');
+    zoom.querySelector('img').src = t ? t.replace(/\/images\/[^/]+\//, '/images/big/') : wbThumbUrl(nm, 'big', shift);
     zoom.style.display = 'block';
     const r = img.getBoundingClientRect();
     const zh = w * 4 / 3 + 10;                 // карточка WB ~3:4

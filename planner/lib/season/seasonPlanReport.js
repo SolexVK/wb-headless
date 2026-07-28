@@ -87,14 +87,14 @@ export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, 
 export function sliceSerpWindow(all, w1, w2, oos = false) {
   const inWin = (d) => d >= w1 && d <= w2;
   const perItem = all.items.map((it) => ({
-    wb: it.wb, name: it.name, brand: it.brand, price: it.price,
+    wb: it.wb, name: it.name, brand: it.brand, price: it.price, thumb: it.thumb,
     daily: (it.dailyFull || []).filter((r) => inWin(r.date)),
   }));
   const groupDaily = buildGroupDailySeries(maybeOOS(perItem.map((p) => p.daily), oos));
   const perItemMeta = perItem.map((p) => {
     const daysN = p.daily.length;
     return {
-      wb: p.wb, name: p.name, brand: p.brand, price: p.price,
+      wb: p.wb, name: p.name, brand: p.brand, price: p.price, thumb: p.thumb,
       days: daysN, avgStock: 0,
       unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
       revenue: p.daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0),
