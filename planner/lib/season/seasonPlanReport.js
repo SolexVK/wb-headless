@@ -184,10 +184,10 @@ export async function collectSerpCandidates({ phrases = [], minusWords = [], pri
   const keys = phraseKeys(phrases);
   const approved = new Set((approvedIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0));
   const noKey = g.items.filter((it) => !nameHasKey(it.name, keys));
-  // Отбор — по продажам за ПОСЛЕДНИЙ ГОД (salesLY).
-  noKey.sort((a, b) => (b.salesLY || 0) - (a.salesLY || 0));
+  // Отбор — по ВЫРУЧКЕ за последний год, по убыванию (крупнейшие сверху).
+  noKey.sort((a, b) => (b.revenueLY || 0) - (a.revenueLY || 0));
   const withKey = g.items.length - noKey.length;
-  L(`Ключи [${keys.join(', ') || '—'}]: с ключом ${withKey}, без ключа ${noKey.length} → на отсмотр ТОП-${Math.min(topN, noKey.length)} по продажам за год.`);
+  L(`Ключи [${keys.join(', ') || '—'}]: с ключом ${withKey}, без ключа ${noKey.length} → на отсмотр ТОП-${Math.min(topN, noKey.length)} по выручке за год (убыв.).`);
   const rows = noKey.slice(0, topN).map((it) => ({
     wb: it.wb, name: it.name, brand: it.brand, thumb: it.thumb,
     avgPrice: it.salesLY > 0 ? Math.round(it.revenueLY / it.salesLY) : it.price,
