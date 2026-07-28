@@ -32,7 +32,9 @@ const lcName = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
 export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, limit } = {}, d1, d2, log = null) {
   const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'сбор', msg }); };
   const phr = [...new Set(phrases.map((s) => String(s).trim()).filter(Boolean))];
-  const mw = minusWords.map(lcName).filter(Boolean);
+  // Минус-слова матчим по КОРНЮ (stem): «пижама»→«пижам» ловит «пижамный/пижамах»,
+  // «прозрачная»→«прозрачн» ловит «прозрачные/прозрачный». Отсекаем все формы слова.
+  const mw = minusWords.map((w) => stem(w)).filter((w) => w && w.length >= 3);
   const byId = new Map();
   let requests = 0, dailyLimit = null, periods = [];
   for (const phrase of phr) {

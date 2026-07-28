@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28f';
+const APP_BUILD = 'season-serp-2026-07-28g';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1443,7 +1443,7 @@ function seasonBuilderPanel() {
         <div class="se-fields se-fields-2">
           <div class="field"><label>Артикул</label><select id="se-article">${arts.map((x) => `<option value="${x.id}"${x.id === aid ? ' selected' : ''}>${x.id} — ${seEsc(x.name)}</option>`).join('')}</select></div>
         </div>
-        <div class="field span2" style="margin-top:10px"><label title="Слова, которых быть не должно в НАЗВАНИИ товара — такие товары отсекаются. Осторожно: не пишите сюда слова, которыми часто называют вашу нишу (муслин нередко зовут «прозрачная» — минус «прозрач» вырежет муслиновые ТОПы).">Минус-слова <span class="mini">(в названии, через запятую)</span></label><input id="se-minus" value="${seEsc(f.minusWords || '')}" placeholder="пижам, детск, мужск, для мальчик, комплект"></div>
+        <div class="field span2" style="margin-top:10px"><label title="Слова, которых быть не должно в НАЗВАНИИ. Матч по корню: пишите в короткой форме (пижама → ловит пижамный/пижамах; детск → детская/детские). Осторожно: не пишите слова своей ниши (муслин часто зовут «прозрачная»).">Минус-слова <span class="mini">(по корню; пиши коротко: пижама, детск, комплект)</span></label><input id="se-minus" value="${seEsc(f.minusWords || '')}" placeholder="пижама, детск, мужск, комплект, для мальчик"></div>
         <div class="field" style="margin-top:10px"><label title="1–3 поисковые фразы, по которым покупатели находят товары вашей ниши. По каждой фразе — 1 запрос: система берёт ВСЕ товары, которые реально по ней находятся (даже если в названии нет вашего слова), с их продажами за 2 года.">🎯 Целевые фразы <span class="mini">(по одной в строке, 1–3 шт. — каждая = 1 запрос)</span></label>
           <textarea id="se-phrases" rows="3" placeholder="рубашка муслиновая женская&#10;рубашка из муслина&#10;марлевка рубашка">${seEsc(f.phrases || '')}</textarea>
         </div>
