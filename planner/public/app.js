@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28d';
+const APP_BUILD = 'season-serp-2026-07-28e';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1458,8 +1458,8 @@ function seasonBuilderPanel() {
           <div class="field"><label>Цена до, ₽</label><input id="se-pmax" type="number" value="${f.priceMax ?? ''}"></div>
           <div class="field"><label>Мин. продаж/мес</label><input id="se-minsales" type="number" value="${f.minSales ?? ''}"></div>
           <div class="field"><label>Мин. выручка/мес, ₽</label><input id="se-minrev" type="number" value="${f.minRevenue ?? ''}"></div>
-          <div class="field"><label>Размер группы аналогов</label><input id="se-limit" type="number" value="${f.limit ?? 60}"></div>
-          <div class="field"><label title="Год старта сезона. Вход, пик и распродажу движок выбирает сам из годового анализа рынка.">Целевой сезон (год старта)</label><input id="se-year" type="number" min="2024" max="2032" value="${f.targetYear || (new Date().getUTCFullYear())}"></div>
+          <div class="field"><label title="Сколько верхних по выручке аналогов брать в основу ранга. До 200 на одну фразу; для 300 используйте 2 фразы (выборки объединятся).">Размер группы аналогов</label><input id="se-limit" type="number" value="${f.limit ?? 60}"></div>
+          <div class="field"><label title="Год, в котором планируете продавать. Если сезон в этом году ещё впереди — план строится на него; если сезон уже прошёл — движок сам сдвинет прогноз на следующий год (всегда вперёд от сегодня).">Целевой год продаж</label><input id="se-year" type="number" min="2024" max="2032" value="${f.targetYear || (new Date().getUTCFullYear())}"></div>
           <div class="field span2"><label title="ТОП-3 — средняя трёх сильнейших аналогов (реалистично). ТОП-1 — уровень самого сильного аналога по выручке в сегменте (амбициозно).">Целевой уровень (пик плана)</label>
             <select id="se-level">
               <option value="top3"${f.targetLevel === 'top1' ? '' : ' selected'}>ТОП-3 — средний (реалистично)</option>

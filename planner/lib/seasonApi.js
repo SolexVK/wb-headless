@@ -115,7 +115,9 @@ export async function runForecast(cfg = {}) {
     subject,
     forecast: { targetYear },
     baseSource: 'market',
-    plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false, rampDays: num(cfg.rampDays), seasonFrac: num(cfg.seasonFrac), targetLevel: cfg.targetLevel === 'top1' ? 'top1' : 'top3' },
+    plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false, rampDays: num(cfg.rampDays), seasonFrac: num(cfg.seasonFrac), targetLevel: cfg.targetLevel === 'top1' ? 'top1' : 'top3',
+      // «сегодня» = следующий день после конца истории (вчера) — прогноз строим вперёд от него
+      asOf: ymd(new Date(Date.parse(hist.d2) + 86400000)) },
   });
   // Учёт запросов MPStats (SERP: 1 на фразу) + память запроса.
   if (dbAvailable()) {

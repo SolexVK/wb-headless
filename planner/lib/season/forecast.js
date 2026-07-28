@@ -113,9 +113,19 @@ function buildEngineeredSeason(shape, cfg) {
   if (seasonLen < minLen) { entryCal = ((entryCal - Math.ceil((minLen - seasonLen) / 2) - 1 + N) % N) + 1; seasonLen = minLen; }
   seasonLen = Math.min(seasonLen, 330);
 
-  // 2) проекция на ЦЕЛЕВОЙ ГОД: реальные последовательные даты (перешагивают НГ сами)
+  // 2) проекция на ЦЕЛЕВОЙ ГОД: реальные последовательные даты (перешагивают НГ сами).
+  // Прогноз строим ВПЕРЁД от сегодня: если вход сезона в targetYear уже прошёл (≤ сегодня),
+  // сдвигаем на следующий год — план всегда на будущий сезон. Если вход ещё впереди в этом
+  // году — оставляем текущий год.
   const emd = calDayToMd(entryCal);
-  const startT = Date.parse(`${cfg.targetYear}-${pad2(emd.m)}-${pad2(emd.d)}T00:00:00Z`);
+  const asOf = cfg.asOf || `${cfg.targetYear}-01-01`;
+  let chosenYear = Number(cfg.targetYear);
+  for (let g = 0; g < 4; g++) {
+    const entryISO = `${chosenYear}-${pad2(emd.m)}-${pad2(emd.d)}`;
+    if (entryISO > asOf) break; // ISO-даты сравнимы как строки
+    chosenYear += 1;
+  }
+  const startT = Date.parse(`${chosenYear}-${pad2(emd.m)}-${pad2(emd.d)}T00:00:00Z`);
   const days = [];
   for (let i = 0; i < seasonLen; i++) {
     const date = new Date(startT + i * DAYMS).toISOString().slice(0, 10);
@@ -227,7 +237,7 @@ function buildEngineeredSeason(shape, cfg) {
     marketDates: { ok: new Date(phaseDates.entry).getUTCDate() !== 1 || new Date(phaseDates.saleStart).getUTCDate() !== 1, label: 'Даты по рынку', value: `вход ${phaseDates.entry}`, ref: 'не 1-е число' },
   };
 
-  return { forecastDaily, forecastPeriod: { from: days[0].date, to: days[days.length - 1].date }, phaseDates, validation, top3PeakDaily: target3, totalUnits: Math.round(total), seasonCal, deliveries, restockDeadline };
+  return { forecastDaily, forecastPeriod: { from: days[0].date, to: days[days.length - 1].date }, phaseDates, validation, top3PeakDaily: target3, totalUnits: Math.round(total), seasonCal, deliveries, restockDeadline, chosenYear };
 }
 
 /**
@@ -280,9 +290,10 @@ export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily
   const top3 = top3Daily > 0 ? top3Daily : baseDaily;
 
   const eng = buildEngineeredSeason(shape, {
-    targetYear: year, top3Daily: top3, volumeAdj, priceAdj, meanPrice,
+    targetYear: year, asOf: opts.asOf, top3Daily: top3, volumeAdj, priceAdj, meanPrice,
     rampDays: opts.rampDays, seasonFrac: opts.seasonFrac, favorableMonth,
   });
+  const effectiveYear = eng.chosenYear || year; // движок мог сдвинуть год вперёд (сезон уже прошёл)
 
   // Историческая кривая (2 года) — по фактическим дням (для второй диаграммы).
   // Размечаем ТЕМИ ЖЕ периодами (Разгон/Сезон/Распродажа/Межсезонье), что и прогноз:
@@ -312,7 +323,8 @@ export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily
 
   return {
     forecastPeriod: eng.forecastPeriod,
-    targetYear: year,
+    targetYear: effectiveYear,
+    requestedYear: year,
     phaseDates: eng.phaseDates,
     seasonCal: eng.seasonCal,
     deliveries: eng.deliveries,
