@@ -867,14 +867,45 @@ export async function buildSeasonPlanReport({
       opts: { ...plan, baseSource: baseInfo.source, priceAnchor: collected.priceAnchor },
     });
     fc.priceInfo = { anchor: collected.priceAnchor, medianPrice: collected.medianPrice };
+
+    // ── ОБЪЁМ плана = фактические продажи ТОП-1/ТОП-3 за АНАЛОГИЧНЫЙ период ──
+    // Синтетическая кривая задаёт ФОРМУ сезона (разгон/пик/распродажа), но её ИТОГ прибиваем
+    // к реальности: сколько лидер(ы) финальной выборки реально продали за ТО ЖЕ сезонное окно
+    // в последнем ПОЛНОМ году. Точнее и без переоценки синтетическим пиком; ТОП-1 — амбициознее.
+    let seasonTargets = null;
+    try {
+      const fp = fc.forecastPeriod;
+      const pad = (n) => String(n).padStart(2, '0');
+      const shiftY = (ymd, k) => { const [y, m, dd] = ymd.split('-').map(Number); return `${y - k}-${pad(m)}-${pad(dd)}`; };
+      let ky = 1; while (ky < 6 && shiftY(fp.to, ky) > d2) ky++; // последнее ПОЛНОЕ окно (конец ≤ конца истории)
+      let aFrom = shiftY(fp.from, ky); const aTo = shiftY(fp.to, ky);
+      if (aFrom < d1) aFrom = d1;                               // не вылезаем за собранную историю
+      const analog = await collectShape(aFrom, aTo);            // из кэша SERP — без доп. запросов
+      const lead = (analog.perItemMeta || []).filter((m) => m.days > 0).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+      const t1 = lead[0] ? Math.round(lead[0].unitsSold) : 0;
+      const t3 = lead.length ? Math.round(lead.slice(0, 3).reduce((s, m) => s + m.unitsSold, 0) / Math.min(3, lead.length)) : 0;
+      const targetTotal = targetLevel === 'top1' ? t1 : t3;
+      const curTotal = (fc.forecastDaily || []).reduce((s, r) => s + (Number(r.plannedOrders) || 0), 0);
+      seasonTargets = { window: { from: aFrom, to: aTo }, yearsBack: ky, top1Units: t1, top3Units: t3, used: targetTotal, curveTotalBefore: Math.round(curTotal) };
+      if (targetTotal > 0 && curTotal > 0) {
+        const factor = targetTotal / curTotal; // множитель формы, чтобы итог = продажам лидера(ов)
+        for (const r of fc.forecastDaily) { r.plannedOrders = round1(r.plannedOrders * factor); r.stock = Math.round((Number(r.stock) || 0) * factor); }
+        if (Array.isArray(fc.deliveries)) fc.deliveries = fc.deliveries.map((d) => ({ ...d, qty: Math.round(d.qty * factor) }));
+        fc.totalUnits = Math.round(curTotal * factor);
+        if (fc.top3PeakDaily != null) fc.top3PeakDaily = Math.round(fc.top3PeakDaily * factor);
+      }
+    } catch (e) { LP(`Не удалось привязать объём к аналогичному периоду: ${String(e.message || e)}.`); }
+
     fc.levelInfo = {
       targetLevel,
       top1Daily: Math.round(top1Daily * 10) / 10,
       top3Daily: Math.round(top3Daily * 10) / 10,
       top1Name: strongest ? strongest.name : null,
+      seasonTargets, // фактический объём ТОП-1/ТОП-3 за аналог. период — база «Выкупов»
     };
     const rk = fc.plan && fc.plan.rank;
-    LP(`Прогноз построен: ранг ${rk ? (rk.rank ?? '—') : '—'}, уровень ${targetLevel === 'top1' ? 'ТОП-1' : 'ТОП-3'} (${Math.round(targetDaily)} шт/день), период прогноза ${fc.forecastPeriod ? fc.forecastPeriod.from + '…' + fc.forecastPeriod.to : '—'}.`);
+    const usedTot = seasonTargets ? seasonTargets.used : null;
+    LP(`Прогноз построен: ранг ${rk ? (rk.rank ?? '—') : '—'}, уровень ${targetLevel === 'top1' ? 'ТОП-1' : 'ТОП-3'}${usedTot ? `, объём ${usedTot} шт по аналог. периоду ${seasonTargets.window.from}…${seasonTargets.window.to}` : ` (${Math.round(targetDaily)} шт/день)`}, период прогноза ${fc.forecastPeriod ? fc.forecastPeriod.from + '…' + fc.forecastPeriod.to : '—'}.`);
 
     return {
       label,

@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28n';
+const APP_BUILD = 'season-serp-2026-07-28o';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2060,6 +2060,16 @@ function seasonPlanChecks(rep, p) {
   </div>`;
 }
 
+// Подпись к «Выкупам»: объём прибит к фактическим продажам ТОП-1/ТОП-3 финальной
+// выборки за аналогичный сезонный период прошлого года (форма кривой — синтетическая).
+function seasonVolumeBasis(p) {
+  const st = p.levelInfo && p.levelInfo.seasonTargets;
+  if (!st || !st.used) return 'MPStats «продажи» = выкупы · база для производства';
+  const lvl = p.levelInfo.targetLevel === 'top1' ? 'ТОП-1' : 'ТОП-3';
+  const w = st.window ? `${seFmtRange(st.window.from, st.window.to)}` : '';
+  return `= фактические продажи ${lvl} за аналог. период ${w}`;
+}
+
 function seasonSummary(rep, p) {
   const rank = p.rank || {};
   const fd = p.forecastDaily || [];
@@ -2073,7 +2083,7 @@ function seasonSummary(rep, p) {
   return `<div class="se-summary">
     <div class="se-cards">
       <div class="se-card"><div class="k">Ранг сезонности</div><div class="v">${rank.rank || '—'}</div><div class="mini">амплитуда p90/p50 = ${rank.amplitude ?? '—'}</div></div>
-      <div class="se-card"><div class="k">Выкупы (прогноз), шт</div><div class="v good">${total.toLocaleString('ru')}</div><div class="mini">MPStats «продажи» = выкупы · база для производства</div></div>
+      <div class="se-card"><div class="k">Выкупы (прогноз), шт</div><div class="v good">${total.toLocaleString('ru')}</div><div class="mini">${seasonVolumeBasis(p)}</div></div>
       <div class="se-card"><div class="k">Заказы (оценка), шт</div><div class="v">${orders.toLocaleString('ru')}</div><div class="mini">выкупы ÷ выкуп: <input id="se-buyout" type="number" min="1" max="100" value="${buyout}" title="% выкупа"> %</div></div>
       <div class="se-card"><div class="k">Цена, ₽</div><div class="v">${pmin ? pmin.toLocaleString('ru') + '–' + pmax.toLocaleString('ru') : '—'}</div><div class="mini">якорь: медиана ТОПов −10%</div></div>
       <div class="se-card"><div class="k">Благоприятные месяцы</div><div class="v">${favM || '—'}</div><div class="mini">спрос выше среднего, остатки ниже</div></div>
