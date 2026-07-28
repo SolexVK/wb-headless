@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28h';
+const APP_BUILD = 'season-serp-2026-07-28i';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1363,6 +1363,7 @@ const seasonIncludeByPath = {};          // path -> Set(wb) вручную од�
 function seasonIncludeFor(path) { if (!seasonIncludeByPath[path]) seasonIncludeByPath[path] = new Set(); return seasonIncludeByPath[path]; }
 // Поведенческая релевантность: фразы предмета + выбранные пользователем + дневной бюджет.
 let seasonBudget = null;                 // {used, limit, left} суточный лимит MPStats
+let seasonApproved = new Set();           // nmID, вручную одобренные в «Предв. выборе»
 const seasonPhrasesByPath = {};          // path -> [{phrase,norm,freq,words}]
 const seasonPickedByPath = {};           // path -> Set(norm) отмеченные галочками фразы
 function seasonPickedFor(path) { if (!seasonPickedByPath[path]) seasonPickedByPath[path] = new Set(); return seasonPickedByPath[path]; }
@@ -1448,7 +1449,6 @@ function seasonBuilderPanel() {
           <textarea id="se-phrases" rows="3" placeholder="рубашка муслиновая женская&#10;рубашка из муслина&#10;марлевка рубашка">${seEsc(f.phrases || '')}</textarea>
         </div>
         <div class="mini">⚠ Минус-слова ищутся <b>в названии</b> — оставляйте их минимум, иначе можно потерять релевантные ТОПы (муслин часто называют «прозрачная»/«лёгкая»). Товары по фразам объединяются, дубли убираются; минус-слова, цена и выручка применяются бесплатно.</div>
-        <div class="field span2" style="margin-top:10px"><label title="ТОП-артикулы, которые НЕ ранжируются по вашим фразам (продаются через другие запросы), но нужны в базе. Впишите их nmID через запятую — подтянем их продажи за 2 года напрямую (1 запрос на артикул).">Всегда включать эти артикулы <span class="mini">(nmID через запятую — для ТОПов вне фраз)</span></label><input id="se-include" value="${seEsc(f.includeIds || '')}" placeholder="напр. 227781398, 219401072"></div>
       </div>
 
       <!-- 2. Фильтры плана -->
@@ -1483,6 +1483,19 @@ function seasonBuilderPanel() {
         </div>
       </div>
 
+      <!-- 3. Предв. выбор ТОПов без ключа в названии -->
+      <div class="u-pg se-wide">
+        <div class="u-pg-t">3 · 🔍 Предв. выбор аналогов без ключа в названии</div>
+        <div class="se-feat-bar">
+          <button class="btn btn-primary" id="se-precheck" type="button">Предв. выбор</button>
+          <span class="mini" id="se-precheck-status">${(f.approvedIds || []).length ? `отобрано: ${(f.approvedIds || []).length}` : ''}</span>
+        </div>
+        <div class="mini">ТОП по продажам среди тех, у кого в названии НЕТ нишевого ключа (муслин…). Отметьте галочками релевантные и «Сохранить» — они войдут в выборку наравне с явными.</div>
+        <details class="se-comp se-wide" id="se-precheck-box"><summary>Кандидаты на отсмотр <span class="mini" id="se-precheck-count"></span></summary>
+          <div class="se-comp-body" id="se-precheck-body"></div>
+        </details>
+      </div>
+
       <!-- 4. Построить план -->
       <div class="se-wide season-actions">
         <button class="btn btn-primary" id="se-build"${seasonHasToken && !seasonBuilding ? '' : ' disabled'}>${seasonBuilding ? '⏳ Строю план…' : '▶ Построить план'}</button>
@@ -1509,7 +1522,7 @@ function collectSeasonForm() {
     articleId: seasonBuildArticle,
     phrases,
     minusWords: v('se-minus'),
-    includeIds: v('se-include'),
+    approvedIds: [...seasonApproved],
     gender: document.getElementById('se-gender')?.value || '',
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
     limit: v('se-limit'), targetYear: v('se-year'),
@@ -1692,24 +1705,70 @@ function renderUndetermined(list, path) {
     toast(`Добавлено в выборку: ${added}. Теперь «Построить план».`);
   });
 }
-async function loadUndetermined() {
+async function loadSeasonCandidates() {
   const cfg = collectSeasonForm();
-  if (!cfg.path) { toast('Сначала укажи путь предмета WB', true); return; }
-  const status = document.getElementById('se-undet-status');
+  if (!cfg.phrases.length) { toast('Сначала впиши целевые фразы', true); return; }
+  const status = document.getElementById('se-precheck-status');
+  const box = document.getElementById('se-precheck-box');
   if (status) status.textContent = 'Собираю кандидатов…';
   try {
     const r = await api('/api/season/candidates', { method: 'POST', body: JSON.stringify(cfg) });
-    const cdnWarn = (r.deepMatch && !r.cardsEnriched) ? ' · ⚠ карточки WB не загрузились (глубокий отбор по названию)' : (r.cardsEnriched ? ` · карточек: ${r.cardsEnriched}` : '');
-    if (status) status.textContent = `всего в предмете: ${r.total}, в сегменте: ${r.structuralPool}, принято: ${r.acceptedCount}, кандидатов: ${(r.undetermined || []).length}${cdnWarn}`;
-    renderUndetermined(r.undetermined || [], cfg.path);
-    seasonLogPush(r.log); renderLogComment(document.getElementById('se-undet-log'), r.log);
+    if (status) status.textContent = `без ключа: ${r.noKeyCount} (с ключом ${r.withKey})`;
+    const cnt = document.getElementById('se-precheck-count');
+    if (cnt) cnt.textContent = `— нишевые ключи: [${(r.keys || []).join(', ') || '—'}]`;
+    renderSeasonCandidates(r.candidates || []);
+    if (box) box.open = true;
+    seasonLogPush(r.log);
+    if (r.budget) seasonBudget = r.budget;
   } catch (e) { if (status) status.textContent = ''; toast('Ошибка: ' + e.message, true); }
+}
+function renderSeasonCandidates(list) {
+  const body = document.getElementById('se-precheck-body'); if (!body) return;
+  if (!list.length) { body.innerHTML = '<div class="mini">Кандидатов без нишевого ключа не нашлось — вся выдача уже с ключом в названии.</div>'; return; }
+  const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
+  const rows = list.map((m) => {
+    const nm = String(m.wb); const link = `https://www.wildberries.ru/catalog/${nm}/detail.aspx`;
+    const imgSrc = m.thumb || wbThumbUrl(nm, 'tm');
+    return `<tr>
+      <td><input type="checkbox" class="se-cand-cb" data-wb="${nm}"${seasonApproved.has(+nm) ? ' checked' : ''}></td>
+      <td class="se-comp-name"><span class="se-comp-thumb"><img loading="lazy" alt="" data-nm="${nm}" data-thumb="${seEsc(m.thumb || '')}" src="${imgSrc}"></span><a href="${link}" target="_blank" rel="noopener">${seEsc(m.name || ('арт. ' + nm))}</a></td>
+      <td>${seEsc(m.brand || '—')}</td>
+      <td class="num">${nm}</td>
+      <td class="num">${fmt(m.avgPrice)} ₽</td>
+      <td class="num">${fmt(m.unitsSold)}</td>
+      <td class="num">${fmt(m.revenue)} ₽</td>
+      <td class="num">${fmt(m.monthlyRevenue)} ₽</td>
+    </tr>`;
+  }).join('');
+  body.innerHTML = `<div class="se-comp-scroll"><table class="se-comp-table" style="min-width:720px">
+      <thead><tr><th>✓</th><th>Название</th><th>Бренд</th><th class="num">Артикул</th><th class="num">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num">≈ ₽/мес</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div class="se-feat-bar" style="margin-top:10px">
+      <button class="btn btn-primary" id="se-cand-save" type="button">💾 Сохранить отобранные</button>
+      <span class="mini" id="se-cand-info">Отмечено: ${seasonApproved.size}</span>
+    </div>`;
+  installSeasonZoom();
+  const info = document.getElementById('se-cand-info');
+  body.querySelectorAll('.se-cand-cb').forEach((cb) => cb.addEventListener('change', () => {
+    const id = +cb.dataset.wb;
+    if (cb.checked) seasonApproved.add(id); else seasonApproved.delete(id);
+    if (info) info.textContent = 'Отмечено: ' + seasonApproved.size;
+  }));
+  document.getElementById('se-cand-save')?.addEventListener('click', () => {
+    const a = state.articles.find((x) => x.id === seasonBuildArticle); if (!a) return;
+    a.seasonFilter = a.seasonFilter || {}; a.seasonFilter.approvedIds = [...seasonApproved]; unitPersist();
+    const st = document.getElementById('se-precheck-status'); if (st) st.textContent = `отобрано: ${seasonApproved.size}`;
+    toast(`Сохранено отобранных: ${seasonApproved.size}. Теперь «Построить план».`);
+  });
 }
 
 function bindSeasonBuilder() {
   const g = (id) => document.getElementById(id);
   g('se-article')?.addEventListener('change', (e) => { seasonBuildArticle = e.target.value; renderSeason(); });
   g('se-log-dl')?.addEventListener('click', downloadSeasonLog);
+  // Одобренные в «Предв. выборе» — восстановить для текущего артикула.
+  { const a = state.articles.find((x) => x.id === seasonBuildArticle); seasonApproved = new Set(((a && a.seasonFilter && a.seasonFilter.approvedIds) || []).map(Number)); }
+  g('se-precheck')?.addEventListener('click', loadSeasonCandidates);
   // Запоминаем фразы и минус-слова для артикула сразу при вводе (дебаунс-сейв в БД),
   // чтобы в следующий раз не вводить заново.
   const persistField = (id, key) => g(id)?.addEventListener('input', () => {
@@ -1718,7 +1777,6 @@ function bindSeasonBuilder() {
   });
   persistField('se-phrases', 'phrases');
   persistField('se-minus', 'minusWords');
-  persistField('se-include', 'includeIds');
   g('se-gender')?.addEventListener('change', () => {
     const a = state.articles.find((x) => x.id === seasonBuildArticle); if (!a) return;
     a.seasonFilter = a.seasonFilter || {}; a.seasonFilter.gender = g('se-gender').value; unitPersist();
@@ -1744,7 +1802,7 @@ function bindSeasonBuilder() {
       if (a) {
         a.seasonFilter = { ...(a.seasonFilter || {}),
           phrases: g('se-phrases')?.value || '', minusWords: cfg.minusWords,
-          includeIds: cfg.includeIds, gender: cfg.gender,
+          approvedIds: cfg.approvedIds, gender: cfg.gender,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
           limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, oos: cfg.oos, weekly: cfg.weekly };
         await recalc(true).catch(() => {});

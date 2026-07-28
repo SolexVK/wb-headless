@@ -312,7 +312,6 @@ app.delete('/api/season/plan', requireEdit('season'), (req, res) => {
 app.post('/api/season/candidates', requireEdit('season'), async (req, res) => {
   try {
     const cfg = req.body || {};
-    if (!cfg.path) return res.status(400).json({ ok: false, error: 'не указан путь предмета' });
     res.json({ ok: true, ...(await runCandidates(cfg)) });
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });

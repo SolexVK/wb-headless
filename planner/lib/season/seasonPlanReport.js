@@ -43,13 +43,42 @@ function genderRootsOf(g) {
   return null;
 }
 
-export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, limit, includeIds = [], gender = null } = {}, d1, d2, log = null) {
-  const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'сбор', msg }); };
+// Общие категорийные слова (5-символьные корни), которые НЕ считаем нишевым ключом:
+// они есть почти в любом названии предмета. Нишевый ключ (муслин, марлевка) остаётся.
+const GENERIC5 = new Set(['рубаш', 'блузк', 'туник', 'футбо', 'плать', 'кофта', 'джемп', 'свите', 'сороч',
+  'женск', 'женщи', 'дамск', 'мужск', 'мужчи', 'детск', 'девоч', 'мальч', 'подро', 'семей',
+  'летня', 'летни', 'весен', 'зимня', 'зимни', 'осенн', 'демис', 'всесе',
+  'оверс', 'прямо', 'приле', 'свобо', 'класс', 'базов', 'больш', 'разме', 'батал',
+  'одежд', 'магаз', 'бренд', 'новин', 'модна', 'модны', 'стиль', 'krasi', 'kruto',
+  'хлопк', 'хлопо', 'котон', 'ткань', 'однот', 'цвет']);
+
+// Нишевые ключи из целевых фраз (значимые слова без общих категорийных). 5-символьный
+// корень, чтобы ловить словоформы: «муслиновая»→«мусли» ловит «муслина/муслиновый».
+function phraseKeys(phrases) {
+  const out = new Set();
+  for (const p of phrases) {
+    for (const w of String(p).toLowerCase().replace(/ё/g, 'е').split(/[^а-я0-9]+/)) {
+      if (w.length < 4) continue;
+      const core = w.slice(0, 5);
+      if (GENERIC5.has(core)) continue;
+      out.add(core.length >= 4 ? core : w);
+    }
+  }
+  return [...out];
+}
+// Есть ли в названии нишевый ключ. Если ключей нет — считаем, что «есть» (не режем).
+function nameHasKey(name, keys) {
+  if (!keys.length) return true;
+  const nm = lcName(name);
+  return keys.some((k) => nm.includes(k));
+}
+
+// Собрать и отфильтровать объединённую выдачу SERP (union + минус-слова/цена/выручка + пол).
+// Общая часть для построения плана и для «Предв. выбора». Возвращает уже отфильтрованный
+// массив товаров SERP + метаданные.
+async function gatherSerp({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, gender = null } = {}, d1, d2, L) {
   const phr = [...new Set(phrases.map((s) => String(s).trim()).filter(Boolean))];
-  // Минус-слова матчим по КОРНЮ (stem): «пижама»→«пижам» ловит «пижамный/пижамах»,
-  // «прозрачная»→«прозрачн» ловит «прозрачные/прозрачный». Отсекаем все формы слова.
   const mw = minusWords.map((w) => stem(w)).filter((w) => w && w.length >= 3);
-  const incl = [...new Set((includeIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0))];
   const byId = new Map();
   let requests = 0, dailyLimit = null, periods = [];
   for (const phrase of phr) {
@@ -76,7 +105,6 @@ export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, 
   const windowMonths = Math.max(1, (Date.parse(d2) - Date.parse(d1)) / (30.4 * 86400000));
   let all = [...byId.values()];
   const before = all.length;
-  // минус-слова по названию (бесплатно) + ценовой сегмент + мин. выручка/мес
   all = all.filter((it) => {
     const nm = lcName(it.name);
     if (mw.some((w) => nm.includes(w))) return false;
@@ -86,9 +114,6 @@ export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, 
     return true;
   });
   L(`Объединено по фразам: ${before} уник. товаров; после минус-слов/сегмента/выручки: ${all.length}.`);
-
-  // Фильтр по ПОЛУ (из карточки WB, бесплатный CDN). Пол не пишут в название и его нет в
-  // выдаче — читаем характеристику «Пол» и отсекаем явно противоположный (неизвестный не трогаем).
   const gRoots = genderRootsOf(gender);
   if (gRoots) {
     let cards = new Map();
@@ -96,58 +121,70 @@ export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, 
     const beforeG = all.length; let known = 0;
     all = all.filter((it) => {
       const g = cardGender(cards.get(Number(it.wb)));
-      if (!g) return true;         // пол не указан — не выбрасываем
+      if (!g) return true;
       known++;
       return gRoots.some((r) => g.includes(r));
     });
     L(`Фильтр по полу (${gender}): карточек с указанным полом ${known}, оставлено ${all.length} из ${beforeG}.`);
   }
+  return { items: all, periods, requests, dailyLimit, windowMonths, total: before };
+}
 
+/**
+ * Сбор аналогов для ПЛАНА. Итоговая выборка = товары с нишевым ключом в названии
+ * (авто) + вручную одобренные «без ключа» (approvedIds, из «Предв. выбора»). Одобренные
+ * берутся из той же выдачи SERP (без доп. запросов). Возвращает товары с дневными рядами.
+ */
+export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, limit, gender = null, approvedIds = [] } = {}, d1, d2, log = null) {
+  const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'сбор', msg }); };
+  const g = await gatherSerp({ phrases, minusWords, priceMin, priceMax, minRevenuePerMonth, gender }, d1, d2, L);
+  const keys = phraseKeys(phrases);
+  const approved = new Set((approvedIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0));
+  L(`Нишевые ключи из фраз: [${keys.join(', ') || '—'}]. Одобрено вручную: ${approved.size}.`);
+  // авто (ключ в названии) ∨ одобрено вручную
+  let all = g.items.filter((it) => nameHasKey(it.name, keys) || approved.has(Number(it.wb)));
+  const withKey = all.filter((it) => nameHasKey(it.name, keys)).length;
+  L(`В выборку: с ключом в названии ${withKey}, одобренных без ключа ${all.length - withKey}, всего ${all.length}.`);
   all.sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
   const keptBeforeLimit = all.length;
-  if (limit && all.length > limit) all = all.slice(0, limit);
-  // полные дневные ряды на каждый товар (по датам periods)
+  if (limit && all.length > limit) {
+    const head = all.slice(0, limit);
+    const headSet = new Set(head.map((x) => Number(x.wb)));
+    // одобренные вручную не выбрасываем лимитом
+    const extra = all.filter((x) => approved.has(Number(x.wb)) && !headSet.has(Number(x.wb)));
+    all = head.concat(extra);
+  }
   for (const it of all) {
-    it.dailyFull = periods.map((date, i) => {
+    it.dailyFull = g.periods.map((date, i) => {
       const s = it.graph[i] || 0, r = it.revenueGraph[i] || 0;
       return { date, sales: s, revenue: r, price: s > 0 ? r / s : it.price, balance: 0 };
     });
   }
+  return { periods: g.periods, items: all, total: g.total, fetched: g.total, kept: keptBeforeLimit, requests: g.requests, dailyLimit: g.dailyLimit, windowMonths: g.windowMonths };
+}
 
-  // Ручное включение ТОПов по nmID (те, что не ранжируются по фразе, но нужны в базе).
-  // Дневные ряды тянем напрямую (item/sales), кэш-первым; всегда добавляем, минуя фильтры.
-  const present = new Set(all.map((x) => Number(x.wb)));
-  const need = incl.filter((id) => !present.has(id));
-  if (need.length) {
-    let names = new Map();
-    try { names = await fetchCardsInfo(need, { concurrency: 8 }); } catch { /* имя из карточки необязательно */ }
-    for (const id of need) {
-      const ckey = `item:${id}|${d1}|${d2}`;
-      let it = serpLoad(ckey, SERP_TTL_MS);
-      if (!it) {
-        if (dailyLimit) break;
-        let daily;
-        try { daily = await fetchItemDailySales(id, d1, d2); requests += 1; }
-        catch (e) { if (e && e.dailyLimit) { dailyLimit = String(e.message || e); break; } L(`Включение nm=${id}: ошибка — ${String(e && e.message || e)}.`); continue; }
-        if (!daily || !daily.length) { L(`Включение nm=${id}: нет данных продаж.`); continue; }
-        const info = names.get(Number(id));
-        it = {
-          wb: id, name: (info && info.imtName) || ('арт. ' + id), brand: (info && info.brand) || '', thumb: '',
-          price: 0, sales: 0, revenue: 0, forced: true,
-          dailyFull: daily.map((r) => ({ date: r.date, sales: Number(r.sales) || 0, revenue: Number(r.revenue) || 0, price: Number(r.price) || 0, balance: Number(r.balance) || 0 })),
-        };
-        it.sales = it.dailyFull.reduce((s, r) => s + r.sales, 0);
-        it.revenue = it.dailyFull.reduce((s, r) => s + r.revenue, 0);
-        const lastPr = [...it.dailyFull].reverse().find((r) => r.price > 0);
-        it.price = lastPr ? Math.round(lastPr.price) : 0;
-        serpSave(ckey, it);
-      }
-      all.push(it); present.add(id);
-      L(`Включён вручную nm=${id} «${(it.name || '').slice(0, 40)}» (выручка ${Math.round(it.revenue)}).`);
-    }
-  }
-
-  return { periods, items: all, total: before, fetched: before, kept: keptBeforeLimit, requests, dailyLimit, windowMonths };
+/**
+ * Кандидаты для «Предв. выбора»: ТОП-N по ПРОДАЖАМ среди товаров БЕЗ нишевого ключа в
+ * названии (их надо отсмотреть глазами). Уже одобренные помечаются checked. Использует
+ * ту же выдачу SERP (кэш) — почти без запросов.
+ */
+export async function collectSerpCandidates({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, gender = null, approvedIds = [], topN = 30 } = {}, d1, d2, log = null) {
+  const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'кандидаты', msg }); };
+  const g = await gatherSerp({ phrases, minusWords, priceMin, priceMax, minRevenuePerMonth, gender }, d1, d2, L);
+  const keys = phraseKeys(phrases);
+  const approved = new Set((approvedIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0));
+  const noKey = g.items.filter((it) => !nameHasKey(it.name, keys));
+  noKey.sort((a, b) => (b.sales || 0) - (a.sales || 0));
+  const withKey = g.items.length - noKey.length;
+  L(`Ключи [${keys.join(', ') || '—'}]: с ключом ${withKey}, без ключа ${noKey.length} → на отсмотр ТОП-${Math.min(topN, noKey.length)} по продажам.`);
+  const rows = noKey.slice(0, topN).map((it) => ({
+    wb: it.wb, name: it.name, brand: it.brand, thumb: it.thumb,
+    avgPrice: it.sales > 0 ? Math.round(it.revenue / it.sales) : it.price,
+    unitsSold: it.sales, revenue: it.revenue,
+    monthlyRevenue: Math.round((it.revenue || 0) / g.windowMonths),
+    checked: approved.has(Number(it.wb)),
+  }));
+  return { candidates: rows, keys, withKey, total: g.items.length, noKeyCount: noKey.length, requests: g.requests, dailyLimit: g.dailyLimit };
 }
 
 // Нарезать собранные SERP-товары под окно [w1,w2] и вернуть структуру как у

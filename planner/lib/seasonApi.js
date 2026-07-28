@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { buildSeasonPlanReport, collectFromCategory } from './season/seasonPlanReport.js';
+import { buildSeasonPlanReport, collectFromCategory, collectSerpCandidates } from './season/seasonPlanReport.js';
 import { buildFeatureDict } from './season/featureDict.js';
 import { fetchCategoryItems, normalizeCategoryItem } from './season/mpstats.js';
 import { fetchCardsInfo, cardMatchText } from './season/wbCard.js';
@@ -107,7 +107,7 @@ export async function runForecast(cfg = {}) {
       priceMin: num(cfg.priceMin), priceMax: num(cfg.priceMax),
       minRevenuePerMonth: num(cfg.minRevenue),
       limit: num(cfg.limit) || 60,
-      includeIds: (list(cfg.includeIds) || []).map(Number).filter((n) => Number.isFinite(n) && n > 0),
+      approvedIds: (list(cfg.approvedIds) || []).map(Number).filter((n) => Number.isFinite(n) && n > 0),
       gender: ['female', 'male', 'kids'].includes(cfg.gender) ? cfg.gender : null,
     },
   };
@@ -212,23 +212,23 @@ export function budgetStatus(path) {
 
 // Кандидаты на ручную проверку: собрать выборку и вернуть ТОП-20 «неопределённых»
 // (высокая выручка, в сегменте, не исключены, но не прошли плюс-слова) + размер выборки.
+// «Предв. выбор»: ТОП-30 по продажам среди товаров БЕЗ нишевого ключа в названии —
+// на визуальный отбор. Использует ту же выдачу SERP (кэш) — почти без запросов.
 export async function runCandidates(cfg = {}) {
   if (!process.env.MPSTATS_TOKEN) throw new Error('MPSTATS_TOKEN не задан в окружении службы (planner/data/.env)');
-  if (!cfg.path) throw new Error('Не указан путь предмета WB (path)');
+  const phrases = phraseList(cfg.phrases);
+  if (!phrases.length) throw new Error('Не указаны целевые фразы');
   const hist = default2Years();
   const log = [];
-  const col = await collectFromCategory({
-    path: cfg.path, d1: hist.d1, d2: hist.d2,
-    filter: buildFilter(cfg.filter || cfg),
-    limit: num(cfg.limit), maxPages: num(cfg.maxPages),
-    deepMatch: cfg.deepMatch !== false, log,
-  });
-  return {
-    acceptedCount: col.kept || 0, sampled: col.fetched || 0,
-    cardsEnriched: col.cardsEnriched || 0, deepMatch: !!col.deepMatch,
-    structuralPool: col.structuralPool || 0, total: col.total || 0,
-    undetermined: col.undetermined || [], log,
-  };
+  const r = await collectSerpCandidates({
+    phrases, minusWords: list(cfg.minusWords) || [],
+    priceMin: num(cfg.priceMin), priceMax: num(cfg.priceMax), minRevenuePerMonth: num(cfg.minRevenue),
+    gender: ['female', 'male', 'kids'].includes(cfg.gender) ? cfg.gender : null,
+    approvedIds: (list(cfg.approvedIds) || []).map(Number).filter((n) => Number.isFinite(n) && n > 0),
+    topN: 30,
+  }, hist.d1, hist.d2, log);
+  if (dbAvailable()) mpstatsBudgetAdd(r.requests || 0);
+  return { ...r, log };
 }
 
 // Словарь признаков предмета: из кэша (БД) или собрать заново. Кэш по path на 30 дней.
