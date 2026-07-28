@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28m';
+const APP_BUILD = 'season-serp-2026-07-28n';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1934,9 +1934,14 @@ function seasonCompetitorsBlock(rep) {
       ? `<span class="se-comp-thumb"><img loading="lazy" alt="" data-nm="${nm}" data-thumb="${seEsc(m.thumb || '')}" src="${imgSrc}"></span>`
       : '<span class="se-comp-thumb noimg"></span>';
     const nameCell = nm ? `${thumb}<a href="${link}" target="_blank" rel="noopener">${title}</a>` : `${thumb}${title}`;
-    // Оборачиваемость (дн) = средний остаток / среднесуточные продажи (avgStock·days/units).
-    const turnover = (m.avgStock > 0 && +m.unitsSold > 0 && m.days > 0)
-      ? Math.round(m.avgStock * m.days / m.unitsSold) : null;
+    // Оборачиваемость (дн) — на сколько дней хватит склада при текущем темпе продаж.
+    // SERP отдаёт только текущий остаток (balance) без дневной истории: считаем
+    // balance ÷ среднесуточные продажи за год (unitsSoldLY/365). Для старых планов —
+    // прежняя формула по среднему остатку (avgStock·days/units).
+    const turnover = (+m.balance > 0 && units(m) > 0)
+      ? Math.round(+m.balance / (units(m) / 365))
+      : ((m.avgStock > 0 && +m.unitsSold > 0 && m.days > 0)
+          ? Math.round(m.avgStock * m.days / m.unitsSold) : null);
     const shareCell = hasShare ? `<td class="num" title="Доля поискового трафика по целевым словам/фразам">${m.share != null ? Math.round(m.share * 100) + '%' : '—'}</td>` : '';
     return `<tr>
       <td class="num">${i + 1}</td>

@@ -220,7 +220,7 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
   const inWin = (d) => d >= w1 && d <= w2;
   const perItem = all.items.map((it) => ({
     wb: it.wb, name: it.name, brand: it.brand, price: it.price, priceMed: it.priceMed, thumb: it.thumb,
-    salesLY: it.salesLY, revenueLY: it.revenueLY,
+    salesLY: it.salesLY, revenueLY: it.revenueLY, balance: it.balance,
     daily: (it.dailyFull || []).filter((r) => inWin(r.date)),
   }));
   const groupDaily = buildGroupDailySeries(maybeOOS(perItem.map((p) => p.daily), oos));
@@ -228,7 +228,7 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
     const daysN = p.daily.length;
     return {
       wb: p.wb, name: p.name, brand: p.brand, price: p.price, priceMed: p.priceMed, thumb: p.thumb,
-      days: daysN, avgStock: 0,
+      days: daysN, avgStock: 0, balance: p.balance || 0, // текущий остаток — для оборачиваемости
       unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
       revenue: p.daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0),
       unitsSoldLY: p.salesLY || 0, revenueLY: p.revenueLY || 0, // за последний год — для витрины ТОП-15
