@@ -54,6 +54,36 @@ function migrate(db) {
     CREATE TABLE IF NOT EXISTS feature_dict (
       path TEXT PRIMARY KEY, json TEXT, fetchedAt TEXT
     );
+    -- Кэш поисковых фраз ОДНОГО товара (by_keywords). Дорогой запрос (тратит суточный
+    -- лимит MPStats), поэтому храним профиль в БД и переиспользуем между отчётами.
+    CREATE TABLE IF NOT EXISTS wb_keywords (
+      nmID INTEGER PRIMARY KEY,
+      d1 TEXT, d2 TEXT,
+      phrases TEXT,           -- JSON [{phrase,traffic}]
+      total INTEGER,          -- суммарный трафик по фразам
+      fetchedAt TEXT
+    );
+    -- Кэш поисковых фраз ПРЕДМЕТА (category/by_keywords) — 1 запрос отдаёт сотни фраз.
+    CREATE TABLE IF NOT EXISTS wb_subject_keywords (
+      path TEXT PRIMARY KEY,
+      d1 TEXT, d2 TEXT,
+      phrases TEXT,           -- JSON [{phrase,traffic,count}]
+      fetchedAt TEXT
+    );
+    -- Память запросов «Ранга сезонности»: введённые слова/минусы/выбранные фразы и
+    -- найденные артикулы — чтобы переиспользовать наработки для похожих предметов.
+    CREATE TABLE IF NOT EXISTS season_searches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      path TEXT,
+      targetWords TEXT,       -- JSON []
+      minusWords TEXT,        -- JSON []
+      pickedPhrases TEXT,     -- JSON []
+      threshold REAL,
+      keptIds TEXT,           -- JSON [] nmID отобранных аналогов
+      resultCount INTEGER,
+      createdAt TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_season_searches_path ON season_searches(path);
     -- Журнал производственных событий (append-only): смены статусов, новые даты,
     -- выполненные количества (Шаг 2), заметки. Источник истории/аудита/динамики.
     CREATE TABLE IF NOT EXISTS prod_events (
@@ -302,6 +332,73 @@ export function featureDictSave(path, data) {
   db.prepare('INSERT INTO feature_dict(path,json,fetchedAt) VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET json=excluded.json, fetchedAt=excluded.fetchedAt')
     .run(String(path), JSON.stringify(data), new Date().toISOString());
   return true;
+}
+
+// ── Кэш поисковых фраз товара (by_keywords) ──
+// Профиль запросов меняется медленно; храним в БД, чтобы не тратить суточный лимит.
+export function keywordsLoad(nmID, maxAgeMs) {
+  const db = getDb(); if (!db) return null;
+  const r = db.prepare('SELECT phrases, total, fetchedAt FROM wb_keywords WHERE nmID = ?').get(Number(nmID));
+  if (!r) return null;
+  if (maxAgeMs != null && r.fetchedAt && (Date.now() - Date.parse(r.fetchedAt) > maxAgeMs)) return null;
+  try { return { phrases: JSON.parse(r.phrases || '[]'), total: r.total || 0, fetchedAt: r.fetchedAt }; } catch { return null; }
+}
+/** Вернуть Map nmID→профиль для набора id (только свежие). Один запрос к БД. */
+export function keywordsLoadMany(nmIds, maxAgeMs) {
+  const db = getDb(); const out = new Map(); if (!db || !nmIds || !nmIds.length) return out;
+  const uniq = [...new Set(nmIds.map(Number).filter((n) => Number.isFinite(n) && n > 0))];
+  const minTs = maxAgeMs != null ? Date.now() - maxAgeMs : null;
+  const q = db.prepare(`SELECT nmID, phrases, total, fetchedAt FROM wb_keywords WHERE nmID IN (${uniq.map(() => '?').join(',')})`);
+  for (const r of q.all(...uniq)) {
+    if (minTs != null && r.fetchedAt && Date.parse(r.fetchedAt) < minTs) continue;
+    try { out.set(Number(r.nmID), { phrases: JSON.parse(r.phrases || '[]'), total: r.total || 0, fetchedAt: r.fetchedAt }); } catch { /* skip */ }
+  }
+  return out;
+}
+export function keywordsSave(nmID, profile, d1, d2) {
+  const db = getDb(); if (!db) return false;
+  const phrases = (profile && profile.phrases) || [];
+  db.prepare(`INSERT INTO wb_keywords(nmID,d1,d2,phrases,total,fetchedAt) VALUES(?,?,?,?,?,?)
+    ON CONFLICT(nmID) DO UPDATE SET d1=excluded.d1, d2=excluded.d2, phrases=excluded.phrases, total=excluded.total, fetchedAt=excluded.fetchedAt`)
+    .run(Number(nmID), d1 || null, d2 || null, JSON.stringify(phrases), Math.round((profile && profile.total) || 0), new Date().toISOString());
+  return true;
+}
+
+// ── Кэш поисковых фраз предмета (category/by_keywords) ──
+export function subjectKeywordsLoad(path, maxAgeMs) {
+  const db = getDb(); if (!db) return null;
+  const r = db.prepare('SELECT phrases, d1, d2, fetchedAt FROM wb_subject_keywords WHERE path = ?').get(String(path));
+  if (!r) return null;
+  if (maxAgeMs != null && r.fetchedAt && (Date.now() - Date.parse(r.fetchedAt) > maxAgeMs)) return null;
+  try { return { phrases: JSON.parse(r.phrases || '[]'), d1: r.d1, d2: r.d2, fetchedAt: r.fetchedAt }; } catch { return null; }
+}
+export function subjectKeywordsSave(path, phrases, d1, d2) {
+  const db = getDb(); if (!db) return false;
+  db.prepare(`INSERT INTO wb_subject_keywords(path,d1,d2,phrases,fetchedAt) VALUES(?,?,?,?,?)
+    ON CONFLICT(path) DO UPDATE SET d1=excluded.d1, d2=excluded.d2, phrases=excluded.phrases, fetchedAt=excluded.fetchedAt`)
+    .run(String(path), d1 || null, d2 || null, JSON.stringify(phrases || []), new Date().toISOString());
+  return true;
+}
+
+// ── Память запросов «Ранга сезонности» ──
+export function searchSave(rec) {
+  const db = getDb(); if (!db) return null;
+  const info = db.prepare(`INSERT INTO season_searches(path,targetWords,minusWords,pickedPhrases,threshold,keptIds,resultCount,createdAt)
+    VALUES(?,?,?,?,?,?,?,?)`)
+    .run(String(rec.path || ''), JSON.stringify(rec.targetWords || []), JSON.stringify(rec.minusWords || []),
+      JSON.stringify(rec.pickedPhrases || []), rec.threshold ?? null, JSON.stringify(rec.keptIds || []),
+      (rec.keptIds || []).length, new Date().toISOString());
+  return info.lastInsertRowid;
+}
+export function searchList(path, limit = 20) {
+  const db = getDb(); if (!db) return [];
+  const rows = path
+    ? db.prepare('SELECT * FROM season_searches WHERE path = ? ORDER BY id DESC LIMIT ?').all(String(path), limit)
+    : db.prepare('SELECT * FROM season_searches ORDER BY id DESC LIMIT ?').all(limit);
+  return rows.map((r) => ({
+    id: r.id, path: r.path, targetWords: JSON.parse(r.targetWords || '[]'), minusWords: JSON.parse(r.minusWords || '[]'),
+    pickedPhrases: JSON.parse(r.pickedPhrases || '[]'), threshold: r.threshold, resultCount: r.resultCount, createdAt: r.createdAt,
+  }));
 }
 
 // ── App-state (всё состояние приложения единым JSON-блобом) ──

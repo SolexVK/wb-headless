@@ -17,6 +17,7 @@ import {
 import { buildGroupDailySeries, buildSeasonPlan, applyOOSCorrection, trimToActive } from './salesPlan.js';
 import { buildForecast } from './forecast.js';
 import { fetchCardsInfo, cardMatchText, cardCharText } from './wbCard.js';
+import { filterByRelevance } from './relevance.js';
 
 /** Сдвиг 'YYYY-MM-DD' на N дней. */
 function offsetDate(ymd, days) {
@@ -226,7 +227,11 @@ export async function collectFromCategory({
   const fWin = { ...filter, windowMonths };
   const hasSoft = (filter.words?.length || filter.allWords?.length);
   const hasWords = !!(filter.words?.length || filter.allWords?.length || filter.exclude?.length || filter.mustHave?.length);
-  const deep = deepMatch && hasWords && !wbSet; // обогащение имеет смысл только при словах
+  // Режим поведенческой релевантности (новый): отбор по доле целевого поискового трафика
+  // (by_keywords), а не по плюс/минус-словам. Требует обогащения карточек для предфильтра.
+  const relevance = filter.relevance || null;
+  const deep = deepMatch && (hasWords || !!relevance) && !wbSet; // обогащение нужно и для релевантности
+  let relInfo = null;
   // Сколько карточек максимум обогащать. Раньше было 120 (сильно резало — отбор шёл
   // только по топ-120 выручки). Теперь тянем ВСЮ выдачу предмета и обогащаем весь
   // структурный пул (в сегменте) до этого потолка.
@@ -297,8 +302,28 @@ export async function collectFromCategory({
     // 3) Применяем слова к обогащённому тексту. НО если ни одна карточка не подтянулась
     // (CDN недоступен) — полный откат на прежнее поведение (матчинг по НАЗВАНИЮ на всей
     // выдаче), чтобы недоступность CDN не давала пустую выборку. Без регресса.
-    items = cardsEnriched > 0 ? filterGroupItems(pool, fWin) : filterGroupItems(allItems, fWin);
-    L(`Фильтр плюс/минус (плюс «любое из»: [${(filter.words || []).join(', ') || '—'}]; минус «любой исключает»: [${(filter.exclude || []).join(', ') || '—'}]; строгий ключ: [${(filter.mustHave || []).join(', ') || '—'}]) → принято ${items.length}.`);
+    if (relevance) {
+      // Отбор по доле целевого трафика (by_keywords, кэш-первым). Период by_keywords —
+      // последние 30 дней (профиль запросов свежий), а не всё историческое окно.
+      const kd2 = relevance.kwD2 || d2;
+      const kd1 = relevance.kwD1 || offsetDate(kd2, -30);
+      relInfo = await filterByRelevance(pool, {
+        targetWords: relevance.targetWords || [],
+        pickedPhrases: relevance.pickedPhrases || [],
+        threshold: relevance.threshold ?? 0.2,
+        budget: relevance.budget ?? 60,
+        d1: kd1, d2: kd2, log, onProgress: relevance.onProgress,
+      });
+      for (const it of pool) {
+        const s = relInfo.scores.get(String(it.wb));
+        if (s) { it.share = s.share; it.matched = s.matched; it._relevance = s.share; }
+      }
+      items = pool.filter((it) => relInfo.keep.has(String(it.wb)));
+      L(`Поведенческая релевантность (цель: [${(relevance.targetWords || []).join(', ') || '—'}]${(relevance.pickedPhrases || []).length ? ` + ${relevance.pickedPhrases.length} выбр. фраз` : ''}; порог доли ${Math.round((relevance.threshold ?? 0.2) * 100)}%) → принято ${items.length}. Профилей из базы ${relInfo.cached}, запросов сети ${relInfo.requests}${relInfo.dailyLimit ? '; ⚠ суточный лимит' : ''}.`);
+    } else {
+      items = cardsEnriched > 0 ? filterGroupItems(pool, fWin) : filterGroupItems(allItems, fWin);
+      L(`Фильтр плюс/минус (плюс «любое из»: [${(filter.words || []).join(', ') || '—'}]; минус «любой исключает»: [${(filter.exclude || []).join(', ') || '—'}]; строгий ключ: [${(filter.mustHave || []).join(', ') || '—'}]) → принято ${items.length}.`);
+    }
   } else {
     basePool = filterGroupItems(allItems, structuralOnly(fWin));
     items = filterGroupItems(allItems, fWin);
@@ -389,6 +414,11 @@ export async function collectFromCategory({
     cardsEnriched, // сколько карточек обогащено (матчинг по описанию+характеристикам)
     undetermined,  // ТОП-20 «неопределённых» на ручную проверку
     structuralPool: basePool.length,
+    relevance: relInfo && {
+      threshold: relevance.threshold ?? 0.2,
+      cached: relInfo.cached, requests: relInfo.requests,
+      prefiltered: relInfo.prefiltered, dailyLimit: relInfo.dailyLimit || null,
+    },
   };
 }
 
