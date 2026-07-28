@@ -643,3 +643,5 @@ html { overflow-x: hidden; }
 .se-ph.tgt::before { content: '🎯'; font-size: 11px; }
 .se-ph-cb { margin: 0; }
 .se-ph-f { color: var(--muted); font-size: 11px; }
+.se-ph-search { margin-bottom: 6px; }
+.se-ph-search input { width: 100%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 13px; }

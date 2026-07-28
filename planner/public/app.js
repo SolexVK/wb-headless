@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-relevance-2026-07-28a';
+const APP_BUILD = 'season-relevance-2026-07-28b';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1540,21 +1540,29 @@ function collectSeasonForm() {
   };
 }
 
-// Отрисовать фразы предмета галочками: свои (с целевым словом) сверху и подсвечены.
+// Отрисовать фразы галочками: целевые (со словом ниши) сверху и подсвечены + поиск.
+let _phSearch = '';
 function renderSeasonPhrases(path) {
   const body = document.getElementById('se-phrases-body'); if (!body) return;
   const phrases = seasonPhrasesByPath[path] || [];
   if (!phrases.length) { body.innerHTML = ''; return; }
   const picked = seasonPickedFor(path);
-  const targets = (document.getElementById('se-target')?.value || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
-  const isTarget = (p) => targets.some((w) => p.norm.includes(w));
   const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
-  const top = phrases.slice(0, 120);
-  const row = (p) => `<label class="se-ph${isTarget(p) ? ' tgt' : ''}${picked.has(p.norm) ? ' on' : ''}">
+  const q = _phSearch.toLowerCase().replace(/ё/g, 'е').trim();
+  // при поиске — все подходящие; без поиска — целевые + добор до 40 (целевые уже сверху)
+  let view = phrases;
+  if (q) view = phrases.filter((p) => p.norm.includes(q) || picked.has(p.norm));
+  else view = phrases.filter((p) => p.target || picked.has(p.norm)).concat(
+    phrases.filter((p) => !p.target && !picked.has(p.norm))).slice(0, 40);
+  const row = (p) => `<label class="se-ph${p.target ? ' tgt' : ''}${picked.has(p.norm) ? ' on' : ''}">
       <input type="checkbox" class="se-ph-cb" data-norm="${seEsc(p.norm)}"${picked.has(p.norm) ? ' checked' : ''}>
       <span class="se-ph-t">${seEsc(p.phrase)}</span><span class="se-ph-f">${fmt(p.freq)}</span></label>`;
-  body.innerHTML = `<div class="se-ph-list">${top.map(row).join('')}</div>
-    ${phrases.length > top.length ? `<div class="mini">Показаны ТОП-${top.length} по частоте из ${phrases.length}.</div>` : ''}`;
+  const tgtN = phrases.filter((p) => p.target).length;
+  body.innerHTML = `<div class="se-ph-search"><input id="se-ph-search" placeholder="🔎 поиск по фразам (например: длинн, оверсайз)" value="${seEsc(_phSearch)}"></div>
+    <div class="se-ph-list">${view.map(row).join('')}</div>
+    <div class="mini">Всего фраз: ${phrases.length}${tgtN ? `, с целевым словом: ${tgtN} (наверху, 🎯)` : ''}. ${q ? `Найдено: ${view.length}.` : (phrases.length > view.length ? `Показаны первые ${view.length} — остальные через поиск.` : '')}</div>`;
+  const s = document.getElementById('se-ph-search');
+  if (s) s.addEventListener('input', (e) => { _phSearch = e.target.value; renderSeasonPhrases(path); document.getElementById('se-ph-search')?.focus(); });
   body.querySelectorAll('.se-ph-cb').forEach((cb) => cb.addEventListener('change', () => {
     const n = cb.dataset.norm;
     if (cb.checked) picked.add(n); else picked.delete(n);
@@ -1564,21 +1572,22 @@ function renderSeasonPhrases(path) {
 }
 
 async function loadSeasonPhrases(force) {
-  const path = (document.getElementById('se-path')?.value || '').trim();
+  const g = (id) => (document.getElementById(id)?.value || '').trim();
+  const path = g('se-path');
   const status = document.getElementById('se-phrases-status');
   if (!path) { toast('Сначала укажи путь предмета WB', true); return; }
-  if (status) status.textContent = 'Загружаю фразы…';
+  if (!g('se-target')) { toast('Впиши целевое слово (например «муслин») — по нему ищем товары ниши', true); return; }
+  if (status) status.textContent = 'Ищу товары ниши и собираю их фразы…';
   try {
-    const r = await api('/api/season/phrases', { method: 'POST', body: JSON.stringify({ path, force: !!force }) });
+    const r = await api('/api/season/phrases', { method: 'POST', body: JSON.stringify({ path, targetWords: g('se-target'), minusWords: g('se-minus'), force: !!force }) });
     seasonPhrasesByPath[path] = r.phrases || [];
-    // авто-отметка фраз с целевым словом при первом сборе (если пользователь ещё ничего не трогал)
+    _phSearch = '';
+    // авто-отметка целевых фраз (с словом ниши), если пользователь ещё ничего не выбрал
     const picked = seasonPickedFor(path);
-    if (!picked.size) {
-      const targets = (document.getElementById('se-target')?.value || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
-      for (const p of seasonPhrasesByPath[path]) if (targets.some((w) => p.norm.includes(w))) picked.add(p.norm);
-    }
+    if (!picked.size) for (const p of seasonPhrasesByPath[path]) if (p.target) picked.add(p.norm);
     if (r.budget) { seasonBudget = r.budget; const b = document.querySelector('.se-budget'); if (b) b.outerHTML = seasonBudgetBadge(); }
-    if (status) status.textContent = `фраз: ${(r.phrases || []).length}${r.cached ? ' (из базы)' : ' (свежие)'}`;
+    if (status) status.textContent = `фраз: ${(r.phrases || []).length}, из них целевых: ${r.targetCount ?? 0}${r.cached ? ' (из базы)' : ` (эталонов: ${r.seedsUsed ?? 0})`}${r.dailyLimit ? ' · ⚠ лимит' : ''}`;
+    if (!(r.phrases || []).length) toast('Не нашёл товаров с целевым словом в этом предмете — проверь слово/предмет или ослабь минус-слова', true);
     renderSeasonPhrases(path);
     const c = document.getElementById('se-picked-count'); if (c) c.textContent = picked.size;
   } catch (e) { if (status) status.textContent = ''; toast('Ошибка загрузки фраз: ' + e.message, true); }

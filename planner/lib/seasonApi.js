@@ -8,9 +8,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildSeasonPlanReport, collectFromCategory } from './season/seasonPlanReport.js';
 import { buildFeatureDict } from './season/featureDict.js';
-import { fetchSubjectKeywords } from './season/wbSubjectKeywords.js';
+import { fetchCategoryItems, normalizeCategoryItem } from './season/mpstats.js';
+import { fetchCardsInfo, cardMatchText } from './season/wbCard.js';
+import { fetchItemKeywords, DailyLimitError } from './season/wbKeywords.js';
 import { dbAvailable, planSave, planLoad, planDelete, planList, featureDictLoad, featureDictSave,
-  subjectKeywordsLoad, subjectKeywordsSave, searchSave, searchList, mpstatsBudgetToday, mpstatsBudgetAdd } from './db.js';
+  subjectKeywordsLoad, subjectKeywordsSave, searchSave, searchList, mpstatsBudgetToday, mpstatsBudgetAdd,
+  keywordsLoadMany, keywordsSave } from './db.js';
 
 const FEATURE_TTL_MS = 30 * 24 * 3600 * 1000; // словарь признаков кэшируем на 30 дней
 const SUBJECT_KW_TTL_MS = 7 * 24 * 3600 * 1000; // фразы предмета — на 7 дней (меняются медленно)
@@ -125,19 +128,74 @@ export async function runForecast(cfg = {}) {
   return report;
 }
 
-// Фразы предмета для выбора галочками (category/by_keywords). Кэш в БД на 7 дней.
+const normPhrase = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').trim();
+
+// Меню фраз для выбора галочками. ВАЖНО: отчёт предмета (category/by_keywords) НЕ содержит
+// нишевых фраз (только «головные» запросы), поэтому фразы берём из by_keywords САМИХ
+// целевых товаров: находим по карточкам топ-N товаров с целевым словом → их поисковые
+// фразы содержат нишу («муслиновая рубашка…») + «жирные неявные» (по которым они тоже
+// ранжируются). Кэш меню — по (предмет + целевые слова) на 7 дней; профили by_keywords
+// эталонов переиспользуются при построении (лимит не тратится дважды).
+async function buildTargetPhrases(path, targetWords, minusWords, { seeds = 6 } = {}) {
+  const tw = targetWords.map(normPhrase).filter(Boolean);
+  const mw = minusWords.map(normPhrase).filter(Boolean);
+  const kw = last30();
+  const cat = await fetchCategoryItems({ path, d1: kw.d1, d2: kw.d2, startRow: 0, endRow: 600 });
+  if (dbAvailable()) mpstatsBudgetAdd(1);
+  let items = (cat.data || []).map(normalizeCategoryItem).filter((x) => x.wb)
+    .sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+  // бесплатный предфильтр карточками: товары с целевым словом, без минус-слов
+  const head = items.slice(0, 250);
+  const cards = await fetchCardsInfo(head.map((x) => x.wb), { concurrency: 8 });
+  const cand = head.filter((x) => {
+    const t = cardMatchText(cards.get(Number(x.wb)));
+    if (!t) return false;
+    if (mw.some((w) => t.includes(w))) return false;
+    return tw.length ? tw.some((w) => t.includes(w)) : true;
+  });
+  const seedItems = cand.slice(0, seeds);
+  // by_keywords эталонов: кэш-первым (БД), сеть только за неизвестными
+  const cached = dbAvailable() ? keywordsLoadMany(seedItems.map((s) => s.wb), 30 * 24 * 3600 * 1000) : new Map();
+  const freq = new Map(); let dailyLimit = false;
+  for (const s of seedItems) {
+    let prof = cached.get(Number(s.wb));
+    if (!prof) {
+      try { prof = await fetchItemKeywords(s.wb, { d1: kw.d1, d2: kw.d2 }); }
+      catch (e) { if (e instanceof DailyLimitError) { dailyLimit = true; break; } prof = null; }
+      if (prof && dbAvailable()) { keywordsSave(s.wb, prof, kw.d1, kw.d2); mpstatsBudgetAdd(1); }
+    }
+    if (!prof) continue;
+    for (const p of (prof.phrases || [])) {
+      const n = normPhrase(p.phrase);
+      const words = n.split(/\s+/).length;
+      if (words < 2 || words > 6) continue;      // фразы 2–6 слов
+      if (mw.some((w) => n.includes(w))) continue; // минус-слова вон
+      const cur = freq.get(n) || { phrase: p.phrase, norm: n, freq: 0, target: tw.some((w) => n.includes(w)) };
+      cur.freq += p.traffic; freq.set(n, cur);
+    }
+  }
+  const arr = [...freq.values()]
+    .sort((a, b) => (b.target - a.target) || (b.freq - a.freq))   // муслиновые — наверх
+    .slice(0, 80)
+    .map((p) => ({ phrase: p.phrase, norm: p.norm, freq: Math.round(p.freq), target: !!p.target }));
+  return { phrases: arr, seedsUsed: seedItems.length, targetCount: arr.filter((p) => p.target).length, dailyLimit };
+}
+
+// Меню фраз для выбора галочками. Кэш по (предмет+целевые слова) на 7 дней.
 export async function getSubjectPhrases(cfg = {}) {
   if (!process.env.MPSTATS_TOKEN) throw new Error('MPSTATS_TOKEN не задан в окружении службы (planner/data/.env)');
   const path = String(cfg.path || '').trim();
   if (!path) throw new Error('Не указан путь предмета WB (path)');
+  const targetWords = list(cfg.targetWords) || [];
+  const minusWords = list(cfg.minusWords) || list(cfg.exclude) || [];
+  const cacheKey = path + '' + targetWords.map((s) => s.toLowerCase()).sort().join(',');
   if (!cfg.force && dbAvailable()) {
-    const hit = subjectKeywordsLoad(path, SUBJECT_KW_TTL_MS);
+    const hit = subjectKeywordsLoad(cacheKey, SUBJECT_KW_TTL_MS);
     if (hit) return { phrases: hit.phrases, cached: true, fetchedAt: hit.fetchedAt, budget: mpstatsBudgetToday() };
   }
-  const kw = last30();
-  const phrases = await fetchSubjectKeywords(path, { d1: kw.d1, d2: kw.d2 });
-  if (dbAvailable()) { subjectKeywordsSave(path, phrases, kw.d1, kw.d2); mpstatsBudgetAdd(1); }
-  return { phrases, cached: false, budget: dbAvailable() ? mpstatsBudgetToday() : null };
+  const r = await buildTargetPhrases(path, targetWords, minusWords);
+  if (dbAvailable() && r.phrases.length) subjectKeywordsSave(cacheKey, r.phrases, null, null);
+  return { phrases: r.phrases, cached: false, seedsUsed: r.seedsUsed, targetCount: r.targetCount, dailyLimit: r.dailyLimit, budget: dbAvailable() ? mpstatsBudgetToday() : null };
 }
 
 // Текущий дневной бюджет запросов MPStats (использовано/лимит/остаток) + недавние запросы.
