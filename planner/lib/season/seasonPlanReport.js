@@ -112,15 +112,24 @@ async function gatherSerp({ phrases = [], minusWords = [], priceMin, priceMax, m
   const windowMonths = Math.max(1, (Date.parse(d2) - Date.parse(d1)) / (30.4 * 86400000));
   let all = [...byId.values()];
   const before = all.length;
+  // МЕДИАННАЯ цена за последний год (по дневной цене = выручка/штуки за день). Короткая
+  // распродажа её не сдвигает — фильтруем по типичной цене, а не по текущей (final_price).
+  const lyCut0 = offsetDate(d2, -365);
+  for (const it of all) {
+    const pr = []; const gph = it.graph || [], rgph = it.revenueGraph || [];
+    for (let i = 0; i < periods.length; i++) { if (periods[i] > lyCut0 && (gph[i] || 0) > 0) pr.push(rgph[i] / gph[i]); }
+    pr.sort((a, b) => a - b);
+    it.priceMed = pr.length ? Math.round(pr[Math.floor((pr.length - 1) / 2)]) : (it.price || 0);
+  }
   all = all.filter((it) => {
     const nm = lcName(it.name);
     if (mw.some((w) => nm.includes(w))) return false;
-    if (priceMin != null && it.price < priceMin) return false;
-    if (priceMax != null && it.price > priceMax) return false;
+    if (priceMin != null && it.priceMed < priceMin) return false;   // по медианной цене
+    if (priceMax != null && it.priceMed > priceMax) return false;
     if (minRevenuePerMonth != null && (it.revenue / windowMonths) < minRevenuePerMonth) return false;
     return true;
   });
-  L(`Объединено по фразам: ${before} уник. товаров; после минус-слов/сегмента/выручки: ${all.length}.`);
+  L(`Объединено по фразам: ${before} уник. товаров; после минус-слов/сегмента (по медианной цене)/выручки: ${all.length}.`);
   const gRoots = genderRootsOf(gender);
   if (gRoots) {
     let cards = new Map();
@@ -197,7 +206,7 @@ export async function collectSerpCandidates({ phrases = [], minusWords = [], pri
   L(`Ключи [${keys.join(', ') || '—'}]: с ключом ${withKey}, без ключа ${noKey.length} → на отсмотр ТОП-${Math.min(topN, noKey.length)} по выручке за год (убыв.).`);
   const rows = noKey.slice(0, topN).map((it) => ({
     wb: it.wb, name: it.name, brand: it.brand, thumb: it.thumb,
-    avgPrice: it.salesLY > 0 ? Math.round(it.revenueLY / it.salesLY) : it.price,
+    avgPrice: it.priceMed || (it.salesLY > 0 ? Math.round(it.revenueLY / it.salesLY) : it.price),
     unitsSold: it.salesLY, revenue: it.revenueLY,
     monthlyRevenue: Math.round((it.revenueLY || 0) / 12),
     checked: approved.has(Number(it.wb)),
@@ -210,7 +219,7 @@ export async function collectSerpCandidates({ phrases = [], minusWords = [], pri
 export function sliceSerpWindow(all, w1, w2, oos = false) {
   const inWin = (d) => d >= w1 && d <= w2;
   const perItem = all.items.map((it) => ({
-    wb: it.wb, name: it.name, brand: it.brand, price: it.price, thumb: it.thumb,
+    wb: it.wb, name: it.name, brand: it.brand, price: it.price, priceMed: it.priceMed, thumb: it.thumb,
     salesLY: it.salesLY, revenueLY: it.revenueLY,
     daily: (it.dailyFull || []).filter((r) => inWin(r.date)),
   }));
@@ -218,7 +227,7 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
   const perItemMeta = perItem.map((p) => {
     const daysN = p.daily.length;
     return {
-      wb: p.wb, name: p.name, brand: p.brand, price: p.price, thumb: p.thumb,
+      wb: p.wb, name: p.name, brand: p.brand, price: p.price, priceMed: p.priceMed, thumb: p.thumb,
       days: daysN, avgStock: 0,
       unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
       revenue: p.daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0),

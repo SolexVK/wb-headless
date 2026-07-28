@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28l';
+const APP_BUILD = 'season-serp-2026-07-28m';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1925,8 +1925,8 @@ function seasonCompetitorsBlock(rep) {
     const nm = m.wb != null ? String(m.wb) : '';
     const link = nm ? `https://www.wildberries.ru/catalog/${nm}/detail.aspx` : '';
     const perMonth = hasLY ? Math.round(rev(m) / 12) : (m.days > 0 ? Math.round((+m.revenue || 0) / m.days * 30) : null);
-    // Средняя цена продажи = выручка / штук (реальная средневзвешенная цена за период).
-    const avgPrice = (units(m) > 0) ? rev(m) / units(m) : (+m.price || null);
+    // Ср. цена: медианная за год (устойчива к распродажам), иначе выручка/штук.
+    const avgPrice = (+m.priceMed > 0) ? +m.priceMed : ((units(m) > 0) ? rev(m) / units(m) : (+m.price || null));
     const title = seEsc(m.name || (nm ? 'арт. ' + nm : '—'));
     // Картинку берём из готового URL serp (m.thumb) — он точный; иначе гадаем хост по nmID.
     const imgSrc = m.thumb || (nm ? wbThumbUrl(nm, 'tm') : '');
