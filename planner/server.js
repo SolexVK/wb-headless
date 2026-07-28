@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import { defaultState, normalizeState, PARTIA_ROLES } from './lib/model.js';
 import { buildSchedule } from './lib/scheduler.js';
 import { findRescues } from './lib/rescue.js';
-import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates } from './lib/seasonApi.js';
+import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates, getSubjectPhrases, budgetStatus } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
 import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList } from './lib/db.js';
@@ -271,7 +271,17 @@ app.post('/api/sample', requireEdit('fabric'), (req, res) => {
 // ---- Ранг сезонности (план продаж по методу сезонности) ----
 // доступность (есть ли токен MPStats)
 app.get('/api/season/status', (req, res) => {
-  res.json({ ok: true, hasToken: !!process.env.MPSTATS_TOKEN });
+  let extra = {};
+  try { extra = budgetStatus(req.query.path || null); } catch { /* без БД — без бюджета */ }
+  res.json({ ok: true, hasToken: !!process.env.MPSTATS_TOKEN, ...extra });
+});
+// фразы предмета (category/by_keywords) для выбора галочками; кэш в БД на 7 дней
+app.post('/api/season/phrases', requireView('season'), async (req, res) => {
+  try {
+    const cfg = req.body || {};
+    if (!cfg.path) return res.status(400).json({ ok: false, error: 'не указан путь предмета' });
+    res.json({ ok: true, ...(await getSubjectPhrases(cfg)) });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 // подсказка пути предмета по слову
 app.get('/api/season/categories', requireView('season'), async (req, res) => {

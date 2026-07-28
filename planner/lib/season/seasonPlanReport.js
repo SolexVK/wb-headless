@@ -378,6 +378,8 @@ export async function collectFromCategory({
     name: it.name,
     brand: it.brand,
     price: it.price,
+    share: it.share,      // доля целевого трафика (режим релевантности)
+    matched: it.matched,  // сколько выбранных фраз совпало
     daily: extractItemDailyFromGraphs(it._raw, d1, d2),
   }));
   const groupDaily = buildGroupDailySeries(maybeOOS(perItem.map((p) => p.daily), oos));
@@ -389,6 +391,8 @@ export async function collectFromCategory({
       name: p.name,
       brand: p.brand,
       price: p.price,
+      share: p.share,     // доля целевого трафика
+      matched: p.matched,
       days: daysN,
       avgStock: daysN ? stockSum / daysN : 0, // средний остаток → для оборачиваемости
       unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
@@ -634,6 +638,7 @@ export async function buildSeasonPlanReport({
       requests,
       groupInfo,
       baseInfo,
+      relevance: collected.relevance || null,
       groupSize: perItemMeta.length,
       itemsWithData: perItemMeta.filter((m) => m.days > 0).length,
       perItem: perItemMeta,

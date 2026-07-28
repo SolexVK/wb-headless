@@ -8,9 +8,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildSeasonPlanReport, collectFromCategory } from './season/seasonPlanReport.js';
 import { buildFeatureDict } from './season/featureDict.js';
-import { dbAvailable, planSave, planLoad, planDelete, planList, featureDictLoad, featureDictSave } from './db.js';
+import { fetchSubjectKeywords } from './season/wbSubjectKeywords.js';
+import { dbAvailable, planSave, planLoad, planDelete, planList, featureDictLoad, featureDictSave,
+  subjectKeywordsLoad, subjectKeywordsSave, searchSave, searchList, mpstatsBudgetToday, mpstatsBudgetAdd } from './db.js';
 
 const FEATURE_TTL_MS = 30 * 24 * 3600 * 1000; // словарь признаков кэшируем на 30 дней
+const SUBJECT_KW_TTL_MS = 7 * 24 * 3600 * 1000; // фразы предмета — на 7 дней (меняются медленно)
 
 const MPSTATS_BASE = process.env.MPSTATS_BASE_URL || 'https://mpstats.io/api';
 // Дерево категорий MPStats (пути предметов) — для подсказки в UI.
@@ -43,6 +46,13 @@ const list = (v) => (Array.isArray(v) ? v.filter(Boolean)
   : v ? String(v).split(',').map((s) => s.trim()).filter(Boolean) : undefined);
 const num = (v) => (v == null || v === '' || v === true ? undefined : Number(v));
 
+// последние 30 дней (для by_keywords — профиль запросов свежий)
+function last30() {
+  const d2 = new Date(); d2.setUTCDate(d2.getUTCDate() - 1);
+  const d1 = new Date(d2); d1.setUTCDate(d1.getUTCDate() - 30);
+  return { d1: ymd(d1), d2: ymd(d2) };
+}
+
 // собрать subject.filter в форме, которую ждёт collectFromCategory
 function buildFilter(f = {}) {
   const filter = {
@@ -53,6 +63,22 @@ function buildFilter(f = {}) {
     minSalesPerMonth: num(f.minSales), minRevenuePerMonth: num(f.minRevenue),
     matchAll: f.matchAll ? true : undefined,
   };
+  // Новый режим: поведенческая релевантность (доля целевого поискового трафика).
+  // Активируется, если заданы целевые слова ИЛИ выбранные фразы предмета.
+  const targetWords = list(f.targetWords) || [];
+  const pickedPhrases = list(f.pickedPhrases) || [];
+  if (targetWords.length || pickedPhrases.length) {
+    let threshold = num(f.threshold);
+    if (threshold != null && threshold > 1) threshold = threshold / 100; // приняли проценты
+    const kw = last30();
+    filter.relevance = {
+      targetWords, pickedPhrases,
+      threshold: threshold != null ? threshold : 0.2,
+      budget: num(f.budget) != null ? num(f.budget) : 60,
+      minusWords: list(f.minusWords) || list(f.exclude) || [],
+      kwD1: kw.d1, kwD2: kw.d2,
+    };
+  }
   for (const k of Object.keys(filter)) if (filter[k] === undefined) delete filter[k];
   return filter;
 }
@@ -65,12 +91,13 @@ export async function runForecast(cfg = {}) {
   if (!cfg.path) throw new Error('Не указан путь предмета WB (path)');
   const hist = default2Years();
   const targetYear = num(cfg.targetYear) || (Number(hist.d2.slice(0, 4)) + 1);
-  return buildSeasonPlanReport({
+  const filter = buildFilter(cfg.filter || cfg);
+  const report = await buildSeasonPlanReport({
     d1: hist.d1, d2: hist.d2,
     label: cfg.label || cfg.path,
     subject: {
       path: cfg.path,
-      filter: buildFilter(cfg.filter || cfg),
+      filter,
       limit: num(cfg.limit),
       maxPages: num(cfg.maxPages),
     },
@@ -79,6 +106,44 @@ export async function runForecast(cfg = {}) {
     plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false, rampDays: num(cfg.rampDays), seasonFrac: num(cfg.seasonFrac), targetLevel: cfg.targetLevel === 'top1' ? 'top1' : 'top3', deepMatch: cfg.deepMatch !== false },
     includeWb: list(cfg.includeWb) ? new Set(list(cfg.includeWb).map(String)) : null,
   });
+  // Учёт суточного бюджета MPStats: сетевые by_keywords + категория (условно 1).
+  if (dbAvailable() && filter.relevance) {
+    const rel = report.relevance || {};
+    mpstatsBudgetAdd((rel.requests || 0) + 1);
+    // Память запроса: слова/минусы/фразы + отобранные артикулы (для переиспользования).
+    try {
+      searchSave({
+        path: cfg.path,
+        targetWords: filter.relevance.targetWords,
+        minusWords: filter.relevance.minusWords,
+        pickedPhrases: filter.relevance.pickedPhrases,
+        threshold: filter.relevance.threshold,
+        keptIds: (report.perItem || []).map((m) => m.wb).filter(Boolean),
+      });
+    } catch { /* память не критична */ }
+  }
+  return report;
+}
+
+// Фразы предмета для выбора галочками (category/by_keywords). Кэш в БД на 7 дней.
+export async function getSubjectPhrases(cfg = {}) {
+  if (!process.env.MPSTATS_TOKEN) throw new Error('MPSTATS_TOKEN не задан в окружении службы (planner/data/.env)');
+  const path = String(cfg.path || '').trim();
+  if (!path) throw new Error('Не указан путь предмета WB (path)');
+  if (!cfg.force && dbAvailable()) {
+    const hit = subjectKeywordsLoad(path, SUBJECT_KW_TTL_MS);
+    if (hit) return { phrases: hit.phrases, cached: true, fetchedAt: hit.fetchedAt, budget: mpstatsBudgetToday() };
+  }
+  const kw = last30();
+  const phrases = await fetchSubjectKeywords(path, { d1: kw.d1, d2: kw.d2 });
+  if (dbAvailable()) { subjectKeywordsSave(path, phrases, kw.d1, kw.d2); mpstatsBudgetAdd(1); }
+  return { phrases, cached: false, budget: dbAvailable() ? mpstatsBudgetToday() : null };
+}
+
+// Текущий дневной бюджет запросов MPStats (использовано/лимит/остаток) + недавние запросы.
+export function budgetStatus(path) {
+  if (!dbAvailable()) return { budget: null, recent: [] };
+  return { budget: mpstatsBudgetToday(), recent: searchList(path || null, 10) };
 }
 
 // Кандидаты на ручную проверку: собрать выборку и вернуть ТОП-20 «неопределённых»

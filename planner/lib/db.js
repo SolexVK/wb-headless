@@ -401,6 +401,22 @@ export function searchList(path, limit = 20) {
   }));
 }
 
+// ── Дневной счётчик запросов к MPStats (защита суточного лимита ~150) ──
+const _today = () => new Date().toISOString().slice(0, 10);
+export function mpstatsBudgetToday() {
+  const limit = Number(process.env.MPSTATS_DAILY_LIMIT) || 150;
+  const m = metaGet('mpstats_budget');
+  let used = 0;
+  try { const j = JSON.parse(m && m.value || '{}'); if (j.date === _today()) used = Number(j.used) || 0; } catch { /* ignore */ }
+  return { date: _today(), used, limit, left: Math.max(0, limit - used) };
+}
+export function mpstatsBudgetAdd(n) {
+  const add = Number(n) || 0; if (add <= 0) return mpstatsBudgetToday();
+  const cur = mpstatsBudgetToday();
+  metaSet('mpstats_budget', JSON.stringify({ date: cur.date, used: cur.used + add }));
+  return mpstatsBudgetToday();
+}
+
 // ── App-state (всё состояние приложения единым JSON-блобом) ──
 export function stateLoadJson() {
   const db = getDb(); if (!db) return null;

@@ -50,24 +50,29 @@ export function scoreProfile(profile, { targetWords = [], pickedNorms = [] } = {
  * @returns {Promise<{keep:Set, scores:Map, requests:number, cached:number, dailyLimit:?string, prefiltered:number}>}
  */
 export async function filterByRelevance(pool, {
-  targetWords = [], pickedPhrases = [], threshold = 0.2, budget = 60,
+  targetWords = [], pickedPhrases = [], minusWords = [], threshold = 0.2, budget = 60,
   d1, d2, onProgress, log,
 } = {}) {
   const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'релевантность', msg }); };
   const tw = targetWords.map(norm).filter(Boolean);
+  const mw = minusWords.map(norm).filter(Boolean);
   const pickedNorms = pickedPhrases.map(norm).filter(Boolean);
   const pickedWords = pickedNorms.flatMap((p) => p.split(/\s+/)).filter((w) => w.length > 3);
 
-  // 1) бесплатный предфильтр карточками: сузить круг под by_keywords
+  // 1) бесплатный предфильтр карточками: сузить круг под by_keywords.
+  //    Минус-слово в тексте карточки исключает кандидата сразу (до сети).
   const looksTarget = (t) => {
     if (!t) return false;
+    if (mw.some((w) => t.includes(w))) return false;
     if (tw.some((w) => t.includes(w))) return true;
     if (pickedWords.length && pickedWords.some((w) => t.includes(w))) return true;
     return false;
   };
   const hasFilter = tw.length || pickedWords.length;
-  const cand = hasFilter ? pool.filter((it) => looksTarget(it._matchText)) : pool.slice();
-  L(`Предфильтр карточками: кандидатов ${cand.length} из ${pool.length}${hasFilter ? '' : ' (без целевых слов — берём весь пул)'}.`);
+  const cand = hasFilter
+    ? pool.filter((it) => looksTarget(it._matchText))
+    : pool.filter((it) => !mw.length || !mw.some((w) => (it._matchText || '').includes(w)));
+  L(`Предфильтр карточками: кандидатов ${cand.length} из ${pool.length}${hasFilter ? '' : ' (без целевых слов — берём весь пул)'}${mw.length ? `, минус-слова [${minusWords.join(', ')}]` : ''}.`);
 
   // 2) кэш из БД — бесплатно
   const cachedMap = keywordsLoadMany(cand.map((c) => c.wb), KEYWORD_TTL_MS);

@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-wordmatch-2026-07-24j';
+const APP_BUILD = 'season-relevance-2026-07-28a';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1356,6 +1356,11 @@ function downloadSeasonLog() {
 }
 const seasonIncludeByPath = {};          // path -> Set(wb) вручную одобренные «неопределённые»
 function seasonIncludeFor(path) { if (!seasonIncludeByPath[path]) seasonIncludeByPath[path] = new Set(); return seasonIncludeByPath[path]; }
+// Поведенческая релевантность: фразы предмета + выбранные пользователем + дневной бюджет.
+let seasonBudget = null;                 // {used, limit, left} суточный лимит MPStats
+const seasonPhrasesByPath = {};          // path -> [{phrase,norm,freq,words}]
+const seasonPickedByPath = {};           // path -> Set(norm) отмеченные галочками фразы
+function seasonPickedFor(path) { if (!seasonPickedByPath[path]) seasonPickedByPath[path] = new Set(); return seasonPickedByPath[path]; }
 const SE_CHARTS = {};            // реестр графиков для тултипа: id → {rows, геометрия, valueKey}
 let seChartSeq = 0;
 
@@ -1400,9 +1405,11 @@ function attachSeasonTip(svg) {
 
 async function renderSeason() {
   const root = document.getElementById('season');
-  if (seasonHasToken === null) {
-    try { seasonHasToken = (await api('/api/season/status')).hasToken; } catch { seasonHasToken = false; }
-  }
+  const f0 = (articlesSorted().find((a) => a.id === seasonBuildArticle) || {}).seasonFilter || {};
+  try {
+    const st = await api('/api/season/status' + (f0.path ? '?path=' + encodeURIComponent(f0.path) : ''));
+    seasonHasToken = st.hasToken; seasonBudget = st.budget || null;
+  } catch { if (seasonHasToken === null) seasonHasToken = false; }
   try { seasonPlansIndex = (await api('/api/season/plans')).plans || []; } catch { seasonPlansIndex = []; }
   root.innerHTML = seasonBuilderPanel() + seasonStorePanel();
   bindSeasonBuilder();
@@ -1418,14 +1425,17 @@ function seasonBuilderPanel() {
   seasonBuildArticle = aid;
   const a = arts.find((x) => x.id === aid);
   const f = a.seasonFilter || {};
-  hydrateSeasonSel(f); // восстановить ранее выбранные признаки/включения для предмета
   const warn = seasonHasToken ? ''
     : '<div class="season-warn">⚠ Не задан <b>MPSTATS_TOKEN</b> в окружении службы — построение недоступно. Добавь токен в <code>planner/data/.env</code> на Mac mini (см. DEPLOY.md) и перезапусти службу.</div>';
-  const selNow = featureSel[f.path] || { plus: new Set(), minus: new Set() };
-  const selCount = selNow.plus.size + selNow.minus.size;
-  const incCount = (seasonIncludeByPath[f.path] || new Set()).size;
+  // восстановить отмеченные фразы из сохранённого фильтра (переживают перезагрузку)
+  if (f.path && !seasonPickedByPath[f.path] && (f.pickedPhrases || []).length) {
+    const s = seasonPickedFor(f.path); (f.pickedPhrases || []).forEach((n) => s.add(String(n)));
+  }
+  const picked = seasonPickedByPath[f.path] || new Set();
+  const thr = f.threshold != null ? f.threshold : 20;
+  const bud = f.budget != null ? f.budget : 60;
   return `<div class="panel season-builder">
-    <div class="subhead"><h3>Часть 1 — Построение плана продаж (по конкурентам)</h3></div>
+    <div class="subhead"><h3>Часть 1 — Построение плана продаж (по конкурентам)</h3>${seasonBudgetBadge()}</div>
     ${warn}
     <div class="season-form se-builder-grid">
 
@@ -1445,50 +1455,33 @@ function seasonBuilderPanel() {
         </div>
       </div>
 
-      <!-- 2. Признаки предмета (широкий сбор без фильтров) -->
-      <details class="se-comp se-feat se-wide" id="se-feat"${featureOpen ? ' open' : ''}>
-        <summary>2 · 🧠 Признаки предмета <span class="mini">${selCount ? `(отмечено: ${selCount})` : '(собрать все слова-признаки по предмету и отметить + / −)'}</span></summary>
-        <div class="se-comp-body">
-          <div class="se-feat-bar">
-            <button class="btn btn-primary" id="se-feat-load" type="button">Собрать признаки предмета</button>
-            <button class="btn" id="se-feat-save" type="button" title="Зафиксировать выбранные признаки в базе">💾 Сохранить признаки</button>
-            <button class="btn btn-danger" id="se-feat-reset" type="button" title="Сбросить выбранные плюс/минус-признаки">✕ Сбросить признаки</button>
-            <button class="btn" id="se-feat-refresh" type="button" title="Пересобрать словарь заново (обновить кэш)">↻ обновить</button>
-            <span class="mini" id="se-feat-status"></span>
-          </div>
-          <div class="mini">Широкий сбор по <b>всему предмету</b> (без фильтров): слова-признаки из названий, описаний и характеристик группируются. Отметьте <b>+</b> (нужный признак) или <b>−</b> (лишний). Правило: достаточно <b>любого одного</b> плюс-признака; <b>любой один</b> минус — исключает; товар без плюс и без минус — уходит в проверку «неопределённых» (шаг 3).</div>
-          <div class="se-key-box" style="margin-top:8px">
-            <label>🎯 Ключевое слово — строго (необязательно)</label>
-            <input id="se-must" value="${seEsc(f.mustHave || '')}" placeholder="напр. муслин — только если есть в характеристиках">
-          </div>
-          <div id="se-feat-body"></div>
-          <div id="se-feat-log" class="se-log"></div>
-        </div>
-      </details>
-
-      <!-- 3. Неопределённые артикулы -->
-      <details class="se-comp se-undet se-wide" id="se-undet">
-        <summary>3 · 🔎 Неопределённые артикулы (ручная проверка) <span class="mini">${incCount ? `(добавлено вручную: ${incCount})` : '(релевантные с продажами, но без явных признаков)'}</span></summary>
-        <div class="se-comp-body">
-          <div class="se-feat-bar">
-            <button class="btn btn-primary" id="se-undet-load" type="button">Проверить неопределённые</button>
-            <span class="mini" id="se-undet-status"></span>
-          </div>
-          <div class="mini">Товары без плюс- и без минус-слов, в вашем ценовом сегменте, с выручкой ≥ 100 000 ₽/мес. ТОП-20 по выручке — отметьте релевантные визуально и «Сохранить», они войдут в выборку.${incCount ? ` <b style="color:var(--accent-2)">Уже добавлено вручную: ${incCount}.</b>` : ''}</div>
-          <div id="se-undet-body"></div>
-          <div id="se-undet-log" class="se-log"></div>
-        </div>
-      </details>
-
-      <!-- 4. Остальные фильтры и параметры плана -->
+      <!-- 2. Целевые фразы (поведенческая релевантность) -->
       <div class="u-pg se-wide">
-        <div class="u-pg-t">4 · Фильтры и параметры плана</div>
+        <div class="u-pg-t">2 · 🎯 Целевые слова и фразы предмета</div>
         <div class="se-fields se-fields-2">
-          <div class="field"><label>Размер группы аналогов</label><input id="se-limit" type="number" value="${f.limit ?? 60}"></div>
+          <div class="field"><label title="Слово(а), по которым узнаётся ваша ниша. Товар считаем «нашим», если заметная доля его поискового трафика идёт по этим словам.">Целевое слово(а)</label><input id="se-target" value="${seEsc(f.targetWords || '')}" placeholder="муслин, марлевка"></div>
+          <div class="field"><label title="Слова, которых быть не должно — кандидат с ними в карточке отсекается сразу (бесплатно).">Минус-слова</label><input id="se-minus" value="${seEsc(f.minusWords || '')}" placeholder="детск, мужск, прозрач"></div>
+        </div>
+        <div class="se-feat-bar" style="margin-top:8px">
+          <button class="btn btn-primary" id="se-phrases-load" type="button">Найти фразы предмета</button>
+          <button class="btn" id="se-phrases-refresh" type="button" title="Обновить фразы предмета (тратит 1 запрос)">↻ обновить</button>
+          <span class="mini" id="se-phrases-status"></span>
+        </div>
+        <div class="mini">Реальные поисковые фразы предмета с частотами. Отметьте галочками релевантные вашей нише — включая «жирные неявные» без вашего слова (например «рубашка летняя с длинным рукавом»). Отмечено: <b id="se-picked-count">${picked.size}</b>.</div>
+        <div id="se-phrases-body" class="se-phrases"></div>
+      </div>
+
+      <!-- 3. Порог, потолок и фильтры -->
+      <div class="u-pg se-wide">
+        <div class="u-pg-t">3 · Порог, потолок и фильтры плана</div>
+        <div class="se-fields se-fields-2">
+          <div class="field"><label title="Минимальная доля поискового трафика по целевым словам/фразам. На тесте 20% чисто отделяли муслин от льна.">Порог доли, % <b id="se-thr-val">${thr}</b></label><input id="se-threshold" type="range" min="5" max="60" step="1" value="${thr}"></div>
+          <div class="field"><label title="Максимум сетевых запросов by_keywords на один отчёт (защита суточного лимита). Уже проверенные из базы не тратят лимит.">Потолок запросов на отчёт</label><input id="se-budget" type="number" min="0" max="150" value="${bud}"></div>
           <div class="field"><label>Цена от, ₽</label><input id="se-pmin" type="number" value="${f.priceMin ?? ''}"></div>
           <div class="field"><label>Цена до, ₽</label><input id="se-pmax" type="number" value="${f.priceMax ?? ''}"></div>
           <div class="field"><label>Мин. продаж/мес</label><input id="se-minsales" type="number" value="${f.minSales ?? ''}"></div>
           <div class="field"><label>Мин. выручка/мес, ₽</label><input id="se-minrev" type="number" value="${f.minRevenue ?? ''}"></div>
+          <div class="field"><label>Размер группы аналогов</label><input id="se-limit" type="number" value="${f.limit ?? 60}"></div>
           <div class="field"><label title="Год старта сезона. Вход, пик и распродажу движок выбирает сам из годового анализа рынка.">Целевой сезон (год старта)</label><input id="se-year" type="number" min="2024" max="2032" value="${f.targetYear || (new Date().getUTCFullYear())}"></div>
           <div class="field span2"><label title="ТОП-3 — средняя трёх сильнейших аналогов (реалистично). ТОП-1 — уровень самого сильного аналога по выручке в сегменте (амбициозно).">Целевой уровень (пик плана)</label>
             <select id="se-level">
@@ -1499,51 +1492,91 @@ function seasonBuilderPanel() {
           <div class="field span2 se-opts">
             <label class="se-check"><input type="checkbox" id="se-oos"${f.oos !== false ? ' checked' : ''}> OOS-поправка</label>
             <label class="se-check"><input type="checkbox" id="se-weekly"${f.weekly !== false ? ' checked' : ''}> недельный профиль</label>
-            <label class="se-check" title="Поиск слов-признаков в полной карточке WB (описание+характеристики), а не в коротком названии. Нужен для работы признаков."><input type="checkbox" id="se-deep"${f.deepMatch !== false ? ' checked' : ''}> глубокий анализ (описание + характеристики)</label>
             <button class="btn btn-danger" id="se-filter-reset" type="button" title="Сбросить числовые фильтры к значениям по умолчанию">✕ Сбросить фильтры</button>
           </div>
         </div>
       </div>
 
-      <!-- 5. Построить план -->
+      <!-- 4. Построить план -->
       <div class="se-wide season-actions">
         <button class="btn btn-primary" id="se-build"${seasonHasToken && !seasonBuilding ? '' : ' disabled'}>${seasonBuilding ? '⏳ Строю план…' : '▶ Построить план'}</button>
         <button class="btn" id="se-log-dl" type="button" title="Скачать расширенный лог всех этапов (.txt)">⬇ Скачать лог</button>
-        <span class="mini">Формируется список релевантных артикулов (признаки + одобренные вручную) → графики ранга сезонности и план продаж.</span>
+        <span class="mini">Кандидаты по целевому слову → доля трафика ≥ порога → графики ранга сезонности и план продаж.</span>
       </div>
       <div id="se-build-log" class="se-log se-wide"></div>
     </div>
   </div>`;
 }
 
-// объединить ручной ввод слов (через запятую) с выбранными в словаре признаками (уникально)
-function mergeWords(manual, extra) {
-  const seen = new Set(); const out = [];
-  for (const w of String(manual || '').split(',').concat([...extra])) {
-    const s = String(w || '').trim(); const k = s.toLowerCase();
-    if (s && !seen.has(k)) { seen.add(k); out.push(s); }
-  }
-  return out.join(', ');
+// Значок остатка суточного лимита MPStats.
+function seasonBudgetBadge() {
+  if (!seasonBudget) return '';
+  const { used, limit, left } = seasonBudget;
+  const cls = left <= 15 ? ' danger' : (left <= 40 ? ' warn' : '');
+  return `<span class="se-budget${cls}" title="Суточный лимит запросов MPStats. Проверенные из базы товары лимит не тратят.">лимит MPStats: ${left} из ${limit} осталось${used ? ` (использовано ${used})` : ''}</span>`;
 }
+
 function collectSeasonForm() {
   const v = (id) => (document.getElementById(id)?.value || '').trim();
   const path = v('se-path');
-  const sel = featureSel[path];
   return {
     articleId: seasonBuildArticle,
     path,
-    words: mergeWords(v('se-words'), sel ? sel.plus : []),
-    allWords: v('se-allwords'),
-    exclude: mergeWords(v('se-exclude'), sel ? sel.minus : []),
-    mustHave: v('se-must'),
-    includeWb: [...(seasonIncludeByPath[path] || [])],
+    targetWords: v('se-target'),
+    minusWords: v('se-minus'),
+    pickedPhrases: [...(seasonPickedByPath[path] || [])],
+    threshold: v('se-threshold') || '20',
+    budget: v('se-budget') || '60',
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
     limit: v('se-limit'), targetYear: v('se-year'),
     targetLevel: (document.getElementById('se-level')?.value === 'top1') ? 'top1' : 'top3',
     oos: document.getElementById('se-oos')?.checked !== false,
     weekly: document.getElementById('se-weekly')?.checked !== false,
-    deepMatch: document.getElementById('se-deep')?.checked !== false,
   };
+}
+
+// Отрисовать фразы предмета галочками: свои (с целевым словом) сверху и подсвечены.
+function renderSeasonPhrases(path) {
+  const body = document.getElementById('se-phrases-body'); if (!body) return;
+  const phrases = seasonPhrasesByPath[path] || [];
+  if (!phrases.length) { body.innerHTML = ''; return; }
+  const picked = seasonPickedFor(path);
+  const targets = (document.getElementById('se-target')?.value || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
+  const isTarget = (p) => targets.some((w) => p.norm.includes(w));
+  const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
+  const top = phrases.slice(0, 120);
+  const row = (p) => `<label class="se-ph${isTarget(p) ? ' tgt' : ''}${picked.has(p.norm) ? ' on' : ''}">
+      <input type="checkbox" class="se-ph-cb" data-norm="${seEsc(p.norm)}"${picked.has(p.norm) ? ' checked' : ''}>
+      <span class="se-ph-t">${seEsc(p.phrase)}</span><span class="se-ph-f">${fmt(p.freq)}</span></label>`;
+  body.innerHTML = `<div class="se-ph-list">${top.map(row).join('')}</div>
+    ${phrases.length > top.length ? `<div class="mini">Показаны ТОП-${top.length} по частоте из ${phrases.length}.</div>` : ''}`;
+  body.querySelectorAll('.se-ph-cb').forEach((cb) => cb.addEventListener('change', () => {
+    const n = cb.dataset.norm;
+    if (cb.checked) picked.add(n); else picked.delete(n);
+    cb.closest('.se-ph')?.classList.toggle('on', cb.checked);
+    const c = document.getElementById('se-picked-count'); if (c) c.textContent = picked.size;
+  }));
+}
+
+async function loadSeasonPhrases(force) {
+  const path = (document.getElementById('se-path')?.value || '').trim();
+  const status = document.getElementById('se-phrases-status');
+  if (!path) { toast('Сначала укажи путь предмета WB', true); return; }
+  if (status) status.textContent = 'Загружаю фразы…';
+  try {
+    const r = await api('/api/season/phrases', { method: 'POST', body: JSON.stringify({ path, force: !!force }) });
+    seasonPhrasesByPath[path] = r.phrases || [];
+    // авто-отметка фраз с целевым словом при первом сборе (если пользователь ещё ничего не трогал)
+    const picked = seasonPickedFor(path);
+    if (!picked.size) {
+      const targets = (document.getElementById('se-target')?.value || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
+      for (const p of seasonPhrasesByPath[path]) if (targets.some((w) => p.norm.includes(w))) picked.add(p.norm);
+    }
+    if (r.budget) { seasonBudget = r.budget; const b = document.querySelector('.se-budget'); if (b) b.outerHTML = seasonBudgetBadge(); }
+    if (status) status.textContent = `фраз: ${(r.phrases || []).length}${r.cached ? ' (из базы)' : ' (свежие)'}`;
+    renderSeasonPhrases(path);
+    const c = document.getElementById('se-picked-count'); if (c) c.textContent = picked.size;
+  } catch (e) { if (status) status.textContent = ''; toast('Ошибка загрузки фраз: ' + e.message, true); }
 }
 
 // Отрисовать словарь признаков: группы характеристик + частые слова, у каждого +/−.
@@ -1683,29 +1716,21 @@ async function loadUndetermined() {
 function bindSeasonBuilder() {
   const g = (id) => document.getElementById(id);
   g('se-article')?.addEventListener('change', (e) => { seasonBuildArticle = e.target.value; renderSeason(); });
-  g('se-undet-load')?.addEventListener('click', loadUndetermined);
   g('se-log-dl')?.addEventListener('click', downloadSeasonLog);
-  // словарь признаков: раскрытие запоминаем; если для пути уже собран — показываем сразу
-  g('se-feat')?.addEventListener('toggle', (e) => { featureOpen = e.target.open; });
-  const featPath = (g('se-path')?.value || '').trim();
-  if (featureDictCache[featPath]) renderFeatureDictBody(featureDictCache[featPath]);
-  g('se-feat-load')?.addEventListener('click', () => loadFeatureDict(false));
-  g('se-feat-refresh')?.addEventListener('click', () => loadFeatureDict(true));
-  g('se-feat-save')?.addEventListener('click', () => { seasonSelPersist(); toast('Признаки сохранены в базе'); });
-  g('se-feat-reset')?.addEventListener('click', () => {
-    const p = (g('se-path')?.value || '').trim();
-    if (featureSel[p]) { featureSel[p].plus.clear(); featureSel[p].minus.clear(); }
-    if (g('se-must')) g('se-must').value = '';
-    seasonSelPersist(p);
-    const dict = featureDictCache[p]; if (dict) renderFeatureDictBody(dict); // снять подсветку чипов
-    toast('Признаки сброшены');
-  });
+  // фразы предмета — если уже загружены для пути, показать сразу
+  const curPath = (g('se-path')?.value || '').trim();
+  if (seasonPhrasesByPath[curPath]) renderSeasonPhrases(curPath);
+  g('se-phrases-load')?.addEventListener('click', () => loadSeasonPhrases(false));
+  g('se-phrases-refresh')?.addEventListener('click', () => loadSeasonPhrases(true));
+  // ползунок порога → живое значение
+  g('se-threshold')?.addEventListener('input', (e) => { const v = g('se-thr-val'); if (v) v.textContent = e.target.value; });
   g('se-filter-reset')?.addEventListener('click', () => {
     const set = (id, val) => { const el = g(id); if (el) el.value = val; };
     set('se-limit', '60'); set('se-pmin', ''); set('se-pmax', ''); set('se-minsales', ''); set('se-minrev', '');
+    set('se-threshold', '20'); if (g('se-thr-val')) g('se-thr-val').textContent = '20'; set('se-budget', '60');
     set('se-year', String(new Date().getUTCFullYear()));
     if (g('se-level')) g('se-level').value = 'top3';
-    ['se-oos', 'se-weekly', 'se-deep'].forEach((id) => { const el = g(id); if (el) el.checked = true; });
+    ['se-oos', 'se-weekly'].forEach((id) => { const el = g(id); if (el) el.checked = true; });
     toast('Фильтры сброшены');
   });
   g('se-path-find')?.addEventListener('click', async () => {
@@ -1732,17 +1757,15 @@ function bindSeasonBuilder() {
       // запомнить фильтр в артикуле, чтобы перестраивать в один клик
       const a = state.articles.find((x) => x.id === cfg.articleId);
       if (a) {
-        const rawV = (id) => (document.getElementById(id)?.value || '').trim();
         a.seasonFilter = { ...(a.seasonFilter || {}), path: cfg.path,
-          // сохраняем РУЧНОЙ ввод (без подмешанных словарных слов — они хранятся отдельно
-          // в featurePlus/featureMinus и подмешиваются заново при построении)
-          words: rawV('se-words'), allWords: cfg.allWords, exclude: rawV('se-exclude'),
-          mustHave: cfg.mustHave,
+          targetWords: cfg.targetWords, minusWords: cfg.minusWords,
+          pickedPhrases: cfg.pickedPhrases, threshold: cfg.threshold, budget: cfg.budget,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
-          limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, oos: cfg.oos, weekly: cfg.weekly, deepMatch: cfg.deepMatch };
-        seasonSelPersist(cfg.path); // добавить актуальные featurePlus/Minus/includeWb
+          limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, oos: cfg.oos, weekly: cfg.weekly };
         await recalc(true).catch(() => {});
       }
+      // обновить остаток лимита после построения
+      try { const st = await api('/api/season/status' + (cfg.path ? '?path=' + encodeURIComponent(cfg.path) : '')); seasonBudget = st.budget || seasonBudget; } catch { /* ignore */ }
       seasonSelArticle = cfg.articleId;
       toast('План построен и сохранён');
     } catch (e) {
@@ -1845,7 +1868,8 @@ function seasonCompetitorsBlock(rep) {
   const items = (rep.perItem || []).filter((m) => m && ((+m.revenue > 0) || (+m.unitsSold > 0)));
   if (!items.length) return '';
   const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
-  const top = items.slice().sort((a, b) => (+b.revenue || 0) - (+a.revenue || 0)).slice(0, 10);
+  const hasShare = items.some((m) => m.share != null);
+  const top = items.slice().sort((a, b) => (+b.revenue || 0) - (+a.revenue || 0)).slice(0, 15);
   const rows = top.map((m, i) => {
     const nm = m.wb != null ? String(m.wb) : '';
     const link = nm ? `https://www.wildberries.ru/catalog/${nm}/detail.aspx` : '';
@@ -1860,11 +1884,13 @@ function seasonCompetitorsBlock(rep) {
     // Оборачиваемость (дн) = средний остаток / среднесуточные продажи (avgStock·days/units).
     const turnover = (m.avgStock > 0 && +m.unitsSold > 0 && m.days > 0)
       ? Math.round(m.avgStock * m.days / m.unitsSold) : null;
+    const shareCell = hasShare ? `<td class="num" title="Доля поискового трафика по целевым словам/фразам">${m.share != null ? Math.round(m.share * 100) + '%' : '—'}</td>` : '';
     return `<tr>
       <td class="num">${i + 1}</td>
       <td class="se-comp-name">${nameCell}</td>
       <td>${seEsc(m.brand || '—')}</td>
       <td class="num">${nm || '—'}</td>
+      ${shareCell}
       <td class="num">${avgPrice != null ? fmt(avgPrice) + ' ₽' : '—'}</td>
       <td class="num">${fmt(m.unitsSold)}</td>
       <td class="num">${fmt(m.revenue)} ₽</td>
@@ -1874,13 +1900,14 @@ function seasonCompetitorsBlock(rep) {
   }).join('');
   const totalKept = rep.groupSize != null ? rep.groupSize : items.length;
   const withData = rep.itemsWithData != null ? rep.itemsWithData : items.length;
+  const relInfo = rep.relevance ? `<div class="mini" style="color:var(--accent-2)">🎯 Поведенческая релевантность: порог доли ${Math.round((rep.relevance.threshold||0)*100)}%, профилей из базы ${rep.relevance.cached||0}, запросов сети ${rep.relevance.requests||0}${rep.relevance.dailyLimit ? ' · ⚠ упёрлись в суточный лимит — часть кандидатов не проверена' : ''}.</div>` : '';
   return `<details class="se-comp">
-    <summary>🔍 Топ-10 конкурентов в выборке — проверка релевантности фильтра <span class="mini">(в выборке ${totalKept}, с данными ${withData})</span></summary>
+    <summary>🔍 Топ-15 конкурентов в выборке — проверка релевантности <span class="mini">(в выборке ${totalKept}, с данными ${withData})</span></summary>
     <div class="se-comp-body">
-      <div class="mini">Отсортировано по выручке за период анализа (2 года). Наведите на превью — увеличится; клик по названию — карточка на Wildberries. Так можно убедиться, что фильтр отобрал именно релевантных конкурентов.</div>
-      ${(rep.groupInfo && rep.groupInfo.deepMatch) ? `<div class="mini" style="color:var(--accent-2)">🧠 Глубокий анализ: слова фильтра искались в полной карточке (заголовок + описание + характеристики) у ${rep.groupInfo.cardsEnriched || 0} товаров, а не только в коротком названии.</div>` : ''}
+      <div class="mini">Отсортировано по выручке за период анализа (2 года). Наведите на превью — увеличится; клик по названию — карточка на Wildberries. Так можно убедиться, что отобраны именно релевантные конкуренты.</div>
+      ${relInfo}
       <div class="se-comp-scroll"><table class="se-comp-table">
-        <thead><tr><th class="num">#</th><th>Название</th><th>Бренд</th><th class="num">Артикул WB</th><th class="num" title="Средняя цена продажи = выручка / штук">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num" title="Оборачиваемость = средний остаток / среднесуточные продажи. Меньше — быстрее распродаётся. Доступно для планов, построенных новой версией.">Оборачив.</th></tr></thead>
+        <thead><tr><th class="num">#</th><th>Название</th><th>Бренд</th><th class="num">Артикул WB</th>${hasShare ? '<th class="num" title="Доля поискового трафика по целевым словам/фразам">Доля</th>' : ''}<th class="num" title="Средняя цена продажи = выручка / штук">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num" title="Оборачиваемость = средний остаток / среднесуточные продажи. Меньше — быстрее распродаётся. Доступно для планов, построенных новой версией.">Оборачив.</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>
