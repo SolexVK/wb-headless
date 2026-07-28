@@ -53,13 +53,14 @@ const GENERIC5 = new Set(['рубаш', 'блузк', 'туник', 'футбо'
   'одежд', 'магаз', 'бренд', 'новин', 'модна', 'модны', 'стиль', 'krasi', 'kruto',
   'хлопк', 'хлопо', 'котон', 'ткань', 'однот', 'цвет']);
 
-const to5 = (w) => { const s = String(w).toLowerCase().replace(/ё/g, 'е').trim(); return s.length >= 5 ? s.slice(0, 5) : s; };
+// Нишевый корень: 4 символа — ловит все словоформы («муслин/муслина/муслиновая»→«мусл»,
+// «марлевка/марлевки»→«марл»). Короче 4 не режем (чтобы «лён» и т.п. не давали ложных).
+const nicheCore = (w) => { const s = String(w).toLowerCase().replace(/ё/g, 'е').trim(); return s.length >= 4 ? s.slice(0, 4) : s; };
 
 // Нишевые ключи. Если задано нишевое слово (nicheWords) — берём ТОЛЬКО его (надёжно, без
 // угадывания). Иначе выводим из фраз: значимые слова без общих категорийных/фасонных.
-// 5-символьный корень ловит словоформы: «муслиновая»→«мусли» ловит «муслина/муслиновый».
 function nicheKeys(phrases, nicheWords = []) {
-  const explicit = (nicheWords || []).map(to5).filter((w) => w && w.length >= 4);
+  const explicit = (nicheWords || []).map(nicheCore).filter((w) => w && w.length >= 4);
   if (explicit.length) return [...new Set(explicit)];
   const out = new Set();
   for (const p of phrases) {

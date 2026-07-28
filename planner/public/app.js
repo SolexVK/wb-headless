@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28k';
+const APP_BUILD = 'season-serp-2026-07-28l';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
