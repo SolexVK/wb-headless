@@ -29,12 +29,27 @@ const lcName = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
  * кэш-первым). Возвращает товары с ПОЛНЫМИ дневными рядами + метаданные; окна сезона
  * потом нарезаются из этого в памяти (sliceSerpWindow) без новых запросов.
  */
-export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, limit } = {}, d1, d2, log = null) {
+// Значение характеристики «Пол» из карточки WB (женский/мужской/для девочек…).
+function cardGender(card) {
+  if (!card || !Array.isArray(card.options)) return '';
+  const o = card.options.find((x) => /^пол\b|^пол$|пол\s/i.test(x.name || '') || (x.name || '').toLowerCase() === 'пол');
+  return o ? String(o.value || '').toLowerCase().replace(/ё/g, 'е') : '';
+}
+// Корни целевого пола → какие значения «Пол» оставляем.
+function genderRootsOf(g) {
+  if (g === 'female' || g === 'жен') return ['жен'];
+  if (g === 'male' || g === 'муж') return ['муж'];
+  if (g === 'kids' || g === 'дет') return ['дет', 'девоч', 'мальч', 'дошкол'];
+  return null;
+}
+
+export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, limit, includeIds = [], gender = null } = {}, d1, d2, log = null) {
   const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'сбор', msg }); };
   const phr = [...new Set(phrases.map((s) => String(s).trim()).filter(Boolean))];
   // Минус-слова матчим по КОРНЮ (stem): «пижама»→«пижам» ловит «пижамный/пижамах»,
   // «прозрачная»→«прозрачн» ловит «прозрачные/прозрачный». Отсекаем все формы слова.
   const mw = minusWords.map((w) => stem(w)).filter((w) => w && w.length >= 3);
+  const incl = [...new Set((includeIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0))];
   const byId = new Map();
   let requests = 0, dailyLimit = null, periods = [];
   for (const phrase of phr) {
@@ -71,6 +86,23 @@ export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, 
     return true;
   });
   L(`Объединено по фразам: ${before} уник. товаров; после минус-слов/сегмента/выручки: ${all.length}.`);
+
+  // Фильтр по ПОЛУ (из карточки WB, бесплатный CDN). Пол не пишут в название и его нет в
+  // выдаче — читаем характеристику «Пол» и отсекаем явно противоположный (неизвестный не трогаем).
+  const gRoots = genderRootsOf(gender);
+  if (gRoots) {
+    let cards = new Map();
+    try { cards = await fetchCardsInfo(all.map((it) => it.wb), { concurrency: 8 }); } catch { /* CDN недоступен → пол не фильтруем */ }
+    const beforeG = all.length; let known = 0;
+    all = all.filter((it) => {
+      const g = cardGender(cards.get(Number(it.wb)));
+      if (!g) return true;         // пол не указан — не выбрасываем
+      known++;
+      return gRoots.some((r) => g.includes(r));
+    });
+    L(`Фильтр по полу (${gender}): карточек с указанным полом ${known}, оставлено ${all.length} из ${beforeG}.`);
+  }
+
   all.sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
   const keptBeforeLimit = all.length;
   if (limit && all.length > limit) all = all.slice(0, limit);
@@ -81,6 +113,40 @@ export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, 
       return { date, sales: s, revenue: r, price: s > 0 ? r / s : it.price, balance: 0 };
     });
   }
+
+  // Ручное включение ТОПов по nmID (те, что не ранжируются по фразе, но нужны в базе).
+  // Дневные ряды тянем напрямую (item/sales), кэш-первым; всегда добавляем, минуя фильтры.
+  const present = new Set(all.map((x) => Number(x.wb)));
+  const need = incl.filter((id) => !present.has(id));
+  if (need.length) {
+    let names = new Map();
+    try { names = await fetchCardsInfo(need, { concurrency: 8 }); } catch { /* имя из карточки необязательно */ }
+    for (const id of need) {
+      const ckey = `item:${id}|${d1}|${d2}`;
+      let it = serpLoad(ckey, SERP_TTL_MS);
+      if (!it) {
+        if (dailyLimit) break;
+        let daily;
+        try { daily = await fetchItemDailySales(id, d1, d2); requests += 1; }
+        catch (e) { if (e && e.dailyLimit) { dailyLimit = String(e.message || e); break; } L(`Включение nm=${id}: ошибка — ${String(e && e.message || e)}.`); continue; }
+        if (!daily || !daily.length) { L(`Включение nm=${id}: нет данных продаж.`); continue; }
+        const info = names.get(Number(id));
+        it = {
+          wb: id, name: (info && info.imtName) || ('арт. ' + id), brand: (info && info.brand) || '', thumb: '',
+          price: 0, sales: 0, revenue: 0, forced: true,
+          dailyFull: daily.map((r) => ({ date: r.date, sales: Number(r.sales) || 0, revenue: Number(r.revenue) || 0, price: Number(r.price) || 0, balance: Number(r.balance) || 0 })),
+        };
+        it.sales = it.dailyFull.reduce((s, r) => s + r.sales, 0);
+        it.revenue = it.dailyFull.reduce((s, r) => s + r.revenue, 0);
+        const lastPr = [...it.dailyFull].reverse().find((r) => r.price > 0);
+        it.price = lastPr ? Math.round(lastPr.price) : 0;
+        serpSave(ckey, it);
+      }
+      all.push(it); present.add(id);
+      L(`Включён вручную nm=${id} «${(it.name || '').slice(0, 40)}» (выручка ${Math.round(it.revenue)}).`);
+    }
+  }
+
   return { periods, items: all, total: before, fetched: before, kept: keptBeforeLimit, requests, dailyLimit, windowMonths };
 }
 

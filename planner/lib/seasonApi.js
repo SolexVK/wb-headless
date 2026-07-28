@@ -107,6 +107,8 @@ export async function runForecast(cfg = {}) {
       priceMin: num(cfg.priceMin), priceMax: num(cfg.priceMax),
       minRevenuePerMonth: num(cfg.minRevenue),
       limit: num(cfg.limit) || 60,
+      includeIds: (list(cfg.includeIds) || []).map(Number).filter((n) => Number.isFinite(n) && n > 0),
+      gender: ['female', 'male', 'kids'].includes(cfg.gender) ? cfg.gender : null,
     },
   };
   const report = await buildSeasonPlanReport({

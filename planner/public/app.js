@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28g';
+const APP_BUILD = 'season-serp-2026-07-28h';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1448,12 +1448,21 @@ function seasonBuilderPanel() {
           <textarea id="se-phrases" rows="3" placeholder="рубашка муслиновая женская&#10;рубашка из муслина&#10;марлевка рубашка">${seEsc(f.phrases || '')}</textarea>
         </div>
         <div class="mini">⚠ Минус-слова ищутся <b>в названии</b> — оставляйте их минимум, иначе можно потерять релевантные ТОПы (муслин часто называют «прозрачная»/«лёгкая»). Товары по фразам объединяются, дубли убираются; минус-слова, цена и выручка применяются бесплатно.</div>
+        <div class="field span2" style="margin-top:10px"><label title="ТОП-артикулы, которые НЕ ранжируются по вашим фразам (продаются через другие запросы), но нужны в базе. Впишите их nmID через запятую — подтянем их продажи за 2 года напрямую (1 запрос на артикул).">Всегда включать эти артикулы <span class="mini">(nmID через запятую — для ТОПов вне фраз)</span></label><input id="se-include" value="${seEsc(f.includeIds || '')}" placeholder="напр. 227781398, 219401072"></div>
       </div>
 
       <!-- 2. Фильтры плана -->
       <div class="u-pg se-wide">
         <div class="u-pg-t">2 · Фильтры и параметры плана</div>
         <div class="se-fields se-fields-2">
+          <div class="field"><label title="Пол берётся из характеристики карточки WB (в названии и выдаче его нет). Отсекает товары противоположного пола. «Любой» — не фильтровать (быстрее).">Пол</label>
+            <select id="se-gender">
+              <option value=""${!f.gender ? ' selected' : ''}>Любой (не фильтровать)</option>
+              <option value="female"${f.gender === 'female' ? ' selected' : ''}>Женский</option>
+              <option value="male"${f.gender === 'male' ? ' selected' : ''}>Мужской</option>
+              <option value="kids"${f.gender === 'kids' ? ' selected' : ''}>Детский</option>
+            </select>
+          </div>
           <div class="field"><label>Цена от, ₽</label><input id="se-pmin" type="number" value="${f.priceMin ?? ''}"></div>
           <div class="field"><label>Цена до, ₽</label><input id="se-pmax" type="number" value="${f.priceMax ?? ''}"></div>
           <div class="field"><label>Мин. продаж/мес</label><input id="se-minsales" type="number" value="${f.minSales ?? ''}"></div>
@@ -1500,6 +1509,8 @@ function collectSeasonForm() {
     articleId: seasonBuildArticle,
     phrases,
     minusWords: v('se-minus'),
+    includeIds: v('se-include'),
+    gender: document.getElementById('se-gender')?.value || '',
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
     limit: v('se-limit'), targetYear: v('se-year'),
     targetLevel: (document.getElementById('se-level')?.value === 'top1') ? 'top1' : 'top3',
@@ -1707,6 +1718,11 @@ function bindSeasonBuilder() {
   });
   persistField('se-phrases', 'phrases');
   persistField('se-minus', 'minusWords');
+  persistField('se-include', 'includeIds');
+  g('se-gender')?.addEventListener('change', () => {
+    const a = state.articles.find((x) => x.id === seasonBuildArticle); if (!a) return;
+    a.seasonFilter = a.seasonFilter || {}; a.seasonFilter.gender = g('se-gender').value; unitPersist();
+  });
   g('se-filter-reset')?.addEventListener('click', () => {
     const set = (id, val) => { const el = g(id); if (el) el.value = val; };
     set('se-limit', '60'); set('se-pmin', ''); set('se-pmax', ''); set('se-minsales', ''); set('se-minrev', '');
@@ -1728,6 +1744,7 @@ function bindSeasonBuilder() {
       if (a) {
         a.seasonFilter = { ...(a.seasonFilter || {}),
           phrases: g('se-phrases')?.value || '', minusWords: cfg.minusWords,
+          includeIds: cfg.includeIds, gender: cfg.gender,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
           limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, oos: cfg.oos, weekly: cfg.weekly };
         await recalc(true).catch(() => {});
