@@ -49,12 +49,18 @@ const GENERIC5 = new Set(['рубаш', 'блузк', 'туник', 'футбо'
   'женск', 'женщи', 'дамск', 'мужск', 'мужчи', 'детск', 'девоч', 'мальч', 'подро', 'семей',
   'летня', 'летни', 'весен', 'зимня', 'зимни', 'осенн', 'демис', 'всесе',
   'оверс', 'прямо', 'приле', 'свобо', 'класс', 'базов', 'больш', 'разме', 'батал',
+  'длинн', 'рукав', 'корот', 'безру', 'ворот', 'модел', 'фасон', 'застё', 'застеж', 'пугов',
   'одежд', 'магаз', 'бренд', 'новин', 'модна', 'модны', 'стиль', 'krasi', 'kruto',
   'хлопк', 'хлопо', 'котон', 'ткань', 'однот', 'цвет']);
 
-// Нишевые ключи из целевых фраз (значимые слова без общих категорийных). 5-символьный
-// корень, чтобы ловить словоформы: «муслиновая»→«мусли» ловит «муслина/муслиновый».
-function phraseKeys(phrases) {
+const to5 = (w) => { const s = String(w).toLowerCase().replace(/ё/g, 'е').trim(); return s.length >= 5 ? s.slice(0, 5) : s; };
+
+// Нишевые ключи. Если задано нишевое слово (nicheWords) — берём ТОЛЬКО его (надёжно, без
+// угадывания). Иначе выводим из фраз: значимые слова без общих категорийных/фасонных.
+// 5-символьный корень ловит словоформы: «муслиновая»→«мусли» ловит «муслина/муслиновый».
+function nicheKeys(phrases, nicheWords = []) {
+  const explicit = (nicheWords || []).map(to5).filter((w) => w && w.length >= 4);
+  if (explicit.length) return [...new Set(explicit)];
   const out = new Set();
   for (const p of phrases) {
     for (const w of String(p).toLowerCase().replace(/ё/g, 'е').split(/[^а-я0-9]+/)) {
@@ -144,10 +150,10 @@ async function gatherSerp({ phrases = [], minusWords = [], priceMin, priceMax, m
  * (авто) + вручную одобренные «без ключа» (approvedIds, из «Предв. выбора»). Одобренные
  * берутся из той же выдачи SERP (без доп. запросов). Возвращает товары с дневными рядами.
  */
-export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, limit, gender = null, approvedIds = [] } = {}, d1, d2, log = null) {
+export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, limit, gender = null, approvedIds = [], nicheWords = [] } = {}, d1, d2, log = null) {
   const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'сбор', msg }); };
   const g = await gatherSerp({ phrases, minusWords, priceMin, priceMax, minRevenuePerMonth, gender }, d1, d2, L);
-  const keys = phraseKeys(phrases);
+  const keys = nicheKeys(phrases, nicheWords);
   const approved = new Set((approvedIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0));
   L(`Нишевые ключи из фраз: [${keys.join(', ') || '—'}]. Одобрено вручную: ${approved.size}.`);
   // авто (ключ в названии) ∨ одобрено вручную
@@ -178,10 +184,10 @@ export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, 
  * названии (их надо отсмотреть глазами). Уже одобренные помечаются checked. Использует
  * ту же выдачу SERP (кэш) — почти без запросов.
  */
-export async function collectSerpCandidates({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, gender = null, approvedIds = [], topN = 30 } = {}, d1, d2, log = null) {
+export async function collectSerpCandidates({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, gender = null, approvedIds = [], nicheWords = [], topN = 30 } = {}, d1, d2, log = null) {
   const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'кандидаты', msg }); };
   const g = await gatherSerp({ phrases, minusWords, priceMin, priceMax, minRevenuePerMonth, gender }, d1, d2, L);
-  const keys = phraseKeys(phrases);
+  const keys = nicheKeys(phrases, nicheWords);
   const approved = new Set((approvedIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0));
   const noKey = g.items.filter((it) => !nameHasKey(it.name, keys));
   // Отбор — по ВЫРУЧКЕ за последний год, по убыванию (крупнейшие сверху).

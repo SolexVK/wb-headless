@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28j';
+const APP_BUILD = 'season-serp-2026-07-28k';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1448,6 +1448,7 @@ function seasonBuilderPanel() {
         <div class="field" style="margin-top:10px"><label title="1–3 поисковые фразы, по которым покупатели находят товары вашей ниши. По каждой фразе — 1 запрос: система берёт ВСЕ товары, которые реально по ней находятся (даже если в названии нет вашего слова), с их продажами за 2 года.">🎯 Целевые фразы <span class="mini">(по одной в строке, 1–3 шт. — каждая = 1 запрос)</span></label>
           <textarea id="se-phrases" rows="3" placeholder="рубашка муслиновая женская&#10;рубашка из муслина&#10;марлевка рубашка">${seEsc(f.phrases || '')}</textarea>
         </div>
+        <div class="field span2" style="margin-top:10px"><label title="Только само нишевое слово (не весь запрос!): муслин, марлевка. По нему делится «явные» (есть в названии → авто в выборку) и «на отсмотр» (нет в названии → в «Предв. выбор»). Если пусто — беру ключи из фраз (может зацепить фасон вроде «длинный рукав»).">🧵 Нишевое слово <span class="mini">(для проверки названия — напр. «муслин, марлевка»)</span></label><input id="se-niche" value="${seEsc(f.nicheWords || '')}" placeholder="муслин, марлевка"></div>
         <div class="mini">⚠ Минус-слова ищутся <b>в названии</b> — оставляйте их минимум, иначе можно потерять релевантные ТОПы (муслин часто называют «прозрачная»/«лёгкая»). Товары по фразам объединяются, дубли убираются; минус-слова, цена и выручка применяются бесплатно.</div>
       </div>
 
@@ -1522,6 +1523,7 @@ function collectSeasonForm() {
     articleId: seasonBuildArticle,
     phrases,
     minusWords: v('se-minus'),
+    nicheWords: v('se-niche'),
     approvedIds: [...seasonApproved],
     gender: document.getElementById('se-gender')?.value || '',
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
@@ -1777,6 +1779,7 @@ function bindSeasonBuilder() {
   });
   persistField('se-phrases', 'phrases');
   persistField('se-minus', 'minusWords');
+  persistField('se-niche', 'nicheWords');
   g('se-gender')?.addEventListener('change', () => {
     const a = state.articles.find((x) => x.id === seasonBuildArticle); if (!a) return;
     a.seasonFilter = a.seasonFilter || {}; a.seasonFilter.gender = g('se-gender').value; unitPersist();
@@ -1801,7 +1804,7 @@ function bindSeasonBuilder() {
       const a = state.articles.find((x) => x.id === cfg.articleId);
       if (a) {
         a.seasonFilter = { ...(a.seasonFilter || {}),
-          phrases: g('se-phrases')?.value || '', minusWords: cfg.minusWords,
+          phrases: g('se-phrases')?.value || '', minusWords: cfg.minusWords, nicheWords: cfg.nicheWords,
           approvedIds: cfg.approvedIds, gender: cfg.gender,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
           limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, oos: cfg.oos, weekly: cfg.weekly };

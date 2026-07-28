@@ -109,6 +109,7 @@ export async function runForecast(cfg = {}) {
       limit: num(cfg.limit) || 60,
       approvedIds: (list(cfg.approvedIds) || []).map(Number).filter((n) => Number.isFinite(n) && n > 0),
       gender: ['female', 'male', 'kids'].includes(cfg.gender) ? cfg.gender : null,
+      nicheWords: list(cfg.nicheWords) || [],
     },
   };
   const report = await buildSeasonPlanReport({
@@ -225,6 +226,7 @@ export async function runCandidates(cfg = {}) {
     priceMin: num(cfg.priceMin), priceMax: num(cfg.priceMax), minRevenuePerMonth: num(cfg.minRevenue),
     gender: ['female', 'male', 'kids'].includes(cfg.gender) ? cfg.gender : null,
     approvedIds: (list(cfg.approvedIds) || []).map(Number).filter((n) => Number.isFinite(n) && n > 0),
+    nicheWords: list(cfg.nicheWords) || [],
     topN: 30,
   }, hist.d1, hist.d2, log);
   if (dbAvailable()) mpstatsBudgetAdd(r.requests || 0);
