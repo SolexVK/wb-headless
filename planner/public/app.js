@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28i';
+const APP_BUILD = 'season-serp-2026-07-28j';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1912,13 +1912,18 @@ function seasonCompetitorsBlock(rep) {
   if (!items.length) return '';
   const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
   const hasShare = items.some((m) => m.share != null);
-  const top = items.slice().sort((a, b) => (+b.revenue || 0) - (+a.revenue || 0)).slice(0, 15);
+  // Витрина ТОП-15 — за ПОСЛЕДНИЙ ГОД (revenueLY/unitsSoldLY), если есть (SERP-план);
+  // для старых планов — за весь период анализа.
+  const hasLY = items.some((m) => m.revenueLY != null);
+  const rev = (m) => hasLY ? (+m.revenueLY || 0) : (+m.revenue || 0);
+  const units = (m) => hasLY ? (+m.unitsSoldLY || 0) : (+m.unitsSold || 0);
+  const top = items.slice().sort((a, b) => rev(b) - rev(a)).slice(0, 15);
   const rows = top.map((m, i) => {
     const nm = m.wb != null ? String(m.wb) : '';
     const link = nm ? `https://www.wildberries.ru/catalog/${nm}/detail.aspx` : '';
-    const perMonth = m.days > 0 ? Math.round((+m.revenue || 0) / m.days * 30) : null;
+    const perMonth = hasLY ? Math.round(rev(m) / 12) : (m.days > 0 ? Math.round((+m.revenue || 0) / m.days * 30) : null);
     // Средняя цена продажи = выручка / штук (реальная средневзвешенная цена за период).
-    const avgPrice = (+m.unitsSold > 0) ? (+m.revenue || 0) / m.unitsSold : (+m.price || null);
+    const avgPrice = (units(m) > 0) ? rev(m) / units(m) : (+m.price || null);
     const title = seEsc(m.name || (nm ? 'арт. ' + nm : '—'));
     // Картинку берём из готового URL serp (m.thumb) — он точный; иначе гадаем хост по nmID.
     const imgSrc = m.thumb || (nm ? wbThumbUrl(nm, 'tm') : '');
@@ -1937,8 +1942,8 @@ function seasonCompetitorsBlock(rep) {
       <td class="num">${nm || '—'}</td>
       ${shareCell}
       <td class="num">${avgPrice != null ? fmt(avgPrice) + ' ₽' : '—'}</td>
-      <td class="num">${fmt(m.unitsSold)}</td>
-      <td class="num">${fmt(m.revenue)} ₽</td>
+      <td class="num">${fmt(units(m))}</td>
+      <td class="num">${fmt(rev(m))} ₽</td>
       <td class="num">${perMonth != null ? fmt(perMonth) + ' ₽' : '—'}</td>
       <td class="num">${turnover != null ? turnover + ' дн' : '—'}</td>
     </tr>`;
@@ -1949,7 +1954,7 @@ function seasonCompetitorsBlock(rep) {
   return `<details class="se-comp">
     <summary>🔍 Топ-15 конкурентов в выборке — проверка релевантности <span class="mini">(в выборке ${totalKept}, с данными ${withData})</span></summary>
     <div class="se-comp-body">
-      <div class="mini">Отсортировано по выручке за период анализа (2 года). Наведите на превью — увеличится; клик по названию — карточка на Wildberries. Так можно убедиться, что отобраны именно релевантные конкуренты.</div>
+      <div class="mini">Продаж/Выручка/₽мес — за <b>${hasLY ? 'последний год' : 'период анализа (2 года)'}</b> (ранг сезонности строится на 2 годах). Наведите на превью — увеличится; клик по названию — карточка на Wildberries.</div>
       ${relInfo}
       <div class="se-comp-scroll"><table class="se-comp-table">
         <thead><tr><th class="num">#</th><th>Название</th><th>Бренд</th><th class="num">Артикул WB</th>${hasShare ? '<th class="num" title="Доля поискового трафика по целевым словам/фразам">Доля</th>' : ''}<th class="num" title="Средняя цена продажи = выручка / штук">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num" title="Оборачиваемость = средний остаток / среднесуточные продажи. Меньше — быстрее распродаётся. Доступно для планов, построенных новой версией.">Оборачив.</th></tr></thead>

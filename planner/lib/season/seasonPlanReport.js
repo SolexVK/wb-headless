@@ -127,6 +127,15 @@ async function gatherSerp({ phrases = [], minusWords = [], priceMin, priceMax, m
     });
     L(`Фильтр по полу (${gender}): карточек с указанным полом ${known}, оставлено ${all.length} из ${beforeG}.`);
   }
+  // Метрики «за последний год» — для ОТБОРА кандидатов и витрины ТОП-15 (свежая
+  // релевантность: мёртвые год назад ТОПы не всплывают). Ранг сезонности при этом
+  // строится на полных 2 годах дневных рядов.
+  const lyCut = offsetDate(d2, -365);
+  for (const it of all) {
+    let sLY = 0, rLY = 0; const gph = it.graph || [], rgph = it.revenueGraph || [];
+    for (let i = 0; i < periods.length; i++) { if (periods[i] > lyCut) { sLY += gph[i] || 0; rLY += rgph[i] || 0; } }
+    it.salesLY = sLY; it.revenueLY = rLY;
+  }
   return { items: all, periods, requests, dailyLimit, windowMonths, total: before };
 }
 
@@ -145,7 +154,8 @@ export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, 
   let all = g.items.filter((it) => nameHasKey(it.name, keys) || approved.has(Number(it.wb)));
   const withKey = all.filter((it) => nameHasKey(it.name, keys)).length;
   L(`В выборку: с ключом в названии ${withKey}, одобренных без ключа ${all.length - withKey}, всего ${all.length}.`);
-  all.sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+  // ТОП-выборку упорядочиваем по выручке за ПОСЛЕДНИЙ ГОД (свежесть), ранг — на 2 годах.
+  all.sort((a, b) => (b.revenueLY || 0) - (a.revenueLY || 0));
   const keptBeforeLimit = all.length;
   if (limit && all.length > limit) {
     const head = all.slice(0, limit);
@@ -174,14 +184,15 @@ export async function collectSerpCandidates({ phrases = [], minusWords = [], pri
   const keys = phraseKeys(phrases);
   const approved = new Set((approvedIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0));
   const noKey = g.items.filter((it) => !nameHasKey(it.name, keys));
-  noKey.sort((a, b) => (b.sales || 0) - (a.sales || 0));
+  // Отбор — по продажам за ПОСЛЕДНИЙ ГОД (salesLY).
+  noKey.sort((a, b) => (b.salesLY || 0) - (a.salesLY || 0));
   const withKey = g.items.length - noKey.length;
-  L(`Ключи [${keys.join(', ') || '—'}]: с ключом ${withKey}, без ключа ${noKey.length} → на отсмотр ТОП-${Math.min(topN, noKey.length)} по продажам.`);
+  L(`Ключи [${keys.join(', ') || '—'}]: с ключом ${withKey}, без ключа ${noKey.length} → на отсмотр ТОП-${Math.min(topN, noKey.length)} по продажам за год.`);
   const rows = noKey.slice(0, topN).map((it) => ({
     wb: it.wb, name: it.name, brand: it.brand, thumb: it.thumb,
-    avgPrice: it.sales > 0 ? Math.round(it.revenue / it.sales) : it.price,
-    unitsSold: it.sales, revenue: it.revenue,
-    monthlyRevenue: Math.round((it.revenue || 0) / g.windowMonths),
+    avgPrice: it.salesLY > 0 ? Math.round(it.revenueLY / it.salesLY) : it.price,
+    unitsSold: it.salesLY, revenue: it.revenueLY,
+    monthlyRevenue: Math.round((it.revenueLY || 0) / 12),
     checked: approved.has(Number(it.wb)),
   }));
   return { candidates: rows, keys, withKey, total: g.items.length, noKeyCount: noKey.length, requests: g.requests, dailyLimit: g.dailyLimit };
@@ -193,6 +204,7 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
   const inWin = (d) => d >= w1 && d <= w2;
   const perItem = all.items.map((it) => ({
     wb: it.wb, name: it.name, brand: it.brand, price: it.price, thumb: it.thumb,
+    salesLY: it.salesLY, revenueLY: it.revenueLY,
     daily: (it.dailyFull || []).filter((r) => inWin(r.date)),
   }));
   const groupDaily = buildGroupDailySeries(maybeOOS(perItem.map((p) => p.daily), oos));
@@ -203,6 +215,7 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
       days: daysN, avgStock: 0,
       unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
       revenue: p.daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0),
+      unitsSoldLY: p.salesLY || 0, revenueLY: p.revenueLY || 0, // за последний год — для витрины ТОП-15
     };
   });
   const prices = all.items.map((it) => it.price).filter((v) => v > 0).sort((a, b) => a - b);
