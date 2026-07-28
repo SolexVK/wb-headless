@@ -22,7 +22,12 @@ let dirty = false;
 // ---------- API ----------
 async function api(path, opts) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+  if (!res.ok) {
+    // HTTP/2 (через Funnel) часто отдаёт пустой statusText → показываем код,
+    // чтобы ошибка не была безымянной (напр. HTTP 404 = служба не перезапущена).
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.error || res.statusText || ('HTTP ' + res.status + ' ' + path));
+  }
   return res.json();
 }
 async function loadAll() {
