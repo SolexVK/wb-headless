@@ -148,9 +148,11 @@ async function gatherSerp({ phrases = [], minusWords = [], priceMin, priceMax, m
   // строится на полных 2 годах дневных рядов.
   const lyCut = offsetDate(d2, -365);
   for (const it of all) {
-    let sLY = 0, rLY = 0; const gph = it.graph || [], rgph = it.revenueGraph || [];
-    for (let i = 0; i < periods.length; i++) { if (periods[i] > lyCut) { sLY += gph[i] || 0; rLY += rgph[i] || 0; } }
-    it.salesLY = sLY; it.revenueLY = rLY;
+    let sLY = 0, rLY = 0, aLY = 0; const gph = it.graph || [], rgph = it.revenueGraph || [];
+    // activeDaysLY — дни за последний год, когда товар РЕАЛЬНО продавался (продажи > 0).
+    // По ним считаем скорость в сезон, чтобы распроданные/новые товары не занижали уровень.
+    for (let i = 0; i < periods.length; i++) { if (periods[i] > lyCut) { const s = gph[i] || 0; sLY += s; rLY += rgph[i] || 0; if (s > 0) aLY++; } }
+    it.salesLY = sLY; it.revenueLY = rLY; it.activeDaysLY = aLY;
   }
   return { items: all, periods, requests, dailyLimit, windowMonths, total: before };
 }
@@ -220,7 +222,7 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
   const inWin = (d) => d >= w1 && d <= w2;
   const perItem = all.items.map((it) => ({
     wb: it.wb, name: it.name, brand: it.brand, price: it.price, priceMed: it.priceMed, thumb: it.thumb,
-    salesLY: it.salesLY, revenueLY: it.revenueLY, balance: it.balance,
+    salesLY: it.salesLY, revenueLY: it.revenueLY, activeDaysLY: it.activeDaysLY, balance: it.balance,
     daily: (it.dailyFull || []).filter((r) => inWin(r.date)),
   }));
   const groupDaily = buildGroupDailySeries(maybeOOS(perItem.map((p) => p.daily), oos));
@@ -232,6 +234,7 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
       unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
       revenue: p.daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0),
       unitsSoldLY: p.salesLY || 0, revenueLY: p.revenueLY || 0, // за последний год — для витрины ТОП-15
+      activeDaysLY: p.activeDaysLY || 0, // дни с продажами за последний год — для скорости в сезон
     };
   });
   const prices = all.items.map((it) => it.price).filter((v) => v > 0).sort((a, b) => a - b);
@@ -835,11 +838,22 @@ export async function buildSeasonPlanReport({
     //   'top1' — уровень САМОГО сильного аналога (амбициозно: цель стать ТОП-1, макс. объём).
     // «Сильнейший» — по ВЫРУЧКЕ (при заданном ценовом сегменте это и максимум продаж);
     // ценовой сегмент уже применён фильтром (priceMin/priceMax), поэтому сравниваем внутри него.
-    const withDays = (perItemMeta || []).filter((m) => m.days > 0);
-    const byDaily = withDays.map((m) => m.unitsSold / m.days).sort((a, b) => b - a);
-    const top3Daily = byDaily.length ? byDaily.slice(0, 3).reduce((s, v) => s + v, 0) / Math.min(3, byDaily.length) : perItemBase;
-    const strongest = withDays.slice().sort((a, b) => (b.revenue || 0) - (a.revenue || 0) || (b.unitsSold || 0) - (a.unitsSold || 0))[0];
-    const top1Daily = strongest && strongest.days > 0 ? strongest.unitsSold / strongest.days : (byDaily[0] || perItemBase);
+    // Скорость аналога в сезон = продажи за ПОСЛЕДНИЙ ГОД ÷ дни, когда он РЕАЛЬНО продавался
+    // (activeDaysLY), а не ÷ всё двухлетнее окно. Иначе распроданные и «молодые» бестселлеры
+    // (нули за дни без наличия/до старта) занижают уровень, а с ним — весь прогноз.
+    // Если LY-метрик нет (старый источник данных) — прежняя логика unitsSold/days за окно.
+    const speed = (m) => (m.activeDaysLY > 0) ? (m.unitsSoldLY / m.activeDaysLY) : (m.days > 0 ? m.unitsSold / m.days : 0);
+    const rev = (m) => (m.revenueLY ?? m.revenue) || 0;
+    const units = (m) => (m.unitsSoldLY ?? m.unitsSold) || 0;
+    // «ТОП-3/ТОП-1» — САМЫЕ КРУПНЫЕ по выручке за год (реальные лидеры рынка), а не самые
+    // «быстрые за активный день»: иначе товар, что был в продаже 2 месяца, но продавался
+    // бойко, ложно попадал бы в тройку. Берём лидеров по выручке → их скорость в сезон.
+    const leaders = (perItemMeta || []).filter((m) => (m.activeDaysLY || 0) > 0 || m.days > 0)
+      .sort((a, b) => rev(b) - rev(a) || units(b) - units(a));
+    const top3arr = leaders.slice(0, 3).map(speed).filter((v) => v > 0);
+    const top3Daily = top3arr.length ? top3arr.reduce((s, v) => s + v, 0) / top3arr.length : perItemBase;
+    const strongest = leaders[0];
+    const top1Daily = strongest ? (speed(strongest) || perItemBase) : perItemBase;
     const targetLevel = plan.targetLevel === 'top1' ? 'top1' : 'top3';
     const targetDaily = targetLevel === 'top1' ? top1Daily : top3Daily;
 
