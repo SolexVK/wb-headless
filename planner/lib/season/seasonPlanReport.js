@@ -18,6 +18,100 @@ import { buildGroupDailySeries, buildSeasonPlan, applyOOSCorrection, trimToActiv
 import { buildForecast } from './forecast.js';
 import { fetchCardsInfo, cardMatchText, cardCharText } from './wbCard.js';
 import { filterByRelevance } from './relevance.js';
+import { fetchSerp, DailyLimitError as SerpLimitError } from './wbSerp.js';
+import { serpLoad, serpSave } from '../db.js';
+
+const SERP_TTL_MS = 3 * 24 * 3600 * 1000; // кэш SERP на 3 дня (сезонная форма стабильна)
+const lcName = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
+
+/**
+ * Собрать аналоги из SERP по 1-3 фразам ЗА ПОЛНОЕ окно [d1,d2] (один запрос на фразу,
+ * кэш-первым). Возвращает товары с ПОЛНЫМИ дневными рядами + метаданные; окна сезона
+ * потом нарезаются из этого в памяти (sliceSerpWindow) без новых запросов.
+ */
+export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, limit } = {}, d1, d2, log = null) {
+  const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'сбор', msg }); };
+  const phr = [...new Set(phrases.map((s) => String(s).trim()).filter(Boolean))];
+  const mw = minusWords.map(lcName).filter(Boolean);
+  const byId = new Map();
+  let requests = 0, dailyLimit = null, periods = [];
+  for (const phrase of phr) {
+    const key = `${phrase}|${d1}|${d2}`;
+    let res = serpLoad(key, SERP_TTL_MS);
+    if (res) { L(`Фраза «${phrase}»: из базы ${res.items.length} товаров.`); }
+    else {
+      try {
+        res = await fetchSerp(phrase, { d1, d2 });
+        serpSave(key, res); requests += 1;
+        L(`Фраза «${phrase}»: SERP вернул ${res.items.length} товаров (доступно ${res.rowCount}). Запрос к MPStats.`);
+      } catch (e) {
+        if (e instanceof SerpLimitError) { dailyLimit = String(e.message || e); L(`Достигнут суточный лимит MPStats на фразе «${phrase}».`); break; }
+        L(`Фраза «${phrase}»: ошибка SERP — ${String(e.message || e)}.`); continue;
+      }
+    }
+    if (res.periods && res.periods.length > periods.length) periods = res.periods;
+    for (const it of res.items) {
+      const cur = byId.get(it.wb);
+      if (!cur) byId.set(it.wb, { ...it, phrases: [phrase] });
+      else cur.phrases.push(phrase);
+    }
+  }
+  const windowMonths = Math.max(1, (Date.parse(d2) - Date.parse(d1)) / (30.4 * 86400000));
+  let all = [...byId.values()];
+  const before = all.length;
+  // минус-слова по названию (бесплатно) + ценовой сегмент + мин. выручка/мес
+  all = all.filter((it) => {
+    const nm = lcName(it.name);
+    if (mw.some((w) => nm.includes(w))) return false;
+    if (priceMin != null && it.price < priceMin) return false;
+    if (priceMax != null && it.price > priceMax) return false;
+    if (minRevenuePerMonth != null && (it.revenue / windowMonths) < minRevenuePerMonth) return false;
+    return true;
+  });
+  L(`Объединено по фразам: ${before} уник. товаров; после минус-слов/сегмента/выручки: ${all.length}.`);
+  all.sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+  const keptBeforeLimit = all.length;
+  if (limit && all.length > limit) all = all.slice(0, limit);
+  // полные дневные ряды на каждый товар (по датам periods)
+  for (const it of all) {
+    it.dailyFull = periods.map((date, i) => {
+      const s = it.graph[i] || 0, r = it.revenueGraph[i] || 0;
+      return { date, sales: s, revenue: r, price: s > 0 ? r / s : it.price, balance: 0 };
+    });
+  }
+  return { periods, items: all, total: before, fetched: before, kept: keptBeforeLimit, requests, dailyLimit, windowMonths };
+}
+
+// Нарезать собранные SERP-товары под окно [w1,w2] и вернуть структуру как у
+// collectFromCategory (group/groupDaily/perItemMeta/…) — БЕЗ обращений к сети.
+export function sliceSerpWindow(all, w1, w2, oos = false) {
+  const inWin = (d) => d >= w1 && d <= w2;
+  const perItem = all.items.map((it) => ({
+    wb: it.wb, name: it.name, brand: it.brand, price: it.price,
+    daily: (it.dailyFull || []).filter((r) => inWin(r.date)),
+  }));
+  const groupDaily = buildGroupDailySeries(maybeOOS(perItem.map((p) => p.daily), oos));
+  const perItemMeta = perItem.map((p) => {
+    const daysN = p.daily.length;
+    return {
+      wb: p.wb, name: p.name, brand: p.brand, price: p.price,
+      days: daysN, avgStock: 0,
+      unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
+      revenue: p.daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0),
+    };
+  });
+  const prices = all.items.map((it) => it.price).filter((v) => v > 0).sort((a, b) => a - b);
+  const medianPrice = prices.length ? prices[Math.floor((prices.length - 1) / 2)] : 0;
+  return {
+    group: all.items.map((it) => ({ wb: it.wb, name: it.name, brand: it.brand, price: it.price, revenue: it.revenue, sales: it.sales, thumb: it.thumb })),
+    groupDaily, perItemMeta,
+    attributesFound: [],
+    total: all.total, fetched: all.fetched, kept: all.kept,
+    medianPrice, priceAnchor: medianPrice ? Math.round(medianPrice * 0.9) : 0,
+    deepMatch: false, cardsEnriched: 0, undetermined: [], structuralPool: all.fetched,
+    dailyLimit: all.dailyLimit, source: 'serp',
+  };
+}
 
 /** Сдвиг 'YYYY-MM-DD' на N дней. */
 function offsetDate(ymd, days) {
@@ -508,7 +602,13 @@ export async function buildSeasonPlanReport({
   const LP = (msg) => log.push({ t: new Date().toISOString(), stage: 'план', msg });
 
   // Замыкание: собрать «форму» (аналоги/группу) за произвольное окно тем же источником.
+  let _serpAll = null, _serpReqCounted = false; // SERP тянем один раз на полное окно, окна режем в памяти
   const collectShape = async (w1, w2) => {
+    if (subject && subject.serp) {
+      if (!_serpAll) _serpAll = await collectSerpAll(subject.serp, d1, d2, log);
+      const req = _serpReqCounted ? 0 : ((_serpReqCounted = true), _serpAll.requests || 0);
+      return { method: 'serp', requests: req, ...sliceSerpWindow(_serpAll, w1, w2, oos) };
+    }
     if (subject) {
       return { method: 'category-bulk', ...(await collectFromCategory({ path: subject.path, d1: w1, d2: w2, filter: subject.filter || {}, limit: subject.limit, maxPages: subject.maxPages, oos, deepMatch: plan.deepMatch !== false, includeWb: includeSet, log })) };
     } else if (group && path) {

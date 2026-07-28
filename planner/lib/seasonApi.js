@@ -48,6 +48,9 @@ const safeId = (id) => String(id || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0,
 const list = (v) => (Array.isArray(v) ? v.filter(Boolean)
   : v ? String(v).split(',').map((s) => s.trim()).filter(Boolean) : undefined);
 const num = (v) => (v == null || v === '' || v === true ? undefined : Number(v));
+// Целевые фразы: массив как есть; строка — по переносам строк, запятым или «;».
+const phraseList = (v) => (Array.isArray(v) ? v.map((s) => String(s).trim()).filter(Boolean)
+  : v ? String(v).split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean) : []);
 
 // последние 30 дней (для by_keywords — профиль запросов свежий)
 function last30() {
@@ -91,36 +94,35 @@ function buildFilter(f = {}) {
 // целевой ГОД старта сезона (targetYear).
 export async function runForecast(cfg = {}) {
   if (!process.env.MPSTATS_TOKEN) throw new Error('MPSTATS_TOKEN не задан в окружении службы (planner/data/.env)');
-  if (!cfg.path) throw new Error('Не указан путь предмета WB (path)');
   const hist = default2Years();
   const targetYear = num(cfg.targetYear) || (Number(hist.d2.slice(0, 4)) + 1);
-  const filter = buildFilter(cfg.filter || cfg);
+  const phrases = phraseList(cfg.phrases);
+  if (!phrases.length) throw new Error('Не указаны целевые фразы (по ним ищем товары-аналоги)');
+  const minusWords = list(cfg.minusWords) || list(cfg.exclude) || [];
+  const subject = {
+    path: cfg.path, limit: num(cfg.limit),
+    // ГЛАВНЫЙ источник — SERP «фраза → товары» (1 запрос на фразу, дневные ряды за 2 года).
+    serp: {
+      phrases, minusWords,
+      priceMin: num(cfg.priceMin), priceMax: num(cfg.priceMax),
+      minRevenuePerMonth: num(cfg.minRevenue),
+      limit: num(cfg.limit) || 60,
+    },
+  };
   const report = await buildSeasonPlanReport({
     d1: hist.d1, d2: hist.d2,
-    label: cfg.label || cfg.path,
-    subject: {
-      path: cfg.path,
-      filter,
-      limit: num(cfg.limit),
-      maxPages: num(cfg.maxPages),
-    },
+    label: cfg.label || phrases[0],
+    subject,
     forecast: { targetYear },
     baseSource: 'market',
-    plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false, rampDays: num(cfg.rampDays), seasonFrac: num(cfg.seasonFrac), targetLevel: cfg.targetLevel === 'top1' ? 'top1' : 'top3', deepMatch: cfg.deepMatch !== false },
-    includeWb: list(cfg.includeWb) ? new Set(list(cfg.includeWb).map(String)) : null,
+    plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false, rampDays: num(cfg.rampDays), seasonFrac: num(cfg.seasonFrac), targetLevel: cfg.targetLevel === 'top1' ? 'top1' : 'top3' },
   });
-  // Учёт суточного бюджета MPStats: сетевые by_keywords + категория (условно 1).
-  if (dbAvailable() && filter.relevance) {
-    const rel = report.relevance || {};
-    mpstatsBudgetAdd((rel.requests || 0) + 1);
-    // Память запроса: слова/минусы/фразы + отобранные артикулы (для переиспользования).
+  // Учёт запросов MPStats (SERP: 1 на фразу) + память запроса.
+  if (dbAvailable()) {
+    mpstatsBudgetAdd(report.requests || 0);
     try {
       searchSave({
-        path: cfg.path,
-        targetWords: filter.relevance.targetWords,
-        minusWords: filter.relevance.minusWords,
-        pickedPhrases: filter.relevance.pickedPhrases,
-        threshold: filter.relevance.threshold,
+        path: cfg.path, targetWords: phrases, minusWords, pickedPhrases: phrases, threshold: null,
         keptIds: (report.perItem || []).map((m) => m.wb).filter(Boolean),
       });
     } catch { /* память не критична */ }

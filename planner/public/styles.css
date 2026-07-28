@@ -645,3 +645,4 @@ html { overflow-x: hidden; }
 .se-ph-f { color: var(--muted); font-size: 11px; }
 .se-ph-search { margin-bottom: 6px; }
 .se-ph-search input { width: 100%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 13px; }
+.season-builder textarea#se-phrases { width: 100%; min-height: 64px; resize: vertical; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; line-height: 1.5; }

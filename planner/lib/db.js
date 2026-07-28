@@ -70,6 +70,13 @@ function migrate(db) {
       phrases TEXT,           -- JSON [{phrase,traffic,count}]
       fetchedAt TEXT
     );
+    -- Кэш SERP «фраза → товары» (serp-v2): товары с дневными графиками за период.
+    -- Основной источник аналогов; кэшируем, чтобы повторный отчёт не тратил запрос.
+    CREATE TABLE IF NOT EXISTS wb_serp (
+      keyword TEXT PRIMARY KEY,   -- «<фраза>|<d1>|<d2>»
+      json TEXT,                  -- {periods, items:[...]}
+      fetchedAt TEXT
+    );
     -- Память запросов «Ранга сезонности»: введённые слова/минусы/выбранные фразы и
     -- найденные артикулы — чтобы переиспользовать наработки для похожих предметов.
     CREATE TABLE IF NOT EXISTS season_searches (
@@ -377,6 +384,21 @@ export function subjectKeywordsSave(path, phrases, d1, d2) {
   db.prepare(`INSERT INTO wb_subject_keywords(path,d1,d2,phrases,fetchedAt) VALUES(?,?,?,?,?)
     ON CONFLICT(path) DO UPDATE SET d1=excluded.d1, d2=excluded.d2, phrases=excluded.phrases, fetchedAt=excluded.fetchedAt`)
     .run(String(path), d1 || null, d2 || null, JSON.stringify(phrases || []), new Date().toISOString());
+  return true;
+}
+
+// ── Кэш SERP «фраза → товары» ──
+export function serpLoad(keyword, maxAgeMs) {
+  const db = getDb(); if (!db) return null;
+  const r = db.prepare('SELECT json, fetchedAt FROM wb_serp WHERE keyword = ?').get(String(keyword));
+  if (!r) return null;
+  if (maxAgeMs != null && r.fetchedAt && (Date.now() - Date.parse(r.fetchedAt) > maxAgeMs)) return null;
+  try { return JSON.parse(r.json); } catch { return null; }
+}
+export function serpSave(keyword, data) {
+  const db = getDb(); if (!db) return false;
+  db.prepare('INSERT INTO wb_serp(keyword,json,fetchedAt) VALUES(?,?,?) ON CONFLICT(keyword) DO UPDATE SET json=excluded.json, fetchedAt=excluded.fetchedAt')
+    .run(String(keyword), JSON.stringify(data), new Date().toISOString());
   return true;
 }
 
