@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28o';
+const APP_BUILD = 'season-serp-2026-07-28p';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2067,7 +2067,10 @@ function seasonVolumeBasis(p) {
   if (!st || !st.used) return 'MPStats «продажи» = выкупы · база для производства';
   const lvl = p.levelInfo.targetLevel === 'top1' ? 'ТОП-1' : 'ТОП-3';
   const w = st.window ? `${seFmtRange(st.window.from, st.window.to)}` : '';
-  return `= фактические продажи ${lvl} за аналог. период ${w}`;
+  const g = (st.growthFactor && st.growthFactor !== 1)
+    ? ` × рост рынка ${st.growthFactor} (${st.growthYoY}/год за ${st.growthYears} г.)`
+    : '';
+  return `= продажи ${lvl} за ${w}${g}`;
 }
 
 function seasonSummary(rep, p) {

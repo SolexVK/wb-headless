@@ -884,11 +884,40 @@ export async function buildSeasonPlanReport({
       const lead = (analog.perItemMeta || []).filter((m) => m.days > 0).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
       const t1 = lead[0] ? Math.round(lead[0].unitsSold) : 0;
       const t3 = lead.length ? Math.round(lead.slice(0, 3).reduce((s, m) => s + m.unitsSold, 0) / Math.min(3, lead.length)) : 0;
-      const targetTotal = targetLevel === 'top1' ? t1 : t3;
+
+      // ── ПРОЕКЦИЯ РОСТА рынка на прогнозный год ──
+      // Якорь — продажи за сезон, что был ky лет назад (последний полный). Рынок за это время
+      // растёт: измеряем рост «год к году» на ОДНОМ И ТОМ ЖЕ сезонном куске двух свежих лет
+      // (оба в данных) и компаундируем на ky лет вперёд. growthMode: 'market' (весь рынок,
+      // с новичками) | 'none' (без проекции). Годовой рост зажат в [0.5, 2.0] от абсурда.
+      const growthMode = plan.growthMode || 'market';
+      const sumUnits = (col) => (col.perItemMeta || []).filter((m) => m.days > 0).reduce((s, m) => s + (m.unitsSold || 0), 0);
+      let gYoY = 1, growthYears = 0, growthClamped = false;
+      if (growthMode !== 'none') {
+        const rStart = shiftY(fp.from, ky - 1); let rEnd = shiftY(fp.to, ky - 1); if (rEnd > d2) rEnd = d2; // свежий год (обрезаем по концу истории)
+        const pStart = shiftY(rStart, 1), pEnd = shiftY(rEnd, 1);                                          // тот же кусок год назад
+        if (pStart >= d1 && rEnd > rStart) {
+          const recentM = await collectShape(rStart, rEnd);
+          const priorM = await collectShape(pStart, pEnd);
+          const ru = sumUnits(recentM), pu = sumUnits(priorM);
+          if (pu > 0 && ru > 0) {
+            const raw = ru / pu; const gc = Math.max(0.5, Math.min(2.0, raw));
+            growthClamped = gc !== raw; gYoY = gc;
+            growthYears = plan.growthYears != null ? Number(plan.growthYears) : ky; // лет от якоря до прогноза
+          }
+        }
+      }
+      const growthFactor = Math.pow(gYoY, growthYears);
+      const t1p = Math.round(t1 * growthFactor), t3p = Math.round(t3 * growthFactor);
+      const targetTotal = targetLevel === 'top1' ? t1p : t3p;
       const curTotal = (fc.forecastDaily || []).reduce((s, r) => s + (Number(r.plannedOrders) || 0), 0);
-      seasonTargets = { window: { from: aFrom, to: aTo }, yearsBack: ky, top1Units: t1, top3Units: t3, used: targetTotal, curveTotalBefore: Math.round(curTotal) };
+      seasonTargets = {
+        window: { from: aFrom, to: aTo }, yearsBack: ky, top1Units: t1, top3Units: t3,
+        growthMode, growthYoY: Math.round(gYoY * 100) / 100, growthYears, growthFactor: Math.round(growthFactor * 100) / 100, growthClamped,
+        top1Projected: t1p, top3Projected: t3p, used: targetTotal, curveTotalBefore: Math.round(curTotal),
+      };
       if (targetTotal > 0 && curTotal > 0) {
-        const factor = targetTotal / curTotal; // множитель формы, чтобы итог = продажам лидера(ов)
+        const factor = targetTotal / curTotal; // множитель формы, чтобы итог = спрогнозированному объёму
         for (const r of fc.forecastDaily) { r.plannedOrders = round1(r.plannedOrders * factor); r.stock = Math.round((Number(r.stock) || 0) * factor); }
         if (Array.isArray(fc.deliveries)) fc.deliveries = fc.deliveries.map((d) => ({ ...d, qty: Math.round(d.qty * factor) }));
         fc.totalUnits = Math.round(curTotal * factor);
