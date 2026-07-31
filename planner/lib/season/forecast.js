@@ -240,6 +240,126 @@ function buildEngineeredSeason(shape, cfg) {
   return { forecastDaily, forecastPeriod: { from: days[0].date, to: days[days.length - 1].date }, phaseDates, validation, top3PeakDaily: target3, totalUnits: Math.round(total), seasonCal, deliveries, restockDeadline, chosenYear };
 }
 
+// Календарные мини-сезоны РФ: всплеск спроса приходит ЗА несколько дней до даты (подарки
+// покупают заранее). ramp — дней разгона до пика, tail — дней возврата к базе после.
+const RU_SPIKES = [
+  { name: 'Новый год', mmdd: '12-20', ramp: 20, tail: 12 },
+  { name: '14 февраля', mmdd: '02-11', ramp: 8, tail: 3 },
+  { name: '23 февраля', mmdd: '02-20', ramp: 8, tail: 3 },
+  { name: '8 марта', mmdd: '03-05', ramp: 8, tail: 3 },
+];
+
+/**
+ * КРУГЛОГОДИЧНАЯ кривая (режим 'allseason'): товар с яркими сезонами, но продажами весь год.
+ * Форма = полный годовой рельеф рынка (тот же shape.index) БЕЗ разгона-с-нуля и БЕЗ обнуления
+ * хвоста: после сезона продажи мягко снижаются до межсезонного «пола» и держатся. Вторичные
+ * всплески (мини-сезоны: НГ, 14/23 фев, 8 мар + пики из данных) размечаются и учитываются в
+ * поставках. Итоговый ОБЪЁМ (годовой) перепривязывается выше по стеку к продажам лидеров за год.
+ */
+function buildAllSeasonYear(shape, cfg) {
+  const A = shape.index, N = 365;
+  const trend = smoothCirc(A, 31);
+  let kPeak = 1; for (let k = 2; k <= N; k++) if (trend[k] > trend[kPeak]) kPeak = k;
+  // межсезонный «пол» — нижний перцентиль сглаженного рельефа (устойчив к всплескам)
+  const ts = trend.slice(1).filter((v) => v > 0).sort((a, b) => a - b);
+  const floorRel = ts.length ? ts[Math.floor(0.20 * (ts.length - 1))] : 0;
+  // границы ГЛАВНОГО сезона (для разметки Сезон/Межсезонье)
+  const thr = Math.max(floorRel * 1.6, (cfg.seasonFrac ?? 0.6) * trend[kPeak]);
+  let s0 = kPeak; for (let g = 0; g < N; g++) { const p = ((s0 - 2 + N) % N) + 1; if (trend[p] >= thr) s0 = p; else break; }
+  let s1 = kPeak; for (let g = 0; g < N; g++) { const nx = (s1 % N) + 1; if (trend[nx] >= thr) s1 = nx; else break; }
+  const inSeason = (k) => ringHas(s0, (s1 % N) + 1, k);
+
+  // окно = 365 дней ВПЕРЁД от сегодня (asOf)
+  const asOf = cfg.asOf || `${cfg.targetYear}-01-01`;
+  const startT = Date.parse(asOf + 'T00:00:00Z');
+  const days = [];
+  for (let i = 0; i < N; i++) {
+    const date = new Date(startT + i * DAYMS).toISOString().slice(0, 10);
+    const k = shape.calDayOf(date);
+    days.push({ date, k, relief: A[k] || 0, i });
+  }
+  // масштаб: пиковый день ≈ уровень ТОП-3 конкурента (итог года перепривяжется к лидерам)
+  const peakRelief = Math.max(...days.map((d) => d.relief), 1e-9);
+  const scale = (cfg.top3Daily || 1) * (cfg.volumeAdj || 1) / peakRelief;
+  const floorAbs = round(floorRel * scale, 1);
+
+  // ── МИНИ-СЕЗОНЫ ── календарные (страховка) + подтверждённые данными (relief выше пола)
+  const findByMmdd = (mmdd) => days.find((d) => d.date.slice(5) === mmdd);
+  const miniSeasons = [];
+  for (const sp of RU_SPIKES) {
+    const pk = findByMmdd(sp.mmdd); if (!pk) continue;
+    if (inSeason(pk.k)) continue; // если попал в главный сезон — не мини, а часть сезона
+    const reliefAt = A[pk.k] || 0;
+    const strength = floorRel > 0 ? reliefAt / floorRel : 1;   // во сколько раз выше межсезонного пола
+    const rampStart = days[Math.max(0, pk.i - sp.ramp)];
+    const endD = days[Math.min(N - 1, pk.i + sp.tail)];
+    miniSeasons.push({
+      name: sp.name, peakDate: pk.date, rampStart: rampStart.date, endDate: endD.date,
+      peakDaily: round(reliefAt * scale, 0), strength: round(strength, 2),
+      confirmed: strength >= 1.15, // рынок реально показывает всплеск в эти дни
+    });
+  }
+  miniSeasons.sort((a, b) => a.peakDate.localeCompare(b.peakDate));
+
+  // ── ДНЕВНОЙ ПЛАН ── чистый рельеф × масштаб (без разгона/обнуления)
+  for (const d of days) { d.final = round(d.relief * scale, 1); }
+  const vals = days.map((d) => d.final);
+  const peakF = Math.max(...vals, 1);
+
+  // ── ПОСТАВКИ: ровный помесячный подсорт (спрос след. месяца × буфер, склад не обнуляем) ──
+  // Приходит за ~4 дня до начала месяца — покрывает и внутримесячные мини-всплески (объём
+  // месяца уже включает их из рельефа). Склад держим на ~месяц вперёд.
+  const BUF = cfg.deliveryBuffer ?? 1.15;
+  const monthKey = (dt) => dt.slice(0, 7);
+  const months = [...new Set(days.map((d) => monthKey(d.date)))];
+  const deliveryByIdx = {}; const deliveries = [];
+  for (const mk of months) {
+    const md = days.filter((d) => monthKey(d.date) === mk);
+    const demand = md.reduce((s, d) => s + d.final, 0);
+    if (demand <= 0) continue;
+    const qty = Math.round(demand * BUF);
+    const arriveIdx = Math.max(0, md[0].i - 4);
+    deliveryByIdx[arriveIdx] = (deliveryByIdx[arriveIdx] || 0) + qty;
+    const hasSpike = miniSeasons.some((m) => monthKey(m.peakDate) === mk && m.confirmed);
+    deliveries.push({ date: days[arriveIdx].date, qty, tag: 'подсорт', month: mk,
+      title: `Подсорт под ${mk}: спрос ${Math.round(demand)} шт + буфер${hasSpike ? ' · включает мини-сезон' : ''}` });
+  }
+  // склад-пила: держим положительным весь год (не обнуляем)
+  let lvl = 0;
+  for (let i = 0; i < days.length; i++) { lvl += (deliveryByIdx[i] || 0); lvl -= days[i].final; days[i].ourStock = Math.max(0, round(lvl, 0)); }
+
+  const forecastDaily = days.map((d) => ({
+    date: d.date,
+    stage: inSeason(d.k) ? 'Сезон' : 'Межсезонье',
+    favorable: !!cfg.favorableMonth[Number(d.date.slice(5, 7))] && d.final >= 0.6 * peakF,
+    kSales: round(d.relief, 4),
+    plannedOrders: d.final,
+    price: round(cfg.meanPrice * (shape.priceIndex[d.k] || 1) * (cfg.priceAdj || 1), 0),
+    stock: d.ourStock,
+    floor: floorAbs,
+  }));
+
+  // календарные границы (для разметки истории теми же периодами)
+  let peakI = 0; for (let i = 1; i < days.length; i++) if (days[i].relief > days[peakI].relief) peakI = i;
+  const seasonCal = { entryCal: s0, hotStartCal: s0, peakCal: days[peakI].k, saleStartCal: (s1 % N) + 1, endCal: (s1 % N) + 1 };
+  const phaseDates = { entry: days[0].date, hotStart: days[0].date, peak: days[peakI].date, saleStart: days[days.length - 1].date, end: days[days.length - 1].date };
+
+  const total = vals.reduce((a, b) => a + b, 0);
+  const minDaily = Math.min(...vals);
+  const validation = {
+    yearRound: { ok: floorAbs >= 0.04 * peakF, label: 'Продажи круглый год', value: `пол ${Math.round(floorAbs)} шт/день`, ref: `≥ ${round(0.04 * peakF, 1)}` },
+    noZeroing: { ok: minDaily > 0, label: 'Склад не обнуляется', value: `мин ${round(minDaily, 1)} шт/день`, ref: '> 0' },
+    peakVsTop3: { ok: Math.abs(peakF / ((cfg.top3Daily || 1) * (cfg.volumeAdj || 1)) - 1) <= 0.2, label: 'Пик ≈ ТОП-3', value: `${Math.round(peakF)} шт/день`, ref: `≈ ${Math.round((cfg.top3Daily || 1) * (cfg.volumeAdj || 1))}` },
+    miniSeasons: { ok: true, label: 'Мини-сезоны учтены', value: `${miniSeasons.filter((m) => m.confirmed).length} подтв. из ${miniSeasons.length}`, ref: miniSeasons.map((m) => m.name).join(', ') || '—' },
+  };
+
+  return {
+    forecastDaily, forecastPeriod: { from: days[0].date, to: days[days.length - 1].date },
+    phaseDates, validation, top3PeakDaily: round(peakF, 0), totalUnits: Math.round(total),
+    seasonCal, deliveries, restockDeadline: null, chosenYear: Number(asOf.slice(0, 4)), miniSeasons,
+  };
+}
+
 /**
  * Строит инженерный прогноз (движок сам выбирает окно сезона из годового анализа).
  * @param {object} p
@@ -289,10 +409,16 @@ export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily
   // Уровень ТОП-3 (целевой пик): если не передан — берём базовый (средний конкурент).
   const top3 = top3Daily > 0 ? top3Daily : baseDaily;
 
-  const eng = buildEngineeredSeason(shape, {
-    targetYear: year, asOf: opts.asOf, top3Daily: top3, volumeAdj, priceAdj, meanPrice,
-    rampDays: opts.rampDays, seasonFrac: opts.seasonFrac, favorableMonth,
-  });
+  const isAllSeason = opts.articleType === 'allseason';
+  const eng = isAllSeason
+    ? buildAllSeasonYear(shape, {
+        targetYear: year, asOf: opts.asOf, top3Daily: top3, volumeAdj, priceAdj, meanPrice,
+        seasonFrac: opts.seasonFrac, favorableMonth, deliveryBuffer: opts.deliveryBuffer,
+      })
+    : buildEngineeredSeason(shape, {
+        targetYear: year, asOf: opts.asOf, top3Daily: top3, volumeAdj, priceAdj, meanPrice,
+        rampDays: opts.rampDays, seasonFrac: opts.seasonFrac, favorableMonth,
+      });
   const effectiveYear = eng.chosenYear || year; // движок мог сдвинуть год вперёд (сезон уже прошёл)
 
   // Историческая кривая (2 года) — по фактическим дням (для второй диаграммы).
@@ -322,6 +448,8 @@ export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily
   const favShare = eng.forecastDaily.length ? eng.forecastDaily.filter((d) => d.favorable).length / eng.forecastDaily.length : 0;
 
   return {
+    mode: isAllSeason ? 'allseason' : 'seasonal',
+    miniSeasons: eng.miniSeasons || null,
     forecastPeriod: eng.forecastPeriod,
     targetYear: effectiveYear,
     requestedYear: year,
