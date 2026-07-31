@@ -124,6 +124,9 @@ export async function runForecast(cfg = {}) {
       growthMode: ['cohort', 'market', 'none'].includes(cfg.growthMode) ? cfg.growthMode : (cfg.articleType === 'allseason' ? 'cohort' : 'market'),
       growthManual: (cfg.growthManual != null && cfg.growthManual !== '' && num(cfg.growthManual) > 0) ? num(cfg.growthManual) : null,
       growthYears: cfg.growthYears != null ? num(cfg.growthYears) : null,
+      priceSegment: ['cheap', 'mid', 'high', 'premium'].includes(cfg.priceSegment) ? cfg.priceSegment : 'auto',
+      cost: num(cfg.cost) > 0 ? num(cfg.cost) : null,
+      priceUndercut: (num(cfg.priceUndercut) > 0) ? Math.min(0.5, num(cfg.priceUndercut) / 100) : 0,
       // «сегодня» = следующий день после конца истории (вчера) — прогноз строим вперёд от него
       asOf: ymd(new Date(Date.parse(hist.d2) + 86400000)) },
   });

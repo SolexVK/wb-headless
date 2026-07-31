@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-allseason-2026-07-31c';
+const APP_BUILD = 'season-segments-2026-07-31d';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1494,6 +1494,17 @@ function seasonBuilderPanel() {
             </select>
           </div>
           <div class="field"><label title="Ручной коэффициент годового роста — перекрывает авто-расчёт. Напр. 1.25 = +25%/год, 0.9 = спад −10%/год. Пусто = считать автоматически по выбранному режиму. Полезно, если тренд ускоряется или замедляется.">Коэф. роста/год (ручной)</label><input id="se-growth-manual" type="number" step="0.05" min="0.5" max="3" value="${f.growthManual ?? ''}" placeholder="авто"></div>
+          <div class="field"><label title="Ценовой сегмент, в котором планируешь продавать. Выборка бьётся на 4 сегмента по квартилям медианной цены за год (адаптивно к нише). Выбор сегмента → объём, цена и ТОП-15 считаются по лидерам именно этого сегмента. «Авто» — весь диапазон. Таблица сегментов с выгодностью появится после построения.">Ценовой сегмент</label>
+            <select id="se-segment">
+              <option value="auto"${['cheap','mid','high','premium'].includes(f.priceSegment) ? '' : ' selected'}>Авто — весь диапазон</option>
+              <option value="cheap"${f.priceSegment === 'cheap' ? ' selected' : ''}>Дешёвый (нижние 25%)</option>
+              <option value="mid"${f.priceSegment === 'mid' ? ' selected' : ''}>Средний (25–50%)</option>
+              <option value="high"${f.priceSegment === 'high' ? ' selected' : ''}>Высокий (50–75%)</option>
+              <option value="premium"${f.priceSegment === 'premium' ? ' selected' : ''}>Премиум (верхние 25%)</option>
+            </select>
+          </div>
+          <div class="field"><label title="Себестоимость товара, ₽ (примерно). По ней подсветим, в каких ценовых сегментах ты работаешь в плюс, а в каких — в убыток. Пусто = не проверять выгодность.">Себестоимость, ₽</label><input id="se-cost" type="number" min="0" value="${f.cost ?? ''}" placeholder="напр. 1400"></div>
+          <div class="field"><label title="На сколько % подрезать цену ниже медианы сегмента (чтобы быть чуть дешевле конкурентов). 0 = по медиане. Напр. 10 = на 10% ниже.">Подрезать цену, %</label><input id="se-undercut" type="number" min="0" max="50" value="${f.priceUndercut ?? ''}" placeholder="0"></div>
           <div class="field span2 se-opts">
             <label class="se-check"><input type="checkbox" id="se-oos"${f.oos !== false ? ' checked' : ''}> OOS-поправка</label>
             <label class="se-check"><input type="checkbox" id="se-weekly"${f.weekly !== false ? ' checked' : ''}> недельный профиль</label>
@@ -1563,6 +1574,9 @@ function collectSeasonForm() {
     articleType: (document.getElementById('se-arttype')?.value === 'allseason') ? 'allseason' : 'seasonal',
     growthMode: (() => { const v = document.getElementById('se-growth')?.value; return ['cohort', 'market', 'none'].includes(v) ? v : 'cohort'; })(),
     growthManual: v('se-growth-manual'),
+    priceSegment: (() => { const v = document.getElementById('se-segment')?.value; return ['cheap', 'mid', 'high', 'premium'].includes(v) ? v : 'auto'; })(),
+    cost: v('se-cost'),
+    priceUndercut: v('se-undercut'),
     oos: document.getElementById('se-oos')?.checked !== false,
     weekly: document.getElementById('se-weekly')?.checked !== false,
   };
@@ -1826,9 +1840,10 @@ function bindSeasonBuilder() {
     const set = (id, val) => { const el = g(id); if (el) el.value = val; };
     set('se-limit', '60'); set('se-pmin', ''); set('se-pmax', ''); set('se-minsales', ''); set('se-minrev', '');
     set('se-year', String(new Date().getUTCFullYear()));
-    set('se-growth-manual', '');
+    set('se-growth-manual', ''); set('se-cost', ''); set('se-undercut', '');
     if (g('se-level')) g('se-level').value = 'top3';
     if (g('se-growth')) g('se-growth').value = 'cohort';
+    if (g('se-segment')) g('se-segment').value = 'auto';
     ['se-oos', 'se-weekly'].forEach((id) => { const el = g(id); if (el) el.checked = true; });
     toast('Фильтры сброшены');
   });
@@ -1851,7 +1866,8 @@ function bindSeasonBuilder() {
           approvedIds: cfg.approvedIds, excludedIds: cfg.excludedIds, gender: cfg.gender,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
           limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, articleType: cfg.articleType,
-          growthMode: cfg.growthMode, growthManual: cfg.growthManual, oos: cfg.oos, weekly: cfg.weekly };
+          growthMode: cfg.growthMode, growthManual: cfg.growthManual,
+          priceSegment: cfg.priceSegment, cost: cfg.cost, priceUndercut: cfg.priceUndercut, oos: cfg.oos, weekly: cfg.weekly };
         await recalc(true).catch(() => {});
       }
       // обновить остаток лимита после построения
@@ -1915,7 +1931,7 @@ async function renderSeasonView(articleId) {
   const staleBanner = stale
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
-  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   installSeasonZoom();
   // Чекбоксы ТОП-15: отжатие → исключить конкурента и пересобрать план (дебаунс, кэш SERP).
   box.querySelectorAll('.se-comp-cb').forEach((cb) => {
@@ -2102,6 +2118,47 @@ function installSeasonZoom() {
     if (att < shifts.length) { img.dataset.att = att + 1; img.dataset.shift = shifts[att]; img.src = wbThumbUrl(nm, 'tm', shifts[att]); }
     else { const w = img.closest('.se-comp-thumb'); if (w) w.classList.add('noimg'); img.remove(); }
   }, true);
+}
+
+// Ценовые сегменты выборки (квартили по медианной цене за год) + выгодность по себестоимости.
+// Показывает, как объём/выручка/цена отличаются по сегментам, и в каком ты работаешь.
+function seasonSegmentsBlock(rep) {
+  const s = rep.segments;
+  if (!s || !Array.isArray(s.bands) || !s.bands.length) return '';
+  const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
+  const vClass = (v) => v === 'ok' ? 'se-seg-ok' : v === 'thin' ? 'se-seg-thin' : v === 'loss' ? 'se-seg-loss' : '';
+  const vLabel = (v) => v === 'ok' ? '✅ в плюс' : v === 'thin' ? '⚠ тонкая маржа' : v === 'loss' ? '⛔ в убыток' : '';
+  const rows = s.bands.map((b) => {
+    const active = s.active && s.active === b.key;
+    const range = `${fmt(b.lo)}–${b.hi != null ? fmt(b.hi) : '∞'} ₽`;
+    const viab = s.cost ? `<td class="num ${vClass(b.viable)}" title="Наценка к себестоимости ${s.cost}₽">×${b.markup} · ${b.margin}% ${vLabel(b.viable)}</td>` : '';
+    return `<tr class="${active ? 'se-seg-active' : ''} ${vClass(b.viable)}">
+      <td>${active ? '▶ ' : ''}${seEsc(b.name)}</td>
+      <td class="num">${range}</td>
+      <td class="num">${b.count}</td>
+      <td class="num">${fmt(b.top3Units)}</td>
+      <td class="num">${fmt(b.top3Rev)} ₽</td>
+      <td class="num">${fmt(b.avgPrice)} ₽</td>
+      ${viab}
+    </tr>`;
+  }).join('');
+  const costNote = s.cost
+    ? `Себестоимость ${fmt(s.cost)} ₽. Зелёный — работаешь в плюс (цена > 1.6× себест.), жёлтый — тонкая маржа, красный — в убыток. Это грубая прикидка по цене (без полного юнита).`
+    : 'Задай себестоимость в конструкторе — подсветим выгодные и убыточные сегменты.';
+  const activeNote = s.active && s.active !== 'auto'
+    ? `План построен по сегменту <b>«${seEsc((s.bands.find((b) => b.key === s.active) || {}).name || s.active)}»</b> — объём, цена и ТОП-15 считаются по его лидерам.`
+    : 'План построен по <b>всей выборке</b>. Выбери сегмент в конструкторе, чтобы считать по конкретному ценовому уровню.';
+  return `<details class="se-comp" open>
+    <summary>💰 Ценовые сегменты выборки <span class="mini">(объём и цена сильно зависят от сегмента)</span></summary>
+    <div class="se-comp-body">
+      <div class="mini">${activeNote}</div>
+      <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
+        <thead><tr><th>Сегмент</th><th class="num">Диапазон цен</th><th class="num" title="Товаров в сегменте">Тов.</th><th class="num" title="Средние продажи ТОП-3 сегмента за год">ТОП-3 продаж/год</th><th class="num" title="Средняя выручка ТОП-3 сегмента за год">ТОП-3 выручка/год</th><th class="num" title="Средняя медианная цена ТОП-3">Ср. цена</th>${s.cost ? '<th class="num">Выгодность</th>' : ''}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <div class="mini">${costNote}</div>
+    </div>
+  </details>`;
 }
 
 // Блок «Характеристики выборки» — реальные Состав/Сезон/Крой с количеством из карточек

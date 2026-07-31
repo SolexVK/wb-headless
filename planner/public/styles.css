@@ -584,6 +584,10 @@ html { overflow-x: hidden; }
 .se-comp-table tbody tr.se-row-off { opacity: 0.4; text-decoration: line-through; }
 .se-comp-table tbody tr.se-row-off:hover { opacity: 0.6; }
 .se-comp-cb { cursor: pointer; }
+.se-seg-table tbody tr.se-seg-active { outline: 2px solid var(--accent); font-weight: 700; }
+.se-seg-table td.se-seg-ok, .se-seg-table tr.se-seg-ok td:first-child { color: var(--ok, #16a34a); }
+.se-seg-table td.se-seg-thin, .se-seg-table tr.se-seg-thin td:first-child { color: var(--warn, #d97706); }
+.se-seg-table td.se-seg-loss, .se-seg-table tr.se-seg-loss td:first-child { color: var(--bad, #dc2626); }
 
 /* Превью конкурента в топ-10 + зум по наведению */
 .se-comp-name { display: flex; align-items: center; gap: 8px; }

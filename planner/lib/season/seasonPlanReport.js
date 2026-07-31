@@ -702,6 +702,41 @@ export async function collectGroupDaily({ group, d1, d2, concurrency = 5, onProg
   return { groupDaily, perItemMeta, errors, dailyLimit };
 }
 
+// Ценовые сегменты выборки по квартилям медианной цены за год (priceMed). Для каждого —
+// число товаров и продажи/выручка/цена ТОП-3 этого сегмента. При заданной себестоимости
+// (plan.cost) — грубая выгодность: viable 'ok' (цена > 1.6× себест.) | 'thin' (> себест.) | 'loss'.
+function computePriceSegments(perItemMeta, plan) {
+  const pm = (m) => m.priceMed || m.price || 0;
+  const un = (m) => m.unitsSoldLY != null ? (m.unitsSoldLY || 0) : (m.unitsSold || 0);
+  const rv = (m) => m.revenueLY != null ? (m.revenueLY || 0) : (m.revenue || 0);
+  const items = (perItemMeta || []).filter((m) => m.days > 0 && pm(m) > 0 && un(m) > 0);
+  if (items.length < 4) return null;
+  const prices = items.map(pm).sort((a, b) => a - b);
+  const q = (p) => prices[Math.floor(p * (prices.length - 1))];
+  const q25 = q(0.25), q50 = q(0.5), q75 = q(0.75);
+  const cost = Number(plan.cost) > 0 ? Number(plan.cost) : null;
+  const defs = [
+    { key: 'cheap', name: 'Дешёвый', lo: 0, hi: q25 },
+    { key: 'mid', name: 'Средний', lo: q25, hi: q50 },
+    { key: 'high', name: 'Высокий', lo: q50, hi: q75 },
+    { key: 'premium', name: 'Премиум', lo: q75, hi: Infinity },
+  ];
+  const bands = defs.map((d) => {
+    const seg = items.filter((m) => { const p = pm(m); return p >= d.lo && p < d.hi; }).sort((a, b) => rv(b) - rv(a));
+    const n = Math.min(3, seg.length);
+    const avg = (f) => n ? Math.round(seg.slice(0, 3).reduce((s, m) => s + f(m), 0) / n) : 0;
+    const avgPrice = avg(pm);
+    let markup = null, margin = null, viable = null;
+    if (cost && avgPrice > 0) {
+      markup = Math.round(avgPrice / cost * 100) / 100;
+      margin = Math.round((avgPrice - cost) / avgPrice * 100);
+      viable = avgPrice > cost * 1.6 ? 'ok' : (avgPrice > cost ? 'thin' : 'loss');
+    }
+    return { key: d.key, name: d.name, lo: Math.round(d.lo), hi: d.hi === Infinity ? null : Math.round(d.hi), count: seg.length, top3Units: avg(un), top3Rev: avg(rv), avgPrice, markup, margin, viable };
+  });
+  return { thresholds: { q25, q50, q75 }, bands, cost, active: 'auto' };
+}
+
 /**
  * Полный отчёт «план продаж на сезон» по группе.
  *
@@ -762,8 +797,28 @@ export async function buildSeasonPlanReport({
   };
 
   let requests = 0;
-  const collected = await collectShape(d1, d2); // история (2 года)
+  let collected = await collectShape(d1, d2); // история (2 года)
   requests += collected.requests || 0;
+
+  // ── ЦЕНОВЫЕ СЕГМЕНТЫ (авто-квартили по медианной цене за год) ──
+  // Бьём выборку на 4 сегмента (Дешёвый/Средний/Высокий/Премиум) по квартилям priceMed —
+  // адаптивно к нише. Если выбран сегмент (plan.priceSegment), пересобираем план ТОЛЬКО на его
+  // лидерах (объём, цена, ТОП-15 — по этому сегменту). Себестоимость (plan.cost) → подсветка
+  // выгодности сегментов. Из кэша SERP — без доп. запросов.
+  let segmentsInfo = null;
+  if (subject && subject.serp && _serpAll) {
+    segmentsInfo = computePriceSegments(collected.perItemMeta, plan);
+    const seg = plan.priceSegment;
+    if (segmentsInfo && seg && seg !== 'auto') {
+      const band = segmentsInfo.bands.find((b) => b.key === seg);
+      if (band && band.count > 0) {
+        const hi = band.hi == null ? Infinity : band.hi;
+        _serpAll.items = _serpAll.items.filter((it) => { const p = it.priceMed || it.price || 0; return p >= band.lo && p < hi; });
+        collected = await collectShape(d1, d2); // пересобрать выборку на выбранном сегменте
+        segmentsInfo.active = seg;
+      }
+    }
+  }
   const method = collected.method;
   const groupInfo = subject
     ? { path: subject.path, total: collected.total, fetched: collected.fetched, kept: collected.kept, truncated: collected.truncated, maxPages: collected.maxPages, deepMatch: collected.deepMatch, cardsEnriched: collected.cardsEnriched }
@@ -1026,6 +1081,7 @@ export async function buildSeasonPlanReport({
       itemsWithData: perItemMeta.filter((m) => m.days > 0).length,
       perItem: perItemMeta,
       attributesFound: collected.attributesFound || [],
+      segments: segmentsInfo,
       plan: fc,
       errors,
       dailyLimit,
@@ -1051,6 +1107,7 @@ export async function buildSeasonPlanReport({
     itemsWithData: perItemMeta.filter((m) => m.days > 0).length,
     perItem: perItemMeta,
     attributesFound: collected.attributesFound || [],
+    segments: segmentsInfo,
     plan: seasonPlan,
     errors,
     dailyLimit,
