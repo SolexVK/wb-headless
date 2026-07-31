@@ -238,14 +238,16 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
       activeDaysLY: p.activeDaysLY || 0, // дни с продажами за последний год — для скорости в сезон
     };
   });
-  const prices = all.items.map((it) => it.price).filter((v) => v > 0).sort((a, b) => a - b);
+  // Медиана по МЕДИАННОЙ ЗА ГОД цене (priceMed), а не по текущей (final_price): устойчиво к
+  // распродажам. Якорь = эта медиана (без авто-скидки; подрезание — настройка priceUndercut выше).
+  const prices = all.items.map((it) => it.priceMed || it.price).filter((v) => v > 0).sort((a, b) => a - b);
   const medianPrice = prices.length ? prices[Math.floor((prices.length - 1) / 2)] : 0;
   return {
     group: all.items.map((it) => ({ wb: it.wb, name: it.name, brand: it.brand, price: it.price, revenue: it.revenue, sales: it.sales, thumb: it.thumb })),
     groupDaily, perItemMeta,
     attributesFound: [],
     total: all.total, fetched: all.fetched, kept: all.kept,
-    medianPrice, priceAnchor: medianPrice ? Math.round(medianPrice * 0.9) : 0,
+    medianPrice, priceAnchor: medianPrice ? Math.round(medianPrice) : 0,
     deepMatch: false, cardsEnriched: 0, undetermined: [], structuralPool: all.fetched,
     dailyLimit: all.dailyLimit, source: 'serp',
   };
@@ -858,6 +860,9 @@ export async function buildSeasonPlanReport({
     const targetLevel = plan.targetLevel === 'top1' ? 'top1' : 'top3';
     const targetDaily = targetLevel === 'top1' ? top1Daily : top3Daily;
 
+    // Подрезание цены под медиану сегмента: priceUndercut (0..0.5), по умолчанию 0 (без скидки).
+    const undercut = Math.max(0, Math.min(0.5, Number(plan.priceUndercut) || 0));
+    const priceAnchorUsed = Math.round((collected.priceAnchor || 0) * (1 - undercut));
     const fc = buildForecast({
       history: groupDaily,
       recent60: recentCol.groupDaily,
@@ -865,9 +870,9 @@ export async function buildSeasonPlanReport({
       baseDaily,
       top3Daily: targetDaily,
       targetYear: forecast.targetYear,
-      opts: { ...plan, baseSource: baseInfo.source, priceAnchor: collected.priceAnchor },
+      opts: { ...plan, baseSource: baseInfo.source, priceAnchor: priceAnchorUsed },
     });
-    fc.priceInfo = { anchor: collected.priceAnchor, medianPrice: collected.medianPrice };
+    fc.priceInfo = { anchor: priceAnchorUsed, medianPrice: collected.medianPrice, undercut };
 
     // ── ОБЪЁМ плана = фактические продажи ТОП-1/ТОП-3 за АНАЛОГИЧНЫЙ период ──
     // Синтетическая кривая задаёт ФОРМУ сезона (разгон/пик/распродажа), но её ИТОГ прибиваем
