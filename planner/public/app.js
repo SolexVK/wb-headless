@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-allseason-2026-07-31a';
+const APP_BUILD = 'season-allseason-2026-07-31b';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1365,6 +1365,8 @@ function seasonIncludeFor(path) { if (!seasonIncludeByPath[path]) seasonIncludeB
 let seasonBudget = null;                 // {used, limit, left} суточный лимит MPStats
 let seasonApproved = new Set();           // nmID, вручную одобренные в «Предв. выборе»
 let seasonHintByArticle = {};             // {articleId: seasonalityHint} — подсказка типа после построения
+let seasonExcludedByArticle = {};         // {articleId: Set(nmID)} — исключённые вручную из ТОП-15 конкуренты
+let _seExclTimer = null;                   // дебаунс авто-пересборки после отжима чекбоксов
 const seasonPhrasesByPath = {};          // path -> [{phrase,norm,freq,words}]
 const seasonPickedByPath = {};           // path -> Set(norm) отмеченные галочками фразы
 function seasonPickedFor(path) { if (!seasonPickedByPath[path]) seasonPickedByPath[path] = new Set(); return seasonPickedByPath[path]; }
@@ -1545,6 +1547,7 @@ function collectSeasonForm() {
     minusWords: v('se-minus'),
     nicheWords: v('se-niche'),
     approvedIds: [...seasonApproved],
+    excludedIds: [...(seasonExcludedByArticle[seasonBuildArticle] || [])],
     gender: document.getElementById('se-gender')?.value || '',
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
     limit: v('se-limit'), targetYear: v('se-year'),
@@ -1833,7 +1836,7 @@ function bindSeasonBuilder() {
       if (a) {
         a.seasonFilter = { ...(a.seasonFilter || {}),
           phrases: g('se-phrases')?.value || '', minusWords: cfg.minusWords, nicheWords: cfg.nicheWords,
-          approvedIds: cfg.approvedIds, gender: cfg.gender,
+          approvedIds: cfg.approvedIds, excludedIds: cfg.excludedIds, gender: cfg.gender,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
           limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, articleType: cfg.articleType, oos: cfg.oos, weekly: cfg.weekly };
         await recalc(true).catch(() => {});
@@ -1887,6 +1890,11 @@ async function renderSeasonView(articleId) {
   try { rec = await api('/api/season/plan?articleId=' + encodeURIComponent(articleId)); }
   catch (e) { box.innerHTML = '<div class="mini bad">Не удалось загрузить: ' + e.message + '</div>'; return; }
   const rep = rec.report, p = rep.plan || {};
+  // Исключённые конкуренты: восстановить из cfg плана (если пересобирали с исключениями).
+  if (!seasonExcludedByArticle[articleId]) {
+    seasonExcludedByArticle[articleId] = new Set(((rec.cfg && rec.cfg.excludedIds) || []).map(Number).filter(Boolean));
+  }
+  const exSet = seasonExcludedByArticle[articleId];
   // План построен СТАРЫМ движком (нет календаря сезона/поставок) → графики отрисуются
   // по устаревшим данным. Просим перестроить, иначе новые правки «не видно».
   const stale = !p.seasonCal || !Array.isArray(p.deliveries);
@@ -1894,8 +1902,18 @@ async function renderSeasonView(articleId) {
   const staleBanner = stale
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
-  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   installSeasonZoom();
+  // Чекбоксы ТОП-15: отжатие → исключить конкурента и пересобрать план (дебаунс, кэш SERP).
+  box.querySelectorAll('.se-comp-cb').forEach((cb) => {
+    const wb = Number(cb.dataset.wb);
+    if (exSet.has(wb)) { cb.checked = false; cb.closest('tr')?.classList.add('se-row-off'); }
+    cb.addEventListener('change', () => {
+      if (cb.checked) exSet.delete(wb); else exSet.add(wb);
+      cb.closest('tr')?.classList.toggle('se-row-off', !cb.checked);
+      scheduleSeasonExclusionRebuild(articleId, rec.cfg || {}, exSet);
+    });
+  });
   // Клик по значению характеристики → вписать строгий ключ в конструктор (Часть 1).
   box.querySelectorAll('.se-attr-chip').forEach((b) => b.addEventListener('click', () => {
     const inp = document.getElementById('se-must'); if (!inp) return;
@@ -1920,6 +1938,35 @@ async function renderSeasonView(articleId) {
   }
 }
 
+// Дебаунс: пользователь может отжать несколько конкурентов подряд — пересобираем один раз.
+function scheduleSeasonExclusionRebuild(articleId, baseCfg, exSet) {
+  clearTimeout(_seExclTimer);
+  const status = document.getElementById('se-comp-status');
+  if (status) status.textContent = `исключено: ${exSet.size} · пересчёт через мгновение…`;
+  _seExclTimer = setTimeout(() => applySeasonExclusions(articleId, baseCfg, exSet), 900);
+}
+
+// Пересобрать план на выборке БЕЗ исключённых конкурентов (место занимают следующие по
+// выручке). Из кэша SERP — без обращений к MPStats. Перестраивает оба графика и ТОП-15.
+async function applySeasonExclusions(articleId, baseCfg, exSet) {
+  const status = document.getElementById('se-comp-status');
+  const cfg = { ...baseCfg, articleId, excludedIds: [...exSet] };
+  if (!(cfg.phrases && cfg.phrases.length) && !cfg.path) { if (status) status.textContent = 'нет параметров для пересборки'; return; }
+  if (status) status.textContent = 'пересобираю план…';
+  try {
+    await api('/api/season/build', { method: 'POST', body: JSON.stringify(cfg) });
+    // запомнить исключения в артикуле, чтобы не отжимать заново
+    const a = state.articles.find((x) => x.id === articleId);
+    if (a) { a.seasonFilter = a.seasonFilter || {}; a.seasonFilter.excludedIds = [...exSet]; unitPersist(); }
+    try { const st = await api('/api/season/status'); seasonBudget = st.budget || seasonBudget; } catch { /* ignore */ }
+    await renderSeasonView(articleId);
+    toast(exSet.size ? `Выборка обновлена: исключено ${exSet.size}, план пересобран` : 'Выборка восстановлена, план пересобран');
+  } catch (e) {
+    if (status) status.textContent = 'ошибка: ' + e.message;
+    toast('Ошибка пересборки: ' + e.message, true);
+  }
+}
+
 // Хост basket-CDN Wildberries по «тому» (vol) nmID. Диапазоны расширяются со временем;
 // при промахе есть перебор соседних хостов на onerror (см. installSeasonZoom).
 function wbBasketHost(vol) {
@@ -1938,9 +1985,10 @@ function wbThumbUrl(nmId, size = 'big', hostShift = 0) {
 
 // Разворачиваемый блок «Топ-10 конкурентов в выборке» — чтобы проверить релевантность
 // фильтра: на каких именно аналогах построена аналитика. Свёрнут по умолчанию.
-function seasonCompetitorsBlock(rep) {
+function seasonCompetitorsBlock(rep, articleId) {
   const items = (rep.perItem || []).filter((m) => m && ((+m.revenue > 0) || (+m.unitsSold > 0)));
   if (!items.length) return '';
+  const exSet = (articleId && seasonExcludedByArticle[articleId]) || new Set();
   const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
   const hasShare = items.some((m) => m.share != null);
   // Витрина ТОП-15 — за ПОСЛЕДНИЙ ГОД (revenueLY/unitsSoldLY), если есть (SERP-план);
@@ -1971,7 +2019,9 @@ function seasonCompetitorsBlock(rep) {
       : ((m.avgStock > 0 && +m.unitsSold > 0 && m.days > 0)
           ? Math.round(m.avgStock * m.days / m.unitsSold) : null);
     const shareCell = hasShare ? `<td class="num" title="Доля поискового трафика по целевым словам/фразам">${m.share != null ? Math.round(m.share * 100) + '%' : '—'}</td>` : '';
+    const cb = `<td class="num"><input type="checkbox" class="se-comp-cb" data-wb="${nm}" title="Снять галочку → убрать этого конкурента из выборки (место займёт следующий по выручке)" checked></td>`;
     return `<tr>
+      ${cb}
       <td class="num">${i + 1}</td>
       <td class="se-comp-name">${nameCell}</td>
       <td>${seEsc(m.brand || '—')}</td>
@@ -1987,13 +2037,15 @@ function seasonCompetitorsBlock(rep) {
   const totalKept = rep.groupSize != null ? rep.groupSize : items.length;
   const withData = rep.itemsWithData != null ? rep.itemsWithData : items.length;
   const relInfo = rep.relevance ? `<div class="mini" style="color:var(--accent-2)">🎯 Поведенческая релевантность: порог доли ${Math.round((rep.relevance.threshold||0)*100)}%, профилей из базы ${rep.relevance.cached||0}, запросов сети ${rep.relevance.requests||0}${rep.relevance.dailyLimit ? ' · ⚠ упёрлись в суточный лимит — часть кандидатов не проверена' : ''}.</div>` : '';
-  return `<details class="se-comp">
-    <summary>🔍 Топ-15 конкурентов в выборке — проверка релевантности <span class="mini">(в выборке ${totalKept}, с данными ${withData})</span></summary>
+  const exCount = exSet.size;
+  return `<details class="se-comp"${exCount ? ' open' : ''}>
+    <summary>🔍 Топ-15 конкурентов в выборке — проверка релевантности <span class="mini">(в выборке ${totalKept}, с данными ${withData}${exCount ? `, исключено ${exCount}` : ''})</span></summary>
     <div class="se-comp-body">
       <div class="mini">Продаж/Выручка/₽мес — за <b>${hasLY ? 'последний год' : 'период анализа (2 года)'}</b> (ранг сезонности строится на 2 годах). Наведите на превью — увеличится; клик по названию — карточка на Wildberries.</div>
+      <div class="mini" style="color:var(--accent-2)">☑ Все конкуренты включены. <b>Снимите галочку</b> у нерелевантного — он уйдёт из выборки, а его место займёт следующий по выручке, и план пересоберётся автоматически (без обращений к MPStats). <span id="se-comp-status"></span></div>
       ${relInfo}
       <div class="se-comp-scroll"><table class="se-comp-table">
-        <thead><tr><th class="num">#</th><th>Название</th><th>Бренд</th><th class="num">Артикул WB</th>${hasShare ? '<th class="num" title="Доля поискового трафика по целевым словам/фразам">Доля</th>' : ''}<th class="num" title="Средняя цена продажи = выручка / штук">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num" title="Оборачиваемость = средний остаток / среднесуточные продажи. Меньше — быстрее распродаётся. Доступно для планов, построенных новой версией.">Оборачив.</th></tr></thead>
+        <thead><tr><th class="num" title="В выборке / исключить">✓</th><th class="num">#</th><th>Название</th><th>Бренд</th><th class="num">Артикул WB</th>${hasShare ? '<th class="num" title="Доля поискового трафика по целевым словам/фразам">Доля</th>' : ''}<th class="num" title="Средняя цена продажи = выручка / штук">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num" title="Оборачиваемость = средний остаток / среднесуточные продажи. Меньше — быстрее распродаётся. Доступно для планов, построенных новой версией.">Оборачив.</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>

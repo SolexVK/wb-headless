@@ -162,14 +162,15 @@ async function gatherSerp({ phrases = [], minusWords = [], priceMin, priceMax, m
  * (авто) + вручную одобренные «без ключа» (approvedIds, из «Предв. выбора»). Одобренные
  * берутся из той же выдачи SERP (без доп. запросов). Возвращает товары с дневными рядами.
  */
-export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, limit, gender = null, approvedIds = [], nicheWords = [] } = {}, d1, d2, log = null) {
+export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, priceMax, minRevenuePerMonth, limit, gender = null, approvedIds = [], nicheWords = [], excludedIds = [] } = {}, d1, d2, log = null) {
   const L = (msg) => { if (log) log.push({ t: new Date().toISOString(), stage: 'сбор', msg }); };
   const g = await gatherSerp({ phrases, minusWords, priceMin, priceMax, minRevenuePerMonth, gender }, d1, d2, L);
   const keys = nicheKeys(phrases, nicheWords);
   const approved = new Set((approvedIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0));
-  L(`Нишевые ключи из фраз: [${keys.join(', ') || '—'}]. Одобрено вручную: ${approved.size}.`);
-  // авто (ключ в названии) ∨ одобрено вручную
-  let all = g.items.filter((it) => nameHasKey(it.name, keys) || approved.has(Number(it.wb)));
+  const excluded = new Set((excludedIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0));
+  L(`Нишевые ключи из фраз: [${keys.join(', ') || '—'}]. Одобрено вручную: ${approved.size}. Исключено вручную: ${excluded.size}.`);
+  // (авто ключ в названии ∨ одобрено вручную) И НЕ исключено вручную (место освобождается → подтянется следующий)
+  let all = g.items.filter((it) => (nameHasKey(it.name, keys) || approved.has(Number(it.wb))) && !excluded.has(Number(it.wb)));
   const withKey = all.filter((it) => nameHasKey(it.name, keys)).length;
   L(`В выборку: с ключом в названии ${withKey}, одобренных без ключа ${all.length - withKey}, всего ${all.length}.`);
   // ТОП-выборку упорядочиваем по выручке за ПОСЛЕДНИЙ ГОД (свежесть), ранг — на 2 годах.

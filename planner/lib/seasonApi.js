@@ -108,6 +108,7 @@ export async function runForecast(cfg = {}) {
       minRevenuePerMonth: num(cfg.minRevenue),
       limit: num(cfg.limit) || 60,
       approvedIds: (list(cfg.approvedIds) || []).map(Number).filter((n) => Number.isFinite(n) && n > 0),
+      excludedIds: (list(cfg.excludedIds) || []).map(Number).filter((n) => Number.isFinite(n) && n > 0),
       gender: ['female', 'male', 'kids'].includes(cfg.gender) ? cfg.gender : null,
       nicheWords: list(cfg.nicheWords) || [],
     },

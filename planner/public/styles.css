@@ -581,6 +581,9 @@ html { overflow-x: hidden; }
 .se-comp-table .se-comp-name a { color: var(--accent); text-decoration: none; }
 .se-comp-table .se-comp-name a:hover { text-decoration: underline; }
 .se-comp-table tbody tr:hover { background: var(--g-row-alt); }
+.se-comp-table tbody tr.se-row-off { opacity: 0.4; text-decoration: line-through; }
+.se-comp-table tbody tr.se-row-off:hover { opacity: 0.6; }
+.se-comp-cb { cursor: pointer; }
 
 /* Превью конкурента в топ-10 + зум по наведению */
 .se-comp-name { display: flex; align-items: center; gap: 8px; }
