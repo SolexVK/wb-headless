@@ -121,7 +121,9 @@ export async function runForecast(cfg = {}) {
     baseSource: 'market',
     plan: { oos: cfg.oos !== false, weekly: cfg.weekly !== false, rampDays: num(cfg.rampDays), seasonFrac: num(cfg.seasonFrac), targetLevel: cfg.targetLevel === 'top1' ? 'top1' : 'top3',
       articleType: cfg.articleType === 'allseason' ? 'allseason' : 'seasonal',
-      growthMode: cfg.growthMode === 'none' ? 'none' : 'market', growthYears: cfg.growthYears != null ? num(cfg.growthYears) : null,
+      growthMode: ['cohort', 'market', 'none'].includes(cfg.growthMode) ? cfg.growthMode : (cfg.articleType === 'allseason' ? 'cohort' : 'market'),
+      growthManual: (cfg.growthManual != null && cfg.growthManual !== '' && num(cfg.growthManual) > 0) ? num(cfg.growthManual) : null,
+      growthYears: cfg.growthYears != null ? num(cfg.growthYears) : null,
       // «сегодня» = следующий день после конца истории (вчера) — прогноз строим вперёд от него
       asOf: ymd(new Date(Date.parse(hist.d2) + 86400000)) },
   });

@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-allseason-2026-07-31b';
+const APP_BUILD = 'season-allseason-2026-07-31c';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1486,6 +1486,14 @@ function seasonBuilderPanel() {
               <option value="top1"${f.targetLevel === 'top1' ? ' selected' : ''}>ТОП-1 — максимум (амбициозно)</option>
             </select>
           </div>
+          <div class="field"><label title="Как проецируем рост рынка на прогнозный год. Когорта — рост по одним и тем же товарам оба года (без новичков), реалистично для карточки. Рынок — весь рынок вместе с новыми продавцами (агрессивно, завышает). Без роста — только факт прошлого года.">Проекция роста</label>
+            <select id="se-growth">
+              <option value="cohort"${f.growthMode === 'market' || f.growthMode === 'none' ? '' : ' selected'}>Когорта — рост карточки (реалистично)</option>
+              <option value="market"${f.growthMode === 'market' ? ' selected' : ''}>Весь рынок (агрессивно)</option>
+              <option value="none"${f.growthMode === 'none' ? ' selected' : ''}>Без роста</option>
+            </select>
+          </div>
+          <div class="field"><label title="Ручной коэффициент годового роста — перекрывает авто-расчёт. Напр. 1.25 = +25%/год, 0.9 = спад −10%/год. Пусто = считать автоматически по выбранному режиму. Полезно, если тренд ускоряется или замедляется.">Коэф. роста/год (ручной)</label><input id="se-growth-manual" type="number" step="0.05" min="0.5" max="3" value="${f.growthManual ?? ''}" placeholder="авто"></div>
           <div class="field span2 se-opts">
             <label class="se-check"><input type="checkbox" id="se-oos"${f.oos !== false ? ' checked' : ''}> OOS-поправка</label>
             <label class="se-check"><input type="checkbox" id="se-weekly"${f.weekly !== false ? ' checked' : ''}> недельный профиль</label>
@@ -1553,6 +1561,8 @@ function collectSeasonForm() {
     limit: v('se-limit'), targetYear: v('se-year'),
     targetLevel: (document.getElementById('se-level')?.value === 'top1') ? 'top1' : 'top3',
     articleType: (document.getElementById('se-arttype')?.value === 'allseason') ? 'allseason' : 'seasonal',
+    growthMode: (() => { const v = document.getElementById('se-growth')?.value; return ['cohort', 'market', 'none'].includes(v) ? v : 'cohort'; })(),
+    growthManual: v('se-growth-manual'),
     oos: document.getElementById('se-oos')?.checked !== false,
     weekly: document.getElementById('se-weekly')?.checked !== false,
   };
@@ -1816,7 +1826,9 @@ function bindSeasonBuilder() {
     const set = (id, val) => { const el = g(id); if (el) el.value = val; };
     set('se-limit', '60'); set('se-pmin', ''); set('se-pmax', ''); set('se-minsales', ''); set('se-minrev', '');
     set('se-year', String(new Date().getUTCFullYear()));
+    set('se-growth-manual', '');
     if (g('se-level')) g('se-level').value = 'top3';
+    if (g('se-growth')) g('se-growth').value = 'cohort';
     ['se-oos', 'se-weekly'].forEach((id) => { const el = g(id); if (el) el.checked = true; });
     toast('Фильтры сброшены');
   });
@@ -1838,7 +1850,8 @@ function bindSeasonBuilder() {
           phrases: g('se-phrases')?.value || '', minusWords: cfg.minusWords, nicheWords: cfg.nicheWords,
           approvedIds: cfg.approvedIds, excludedIds: cfg.excludedIds, gender: cfg.gender,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
-          limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, articleType: cfg.articleType, oos: cfg.oos, weekly: cfg.weekly };
+          limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, articleType: cfg.articleType,
+          growthMode: cfg.growthMode, growthManual: cfg.growthManual, oos: cfg.oos, weekly: cfg.weekly };
         await recalc(true).catch(() => {});
       }
       // обновить остаток лимита после построения
@@ -2147,9 +2160,14 @@ function seasonVolumeBasis(p) {
   if (!st || !st.used) return 'MPStats «продажи» = выкупы · база для производства';
   const lvl = p.levelInfo.targetLevel === 'top1' ? 'ТОП-1' : 'ТОП-3';
   const w = st.window ? `${seFmtRange(st.window.from, st.window.to)}` : '';
+  const modeName = st.growthManual ? `вручную ${st.growthManual}/год`
+    : st.growthMode === 'market' ? `рынок ${st.growthYoY}/год`
+    : st.growthMode === 'none' ? 'без роста'
+    : `когорта ${st.growthYoY}/год`;
+  const meas = (st.growthMeasured && st.growthManual) ? ` (авто было ${st.growthMeasured})` : '';
   const g = (st.growthFactor && st.growthFactor !== 1)
-    ? ` × рост рынка ${st.growthFactor} (${st.growthYoY}/год за ${st.growthYears} г.)`
-    : '';
+    ? ` × рост ${st.growthFactor} [${modeName}${st.growthYears > 1 ? ` за ${st.growthYears} г.` : ''}${meas}]`
+    : ` · ${modeName}`;
   if (st.mode === 'allseason-monthly') {
     return `= сумма помесячных продаж ${lvl} (свои лидеры каждого месяца) за год${g}`;
   }

@@ -886,36 +886,41 @@ export async function buildSeasonPlanReport({
       const t1 = lead[0] ? Math.round(lead[0].unitsSold) : 0;
       const t3 = lead.length ? Math.round(lead.slice(0, 3).reduce((s, m) => s + m.unitsSold, 0) / Math.min(3, lead.length)) : 0;
 
-      // ── ПРОЕКЦИЯ РОСТА рынка на прогнозный год ──
-      // Якорь — продажи за сезон, что был ky лет назад (последний полный). Рынок за это время
-      // растёт: измеряем рост «год к году» на ОДНОМ И ТОМ ЖЕ сезонном куске двух свежих лет
-      // (оба в данных) и компаундируем на ky лет вперёд. growthMode: 'market' (весь рынок,
-      // с новичками) | 'none' (без проекции). Годовой рост зажат в [0.5, 2.0] от абсурда.
-      const growthMode = plan.growthMode || 'market';
+      // ── ПРОЕКЦИЯ РОСТА на прогнозный год ──
+      // Измеряем рост «год к году» на одном и том же окне двух свежих лет (оба в данных) и
+      // компаундируем на нужное число лет. Режимы (growthMode):
+      //   'cohort' — по ОДНИМ И ТЕМ ЖЕ товарам оба года (без новичков) → рост КАРТОЧКИ (реалистично);
+      //   'market' — весь рынок с новичками (агрессивно, завышает);
+      //   'none'   — без проекции.
+      // По умолчанию: круглогодичный → cohort, сезонный → market. Ручной коэффициент
+      // plan.growthManual (годовой) перекрывает измерение. Измеренное — зажато [0.5,2.0], ручное [0.5,3.0].
       const allSeasonMode = plan.articleType === 'allseason';
+      const growthMode = plan.growthMode || (allSeasonMode ? 'cohort' : 'market');
+      const manual = Number(plan.growthManual);
       const sumUnits = (col) => (col.perItemMeta || []).filter((m) => m.days > 0).reduce((s, m) => s + (m.unitsSold || 0), 0);
-      let gYoY = 1, growthYears = 0, growthClamped = false;
-      if (growthMode !== 'none') {
-        // Окна измерения роста «год к году»:
-        //  • круглогодичный — два ПОЛНЫХ года: окно якоря (последний год) vs год до него;
-        //  • сезонный — самый свежий сезонный кусок (обрезан по концу истории) vs он же год назад.
+      const growYears = plan.growthYears != null ? Number(plan.growthYears) : ky;
+      let gYoY = 1, growthYears = 0, growthClamped = false, growthMeasured = null;
+      if (Number.isFinite(manual) && manual > 0) {
+        const gc = Math.max(0.5, Math.min(3.0, manual)); growthClamped = gc !== manual; gYoY = gc; growthYears = growYears;
+      } else if (growthMode !== 'none') {
         let rStart, rEnd, pStart, pEnd;
-        if (allSeasonMode) {
-          rStart = aFrom; rEnd = aTo;
-          pStart = shiftY(aFrom, 1); pEnd = shiftY(aTo, 1);
-        } else {
-          rStart = shiftY(fp.from, ky - 1); rEnd = shiftY(fp.to, ky - 1); if (rEnd > d2) rEnd = d2;
-          pStart = shiftY(rStart, 1); pEnd = shiftY(rEnd, 1);
-        }
+        if (allSeasonMode) { rStart = aFrom; rEnd = aTo; pStart = shiftY(aFrom, 1); pEnd = shiftY(aTo, 1); }
+        else { rStart = shiftY(fp.from, ky - 1); rEnd = shiftY(fp.to, ky - 1); if (rEnd > d2) rEnd = d2; pStart = shiftY(rStart, 1); pEnd = shiftY(rEnd, 1); }
         if (pStart >= d1 && rEnd > rStart) {
           const recentM = await collectShape(rStart, rEnd);
           const priorM = await collectShape(pStart, pEnd);
-          const ru = sumUnits(recentM), pu = sumUnits(priorM);
-          if (pu > 0 && ru > 0) {
-            const raw = ru / pu; const gc = Math.max(0.5, Math.min(2.0, raw));
-            growthClamped = gc !== raw; gYoY = gc;
-            growthYears = plan.growthYears != null ? Number(plan.growthYears) : ky; // лет от якоря до прогноза
+          let raw = null;
+          if (growthMode === 'cohort') {
+            // одни и те же товары в оба окна (units>0) → рост карточки, без новичков рынка
+            const pm = new Map(); (priorM.perItemMeta || []).forEach((m) => { if (m.days > 0 && m.unitsSold > 0) pm.set(Number(m.wb), m.unitsSold); });
+            let cr = 0, cp = 0;
+            (recentM.perItemMeta || []).forEach((m) => { const p = pm.get(Number(m.wb)); if (p && m.unitsSold > 0) { cr += m.unitsSold; cp += p; } });
+            if (cp > 0 && cr > 0) raw = cr / cp;
+          } else {
+            const ru = sumUnits(recentM), pu = sumUnits(priorM);
+            if (pu > 0 && ru > 0) raw = ru / pu;
           }
+          if (raw != null) { const gc = Math.max(0.5, Math.min(2.0, raw)); growthClamped = gc !== raw; gYoY = gc; growthYears = growYears; growthMeasured = Math.round(raw * 100) / 100; }
         }
       }
       const growthFactor = Math.pow(gYoY, growthYears);
@@ -969,6 +974,7 @@ export async function buildSeasonPlanReport({
         seasonTargets = {
           mode: 'allseason-monthly', window: { from: aFrom, to: aTo }, yearsBack: ky, top1Units: t1, top3Units: t3,
           growthMode, growthYoY: Math.round(gYoY * 100) / 100, growthYears, growthFactor: Math.round(growthFactor * 100) / 100, growthClamped,
+          growthMeasured, growthManual: (Number.isFinite(manual) && manual > 0) ? manual : null,
           monthlyTargets: monthTargetGrown, used: Math.round(usedTotal), curveTotalBefore: Math.round(curTotal),
         };
       } else {
@@ -976,6 +982,7 @@ export async function buildSeasonPlanReport({
         seasonTargets = {
           window: { from: aFrom, to: aTo }, yearsBack: ky, top1Units: t1, top3Units: t3,
           growthMode, growthYoY: Math.round(gYoY * 100) / 100, growthYears, growthFactor: Math.round(growthFactor * 100) / 100, growthClamped,
+          growthMeasured, growthManual: (Number.isFinite(manual) && manual > 0) ? manual : null,
           top1Projected: t1p, top3Projected: t3p, used: targetTotal, curveTotalBefore: Math.round(curTotal),
         };
         if (targetTotal > 0 && curTotal > 0) {
