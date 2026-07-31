@@ -2098,6 +2098,9 @@ function seasonVolumeBasis(p) {
   const g = (st.growthFactor && st.growthFactor !== 1)
     ? ` × рост рынка ${st.growthFactor} (${st.growthYoY}/год за ${st.growthYears} г.)`
     : '';
+  if (st.mode === 'allseason-monthly') {
+    return `= сумма помесячных продаж ${lvl} (свои лидеры каждого месяца) за год${g}`;
+  }
   return `= продажи ${lvl} за ${w}${g}`;
 }
 

@@ -919,19 +919,71 @@ export async function buildSeasonPlanReport({
       }
       const growthFactor = Math.pow(gYoY, growthYears);
       const t1p = Math.round(t1 * growthFactor), t3p = Math.round(t3 * growthFactor);
-      const targetTotal = targetLevel === 'top1' ? t1p : t3p;
       const curTotal = (fc.forecastDaily || []).reduce((s, r) => s + (Number(r.plannedOrders) || 0), 0);
-      seasonTargets = {
-        window: { from: aFrom, to: aTo }, yearsBack: ky, top1Units: t1, top3Units: t3,
-        growthMode, growthYoY: Math.round(gYoY * 100) / 100, growthYears, growthFactor: Math.round(growthFactor * 100) / 100, growthClamped,
-        top1Projected: t1p, top3Projected: t3p, used: targetTotal, curveTotalBefore: Math.round(curTotal),
-      };
-      if (targetTotal > 0 && curTotal > 0) {
-        const factor = targetTotal / curTotal; // множитель формы, чтобы итог = спрогнозированному объёму
-        for (const r of fc.forecastDaily) { r.plannedOrders = round1(r.plannedOrders * factor); r.stock = Math.round((Number(r.stock) || 0) * factor); }
-        if (Array.isArray(fc.deliveries)) fc.deliveries = fc.deliveries.map((d) => ({ ...d, qty: Math.round(d.qty * factor) }));
-        fc.totalUnits = Math.round(curTotal * factor);
-        if (fc.top3PeakDaily != null) fc.top3PeakDaily = Math.round(fc.top3PeakDaily * factor);
+
+      if (allSeasonMode) {
+        // ── ОБЪЁМ ПОМЕСЯЧНО ── у круглогодичного товара лидеры МЕНЯЮТСЯ от месяца к месяцу
+        // (летом одни, зимой другие), поэтому фикс. годовая тройка занижает межсезонье. Для
+        // каждого календарного месяца берём СВОЙ топ-3/топ-1 (самый свежий полный месяц в
+        // данных) → месячная цель. Годовой объём = сумма 12 целей × рост. План масштабируем
+        // помесячно под эти цели; дни внутри месяца — по рельефу (мини-сезоны сохраняются).
+        const lastDay = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+        const monthWindow = (m) => {
+          for (let y = Number(d2.slice(0, 4)); y >= Number(d1.slice(0, 4)); y--) {
+            const from = `${y}-${pad(m)}-01`, to = `${y}-${pad(m)}-${pad(lastDay(y, m))}`;
+            if (from >= d1 && to <= d2) return { from, to };
+          }
+          return null;
+        };
+        const mt1 = {}, mt3 = {};
+        for (let m = 1; m <= 12; m++) {
+          const w = monthWindow(m); if (!w) { mt1[m] = 0; mt3[m] = 0; continue; }
+          const col = await collectShape(w.from, w.to); // из кэша SERP
+          const ld = (col.perItemMeta || []).filter((x) => x.days > 0).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+          mt1[m] = ld[0] ? Math.round(ld[0].unitsSold) : 0;
+          mt3[m] = ld.length ? Math.round(ld.slice(0, 3).reduce((s, x) => s + x.unitsSold, 0) / Math.min(3, ld.length)) : 0;
+        }
+        const mt = targetLevel === 'top1' ? mt1 : mt3;
+        const monthTargetGrown = {}; for (let m = 1; m <= 12; m++) monthTargetGrown[m] = Math.round((mt[m] || 0) * growthFactor);
+
+        // масштабируем каждый прогнозный месяц под свою цель (неполный месяц — пропорционально)
+        const byFM = {}; for (const r of (fc.forecastDaily || [])) { const fm = r.date.slice(0, 7); (byFM[fm] = byFM[fm] || []).push(r); }
+        const factorByFM = {};
+        for (const fm of Object.keys(byFM)) {
+          const rows = byFM[fm], mnum = Number(fm.slice(5, 7)), full = lastDay(Number(fm.slice(0, 4)), mnum);
+          const curSum = rows.reduce((s, r) => s + (Number(r.plannedOrders) || 0), 0);
+          const targetSum = (monthTargetGrown[mnum] || 0) * (rows.length / full);
+          const f = curSum > 0 ? targetSum / curSum : 0;
+          factorByFM[fm] = f;
+          for (const r of rows) r.plannedOrders = round1(r.plannedOrders * f);
+        }
+        if (Array.isArray(fc.deliveries)) fc.deliveries = fc.deliveries.map((d) => ({ ...d, qty: Math.round(d.qty * (factorByFM[d.month] != null ? factorByFM[d.month] : 1)) }));
+        // склад-пила заново после помесячного масштаба (стабильно >0, не обнуляем)
+        const delByDate = {}; for (const d of (fc.deliveries || [])) delByDate[d.date] = (delByDate[d.date] || 0) + d.qty;
+        let lvl = 0;
+        for (const r of (fc.forecastDaily || [])) { lvl += (delByDate[r.date] || 0); lvl -= (Number(r.plannedOrders) || 0); r.stock = Math.max(0, Math.round(lvl)); }
+        const usedTotal = (fc.forecastDaily || []).reduce((s, r) => s + (Number(r.plannedOrders) || 0), 0);
+        fc.totalUnits = Math.round(usedTotal);
+        fc.top3PeakDaily = Math.round(Math.max(...(fc.forecastDaily || []).map((r) => Number(r.plannedOrders) || 0), 0));
+        seasonTargets = {
+          mode: 'allseason-monthly', window: { from: aFrom, to: aTo }, yearsBack: ky, top1Units: t1, top3Units: t3,
+          growthMode, growthYoY: Math.round(gYoY * 100) / 100, growthYears, growthFactor: Math.round(growthFactor * 100) / 100, growthClamped,
+          monthlyTargets: monthTargetGrown, used: Math.round(usedTotal), curveTotalBefore: Math.round(curTotal),
+        };
+      } else {
+        const targetTotal = targetLevel === 'top1' ? t1p : t3p;
+        seasonTargets = {
+          window: { from: aFrom, to: aTo }, yearsBack: ky, top1Units: t1, top3Units: t3,
+          growthMode, growthYoY: Math.round(gYoY * 100) / 100, growthYears, growthFactor: Math.round(growthFactor * 100) / 100, growthClamped,
+          top1Projected: t1p, top3Projected: t3p, used: targetTotal, curveTotalBefore: Math.round(curTotal),
+        };
+        if (targetTotal > 0 && curTotal > 0) {
+          const factor = targetTotal / curTotal; // множитель формы, чтобы итог = спрогнозированному объёму
+          for (const r of fc.forecastDaily) { r.plannedOrders = round1(r.plannedOrders * factor); r.stock = Math.round((Number(r.stock) || 0) * factor); }
+          if (Array.isArray(fc.deliveries)) fc.deliveries = fc.deliveries.map((d) => ({ ...d, qty: Math.round(d.qty * factor) }));
+          fc.totalUnits = Math.round(curTotal * factor);
+          if (fc.top3PeakDaily != null) fc.top3PeakDaily = Math.round(fc.top3PeakDaily * factor);
+        }
       }
     } catch (e) { LP(`Не удалось привязать объём к аналогичному периоду: ${String(e.message || e)}.`); }
 
