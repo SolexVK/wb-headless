@@ -891,11 +891,21 @@ export async function buildSeasonPlanReport({
       // (оба в данных) и компаундируем на ky лет вперёд. growthMode: 'market' (весь рынок,
       // с новичками) | 'none' (без проекции). Годовой рост зажат в [0.5, 2.0] от абсурда.
       const growthMode = plan.growthMode || 'market';
+      const allSeasonMode = plan.articleType === 'allseason';
       const sumUnits = (col) => (col.perItemMeta || []).filter((m) => m.days > 0).reduce((s, m) => s + (m.unitsSold || 0), 0);
       let gYoY = 1, growthYears = 0, growthClamped = false;
       if (growthMode !== 'none') {
-        const rStart = shiftY(fp.from, ky - 1); let rEnd = shiftY(fp.to, ky - 1); if (rEnd > d2) rEnd = d2; // свежий год (обрезаем по концу истории)
-        const pStart = shiftY(rStart, 1), pEnd = shiftY(rEnd, 1);                                          // тот же кусок год назад
+        // Окна измерения роста «год к году»:
+        //  • круглогодичный — два ПОЛНЫХ года: окно якоря (последний год) vs год до него;
+        //  • сезонный — самый свежий сезонный кусок (обрезан по концу истории) vs он же год назад.
+        let rStart, rEnd, pStart, pEnd;
+        if (allSeasonMode) {
+          rStart = aFrom; rEnd = aTo;
+          pStart = shiftY(aFrom, 1); pEnd = shiftY(aTo, 1);
+        } else {
+          rStart = shiftY(fp.from, ky - 1); rEnd = shiftY(fp.to, ky - 1); if (rEnd > d2) rEnd = d2;
+          pStart = shiftY(rStart, 1); pEnd = shiftY(rEnd, 1);
+        }
         if (pStart >= d1 && rEnd > rStart) {
           const recentM = await collectShape(rStart, rEnd);
           const priorM = await collectShape(pStart, pEnd);

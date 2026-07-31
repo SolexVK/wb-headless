@@ -450,8 +450,20 @@ export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily
   const favMonths = [...new Set(eng.forecastDaily.filter((d) => d.favorable).map((d) => Number(d.date.slice(5, 7))))].sort((a, b) => a - b);
   const favShare = eng.forecastDaily.length ? eng.forecastDaily.filter((d) => d.favorable).length / eng.forecastDaily.length : 0;
 
+  // Авто-подсказка типа артикула по рыночному рельефу: амплитуда пик/медиана и «пол» (нижний
+  // уровень к пику). Ровный весь год → круглогодичный; резкий с провалом в межсезон → сезонный.
+  const relV = shape.index.slice(1).filter((v) => v > 0).sort((a, b) => a - b);
+  const rp = (q) => relV.length ? relV[Math.max(0, Math.floor(q * (relV.length - 1)))] : 0;
+  const rP50 = rp(0.5), rP90 = rp(0.9), rP10 = rp(0.1);
+  const amplitude = rP50 > 0 ? round(rP90 / rP50, 2) : 99;
+  const floorSharePct = rP90 > 0 ? Math.round(rP10 / rP90 * 100) : 0;
+  const suggest = (amplitude <= 2.2 && floorSharePct >= 25) ? 'allseason'
+    : (amplitude >= 4 || floorSharePct < 12) ? 'seasonal' : 'mixed';
+  const seasonalityHint = { amplitude, floorSharePct, suggest };
+
   return {
     mode: isAllSeason ? 'allseason' : 'seasonal',
+    seasonalityHint,
     miniSeasons: eng.miniSeasons || null,
     forecastPeriod: eng.forecastPeriod,
     targetYear: effectiveYear,
