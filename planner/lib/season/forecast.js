@@ -306,9 +306,12 @@ function buildAllSeasonYear(shape, cfg) {
   const vals = days.map((d) => d.final);
   const peakF = Math.max(...vals, 1);
 
-  // ── ПОСТАВКИ: ровный помесячный подсорт (спрос след. месяца × буфер, склад не обнуляем) ──
-  // Приходит за ~4 дня до начала месяца — покрывает и внутримесячные мини-всплески (объём
-  // месяца уже включает их из рельефа). Склад держим на ~месяц вперёд.
+  // ── ПОСТАВКИ = ДЕДЛАЙНЫ НАЛИЧИЯ на складе WB (не старт производства!) ──
+  // Ровный помесячный подсорт: к дате «нужно на складе» лежит объём под спрос месяца × буфер.
+  // Дата — когда товар ДОЛЖЕН УЖЕ БЫТЬ на WB (за ~4 дня до месяца, покрывает и внутримесячные
+  // мини-всплески — объём месяца включает их из рельефа). Обратный расчёт «когда запускать
+  // крой/пошив/закуп ткани» с учётом мощности и логистики — задача плана производства
+  // (конвейер «Производство 2.0»), а не прогноза продаж.
   const BUF = cfg.deliveryBuffer ?? 1.15;
   const monthKey = (dt) => dt.slice(0, 7);
   const months = [...new Set(days.map((d) => monthKey(d.date)))];
@@ -321,8 +324,8 @@ function buildAllSeasonYear(shape, cfg) {
     const arriveIdx = Math.max(0, md[0].i - 4);
     deliveryByIdx[arriveIdx] = (deliveryByIdx[arriveIdx] || 0) + qty;
     const hasSpike = miniSeasons.some((m) => monthKey(m.peakDate) === mk && m.confirmed);
-    deliveries.push({ date: days[arriveIdx].date, qty, tag: 'подсорт', month: mk,
-      title: `Подсорт под ${mk}: спрос ${Math.round(demand)} шт + буфер${hasSpike ? ' · включает мини-сезон' : ''}` });
+    deliveries.push({ date: days[arriveIdx].date, qty, tag: 'подсорт', month: mk, needBy: days[arriveIdx].date,
+      title: `Нужно на складе WB к ${days[arriveIdx].date}: подсорт под ${mk} (спрос ${Math.round(demand)} шт + буфер${hasSpike ? ', включает мини-сезон' : ''})` });
   }
   // склад-пила: держим положительным весь год (не обнуляем)
   let lvl = 0;
