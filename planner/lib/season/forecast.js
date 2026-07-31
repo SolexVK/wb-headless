@@ -452,7 +452,10 @@ export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily
 
   // Авто-подсказка типа артикула по рыночному рельефу: амплитуда пик/медиана и «пол» (нижний
   // уровень к пику). Ровный весь год → круглогодичный; резкий с провалом в межсезон → сезонный.
-  const relV = shape.index.slice(1).filter((v) => v > 0).sort((a, b) => a - b);
+  // Считаем по СГЛАЖЕННОМУ рельефу (31-дн тренд), иначе разовые лончевые спайки в сырых днях
+  // дают неустойчивую амплитуду (прыгает от сдвига окна на пару дней).
+  const trendH = smoothCirc(shape.index, 31);
+  const relV = trendH.slice(1).filter((v) => v > 0).sort((a, b) => a - b);
   const rp = (q) => relV.length ? relV[Math.max(0, Math.floor(q * (relV.length - 1)))] : 0;
   const rP50 = rp(0.5), rP90 = rp(0.9), rP10 = rp(0.1);
   const amplitude = rP50 > 0 ? round(rP90 / rP50, 2) : 99;

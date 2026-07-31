@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-serp-2026-07-28p';
+const APP_BUILD = 'season-allseason-2026-07-31a';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1364,6 +1364,7 @@ function seasonIncludeFor(path) { if (!seasonIncludeByPath[path]) seasonIncludeB
 // Поведенческая релевантность: фразы предмета + выбранные пользователем + дневной бюджет.
 let seasonBudget = null;                 // {used, limit, left} суточный лимит MPStats
 let seasonApproved = new Set();           // nmID, вручную одобренные в «Предв. выборе»
+let seasonHintByArticle = {};             // {articleId: seasonalityHint} — подсказка типа после построения
 const seasonPhrasesByPath = {};          // path -> [{phrase,norm,freq,words}]
 const seasonPickedByPath = {};           // path -> Set(norm) отмеченные галочками фразы
 function seasonPickedFor(path) { if (!seasonPickedByPath[path]) seasonPickedByPath[path] = new Set(); return seasonPickedByPath[path]; }
@@ -1455,6 +1456,13 @@ function seasonBuilderPanel() {
       <!-- 2. Фильтры плана -->
       <div class="u-pg se-wide">
         <div class="u-pg-t">2 · Фильтры и параметры плана</div>
+        <div class="field span2"><label title="Сезонный — товар с ярко выраженным сезоном (лёгкий муслин, марлёвка): план = разгон с нуля → сезон → распродажа с обнулением остатков. Круглогодичный — товар с яркими сезонами, но продажами весь год (полоска, клетка): план на 12 мес с сезонным пиком, мягким спадом и межсезонной базой + мини-сезоны (НГ, 14/23 фев, 8 марта). Движок подскажет тип после построения.">Тип артикула</label>
+            <select id="se-arttype">
+              <option value="seasonal"${f.articleType === 'allseason' ? '' : ' selected'}>Сезонный — только высокий сезон (разгон → сезон → распродажа в ноль)</option>
+              <option value="allseason"${f.articleType === 'allseason' ? ' selected' : ''}>Круглогодичный — весь год с яркими сезонами (пик → база + мини-сезоны)</option>
+            </select>
+            <div class="mini" id="se-arttype-hint">${seasonHintText(seasonHintByArticle[aid], f.articleType === 'allseason' ? 'allseason' : 'seasonal')}</div>
+          </div>
         <div class="se-fields se-fields-2">
           <div class="field"><label title="Пол берётся из характеристики карточки WB (в названии и выдаче его нет). Отсекает товары противоположного пола. «Любой» — не фильтровать (быстрее).">Пол</label>
             <select id="se-gender">
@@ -1508,6 +1516,18 @@ function seasonBuilderPanel() {
   </div>`;
 }
 
+// Подсказка типа артикула по рыночному рельефу (после построения). Сравнивает совет движка
+// с выбранным типом и мягко предлагает переключиться, если рынок говорит иное.
+function seasonHintText(hint, chosen) {
+  if (!hint || !hint.suggest) return '💡 Подсказка по типу появится после построения (движок оценит рынок).';
+  const nameOf = (t) => t === 'allseason' ? 'круглогодичный' : t === 'seasonal' ? 'сезонный' : 'смешанный';
+  const base = `💡 Рынок похож на <b>${nameOf(hint.suggest)}</b> (амплитуда пик/медиана ×${hint.amplitude}, межсезонный «пол» ${hint.floorSharePct}% от пика).`;
+  if (hint.suggest !== 'mixed' && hint.suggest !== chosen) {
+    return `${base} У тебя выбран «${nameOf(chosen)}» — возможно, стоит переключить и перестроить.`;
+  }
+  return `${base} Выбранный тип «${nameOf(chosen)}» — подходит.`;
+}
+
 // Значок остатка суточного лимита MPStats.
 function seasonBudgetBadge() {
   if (!seasonBudget) return '';
@@ -1529,6 +1549,7 @@ function collectSeasonForm() {
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
     limit: v('se-limit'), targetYear: v('se-year'),
     targetLevel: (document.getElementById('se-level')?.value === 'top1') ? 'top1' : 'top3',
+    articleType: (document.getElementById('se-arttype')?.value === 'allseason') ? 'allseason' : 'seasonal',
     oos: document.getElementById('se-oos')?.checked !== false,
     weekly: document.getElementById('se-weekly')?.checked !== false,
   };
@@ -1784,6 +1805,10 @@ function bindSeasonBuilder() {
     const a = state.articles.find((x) => x.id === seasonBuildArticle); if (!a) return;
     a.seasonFilter = a.seasonFilter || {}; a.seasonFilter.gender = g('se-gender').value; unitPersist();
   });
+  g('se-arttype')?.addEventListener('change', () => {
+    const a = state.articles.find((x) => x.id === seasonBuildArticle); if (!a) return;
+    a.seasonFilter = a.seasonFilter || {}; a.seasonFilter.articleType = g('se-arttype').value; unitPersist();
+  });
   g('se-filter-reset')?.addEventListener('click', () => {
     const set = (id, val) => { const el = g(id); if (el) el.value = val; };
     set('se-limit', '60'); set('se-pmin', ''); set('se-pmax', ''); set('se-minsales', ''); set('se-minrev', '');
@@ -1800,6 +1825,9 @@ function bindSeasonBuilder() {
       const built = await api('/api/season/build', { method: 'POST', body: JSON.stringify(cfg) });
       const blog = (built && built.report && built.report.log) || [];
       seasonLogPush(blog); renderLogComment(document.getElementById('se-build-log'), blog);
+      // запомнить подсказку типа артикула (движок оценил рельеф рынка)
+      const hint = built && built.report && built.report.plan && built.report.plan.seasonalityHint;
+      if (hint) seasonHintByArticle[cfg.articleId] = hint;
       // запомнить фильтр в артикуле, чтобы перестраивать в один клик
       const a = state.articles.find((x) => x.id === cfg.articleId);
       if (a) {
@@ -1807,7 +1835,7 @@ function bindSeasonBuilder() {
           phrases: g('se-phrases')?.value || '', minusWords: cfg.minusWords, nicheWords: cfg.nicheWords,
           approvedIds: cfg.approvedIds, gender: cfg.gender,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
-          limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, oos: cfg.oos, weekly: cfg.weekly };
+          limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, articleType: cfg.articleType, oos: cfg.oos, weekly: cfg.weekly };
         await recalc(true).catch(() => {});
       }
       // обновить остаток лимита после построения
@@ -2091,9 +2119,22 @@ function seasonSummary(rep, p) {
       <div class="se-card"><div class="k">Цена, ₽</div><div class="v">${pmin ? pmin.toLocaleString('ru') + '–' + pmax.toLocaleString('ru') : '—'}</div><div class="mini">якорь: медиана ТОПов −10%</div></div>
       <div class="se-card"><div class="k">Благоприятные месяцы</div><div class="v">${favM || '—'}</div><div class="mini">спрос выше среднего, остатки ниже</div></div>
     </div>
+    ${seasonModeNote(p)}
     ${seasonLevelNote(p)}
     <div class="mini">Группа-аналогов: ${rep.itemsWithData ?? '—'} из ${rep.groupSize ?? '—'} · сбор: ${rep.method === 'category-bulk' ? 'одним запросом по категории' : rep.method === 'per-sku' ? 'по каждому товару' : (rep.method || '—')} (${rep.requests ?? '—'} обращ. к MPStats) · построено ${gen}</div>
   </div>`;
+}
+
+// Бейдж режима плана + мини-сезоны (для круглогодичного).
+function seasonModeNote(p) {
+  if (p.mode !== 'allseason') return '<div class="mini se-mode-note">📅 Режим: <b>сезонный</b> — план на один высокий сезон (разгон → сезон → распродажа).</div>';
+  const ms = (p.miniSeasons || []);
+  const conf = ms.filter((m) => m.confirmed);
+  const list = ms.length
+    ? ms.map((m) => `${m.confirmed ? '✅' : '≈'} ${seEsc(m.name)} (${seFmtDate(m.peakDate)})`).join(' · ')
+    : 'не обнаружены';
+  return `<div class="mini se-mode-note">🔄 Режим: <b>круглогодичный</b> — план на 12 мес: сезонный пик, мягкий спад и межсезонная база (склад не обнуляется).
+    <br>🎉 Мини-сезоны (подтв. рынком ${conf.length} из ${ms.length}): ${list}</div>`;
 }
 
 // Пояснение к целевому уровню (ТОП-3/ТОП-1) с обоими значениями для сравнения.
@@ -2113,12 +2154,17 @@ function seasonChartsBlock(rep, p) {
   const fTitle = 'Прогноз спроса, цены и остатков — ' + (fp ? seFmtRange(fp.from, fp.to) : 'на запрошенный период');
   const hTitle = 'История за 2 года (реальные данные аналогов)' + (hp ? ' — ' + seFmtRange(hp.d1, hp.d2) : '');
   const ph = p.phaseDates || {};
-  const milestones = [
-    { date: ph.entry, name: 'Вход' }, { date: ph.hotStart, name: 'Старт сезона' },
-    { date: ph.peak, name: 'Пик' }, { date: ph.saleStart, name: 'Начало распродажи' }, { date: ph.end, name: 'Конец' },
-  ].filter((m) => m.date);
+  const isAll = p.mode === 'allseason';
+  // Круглогодичный: вехи = главный пик + мини-сезоны (НГ, 14/23 фев, 8 марта). Сезонный: фазы.
+  const milestones = isAll
+    ? [{ date: ph.peak, name: 'Пик сезона' }].concat((p.miniSeasons || []).map((m) => ({ date: m.peakDate, name: (m.confirmed ? '' : '≈') + m.name }))).filter((m) => m.date)
+    : [
+        { date: ph.entry, name: 'Вход' }, { date: ph.hotStart, name: 'Старт сезона' },
+        { date: ph.peak, name: 'Пик' }, { date: ph.saleStart, name: 'Начало распродажи' }, { date: ph.end, name: 'Конец' },
+      ].filter((m) => m.date);
+  const demandLbl = isAll ? 'план продаж (весь год), шт/день' : 'план продаж (выкупы), шт/день';
   return `<div class="se-charts">
-    ${seasonChartSVG(fTitle, p.forecastDaily || [], 'plannedOrders', { demand: 'план продаж (выкупы), шт/день', stock: 'наш склад (план поставок), шт', milestones, deliveries: p.deliveries || [], restock: p.restockDeadline || null })}
+    ${seasonChartSVG(fTitle, p.forecastDaily || [], 'plannedOrders', { demand: demandLbl, stock: 'наш склад (план поставок), шт', milestones, deliveries: p.deliveries || [], restock: p.restockDeadline || null })}
     ${seasonChartSVG(hTitle, p.historyDaily || [], 'sales', { demand: 'продажи аналогов, шт/день', stock: 'остатки конкурентов, шт', milestones: p.historyMilestones || [], milestoneLabels: false })}
   </div>`;
 }
