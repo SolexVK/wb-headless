@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-segments-2026-07-31d';
+const APP_BUILD = 'season-price-2026-08-01a';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1503,7 +1503,11 @@ function seasonBuilderPanel() {
               <option value="premium"${f.priceSegment === 'premium' ? ' selected' : ''}>Премиум (верхние 25%)</option>
             </select>
           </div>
-          <div class="field"><label title="Себестоимость товара, ₽ (примерно). По ней подсветим, в каких ценовых сегментах ты работаешь в плюс, а в каких — в убыток. Пусто = не проверять выгодность.">Себестоимость, ₽</label><input id="se-cost" type="number" min="0" value="${f.cost ?? ''}" placeholder="напр. 1400"></div>
+          <div class="field"><label title="Себестоимость товара, ₽ (примерно). Основа для целевой цены: себестоимость × наценка = бухгалтерская цена. Пусто = не считать выгодность и не подбирать конкурентов от себестоимости.">Себестоимость, ₽</label><input id="se-cost" type="number" min="0" value="${f.cost ?? ''}" placeholder="напр. 550"></div>
+          <div class="field"><label title="Наценка к себестоимости — задаёт целевую БУХГАЛТЕРСКУЮ цену (себест × наценка). Вилка ×от…×до = целевое ценовое окно. Напр. 4 и 5 при себест. 550 → 2200–2750 ₽. Через СПП переведём в цену покупателя и подберём конкурентов там.">Наценка ×от … ×до</label>
+            <div style="display:flex;gap:6px"><input id="se-markup-min" type="number" step="0.5" min="1" value="${f.markupMin ?? ''}" placeholder="4" style="width:70px"><span style="align-self:center">…</span><input id="se-markup-max" type="number" step="0.5" min="1" value="${f.markupMax ?? ''}" placeholder="5" style="width:70px"></div>
+          </div>
+          <div class="field"><label title="СПП — скидка постоянного покупателя (WB). Мост между твоей бухгалтерской ценой и ценой покупателя, которую показывает MPStats: цена_покупателя = бухгалтерская × (1 − СПП%). Задаётся вручную, у каждого товара своя. Напр. 20.">СПП, %</label><input id="se-spp" type="number" min="0" max="90" value="${f.spp ?? ''}" placeholder="напр. 20"></div>
           <div class="field"><label title="На сколько % подрезать цену ниже медианы сегмента (чтобы быть чуть дешевле конкурентов). 0 = по медиане. Напр. 10 = на 10% ниже.">Подрезать цену, %</label><input id="se-undercut" type="number" min="0" max="50" value="${f.priceUndercut ?? ''}" placeholder="0"></div>
           <div class="field span2 se-opts">
             <label class="se-check"><input type="checkbox" id="se-oos"${f.oos !== false ? ' checked' : ''}> OOS-поправка</label>
@@ -1576,6 +1580,7 @@ function collectSeasonForm() {
     growthManual: v('se-growth-manual'),
     priceSegment: (() => { const v = document.getElementById('se-segment')?.value; return ['cheap', 'mid', 'high', 'premium'].includes(v) ? v : 'auto'; })(),
     cost: v('se-cost'),
+    markupMin: v('se-markup-min'), markupMax: v('se-markup-max'), spp: v('se-spp'),
     priceUndercut: v('se-undercut'),
     oos: document.getElementById('se-oos')?.checked !== false,
     weekly: document.getElementById('se-weekly')?.checked !== false,
@@ -1841,6 +1846,7 @@ function bindSeasonBuilder() {
     set('se-limit', '60'); set('se-pmin', ''); set('se-pmax', ''); set('se-minsales', ''); set('se-minrev', '');
     set('se-year', String(new Date().getUTCFullYear()));
     set('se-growth-manual', ''); set('se-cost', ''); set('se-undercut', '');
+    set('se-markup-min', ''); set('se-markup-max', ''); set('se-spp', '');
     if (g('se-level')) g('se-level').value = 'top3';
     if (g('se-growth')) g('se-growth').value = 'cohort';
     if (g('se-segment')) g('se-segment').value = 'auto';
@@ -1867,7 +1873,8 @@ function bindSeasonBuilder() {
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
           limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, articleType: cfg.articleType,
           growthMode: cfg.growthMode, growthManual: cfg.growthManual,
-          priceSegment: cfg.priceSegment, cost: cfg.cost, priceUndercut: cfg.priceUndercut, oos: cfg.oos, weekly: cfg.weekly };
+          priceSegment: cfg.priceSegment, cost: cfg.cost, markupMin: cfg.markupMin, markupMax: cfg.markupMax, spp: cfg.spp,
+          priceUndercut: cfg.priceUndercut, oos: cfg.oos, weekly: cfg.weekly };
         await recalc(true).catch(() => {});
       }
       // обновить остаток лимита после построения
@@ -2057,6 +2064,7 @@ function seasonCompetitorsBlock(rep, articleId) {
       <td class="num">${nm || '—'}</td>
       ${shareCell}
       <td class="num">${avgPrice != null ? fmt(avgPrice) + ' ₽' : '—'}</td>
+      <td class="num se-comp-range" title="Разброс дневной цены за год (мин–макс). Широкий разброс = частые распродажи; смотри, адекватна ли ср. цена.">${(+m.priceLo > 0 && +m.priceHi > 0) ? fmt(m.priceLo) + '–' + fmt(m.priceHi) : '—'}</td>
       <td class="num">${fmt(units(m))}</td>
       <td class="num">${fmt(rev(m))} ₽</td>
       <td class="num">${perMonth != null ? fmt(perMonth) + ' ₽' : '—'}</td>
@@ -2074,7 +2082,7 @@ function seasonCompetitorsBlock(rep, articleId) {
       <div class="mini" style="color:var(--accent-2)">☑ Все конкуренты включены. <b>Снимите галочку</b> у нерелевантного — он уйдёт из выборки, а его место займёт следующий по выручке, и план пересоберётся автоматически (без обращений к MPStats). <span id="se-comp-status"></span></div>
       ${relInfo}
       <div class="se-comp-scroll"><table class="se-comp-table">
-        <thead><tr><th class="num" title="В выборке / исключить">✓</th><th class="num">#</th><th>Название</th><th>Бренд</th><th class="num">Артикул WB</th>${hasShare ? '<th class="num" title="Доля поискового трафика по целевым словам/фразам">Доля</th>' : ''}<th class="num" title="Средняя цена продажи = выручка / штук">Ср. цена</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num" title="Оборачиваемость = средний остаток / среднесуточные продажи. Меньше — быстрее распродаётся. Доступно для планов, построенных новой версией.">Оборачив.</th></tr></thead>
+        <thead><tr><th class="num" title="В выборке / исключить">✓</th><th class="num">#</th><th>Название</th><th>Бренд</th><th class="num">Артикул WB</th>${hasShare ? '<th class="num" title="Доля поискового трафика по целевым словам/фразам">Доля</th>' : ''}<th class="num" title="Средняя цена продажи (медиана по штукам за год) — цена покупателя">Ср. цена</th><th class="num" title="Разброс дневной цены за год (мин–макс)">Разброс</th><th class="num">Продаж</th><th class="num">Выручка</th><th class="num" title="Средняя выручка в месяц, пока товар был в наличии">≈ ₽/мес</th><th class="num" title="Оборачиваемость = средний остаток / среднесуточные продажи. Меньше — быстрее распродаётся. Доступно для планов, построенных новой версией.">Оборачив.</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>
@@ -2128,32 +2136,38 @@ function seasonSegmentsBlock(rep) {
   const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
   const vClass = (v) => v === 'ok' ? 'se-seg-ok' : v === 'thin' ? 'se-seg-thin' : v === 'loss' ? 'se-seg-loss' : '';
   const vLabel = (v) => v === 'ok' ? '✅ в плюс' : v === 'thin' ? '⚠ тонкая маржа' : v === 'loss' ? '⛔ в убыток' : '';
+  // Попадает ли сегмент в целевое окно (от себестоимости) — по пересечению диапазонов.
+  const tb = s.targetBand;
+  const inTarget = (b) => tb ? (b.lo <= (tb.hi == null ? Infinity : tb.hi) && (b.hi == null ? Infinity : b.hi) >= tb.lo) : false;
   const rows = s.bands.map((b) => {
-    const active = s.active && s.active === b.key;
+    const active = (s.active && s.active === b.key) || inTarget(b);
     const range = `${fmt(b.lo)}–${b.hi != null ? fmt(b.hi) : '∞'} ₽`;
-    const viab = s.cost ? `<td class="num ${vClass(b.viable)}" title="Наценка к себестоимости ${s.cost}₽">×${b.markup} · ${b.margin}% ${vLabel(b.viable)}</td>` : '';
+    const acc = s.cost ? `<td class="num" title="Наша бухгалтерская цена = цена покупателя / (1 − СПП ${s.spp || 0}%)">${b.accounting ? fmt(b.accounting) + ' ₽' : '—'}</td>` : '';
+    const viab = s.cost ? `<td class="num ${vClass(b.viable)}" title="Наценка нашей бухгалтерской цены к себестоимости ${fmt(s.cost)}₽">×${b.markup || '—'} ${vLabel(b.viable)}</td>` : '';
     return `<tr class="${active ? 'se-seg-active' : ''} ${vClass(b.viable)}">
-      <td>${active ? '▶ ' : ''}${seEsc(b.name)}</td>
+      <td>${active ? '🎯 ' : ''}${seEsc(b.name)}</td>
       <td class="num">${range}</td>
       <td class="num">${b.count}</td>
       <td class="num">${fmt(b.top3Units)}</td>
       <td class="num">${fmt(b.top3Rev)} ₽</td>
       <td class="num">${fmt(b.avgPrice)} ₽</td>
-      ${viab}
+      ${acc}${viab}
     </tr>`;
   }).join('');
   const costNote = s.cost
-    ? `Себестоимость ${fmt(s.cost)} ₽. Зелёный — работаешь в плюс (цена > 1.6× себест.), жёлтый — тонкая маржа, красный — в убыток. Это грубая прикидка по цене (без полного юнита).`
-    : 'Задай себестоимость в конструкторе — подсветим выгодные и убыточные сегменты.';
-  const activeNote = s.active && s.active !== 'auto'
-    ? `План построен по сегменту <b>«${seEsc((s.bands.find((b) => b.key === s.active) || {}).name || s.active)}»</b> — объём, цена и ТОП-15 считаются по его лидерам.`
-    : 'План построен по <b>всей выборке</b>. Выбери сегмент в конструкторе, чтобы считать по конкретному ценовому уровню.';
+    ? `Себестоимость ${fmt(s.cost)} ₽, СПП ${s.spp || 0}%. «Наша цена» = цена покупателя ÷ (1 − СПП) — от неё считается наценка. Зелёный — наценка ≥ целевой, жёлтый — ниже цели, красный — в убыток. Грубая прикидка (без полного юнита).`
+    : 'Задай себестоимость, наценку и СПП в конструкторе — подсветим, в каком сегменте достигается твоя целевая наценка.';
+  const activeNote = tb
+    ? `🎯 Целевое окно цены покупателя <b>${fmt(tb.lo)}–${tb.hi != null ? fmt(tb.hi) : '∞'} ₽</b> (${seEsc(tb.source || '')}). План построен по конкурентам этого окна — объём, цена и ТОП-15 по ним.`
+    : (s.active && s.active !== 'auto'
+      ? `План построен по сегменту <b>«${seEsc((s.bands.find((b) => b.key === s.active) || {}).name || s.active)}»</b>.`
+      : 'План построен по <b>всей выборке</b>. Задай себестоимость+наценку (или выбери сегмент) в конструкторе, чтобы считать по своему ценовому окну.');
   return `<details class="se-comp" open>
     <summary>💰 Ценовые сегменты выборки <span class="mini">(объём и цена сильно зависят от сегмента)</span></summary>
     <div class="se-comp-body">
       <div class="mini">${activeNote}</div>
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
-        <thead><tr><th>Сегмент</th><th class="num">Диапазон цен</th><th class="num" title="Товаров в сегменте">Тов.</th><th class="num" title="Средние продажи ТОП-3 сегмента за год">ТОП-3 продаж/год</th><th class="num" title="Средняя выручка ТОП-3 сегмента за год">ТОП-3 выручка/год</th><th class="num" title="Средняя медианная цена ТОП-3">Ср. цена</th>${s.cost ? '<th class="num">Выгодность</th>' : ''}</tr></thead>
+        <thead><tr><th>Сегмент</th><th class="num" title="Цена покупателя (с СПП), как в MPStats">Цена покупателя</th><th class="num" title="Товаров в сегменте">Тов.</th><th class="num" title="Средние продажи ТОП-3 сегмента за год">ТОП-3 продаж/год</th><th class="num" title="Средняя выручка ТОП-3 сегмента за год">ТОП-3 выручка/год</th><th class="num" title="Средняя цена продажи ТОП-3 (медиана по штукам)">Ср. цена</th>${s.cost ? '<th class="num" title="Наша бухгалтерская цена = цена покупателя / (1−СПП)">Наша цена</th><th class="num">Наценка</th>' : ''}</tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
       <div class="mini">${costNote}</div>

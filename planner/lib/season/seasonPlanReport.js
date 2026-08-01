@@ -112,14 +112,25 @@ async function gatherSerp({ phrases = [], minusWords = [], priceMin, priceMax, m
   const windowMonths = Math.max(1, (Date.parse(d2) - Date.parse(d1)) / (30.4 * 86400000));
   let all = [...byId.values()];
   const before = all.length;
-  // МЕДИАННАЯ цена за последний год (по дневной цене = выручка/штуки за день). Короткая
-  // распродажа её не сдвигает — фильтруем по типичной цене, а не по текущей (final_price).
+  // ЦЕНА ПРОДАЖИ за последний год = МЕДИАНА, ВЗВЕШЕННАЯ ПО ШТУКАМ (цена, ниже которой продано
+  // 50% годовых штук). Это цена, по которой реально ушёл товар: короткие малообъёмные скидки её
+  // не двигают, а сильный продавец (много штук по полной) не занижается медианой по дням.
+  // Плюс разброс priceLo..priceHi (мин/макс дневная цена за год) — для показа в ТОП-15.
+  // Внимание: это ЦЕНА ПОКУПАТЕЛЯ (с СПП), как отдаёт MPStats.
   const lyCut0 = offsetDate(d2, -365);
   for (const it of all) {
-    const pr = []; const gph = it.graph || [], rgph = it.revenueGraph || [];
-    for (let i = 0; i < periods.length; i++) { if (periods[i] > lyCut0 && (gph[i] || 0) > 0) pr.push(rgph[i] / gph[i]); }
-    pr.sort((a, b) => a - b);
-    it.priceMed = pr.length ? Math.round(pr[Math.floor((pr.length - 1) / 2)]) : (it.price || 0);
+    const gph = it.graph || [], rgph = it.revenueGraph || [];
+    const days = [];
+    for (let i = 0; i < periods.length; i++) { const u = gph[i] || 0; if (periods[i] > lyCut0 && u > 0) days.push({ pr: rgph[i] / u, u }); }
+    if (days.length) {
+      days.sort((a, b) => a.pr - b.pr);
+      const totU = days.reduce((s, d) => s + d.u, 0);
+      let cum = 0, med = days[days.length - 1].pr;
+      for (const d of days) { cum += d.u; if (cum >= totU / 2) { med = d.pr; break; } }
+      it.priceMed = Math.round(med);
+      it.priceLo = Math.round(days[0].pr);
+      it.priceHi = Math.round(days[days.length - 1].pr);
+    } else { it.priceMed = it.price || 0; it.priceLo = it.price || 0; it.priceHi = it.price || 0; }
   }
   all = all.filter((it) => {
     const nm = lcName(it.name);
@@ -222,7 +233,7 @@ export async function collectSerpCandidates({ phrases = [], minusWords = [], pri
 export function sliceSerpWindow(all, w1, w2, oos = false) {
   const inWin = (d) => d >= w1 && d <= w2;
   const perItem = all.items.map((it) => ({
-    wb: it.wb, name: it.name, brand: it.brand, price: it.price, priceMed: it.priceMed, thumb: it.thumb,
+    wb: it.wb, name: it.name, brand: it.brand, price: it.price, priceMed: it.priceMed, priceLo: it.priceLo, priceHi: it.priceHi, thumb: it.thumb,
     salesLY: it.salesLY, revenueLY: it.revenueLY, activeDaysLY: it.activeDaysLY, balance: it.balance,
     daily: (it.dailyFull || []).filter((r) => inWin(r.date)),
   }));
@@ -230,7 +241,7 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
   const perItemMeta = perItem.map((p) => {
     const daysN = p.daily.length;
     return {
-      wb: p.wb, name: p.name, brand: p.brand, price: p.price, priceMed: p.priceMed, thumb: p.thumb,
+      wb: p.wb, name: p.name, brand: p.brand, price: p.price, priceMed: p.priceMed, priceLo: p.priceLo, priceHi: p.priceHi, thumb: p.thumb,
       days: daysN, avgStock: 0, balance: p.balance || 0, // текущий остаток — для оборачиваемости
       unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
       revenue: p.daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0),
@@ -715,6 +726,9 @@ function computePriceSegments(perItemMeta, plan) {
   const q = (p) => prices[Math.floor(p * (prices.length - 1))];
   const q25 = q(0.25), q50 = q(0.5), q75 = q(0.75);
   const cost = Number(plan.cost) > 0 ? Number(plan.cost) : null;
+  const spp = Math.min(90, Math.max(0, Number(plan.spp) || 0));
+  const kSpp = 1 - spp / 100;                    // цена покупателя = бухгалтерская × kSpp
+  const mLo = Number(plan.markupMin) > 0 ? Number(plan.markupMin) : 0; // целевая наценка (мин)
   const defs = [
     { key: 'cheap', name: 'Дешёвый', lo: 0, hi: q25 },
     { key: 'mid', name: 'Средний', lo: q25, hi: q50 },
@@ -725,16 +739,19 @@ function computePriceSegments(perItemMeta, plan) {
     const seg = items.filter((m) => { const p = pm(m); return p >= d.lo && p < d.hi; }).sort((a, b) => rv(b) - rv(a));
     const n = Math.min(3, seg.length);
     const avg = (f) => n ? Math.round(seg.slice(0, 3).reduce((s, m) => s + f(m), 0) / n) : 0;
-    const avgPrice = avg(pm);
-    let markup = null, margin = null, viable = null;
+    const avgPrice = avg(pm); // цена покупателя (с СПП), как в MPStats
+    // Наша БУХГАЛТЕРСКАЯ цена, если встать в этот сегмент = цена покупателя / (1−СПП).
+    // Выгодность — по наценке этой цены к себестоимости (грубо, без полного юнита).
+    let accounting = null, markup = null, viable = null;
     if (cost && avgPrice > 0) {
-      markup = Math.round(avgPrice / cost * 100) / 100;
-      margin = Math.round((avgPrice - cost) / avgPrice * 100);
-      viable = avgPrice > cost * 1.6 ? 'ok' : (avgPrice > cost ? 'thin' : 'loss');
+      accounting = Math.round(avgPrice / (kSpp || 1));
+      markup = Math.round(accounting / cost * 100) / 100;
+      const okT = mLo > 0 ? mLo : 3.5; // целевая наценка, или 3.5× по умолчанию (покрыть ВБ+маржа)
+      viable = accounting <= cost ? 'loss' : (markup >= okT ? 'ok' : 'thin');
     }
-    return { key: d.key, name: d.name, lo: Math.round(d.lo), hi: d.hi === Infinity ? null : Math.round(d.hi), count: seg.length, top3Units: avg(un), top3Rev: avg(rv), avgPrice, markup, margin, viable };
+    return { key: d.key, name: d.name, lo: Math.round(d.lo), hi: d.hi === Infinity ? null : Math.round(d.hi), count: seg.length, top3Units: avg(un), top3Rev: avg(rv), avgPrice, accounting, markup, viable };
   });
-  return { thresholds: { q25, q50, q75 }, bands, cost, active: 'auto' };
+  return { thresholds: { q25, q50, q75 }, bands, cost, spp, active: 'auto' };
 }
 
 /**
@@ -800,22 +817,37 @@ export async function buildSeasonPlanReport({
   let collected = await collectShape(d1, d2); // история (2 года)
   requests += collected.requests || 0;
 
-  // ── ЦЕНОВЫЕ СЕГМЕНТЫ (авто-квартили по медианной цене за год) ──
-  // Бьём выборку на 4 сегмента (Дешёвый/Средний/Высокий/Премиум) по квартилям priceMed —
-  // адаптивно к нише. Если выбран сегмент (plan.priceSegment), пересобираем план ТОЛЬКО на его
-  // лидерах (объём, цена, ТОП-15 — по этому сегменту). Себестоимость (plan.cost) → подсветка
-  // выгодности сегментов. Из кэша SERP — без доп. запросов.
+  // ── ЦЕНОВЫЕ СЕГМЕНТЫ + ЦЕЛЕВОЕ ОКНО ОТ СЕБЕСТОИМОСТИ ──
+  // Сегменты (квартили priceMed) считаем по ПОЛНОЙ выборке — как карта рынка. Целевое окно
+  // подбора конкурентов:
+  //   • приоритет — ОТ СЕБЕСТОИМОСТИ: [себест×наценкаОт, себест×наценкаДо] × (1−СПП) → цена
+  //     покупателя (её отдаёт MPStats). Так экономика задаёт, каких конкурентов брать.
+  //   • иначе — выбранный квартиль (plan.priceSegment).
+  // На конкурентах окна и строим объём/цену/ранг/ТОП-15. Из кэша SERP — без доп. запросов.
   let segmentsInfo = null;
   if (subject && subject.serp && _serpAll) {
     segmentsInfo = computePriceSegments(collected.perItemMeta, plan);
-    const seg = plan.priceSegment;
-    if (segmentsInfo && seg && seg !== 'auto') {
-      const band = segmentsInfo.bands.find((b) => b.key === seg);
-      if (band && band.count > 0) {
-        const hi = band.hi == null ? Infinity : band.hi;
-        _serpAll.items = _serpAll.items.filter((it) => { const p = it.priceMed || it.price || 0; return p >= band.lo && p < hi; });
-        collected = await collectShape(d1, d2); // пересобрать выборку на выбранном сегменте
-        segmentsInfo.active = seg;
+    const kSpp = 1 - Math.min(0.9, Math.max(0, (Number(plan.spp) || 0) / 100));
+    const cost = Number(plan.cost) || 0, mLo = Number(plan.markupMin) || 0, mHi = Number(plan.markupMax) || 0;
+    let band = null, activeKey = null;
+    if (cost > 0 && mLo > 0 && mHi > 0) {
+      band = { lo: cost * Math.min(mLo, mHi) * kSpp, hi: cost * Math.max(mLo, mHi) * kSpp };
+      activeKey = 'cost';
+    } else if (segmentsInfo && plan.priceSegment && plan.priceSegment !== 'auto') {
+      const b = segmentsInfo.bands.find((x) => x.key === plan.priceSegment);
+      if (b && b.count > 0) { band = { lo: b.lo, hi: b.hi == null ? Infinity : b.hi }; activeKey = plan.priceSegment; }
+    }
+    if (band && segmentsInfo) {
+      const hi = band.hi == null ? Infinity : band.hi;
+      const kept = _serpAll.items.filter((it) => { const p = it.priceMed || it.price || 0; return p >= band.lo && p < hi; });
+      if (kept.length > 0) {
+        _serpAll.items = kept;
+        collected = await collectShape(d1, d2); // пересобрать выборку на целевом окне
+        segmentsInfo.active = activeKey;
+        segmentsInfo.targetBand = { lo: Math.round(band.lo), hi: band.hi === Infinity ? null : Math.round(band.hi), source: activeKey === 'cost' ? 'от себестоимости' : (segmentsInfo.bands.find((x) => x.key === activeKey) || {}).name };
+        LP(`Целевое окно цены покупателя ${Math.round(band.lo)}–${band.hi === Infinity ? '∞' : Math.round(band.hi)} ₽ (${activeKey === 'cost' ? 'от себестоимости×наценка×СПП' : 'сегмент'}): в выборке ${kept.length} конкурентов.`);
+      } else {
+        LP(`Целевое окно цены дало 0 конкурентов — оставляю полную выборку. Проверь себестоимость/наценку/СПП.`);
       }
     }
   }
