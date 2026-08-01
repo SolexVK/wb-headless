@@ -92,6 +92,9 @@ async function gatherSerp({ phrases = [], minusWords = [], priceMin, priceMax, m
   for (const phrase of phr) {
     const key = `${phrase}|${d1}|${d2}`;
     let res = serpLoad(key, SERP_TTL_MS);
+    // Самоочистка кэша старой схемы: если в сохранённых товарах нет поля color (кэш записан
+    // до добавления цвета) — считаем промахом и перезапрашиваем (разово, +1 запрос на фразу).
+    if (res && res.items && res.items.length && !('color' in res.items[0])) { res = null; }
     if (res) { L(`Фраза «${phrase}»: из базы ${res.items.length} товаров.`); }
     else {
       try {

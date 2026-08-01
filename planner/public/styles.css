@@ -588,6 +588,10 @@ html { overflow-x: hidden; }
 .se-seg-table td.se-seg-ok, .se-seg-table tr.se-seg-ok td:first-child { color: var(--ok, #16a34a); }
 .se-seg-table td.se-seg-thin, .se-seg-table tr.se-seg-thin td:first-child { color: var(--warn, #d97706); }
 .se-seg-table td.se-seg-loss, .se-seg-table tr.se-seg-loss td:first-child { color: var(--bad, #dc2626); }
+/* Полоска нормализованной доли цвета (микс для пошива) */
+.se-share-cell { white-space: nowrap; }
+.se-share-bar { display: inline-block; height: 8px; min-width: 2px; background: var(--accent);
+  border-radius: 3px; margin-right: 6px; vertical-align: middle; }
 
 /* Превью конкурента в топ-10 + зум по наведению */
 .se-comp-name { display: flex; align-items: center; gap: 8px; }

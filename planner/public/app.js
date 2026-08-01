@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-colors-2026-08-01d';
+const APP_BUILD = 'season-colors-2026-08-01e';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2188,7 +2188,7 @@ function seasonColorsBlock(rep) {
       <td class="num">${fmt(c.units)}</td>
       <td class="num">${c.rawShare}%</td>
       <td class="num">${fmt(c.avgPerSku)}</td>
-      <td class="num"><b>${c.normShare != null ? c.normShare + '%' : '—'}</b></td>
+      <td class="num se-share-cell">${c.normShare != null ? `<span class="se-share-bar" style="width:${Math.round(c.normShare * 2.2)}px"></span><b>${c.normShare}%</b>` : '—'}</td>
     </tr>`).join('');
   return `<details class="se-comp" open>
     <summary>🎨 Доли спроса по цветам <span class="mini">(конкурентов ${ca.total.skus}, продаж ${fmt(ca.total.units)})</span></summary>
