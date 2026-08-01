@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-price-2026-08-01c';
+const APP_BUILD = 'season-colors-2026-08-01d';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1939,7 +1939,7 @@ async function renderSeasonView(articleId) {
   const staleBanner = stale
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
-  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   installSeasonZoom();
   // Чекбоксы ТОП-15: отжатие → исключить конкурента и пересобрать план (дебаунс, кэш SERP).
   box.querySelectorAll('.se-comp-cb').forEach((cb) => {
@@ -2172,6 +2172,32 @@ function seasonSegmentsBlock(rep) {
         <tbody>${rows}</tbody>
       </table></div>
       <div class="mini">${costNote}</div>
+    </div>
+  </details>`;
+}
+
+// Доли спроса по ЦВЕТАМ (нормализованные + сырые) из выборки конкурентов. Нормализованная
+// доля = среднее на 1 артикул (÷ Σсредних) — убирает перекос «белого больше выкладывают».
+function seasonColorsBlock(rep) {
+  const ca = rep.colorAnalysis;
+  if (!ca || !Array.isArray(ca.colors) || !ca.colors.length) return '';
+  const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
+  const rows = ca.colors.map((c) => `<tr class="${c.lowConfidence ? 'se-seg-thin' : ''}">
+      <td>${seEsc(c.name)}${c.lowConfidence ? ' <span class="mini">⚠ мало</span>' : ''}</td>
+      <td class="num">${c.skus}</td>
+      <td class="num">${fmt(c.units)}</td>
+      <td class="num">${c.rawShare}%</td>
+      <td class="num">${fmt(c.avgPerSku)}</td>
+      <td class="num"><b>${c.normShare != null ? c.normShare + '%' : '—'}</b></td>
+    </tr>`).join('');
+  return `<details class="se-comp" open>
+    <summary>🎨 Доли спроса по цветам <span class="mini">(конкурентов ${ca.total.skus}, продаж ${fmt(ca.total.units)})</span></summary>
+    <div class="se-comp-body">
+      <div class="mini"><b>Нормализ. доля</b> = средняя продажа на 1 карточку ÷ сумму средних — это твой микс для пошива (убирает перекос «белого просто больше выкладывают»). <b>Сырая доля</b> = объём рынка (для оценки насыщения). Цвета с &lt;${ca.minCount} артикулов — «мало данных».</div>
+      <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
+        <thead><tr><th>Цвет</th><th class="num" title="Артикулов конкурентов этого цвета">Тов.</th><th class="num">Продажи</th><th class="num" title="Доля объёма рынка">Сырая</th><th class="num" title="Средняя продажа на 1 карточку = продажи / количество">Ср/арт</th><th class="num" title="Нормализованная доля = ср/арт ÷ сумму ср/арт — микс для производства">Норм. доля</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
     </div>
   </details>`;
 }

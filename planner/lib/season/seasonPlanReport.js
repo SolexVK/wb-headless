@@ -19,6 +19,7 @@ import { buildForecast } from './forecast.js';
 import { fetchCardsInfo, cardMatchText, cardCharText } from './wbCard.js';
 import { filterByRelevance } from './relevance.js';
 import { fetchSerp, DailyLimitError as SerpLimitError } from './wbSerp.js';
+import { computeColorShares } from './colorSize.js';
 import { serpLoad, serpSave } from '../db.js';
 
 const SERP_TTL_MS = 3 * 24 * 3600 * 1000; // кэш SERP на 3 дня (сезонная форма стабильна)
@@ -233,7 +234,7 @@ export async function collectSerpCandidates({ phrases = [], minusWords = [], pri
 export function sliceSerpWindow(all, w1, w2, oos = false) {
   const inWin = (d) => d >= w1 && d <= w2;
   const perItem = all.items.map((it) => ({
-    wb: it.wb, name: it.name, brand: it.brand, price: it.price, priceMed: it.priceMed, priceLo: it.priceLo, priceHi: it.priceHi, thumb: it.thumb,
+    wb: it.wb, name: it.name, brand: it.brand, color: it.color, price: it.price, priceMed: it.priceMed, priceLo: it.priceLo, priceHi: it.priceHi, thumb: it.thumb,
     salesLY: it.salesLY, revenueLY: it.revenueLY, activeDaysLY: it.activeDaysLY, balance: it.balance,
     daily: (it.dailyFull || []).filter((r) => inWin(r.date)),
   }));
@@ -241,7 +242,7 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
   const perItemMeta = perItem.map((p) => {
     const daysN = p.daily.length;
     return {
-      wb: p.wb, name: p.name, brand: p.brand, price: p.price, priceMed: p.priceMed, priceLo: p.priceLo, priceHi: p.priceHi, thumb: p.thumb,
+      wb: p.wb, name: p.name, brand: p.brand, color: p.color, price: p.price, priceMed: p.priceMed, priceLo: p.priceLo, priceHi: p.priceHi, thumb: p.thumb,
       days: daysN, avgStock: 0, balance: p.balance || 0, // текущий остаток — для оборачиваемости
       unitsSold: p.daily.reduce((s, r) => s + (Number(r.sales) || 0), 0),
       revenue: p.daily.reduce((s, r) => s + (Number(r.revenue) || 0), 0),
@@ -859,6 +860,9 @@ export async function buildSeasonPlanReport({
     : path ? { path, total: collected.total, fetched: collected.fetched, kept: collected.kept } : null;
 
   const { groupDaily, perItemMeta, dailyLimit } = collected;
+  // Доли спроса по цветам (нормализованные + сырые) из финальной выборки — для мини-инструмента
+  // «Размеры и цвета». Из уже собранных данных (color в serp), без доп. запросов.
+  const colorAnalysis = computeColorShares(perItemMeta);
   const errors = collected.errors || [];
   LP(`Сбор аналогов завершён: в выборке ${perItemMeta.length}, с дневными данными ${perItemMeta.filter((m) => m.days > 0).length}. Строю уровень/ранг/фазы и план.`);
 
@@ -1116,6 +1120,7 @@ export async function buildSeasonPlanReport({
       perItem: perItemMeta,
       attributesFound: collected.attributesFound || [],
       segments: segmentsInfo,
+      colorAnalysis,
       plan: fc,
       errors,
       dailyLimit,
@@ -1142,6 +1147,7 @@ export async function buildSeasonPlanReport({
     perItem: perItemMeta,
     attributesFound: collected.attributesFound || [],
     segments: segmentsInfo,
+    colorAnalysis,
     plan: seasonPlan,
     errors,
     dailyLimit,

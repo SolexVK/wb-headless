@@ -35,6 +35,7 @@ export function parseSerp(json) {
     rating: num(r.rating),
     comments: num(r.comments),
     balance: num(r.balance),       // текущий остаток (дневного нет)
+    color: r.color || '',          // цвет(а) карточки строкой (иногда через запятую)
     subject: r.subject || '',
     subjectId: r.subject_id ?? null,
     thumb: r.thumb || '',
