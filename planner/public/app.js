@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-sizes-mpstats-2026-08-01c';
+const APP_BUILD = 'season-sizes-ranges-2026-08-01d';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2229,23 +2229,34 @@ function seasonSizesBlock(rep) {
       </div>
     </details>`;
   }
-  const rows = sa.sizes.map((s) => `<tr class="${s.core ? '' : 'se-seg-thin'}">
-      <td><b>${seEsc(s.size)}</b>${s.origin ? ` <span class="mini">${seEsc(s.origin)}</span>` : ''}${s.core ? '' : ' <span class="mini">крайний</span>'}</td>
+  // В основную таблицу — только ядро сетки (что точно шить). Крайние размеры (низкое
+  // покрытие) свёрнуты в сноску, чтобы не шуметь и не двоить шкалу.
+  const core = sa.sizes.filter((s) => s.core);
+  const shown = core.length ? core : sa.sizes; // страховка: если ядра нет — показать всё
+  const coreShare = core.reduce((a, s) => a + s.share, 0);
+  const rows = shown.map((s) => `<tr>
+      <td><b>${seEsc(s.size)}</b>${s.origin ? ` <span class="mini">${seEsc(s.origin)}</span>` : ''}</td>
       <td class="num">${s.coverage}%</td>
       <td class="num">${s.carriers}</td>
       <td class="num">${fmt(s.sales)}</td>
       <td class="num se-share-cell"><span class="se-share-bar" style="width:${Math.round((s.share || 0) * 2.2)}px"></span><b>${s.share}%</b></td>
     </tr>`).join('');
-  const oneNote = sa.oneSizeCount ? ` <span class="mini">(+${sa.oneSizeCount} ONE SIZE — вне сплита)</span>` : '';
+  const ex = sa.extremeSummary;
+  const exRow = ex ? `<tr class="se-seg-thin">
+      <td><span class="mini">Крайние (${ex.count}): ${seEsc((ex.sizes || []).join(', '))} — редкие, под мин.партию/настил</span></td>
+      <td class="num">—</td><td class="num">—</td><td class="num">${fmt(ex.sales)}</td>
+      <td class="num se-share-cell"><b>${ex.share}%</b></td>
+    </tr>` : '';
+  const oneNote = sa.oneSizeCount ? ` <span class="mini">(+${sa.oneSizeCount} карточек ONE SIZE — вне размерного сплита)</span>` : '';
   const cacheNote = dg.fetched != null ? `Вызовов MPStats: ${dg.fetched} (из кэша ${dg.fromCache || 0}).` : '';
   return `<details class="se-comp" open>
     <summary>📏 Размерная сетка и спрос <span class="mini">(MPStats · продажи по размерам · ТОП-${sa.sizedCompetitors || sa.nmCount || ''} конкурентов)</span></summary>
     <div class="se-comp-body">
-      <div class="mini"><b>Доля спроса</b> = продажи размера ÷ всех продаж ТОПа — рабочая кривая для пошива. <b>Покрытие</b> = доля карточек, кто держит размер (высокое → <b>ядро</b> сетки; низкое → крайние размеры под мин.партию/настил). Продажи — штук за окно ${win}.${oneNote}</div>
-      <div class="mini">Ядро: <b>${(sa.grid.core || []).join(', ') || '—'}</b>${(sa.grid.extreme || []).length ? ` · крайние: ${sa.grid.extreme.join(', ')}` : ''}. Всего продаж в выборке: ${fmt(sa.totalSales)}. ${cacheNote}</div>
+      <div class="mini"><b>Доля спроса</b> = продажи размера ÷ всех продаж ТОПа — это готовый рецепт сплита тиража. <b>Покрытие</b> = доля карточек ТОПа, кто держит размер (высокое → <b>ядро</b> сетки — шить обязательно). Одиночные размеры сведены в диапазоны ниши. Продажи — штук за окно ${win}.${oneNote}</div>
+      <div class="mini">Ядро (${shown.length} размеров, ${Math.round(coreShare)}% спроса): <b>${(sa.grid.core || []).join(', ') || '—'}</b>. Всего продаж в выборке: ${fmt(sa.totalSales)}. ${cacheNote}</div>
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
-        <thead><tr><th>Размер</th><th class="num" title="Доля карточек ТОПа, кто держит размер">Покрытие</th><th class="num" title="Сколько карточек держат размер (штучно)">Карт.</th><th class="num" title="Продажи размера за окно, штук">Продажи</th><th class="num" title="Рабочая доля для плана производства">Доля спроса</th></tr></thead>
-        <tbody>${rows}</tbody>
+        <thead><tr><th>Размер (диапазон)</th><th class="num" title="Доля карточек ТОПа, кто держит размер">Покрытие</th><th class="num" title="Сколько карточек держат размер (штучно)">Карт.</th><th class="num" title="Продажи размера за окно, штук">Продажи</th><th class="num" title="Рабочая доля для плана производства">Доля спроса</th></tr></thead>
+        <tbody>${rows}${exRow}</tbody>
       </table></div>
     </div>
   </details>`;
