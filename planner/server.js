@@ -175,7 +175,26 @@ app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'adm
 // Анти-кэш для кода интерфейса: html/js/css отдаём с обязательной ревалидацией,
 // иначе браузер держит старые app.js/styles.css после обновления (обновления «не видно»).
 const NO_CACHE_RE = /\.(?:html|js|css)$/i;
-app.use(express.static(path.join(__dirname, 'public'), {
+
+// Пуленепробиваемый кэш-бастинг: index.html отдаём с версией (mtime) на app.js/styles.css —
+// `app.js?v=<mtime>`. При изменении файла URL меняется → любой кэш (браузер/прокси) обязан
+// скачать заново. Дополняет no-cache: снимает проблему «обновил, а изменений не видно».
+const PUB_DIR = path.join(__dirname, 'public');
+function indexHtmlVersioned() {
+  let html = fs.readFileSync(path.join(PUB_DIR, 'index.html'), 'utf8');
+  return html.replace(/(?:src|href)="(app\.js|styles\.css)"/g, (m, file) => {
+    let v = ''; try { v = String(Math.floor(fs.statSync(path.join(PUB_DIR, file)).mtimeMs)); } catch { /* нет файла — как есть */ }
+    return v ? m.replace(`"${file}"`, `"${file}?v=${v}"`) : m;
+  });
+}
+app.get(['/', '/index.html'], (req, res) => {
+  try {
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.type('html').send(indexHtmlVersioned());
+  } catch { res.sendFile(path.join(PUB_DIR, 'index.html')); }
+});
+
+app.use(express.static(PUB_DIR, {
   setHeaders(res, filePath) {
     if (NO_CACHE_RE.test(filePath)) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   },
