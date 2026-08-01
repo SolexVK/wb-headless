@@ -69,47 +69,48 @@ export function computeColorShares(items, { minCount = 3 } = {}) {
 }
 
 /**
- * Кол-во к пошиву по цветам. ВАЖНО: forecast — это объём ОДНОГО лучшего цвета (потолок
- * карточки-чемпиона), а НЕ итог на все цвета. Поэтому лучший цвет = forecast (100%), а
- * остальные масштабируются ОТНОСИТЕЛЬНО лучшего по силе продаж на 1 карточку (avgPerSku):
- *   qty_i = forecast × avgPerSku_i / avgPerSku_best.
- * Общий тираж = сумма по цветам (больше forecast). Слабые цвета (сила ниже порога от
- * лучшего) уходят в сноску — не плодим микро-партии.
+ * Кол-во к пошиву по цветам. БАЗА — СУММАРНЫЙ ОБЪЁМ продаж цвета (units), т.е. реальный
+ * рыночный спрос (белого продаётся больше всего → он лидер, как и в жизни). НЕ по Ср/арт:
+ * средняя на карточку задирается у цветов с малым числом карточек (1-2 хита) и даёт
+ * контр-интуитивного «лидера». Ср/арт остаётся справочным сигналом «эффективности».
  *
- * Отбор в ассортимент: сперва НАДЁЖНЫЕ цвета (≥minCount карточек) — по силе, порог их
- * фильтрует. Если надёжных меньше minColors — ДОБИРАЕМ до минимума «малоданными» цветами
- * (<minCount карточек), но их силу ОГРАНИЧИВАЕМ сверху слабейшим надёжным цветом: у цвета
- * с 1 карточкой Ср/арт может быть выше лидера случайно (выброс) — не даём ему всплыть.
+ * Лучший цвет (макс. объём) = forecast (100%), остальные — пропорционально СВОЕМУ объёму
+ * относительно лучшего: qty_i = forecast × units_i / units_best. Общий тираж = сумма (больше
+ * forecast). Слабые/лишние — в сноску. Ассортимент добирается до minColors (сперва надёжные
+ * ≥minCount карточек, затем малоданные) — по тому же объёму.
  *
- * @param {Array} colors — из computeColorShares (нужны name, avgPerSku, skus, units, normShare).
+ * @param {Array} colors — из computeColorShares (нужны name, units, avgPerSku, skus, normShare, rawShare).
  * @param {number} forecast — «Выкупы (прогноз)», объём лучшего цвета.
- * @param {{minRel?:number, minCount?:number, minColors?:number}} opts — minRel: порог силы
- *        относительно лучшего (0.4 = ≥40%); minCount: минимум карточек для доверия;
+ * @param {{minRel?:number, minCount?:number, minColors?:number}} opts — minRel: порог объёма
+ *        относительно лучшего (0.4 = ≥40%); minCount: минимум карточек для «надёжного»;
  *        minColors: минимум расцветок в ассортименте (по умолч. 5).
- * @returns {{best:{name,avgPerSku}|null, core:Array, weak:Array, grandTotal:number,
+ * @returns {{best:{name,units,avgPerSku}|null, core:Array, weak:Array, grandTotal:number,
  *            weakSummary:{count,qty,names}|null, minRel:number, minColors:number}}
  */
 export function colorQuantities(colors, forecast, { minRel = 0.4, minCount = 3, minColors = 5 } = {}) {
   const F = Math.max(0, Number(forecast) || 0);
-  const named = (colors || []).filter((c) => c && c.avgPerSku > 0 && c.name !== 'не указан');
+  const named = (colors || []).filter((c) => c && Number(c.units) > 0 && c.name !== 'не указан');
   if (!named.length || !F) return { best: null, core: [], weak: [], grandTotal: 0, weakSummary: null, minRel, minColors };
   const trusted = named.filter((c) => (c.skus || 0) >= minCount);
   const lowData = named.filter((c) => (c.skus || 0) < minCount);
   // Лидер и масштаб — по надёжным цветам (если надёжных нет вовсе, берём по всем).
   const scalePool = trusted.length ? trusted : named;
-  const bestAvg = Math.max(...scalePool.map((c) => c.avgPerSku));
-  const mkRow = (c, low, capRel) => {
-    const rel = Math.min(c.avgPerSku / bestAvg, capRel);
-    return { name: c.name, avgPerSku: c.avgPerSku, rel: Math.round(rel * 1000) / 10, qty: Math.round(F * rel), skus: c.skus, units: c.units, normShare: c.normShare, lowData: !!low };
+  const bestUnits = Math.max(...scalePool.map((c) => c.units));
+  const mkRow = (c, low) => {
+    const rel = Math.min(c.units / bestUnits, 1); // база — СУММАРНЫЙ объём (лидер = потолок)
+    return {
+      name: c.name, units: c.units, avgPerSku: c.avgPerSku, skus: c.skus, normShare: c.normShare,
+      rel: Math.round(rel * 1000) / 10, qty: Math.round(F * rel), lowData: !!low, efficient: false,
+    };
   };
-  const trustedRows = trusted.map((c) => mkRow(c, false, Infinity)).sort((a, b) => b.qty - a.qty);
-  // Потолок силы для доборных = слабейший надёжный цвет (или порог, если надёжных нет).
-  const capRel = trustedRows.length ? (trustedRows[trustedRows.length - 1].rel / 100) : minRel;
-  // Доборные ранжируем по числу карточек (надёжнее), затем по объёму рынка — не по Ср/арт (шумит).
-  const lowRows = lowData.map((c) => mkRow(c, true, capRel))
-    .sort((a, b) => (b.skus - a.skus) || ((b.units || 0) - (a.units || 0)) || (b.qty - a.qty));
+  const trustedRows = trusted.map((c) => mkRow(c, false)).sort((a, b) => b.units - a.units);
+  const lowRows = lowData.map((c) => mkRow(c, true)).sort((a, b) => (b.skus - a.skus) || (b.units - a.units));
+  // «Эффективный» = Ср/арт выше, чем у ЛИДЕРА по объёму: продаётся лучше на карточку при
+  // меньшем объёме → возможная недооценённая ниша (низкая конкуренция внутри цвета).
+  const leaderAvg = (trustedRows[0] || lowRows[0] || {}).avgPerSku || 0;
+  for (const r of [...trustedRows, ...lowRows]) r.efficient = leaderAvg > 0 && (r.avgPerSku || 0) > leaderAvg * 1.15;
 
-  // Ядро: надёжные по порогу/минимуму, затем добор из малоданных до minColors.
+  // Ядро: надёжные по порогу объёма/минимуму, затем добор из малоданных до minColors.
   const passCount = trustedRows.filter((r) => r.rel >= minRel * 100).length;
   const ordered = [...trustedRows, ...lowRows];
   const keep = Math.min(ordered.length, Math.max(passCount, Math.max(1, minColors || 1)));
@@ -119,5 +120,6 @@ export function colorQuantities(colors, forecast, { minRel = 0.4, minCount = 3, 
   const weakSummary = weak.length
     ? { count: weak.length, qty: weak.reduce((s, r) => s + r.qty, 0), names: weak.map((r) => r.name) }
     : null;
-  return { best: { name: trustedRows[0]?.name || core[0]?.name, avgPerSku: trustedRows[0]?.avgPerSku || core[0]?.avgPerSku }, core, weak, grandTotal, weakSummary, minRel, minColors };
+  const lead = trustedRows[0] || core[0];
+  return { best: lead ? { name: lead.name, units: lead.units, avgPerSku: lead.avgPerSku } : null, core, weak, grandTotal, weakSummary, minRel, minColors };
 }

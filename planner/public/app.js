@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-colors-cachebust-2026-08-01j';
+const APP_BUILD = 'season-colors-volume-2026-08-01k';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2182,24 +2182,25 @@ function seasonSegmentsBlock(rep) {
 // итог на все. Поэтому лучший цвет = прогноз (100%), остальные масштабируются ОТНОСИТЕЛЬНО
 // лучшего по силе на 1 карточку (avgPerSku). Итог = сумма (больше прогноза). Зеркалит чистую
 // colorQuantities() из lib/season/colorSize.js (та же формула, проверена тестом).
+// База — СУММАРНЫЙ объём продаж цвета (units) = реальный спрос. Зеркалит colorQuantities()
+// из lib/season/colorSize.js (проверено тестом). Ср/арт — справочно + флаг «эфф».
 function seasonColorQuantities(colors, forecast, minRelPct, minCount, minColors) {
   const F = Math.max(0, +forecast || 0);
-  const named = (colors || []).filter((c) => c && c.avgPerSku > 0 && c.name !== 'не указан');
+  const named = (colors || []).filter((c) => c && Number(c.units) > 0 && c.name !== 'не указан');
   if (!named.length || !F) return null;
   const mc = minCount || 3;
   const trusted = named.filter((c) => (c.skus || 0) >= mc);
   const lowData = named.filter((c) => (c.skus || 0) < mc);
   const scalePool = trusted.length ? trusted : named;
-  const bestAvg = Math.max(...scalePool.map((c) => c.avgPerSku));
-  const mkRow = (c, low, capRel) => {
-    const rel = Math.min(c.avgPerSku / bestAvg, capRel);
-    return { name: c.name, rel: Math.round(rel * 1000) / 10, qty: Math.round(F * rel), skus: c.skus, units: c.units, normShare: c.normShare, lowData: !!low };
+  const bestUnits = Math.max(...scalePool.map((c) => c.units));
+  const mkRow = (c, low) => {
+    const rel = Math.min(c.units / bestUnits, 1);
+    return { name: c.name, units: c.units, avgPerSku: c.avgPerSku, skus: c.skus, normShare: c.normShare, rel: Math.round(rel * 1000) / 10, qty: Math.round(F * rel), lowData: !!low, efficient: false };
   };
-  const trustedRows = trusted.map((c) => mkRow(c, false, Infinity)).sort((a, b) => b.qty - a.qty);
-  // Потолок силы для доборных (малоданных) = слабейший надёжный цвет — не даём выбросу всплыть.
-  const capRel = trustedRows.length ? (trustedRows[trustedRows.length - 1].rel / 100) : (minRelPct / 100);
-  const lowRows = lowData.map((c) => mkRow(c, true, capRel))
-    .sort((a, b) => (b.skus - a.skus) || ((b.units || 0) - (a.units || 0)) || (b.qty - a.qty));
+  const trustedRows = trusted.map((c) => mkRow(c, false)).sort((a, b) => b.units - a.units);
+  const lowRows = lowData.map((c) => mkRow(c, true)).sort((a, b) => (b.skus - a.skus) || (b.units - a.units));
+  const leaderAvg = (trustedRows[0] || lowRows[0] || {}).avgPerSku || 0;
+  for (const r of [...trustedRows, ...lowRows]) r.efficient = leaderAvg > 0 && (r.avgPerSku || 0) > leaderAvg * 1.15;
   const passCount = trustedRows.filter((r) => r.rel >= minRelPct).length;
   const ordered = [...trustedRows, ...lowRows];
   const keep = Math.min(ordered.length, Math.max(passCount, Math.max(1, minColors || 1)));
@@ -2223,35 +2224,36 @@ function seasonColorsBlock(rep, p) {
   const cq = seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount);
   const qtyByName = new Map();
   const bestName = cq ? cq.best.name : null;
-  if (cq) { cq.core.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: true, lowData: r.lowData })); cq.weak.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: false, lowData: r.lowData })); }
+  if (cq) { cq.core.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: true, lowData: r.lowData, efficient: r.efficient })); cq.weak.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: false, lowData: r.lowData, efficient: r.efficient })); }
 
-  // Сортируем строки как в расчёте (по кол-ву убыв.), чтобы лидер был сверху и подсвечен.
+  // Сортируем строки как в расчёте (по объёму убыв.), чтобы лидер был сверху и подсвечен.
   const ordered = cq
     ? [...cq.core, ...cq.weak].map((r) => ca.colors.find((c) => c.name === r.name)).filter(Boolean)
       .concat(ca.colors.filter((c) => !qtyByName.has(c.name)))
     : ca.colors;
+  const maxRaw = Math.max(1, ...ca.colors.map((c) => c.rawShare || 0)); // масштаб полоски доли объёма
   const rows = ordered.map((c) => {
     const q = qtyByName.get(c.name);
     const isBest = c.name === bestName;
     const qtyCell = q ? (q.core ? `<b>${fmt(q.qty)}</b>${q.lowData ? ' <span class="mini">⚑ добор</span>' : ''}` : `<span class="mini">${fmt(q.qty)} · доп.</span>`) : '<span class="mini">—</span>';
-    const relCell = q ? `${q.rel}%` : '—';
     const cls = isBest ? 'se-color-best' : ((!q || q.core) ? '' : 'se-seg-thin');
+    const eff = q && q.efficient ? ' <span class="mini" title="Ср/арт выше, чем у лидера — цвет продаётся лучше на карточку при меньшем объёме: возможная недооценённая ниша">▲ эфф</span>' : '';
     const nameCell = `${isBest ? '★ <b>' : ''}${seEsc(c.name)}${isBest ? '</b> <span class="mini">лидер</span>' : ''}${c.lowConfidence ? ' <span class="mini">⚠ мало</span>' : ''}`;
     return `<tr class="${cls}"${isBest ? ' style="background:rgba(255,196,0,.16)"' : ''}>
       <td>${nameCell}</td>
       <td class="num">${c.skus}</td>
-      <td class="num">${fmt(c.avgPerSku)}</td>
-      <td class="num">${relCell}</td>
-      <td class="num se-share-cell">${c.normShare != null ? `<span class="se-share-bar" style="width:${Math.round(c.normShare * 2.2)}px"></span>${c.normShare}%` : '—'}</td>
+      <td class="num">${fmt(c.units)}</td>
+      <td class="num se-share-cell"><span class="se-share-bar" style="width:${Math.round((c.rawShare || 0) / maxRaw * 90)}px"></span>${c.rawShare != null ? c.rawShare + '%' : '—'}</td>
+      <td class="num">${fmt(c.avgPerSku)}${eff}</td>
       <td class="num">${qtyCell}</td>
     </tr>`;
   }).join('');
 
   const head = cq
-    ? `<div class="mini"><b>Логика количества:</b> «Выкупы (прогноз)» = ${fmt(forecast)} шт — это объём <b>лучшего цвета</b> (★ ${seEsc(cq.best.name)}), а не итог на все. Остальные — меньше, <b>пропорционально силе относительно лучшего</b> (кол-во = прогноз × сила÷100). В ассортимент берём минимум <b>${seasonColorMinCount}</b> расцветок: сперва надёжные (≥${ca.minCount} карточек), затем <b>⚑ добор</b> из малоданных — их силу ограничиваем слабейшим надёжным цветом (у цвета с 1 карточкой Ср/арт может быть случайно высоким). Что не вошло — «доп.» ниже.</div>`
-    : `<div class="mini">Нормализ. доля = средняя продажа на 1 карточку ÷ сумму средних — микс для пошива. Кол-во появится, когда есть прогноз и доверенные цвета.</div>`;
+    ? `<div class="mini"><b>Логика количества:</b> база — <b>суммарный объём продаж</b> цвета (реальный спрос). «Выкупы (прогноз)» = ${fmt(forecast)} шт — это объём <b>лидера по объёму</b> (★ ${seEsc(cq.best.name)}). Остальные — меньше, <b>пропорционально своему объёму относительно лидера</b> (кол-во = прогноз × доля÷лидер). Ассортимент — минимум <b>${seasonColorMinCount}</b> расцветок (сперва надёжные ≥${ca.minCount} карточек, затем <b>⚑ добор</b>). <b>Ср/арт</b> — справочно; <b>▲ эфф</b> = продаётся лучше на карточку, чем лидер (возможная недооценённая ниша).</div>`
+    : `<div class="mini">Доля объёма = суммарные продажи цвета ÷ все продажи. Кол-во появится, когда есть прогноз и доверенные цвета.</div>`;
   const totalLine = cq
-    ? `<div class="se-color-total"><b>Общий тираж (${cq.core.length} цвет. ассортимента): ${fmt(cq.grandTotal)} шт</b> — больше прогноза, т.к. прогноз = только лучший цвет.${cq.weakSummary ? ` Доп. (${cq.weakSummary.count}): ${seEsc(cq.weakSummary.names.join(', '))} — ещё ~${fmt(cq.weakSummary.qty)} шт, если расширять.` : ''}
+    ? `<div class="se-color-total"><b>Общий тираж (${cq.core.length} цвет. ассортимента): ${fmt(cq.grandTotal)} шт</b> — больше прогноза, т.к. прогноз = только лидер по объёму.${cq.weakSummary ? ` Доп. (${cq.weakSummary.count}): ${seEsc(cq.weakSummary.names.join(', '))} — ещё ~${fmt(cq.weakSummary.qty)} шт, если расширять.` : ''}
         <label class="mini" style="margin-left:8px">цветов в ассортименте: <input id="se-color-count" type="number" min="1" max="20" step="1" value="${seasonColorMinCount}" style="width:52px" title="Гарантированный минимум расцветок — движок добирает даже слабые"></label>
         <label class="mini" style="margin-left:8px">порог силы: <input id="se-color-thr" type="number" min="5" max="100" step="5" value="${seasonColorMinRel}" style="width:52px" title="Цвета сильнее этого % от лучшего входят сверх минимума"> %</label></div>`
     : '';
@@ -2263,7 +2265,7 @@ function seasonColorsBlock(rep, p) {
     <div class="se-comp-body">
       ${head}
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
-        <thead><tr><th>Цвет</th><th class="num" title="Артикулов конкурентов этого цвета">Тов.</th><th class="num" title="Средняя продажа на 1 карточку = продажи / количество">Ср/арт</th><th class="num" title="Сила относительно лучшего цвета = ср/арт ÷ ср/арт лучшего">К лучш.</th><th class="num" title="Нормализованная доля = ср/арт ÷ сумму ср/арт">Норм. доля</th><th class="num" title="Кол-во к пошиву = прогноз × силу относительно лучшего">Кол-во, шт</th></tr></thead>
+        <thead><tr><th>Цвет</th><th class="num" title="Артикулов конкурентов этого цвета">Тов.</th><th class="num" title="Суммарные продажи цвета за период (штук) — реальный спрос">Продажи</th><th class="num" title="Доля суммарного объёма продаж цвета от всех — база плана">Доля объёма</th><th class="num" title="Средняя продажа на 1 карточку (справочно); ▲ эфф = выше лидера">Ср/арт</th><th class="num" title="Кол-во к пошиву = прогноз × доля объёма относительно лидера">Кол-во, шт</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
       ${totalLine}
