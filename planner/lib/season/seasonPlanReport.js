@@ -20,10 +20,33 @@ import { fetchCardsInfo, cardMatchText, cardCharText } from './wbCard.js';
 import { filterByRelevance } from './relevance.js';
 import { fetchSerp, DailyLimitError as SerpLimitError } from './wbSerp.js';
 import { computeColorShares } from './colorSize.js';
-import { serpLoad, serpSave } from '../db.js';
+import { fetchSizeStock } from './wbSizeStock.js';
+import { computeSizeCurve } from './sizeCurve.js';
+import { serpLoad, serpSave, sizeSnapSave, sizeSnapLoad } from '../db.js';
 
 const SERP_TTL_MS = 3 * 24 * 3600 * 1000; // кэш SERP на 3 дня (сезонная форма стабильна)
 const lcName = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
+
+// Размерный спрос из БЕСПЛАТНОГО снимка остатков WB (0 запросов MPStats). Берём топ-N живых
+// конкурентов, снимаем остатки по размерам, копим снимок в БД (для убыли), считаем кривую.
+// Тихо возвращает null при офлайне/пустом ответе — раздел просто не покажется.
+async function gatherSizeCurve(perItemMeta, { day, topN = 60, enabled = true } = {}) {
+  if (!enabled) return null;
+  const live = (perItemMeta || []).filter((m) => (m.unitsSoldLY || m.unitsSold || 0) > 0)
+    .sort((a, b) => (b.unitsSoldLY || b.unitsSold || 0) - (a.unitsSoldLY || a.unitsSold || 0)).slice(0, topN);
+  const nmIds = live.map((m) => Number(m.wb)).filter((n) => Number.isFinite(n) && n > 0);
+  if (!nmIds.length) return null;
+  let stock;
+  try { stock = await fetchSizeStock(nmIds); } catch { return null; }
+  if (!stock || !stock.size) return null;
+  const d = String(day || new Date().toISOString().slice(0, 10));
+  try { sizeSnapSave(stock, d); } catch { /* БД недоступна — не критично */ }
+  let snapshots = [];
+  try { snapshots = sizeSnapLoad(nmIds); } catch { snapshots = []; }
+  const salesByNm = new Map(live.map((m) => [Number(m.wb), m.unitsSoldLY || m.unitsSold || 0]));
+  const curve = computeSizeCurve(stock, salesByNm, snapshots);
+  return { ...curve, snapshotDay: d, nmCount: nmIds.length, withStock: stock.size };
+}
 
 /**
  * Собрать аналоги из SERP по 1-3 фразам ЗА ПОЛНОЕ окно [d1,d2] (один запрос на фразу,
@@ -866,6 +889,9 @@ export async function buildSeasonPlanReport({
   // Доли спроса по цветам (нормализованные + сырые) из финальной выборки — для мини-инструмента
   // «Размеры и цвета». Из уже собранных данных (color в serp), без доп. запросов.
   const colorAnalysis = computeColorShares(perItemMeta);
+  // Размерный спрос из бесплатного снимка остатков WB (0 запросов MPStats). Можно отключить
+  // plan.withSizes=false. null при офлайне/недоступности WB — раздел просто не покажется.
+  const sizeAnalysis = await gatherSizeCurve(perItemMeta, { day: plan.asOf, enabled: plan.withSizes !== false });
   const errors = collected.errors || [];
   LP(`Сбор аналогов завершён: в выборке ${perItemMeta.length}, с дневными данными ${perItemMeta.filter((m) => m.days > 0).length}. Строю уровень/ранг/фазы и план.`);
 
@@ -1124,6 +1150,7 @@ export async function buildSeasonPlanReport({
       attributesFound: collected.attributesFound || [],
       segments: segmentsInfo,
       colorAnalysis,
+      sizeAnalysis,
       plan: fc,
       errors,
       dailyLimit,
@@ -1151,6 +1178,7 @@ export async function buildSeasonPlanReport({
     attributesFound: collected.attributesFound || [],
     segments: segmentsInfo,
     colorAnalysis,
+    sizeAnalysis,
     plan: seasonPlan,
     errors,
     dailyLimit,

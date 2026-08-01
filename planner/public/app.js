@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-colors-2026-08-01e';
+const APP_BUILD = 'season-sizes-2026-08-01a';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1939,7 +1939,7 @@ async function renderSeasonView(articleId) {
   const staleBanner = stale
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
-  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep) + seasonSizesBlock(rep) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   installSeasonZoom();
   // Чекбоксы ТОП-15: отжатие → исключить конкурента и пересобрать план (дебаунс, кэш SERP).
   box.querySelectorAll('.se-comp-cb').forEach((cb) => {
@@ -2196,6 +2196,37 @@ function seasonColorsBlock(rep) {
       <div class="mini"><b>Нормализ. доля</b> = средняя продажа на 1 карточку ÷ сумму средних — это твой микс для пошива (убирает перекос «белого просто больше выкладывают»). <b>Сырая доля</b> = объём рынка (для оценки насыщения). Цвета с &lt;${ca.minCount} артикулов — «мало данных».</div>
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
         <thead><tr><th>Цвет</th><th class="num" title="Артикулов конкурентов этого цвета">Тов.</th><th class="num">Продажи</th><th class="num" title="Доля объёма рынка">Сырая</th><th class="num" title="Средняя продажа на 1 карточку = продажи / количество">Ср/арт</th><th class="num" title="Нормализованная доля = ср/арт ÷ сумму ср/арт — микс для производства">Норм. доля</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>
+  </details>`;
+}
+
+// Размерный спрос из БЕСПЛАТНОГО снимка остатков WB (0 запросов MPStats). Покрытие = ядро
+// сетки; сток-микс — стартовая оценка; убыль (день-к-дню) — реальный спрос, копится в фоне.
+function seasonSizesBlock(rep) {
+  const sa = rep.sizeAnalysis;
+  if (!sa || !Array.isArray(sa.sizes) || !sa.sizes.length) return '';
+  const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
+  const isDepl = sa.method === 'depletion';
+  const methodNote = isDepl
+    ? `Доля спроса — по <b>убыли остатков</b> (снимков: ${sa.intervals + 1}, продано ${fmt(sa.deplTotal)} шт за период). Это фактические продажи по размерам.`
+    : `Доля спроса — <b>стартовая оценка по остатку</b> (распроданные размеры занижены). Точную кривую даст <b>убыль</b> — копится автоматически при ежедневных перестроениях (нужно ≥2 снимка). Дальше — калибровка MPStats по кнопке.`;
+  const rows = sa.sizes.map((s) => `<tr class="${s.core ? '' : 'se-seg-thin'}">
+      <td><b>${seEsc(s.size)}</b>${s.core ? '' : ' <span class="mini">крайний</span>'}</td>
+      <td class="num">${s.coverage}%</td>
+      <td class="num">${s.carriers}</td>
+      <td class="num">${s.provShare}%</td>
+      <td class="num">${s.deplShare != null ? s.deplShare + '%' : '—'}</td>
+      <td class="num se-share-cell"><span class="se-share-bar" style="width:${Math.round((s.share || 0) * 2.2)}px"></span><b>${s.share}%</b></td>
+    </tr>`).join('');
+  return `<details class="se-comp" open>
+    <summary>📏 Размерная сетка и спрос <span class="mini">(снимок остатков WB, ${sa.nmCount} конкурентов, 0 запросов MPStats)</span></summary>
+    <div class="se-comp-body">
+      <div class="mini"><b>Покрытие</b> = взвешенная по продажам доля конкурентов, кто держит размер (высокое → <b>ядро</b> сетки; низкое → крайние размеры под мин.партию/настил). ${methodNote}</div>
+      <div class="mini">Ядро: <b>${(sa.grid.core || []).join(', ') || '—'}</b>${(sa.grid.extreme || []).length ? ` · крайние: ${sa.grid.extreme.join(', ')}` : ''}. Снимок за ${seEsc(sa.snapshotDay || '')}.</div>
+      <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
+        <thead><tr><th>Размер</th><th class="num" title="Взвешенная доля конкурентов, кто держит размер">Покрытие</th><th class="num" title="Сколько конкурентов держат размер (штучно)">Конк.</th><th class="num" title="Стартовая оценка спроса по доле в остатке">Сток-микс</th><th class="num" title="Спрос по убыли остатков (реальные продажи)">Убыль</th><th class="num" title="Рабочая доля для плана производства">Доля спроса</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>

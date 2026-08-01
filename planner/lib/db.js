@@ -132,6 +132,16 @@ function migrate(db) {
       perms TEXT,                     -- JSON карта прав по листам {tab: none|view|edit}
       accessRequest TEXT              -- текст заявки на расширение доступа (NULL = нет)
     );
+    -- Ежедневные снимки остатков ПО РАЗМЕРАМ (бесплатный card-detail WB). Убыль остатка
+    -- день-к-дню ≈ продажи по размеру → бесплатная кривая размерного спроса (см. sizeCurve.js).
+    CREATE TABLE IF NOT EXISTS wb_size_snap (
+      nm INTEGER,          -- nmID конкурента
+      day TEXT,            -- дата снимка YYYY-MM-DD
+      size TEXT,           -- каноничная метка размера
+      qty INTEGER,         -- суммарный остаток по всем складам
+      PRIMARY KEY (nm, day, size)
+    );
+    CREATE INDEX IF NOT EXISTS idx_wb_size_snap_day ON wb_size_snap(day);
   `);
   // Идемпотентно добавить новые колонки в уже существующую таблицу users (старые БД).
   for (const [col, decl] of [['role', "TEXT DEFAULT 'viewer'"], ['perms', 'TEXT'], ['accessRequest', 'TEXT']]) {
@@ -400,6 +410,29 @@ export function serpSave(keyword, data) {
   db.prepare('INSERT INTO wb_serp(keyword,json,fetchedAt) VALUES(?,?,?) ON CONFLICT(keyword) DO UPDATE SET json=excluded.json, fetchedAt=excluded.fetchedAt')
     .run(String(keyword), JSON.stringify(data), new Date().toISOString());
   return true;
+}
+
+// ── Снимки остатков по размерам (для бесплатной кривой размерного спроса) ──
+/** Сохранить снимок за день: stockByNm = Map nmId → {sizes:[{size,qty}]}. Идемпотентно по (nm,day,size). */
+export function sizeSnapSave(stockByNm, day) {
+  const db = getDb(); if (!db || !stockByNm) return 0;
+  const d = String(day || new Date().toISOString().slice(0, 10));
+  const stmt = db.prepare('INSERT INTO wb_size_snap(nm,day,size,qty) VALUES(?,?,?,?) ON CONFLICT(nm,day,size) DO UPDATE SET qty=excluded.qty');
+  let n = 0;
+  for (const [nm, v] of stockByNm) {
+    for (const s of (v && v.sizes) || []) { stmt.run(Number(nm), d, String(s.size), Number(s.qty) || 0); n += 1; }
+  }
+  return n;
+}
+/** Загрузить снимки для набора nmID (опц. начиная с sinceDay). Возвращает [{nm,day,size,qty}]. */
+export function sizeSnapLoad(nmIds, sinceDay) {
+  const db = getDb(); if (!db) return [];
+  const ids = [...new Set((nmIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0))];
+  if (!ids.length) return [];
+  const ph = ids.map(() => '?').join(',');
+  const where = sinceDay ? ` AND day >= ?` : '';
+  const args = sinceDay ? [...ids, String(sinceDay)] : ids;
+  return db.prepare(`SELECT nm,day,size,qty FROM wb_size_snap WHERE nm IN (${ph})${where} ORDER BY day ASC`).all(...args);
 }
 
 // ── Память запросов «Ранга сезонности» ──
