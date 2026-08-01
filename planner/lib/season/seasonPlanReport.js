@@ -20,35 +20,56 @@ import { fetchCardsInfo, cardMatchText, cardCharText } from './wbCard.js';
 import { filterByRelevance } from './relevance.js';
 import { fetchSerp, DailyLimitError as SerpLimitError } from './wbSerp.js';
 import { computeColorShares } from './colorSize.js';
-import { fetchSizeStock } from './wbSizeStock.js';
-import { computeSizeCurve } from './sizeCurve.js';
-import { serpLoad, serpSave, sizeSnapSave, sizeSnapLoad } from '../db.js';
+import { fetchSalesSizesBatch, fetchApiLimit } from './mpstatsSizes.js';
+import { computeSizeCurveFromSales } from './sizeCurve.js';
+import { serpLoad, serpSave, mpSizeSalesLoad, mpSizeSalesSave } from '../db.js';
 
 const SERP_TTL_MS = 3 * 24 * 3600 * 1000; // кэш SERP на 3 дня (сезонная форма стабильна)
 const lcName = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
 
-// Размерный спрос из БЕСПЛАТНОГО снимка остатков WB (0 запросов MPStats). Берём топ-N живых
-// конкурентов, снимаем остатки по размерам, копим снимок в БД (для убыли), считаем кривую.
-// Тихо возвращает null при офлайне/пустом ответе — раздел просто не покажется.
-async function gatherSizeCurve(perItemMeta, { day, topN = 60, enabled = true } = {}) {
+// Размерный спрос из ОФИЦИАЛЬНОГО API MPStats (sales/sizes). Берём строгий ТОП-N живых
+// конкурентов по продажам, для каждого — продажи по размерам за окно [w1,w2] (cache-first,
+// TTL). Экономно к квоте: перед батчем читаем остаток, при нехватке не лезем. Возвращает
+// объект с diag даже при пустоте — блок покажет причину, а не исчезнет.
+const SIZE_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;   // кэш размерного спроса — 7 дней
+async function gatherSizeCurve(perItemMeta, { d1, d2, topN = 10, enabled = true } = {}) {
   if (!enabled) return null;
-  const d = String(day || new Date().toISOString().slice(0, 10));
-  const diag = { endpoint: '', requested: 0, statuses: [], errors: [], products: 0, withStock: 0, reason: '' };
-  const empty = (reason) => ({ sizes: [], grid: { core: [], extreme: [] }, nmCount: diag.requested, snapshotDay: d, diag: { ...diag, reason } });
+  // Окно спроса: свежие ~90 дней до конца истории (а не 2 года — иначе мешаем сезоны).
+  const w2 = String(d2 || new Date().toISOString().slice(0, 10));
+  const w1 = offsetDate(w2, -90);
+  const diag = { source: 'mpstats', window: `${w1}…${w2}`, topN, requested: 0, fromCache: 0, fetched: 0, quota: null, errors: [], reason: '' };
+  const base = { sizes: [], grid: { core: [], extreme: [] }, window: { d1: w1, d2: w2 } };
+  const empty = (reason) => ({ ...base, diag: { ...diag, reason } });
+
   const live = (perItemMeta || []).filter((m) => (m.unitsSoldLY || m.unitsSold || 0) > 0)
     .sort((a, b) => (b.unitsSoldLY || b.unitsSold || 0) - (a.unitsSoldLY || a.unitsSold || 0)).slice(0, topN);
-  const nmIds = live.map((m) => Number(m.wb)).filter((n) => Number.isFinite(n) && n > 0);
-  if (!nmIds.length) return empty('no-live-nm');
-  let stock;
-  try { stock = await fetchSizeStock(nmIds, diag); } catch (e) { diag.errors.push(String(e?.message || e).slice(0, 120)); return empty('fetch-throw'); }
-  if (!stock || !stock.size) return empty('empty-stock');
-  diag.withStock = stock.size;
-  try { sizeSnapSave(stock, d); } catch { /* БД недоступна — не критично */ }
-  let snapshots = [];
-  try { snapshots = sizeSnapLoad(nmIds); } catch { snapshots = []; }
-  const salesByNm = new Map(live.map((m) => [Number(m.wb), m.unitsSoldLY || m.unitsSold || 0]));
-  const curve = computeSizeCurve(stock, salesByNm, snapshots);
-  return { ...curve, snapshotDay: d, nmCount: nmIds.length, withStock: stock.size, diag: { ...diag, reason: 'ok' } };
+  const skus = live.map((m) => Number(m.wb)).filter((n) => Number.isFinite(n) && n > 0);
+  if (!skus.length) return empty('no-live-nm');
+
+  // Сколько карточек уже в свежем кэше — на столько квота не нужна.
+  const needFetch = skus.filter((s) => !mpSizeSalesLoad(s, w1, w2, SIZE_CACHE_TTL_MS));
+  // Квота-гард: если требуется живой запрос, но остаток меньше нужного — не тратим совсем.
+  if (needFetch.length) {
+    const quota = await fetchApiLimit();
+    diag.quota = quota;
+    if (quota && quota.remaining < needFetch.length) return empty('low-quota');
+  }
+
+  const perCompetitor = [];
+  try {
+    const bySku = await fetchSalesSizesBatch(skus, {
+      d1: w1, d2: w2,
+      cacheGet: (s) => mpSizeSalesLoad(s, w1, w2, SIZE_CACHE_TTL_MS),
+      cacheSet: (s, rows) => mpSizeSalesSave(s, w1, w2, rows),
+      diag,
+    });
+    for (const s of skus) { const rows = bySku.get(s); if (rows) perCompetitor.push({ sku: s, rows }); }
+  } catch (e) { diag.errors.push(String(e?.message || e).slice(0, 120)); return empty('fetch-throw'); }
+
+  if (!perCompetitor.length) return empty('empty');
+  const curve = computeSizeCurveFromSales(perCompetitor);
+  if (!curve.sizes.length) return { ...base, ...curve, diag: { ...diag, reason: curve.oneSizeCount ? 'all-one-size' : 'empty' } };
+  return { ...base, ...curve, nmCount: perCompetitor.length, diag: { ...diag, reason: 'ok' } };
 }
 
 /**
@@ -892,9 +913,11 @@ export async function buildSeasonPlanReport({
   // Доли спроса по цветам (нормализованные + сырые) из финальной выборки — для мини-инструмента
   // «Размеры и цвета». Из уже собранных данных (color в serp), без доп. запросов.
   const colorAnalysis = computeColorShares(perItemMeta);
-  // Размерный спрос из бесплатного снимка остатков WB (0 запросов MPStats). Можно отключить
-  // plan.withSizes=false. null при офлайне/недоступности WB — раздел просто не покажется.
-  const sizeAnalysis = await gatherSizeCurve(perItemMeta, { day: plan.asOf, enabled: plan.withSizes !== false });
+  // Размерный спрос из MPStats sales/sizes по строгому ТОП-N конкурентов (cache-first, TTL,
+  // квота-гард). Отключается plan.withSizes=false. Объект с diag даже при пустоте.
+  const sizeAnalysis = await gatherSizeCurve(perItemMeta, {
+    d1, d2, topN: Number(plan.sizeTopN) || 10, enabled: plan.withSizes !== false,
+  });
   const errors = collected.errors || [];
   LP(`Сбор аналогов завершён: в выборке ${perItemMeta.length}, с дневными данными ${perItemMeta.filter((m) => m.days > 0).length}. Строю уровень/ранг/фазы и план.`);
 

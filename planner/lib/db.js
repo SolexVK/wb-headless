@@ -142,6 +142,13 @@ function migrate(db) {
       PRIMARY KEY (nm, day, size)
     );
     CREATE INDEX IF NOT EXISTS idx_wb_size_snap_day ON wb_size_snap(day);
+    -- Кэш размерного спроса конкурента из MPStats (sales/sizes). Ключ — sku|d1|d2,
+    -- чтобы разные окна периода не смешивались. TTL применяет вызывающий (mpSizeSalesLoad).
+    CREATE TABLE IF NOT EXISTS mp_size_sales (
+      key TEXT PRIMARY KEY,   -- «<sku>|<d1>|<d2>»
+      json TEXT,              -- [{size_name,size_origin,sales}]
+      fetchedAt TEXT
+    );
   `);
   // Идемпотентно добавить новые колонки в уже существующую таблицу users (старые БД).
   for (const [col, decl] of [['role', "TEXT DEFAULT 'viewer'"], ['perms', 'TEXT'], ['accessRequest', 'TEXT']]) {
@@ -433,6 +440,24 @@ export function sizeSnapLoad(nmIds, sinceDay) {
   const where = sinceDay ? ` AND day >= ?` : '';
   const args = sinceDay ? [...ids, String(sinceDay)] : ids;
   return db.prepare(`SELECT nm,day,size,qty FROM wb_size_snap WHERE nm IN (${ph})${where} ORDER BY day ASC`).all(...args);
+}
+
+// ── Кэш размерного спроса конкурента (MPStats sales/sizes) ──
+const mpSizeKey = (sku, d1, d2) => `${Number(sku)}|${d1 || ''}|${d2 || ''}`;
+/** Загрузить размеры карточки за окно, если снимок не старше maxAgeMs. null → надо запросить. */
+export function mpSizeSalesLoad(sku, d1, d2, maxAgeMs) {
+  const db = getDb(); if (!db) return null;
+  const r = db.prepare('SELECT json, fetchedAt FROM mp_size_sales WHERE key = ?').get(mpSizeKey(sku, d1, d2));
+  if (!r) return null;
+  if (maxAgeMs != null && r.fetchedAt && (Date.now() - Date.parse(r.fetchedAt) > maxAgeMs)) return null;
+  try { return JSON.parse(r.json); } catch { return null; }
+}
+/** Сохранить размеры карточки за окно (идемпотентно по ключу sku|d1|d2). */
+export function mpSizeSalesSave(sku, d1, d2, rows) {
+  const db = getDb(); if (!db) return false;
+  db.prepare('INSERT INTO mp_size_sales(key,json,fetchedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET json=excluded.json, fetchedAt=excluded.fetchedAt')
+    .run(mpSizeKey(sku, d1, d2), JSON.stringify(rows || []), new Date().toISOString());
+  return true;
 }
 
 // ── Память запросов «Ранга сезонности» ──

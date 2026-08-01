@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-sizes-2026-08-01b';
+const APP_BUILD = 'season-sizes-mpstats-2026-08-01c';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2202,49 +2202,49 @@ function seasonColorsBlock(rep) {
   </details>`;
 }
 
-// Размерный спрос из БЕСПЛАТНОГО снимка остатков WB (0 запросов MPStats). Покрытие = ядро
-// сетки; сток-микс — стартовая оценка; убыль (день-к-дню) — реальный спрос, копится в фоне.
+// Размерный спрос из ОФИЦИАЛЬНОГО API MPStats (sales/sizes) по ТОП-N конкурентов. Доля спроса
+// = продажи размера ÷ всех продаж; покрытие = доля карточек ТОПа, кто держит размер (→ ядро).
 function seasonSizesBlock(rep) {
   const sa = rep.sizeAnalysis;
   if (!sa) return '';
   const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
-  // Пустой снимок — не прячем блок, а объясняем причину (иначе «ничего не появилось»).
+  const dg = sa.diag || {};
+  const win = sa.window ? `${seEsc(sa.window.d1)}…${seEsc(sa.window.d2)}` : seEsc(dg.window || '');
+  // Пустой результат — не прячем блок, а объясняем причину (иначе «ничего не появилось»).
   if (!Array.isArray(sa.sizes) || !sa.sizes.length) {
-    const dg = sa.diag || {};
-    const st = (dg.statuses || []).join(', ') || '—';
     const err = (dg.errors || [])[0];
+    const q = dg.quota ? ` Остаток квоты MPStats: ${dg.quota.remaining} из ${dg.quota.available}.` : '';
     const why = {
-      'no-live-nm': 'Среди конкурентов нет карточек с продажами — не с кого снимать остатки.',
-      'fetch-throw': `Запрос остатков упал с ошибкой${err ? `: ${seEsc(err)}` : ''}.`,
-      'empty-stock': `WB вернул пустой ответ по остаткам (HTTP-статусы: ${seEsc(st)}, товаров в ответе: ${dg.products || 0}). Обычно это гео/бот-защита эндпоинта card.wb.ru — он закрыт для этого IP.`,
-    }[dg.reason] || 'Снимок остатков по размерам недоступен.';
+      'no-live-nm': 'Среди конкурентов нет карточек с продажами — не с кого брать размеры.',
+      'low-quota': `Не хватает квоты MPStats на запрос ТОП-${dg.topN || 10}.${q} Раздел не строился, чтобы не жечь лимит. Повтори завтра или подними тариф.`,
+      'fetch-throw': `Запрос к MPStats упал${err ? `: ${seEsc(err)}` : ''}.`,
+      'all-one-size': 'Все конкуренты ТОПа продаются как ONE SIZE — размерного сплита нет.',
+      'empty': 'MPStats не вернул продажи по размерам для этих карточек за период.',
+    }[dg.reason] || 'Размерный спрос недоступен.';
     return `<details class="se-comp" open>
-      <summary>📏 Размерная сетка и спрос <span class="mini">(снимок остатков недоступен)</span></summary>
+      <summary>📏 Размерная сетка и спрос <span class="mini">(нет данных)</span></summary>
       <div class="se-comp-body">
         <div class="mini">${why}</div>
-        <div class="mini">Диагностика: эндпоинт <code>${seEsc(dg.endpoint || 'card.wb.ru')}</code>, запрошено nmID: ${dg.requested || 0}, источник: ${seEsc(dg.source || '—')}, получено с остатком: ${dg.withStock || 0}.</div>
+        <div class="mini">Диагностика: источник MPStats sales/sizes, окно ${win || '—'}, ТОП-${dg.topN || 10}, запрошено ${dg.requested || 0}, из кэша ${dg.fromCache || 0}, живых вызовов ${dg.fetched || 0}${(dg.errors || []).length ? `, ошибки: ${seEsc((dg.errors || []).slice(0, 2).join('; '))}` : ''}.</div>
       </div>
     </details>`;
   }
-  const isDepl = sa.method === 'depletion';
-  const methodNote = isDepl
-    ? `Доля спроса — по <b>убыли остатков</b> (снимков: ${sa.intervals + 1}, продано ${fmt(sa.deplTotal)} шт за период). Это фактические продажи по размерам.`
-    : `Доля спроса — <b>стартовая оценка по остатку</b> (распроданные размеры занижены). Точную кривую даст <b>убыль</b> — копится автоматически при ежедневных перестроениях (нужно ≥2 снимка). Дальше — калибровка MPStats по кнопке.`;
   const rows = sa.sizes.map((s) => `<tr class="${s.core ? '' : 'se-seg-thin'}">
-      <td><b>${seEsc(s.size)}</b>${s.core ? '' : ' <span class="mini">крайний</span>'}</td>
+      <td><b>${seEsc(s.size)}</b>${s.origin ? ` <span class="mini">${seEsc(s.origin)}</span>` : ''}${s.core ? '' : ' <span class="mini">крайний</span>'}</td>
       <td class="num">${s.coverage}%</td>
       <td class="num">${s.carriers}</td>
-      <td class="num">${s.provShare}%</td>
-      <td class="num">${s.deplShare != null ? s.deplShare + '%' : '—'}</td>
+      <td class="num">${fmt(s.sales)}</td>
       <td class="num se-share-cell"><span class="se-share-bar" style="width:${Math.round((s.share || 0) * 2.2)}px"></span><b>${s.share}%</b></td>
     </tr>`).join('');
+  const oneNote = sa.oneSizeCount ? ` <span class="mini">(+${sa.oneSizeCount} ONE SIZE — вне сплита)</span>` : '';
+  const cacheNote = dg.fetched != null ? `Вызовов MPStats: ${dg.fetched} (из кэша ${dg.fromCache || 0}).` : '';
   return `<details class="se-comp" open>
-    <summary>📏 Размерная сетка и спрос <span class="mini">(снимок остатков WB, ${sa.nmCount} конкурентов, 0 запросов MPStats)</span></summary>
+    <summary>📏 Размерная сетка и спрос <span class="mini">(MPStats · продажи по размерам · ТОП-${sa.sizedCompetitors || sa.nmCount || ''} конкурентов)</span></summary>
     <div class="se-comp-body">
-      <div class="mini"><b>Покрытие</b> = взвешенная по продажам доля конкурентов, кто держит размер (высокое → <b>ядро</b> сетки; низкое → крайние размеры под мин.партию/настил). ${methodNote}</div>
-      <div class="mini">Ядро: <b>${(sa.grid.core || []).join(', ') || '—'}</b>${(sa.grid.extreme || []).length ? ` · крайние: ${sa.grid.extreme.join(', ')}` : ''}. Снимок за ${seEsc(sa.snapshotDay || '')}.</div>
+      <div class="mini"><b>Доля спроса</b> = продажи размера ÷ всех продаж ТОПа — рабочая кривая для пошива. <b>Покрытие</b> = доля карточек, кто держит размер (высокое → <b>ядро</b> сетки; низкое → крайние размеры под мин.партию/настил). Продажи — штук за окно ${win}.${oneNote}</div>
+      <div class="mini">Ядро: <b>${(sa.grid.core || []).join(', ') || '—'}</b>${(sa.grid.extreme || []).length ? ` · крайние: ${sa.grid.extreme.join(', ')}` : ''}. Всего продаж в выборке: ${fmt(sa.totalSales)}. ${cacheNote}</div>
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
-        <thead><tr><th>Размер</th><th class="num" title="Взвешенная доля конкурентов, кто держит размер">Покрытие</th><th class="num" title="Сколько конкурентов держат размер (штучно)">Конк.</th><th class="num" title="Стартовая оценка спроса по доле в остатке">Сток-микс</th><th class="num" title="Спрос по убыли остатков (реальные продажи)">Убыль</th><th class="num" title="Рабочая доля для плана производства">Доля спроса</th></tr></thead>
+        <thead><tr><th>Размер</th><th class="num" title="Доля карточек ТОПа, кто держит размер">Покрытие</th><th class="num" title="Сколько карточек держат размер (штучно)">Карт.</th><th class="num" title="Продажи размера за окно, штук">Продажи</th><th class="num" title="Рабочая доля для плана производства">Доля спроса</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>
