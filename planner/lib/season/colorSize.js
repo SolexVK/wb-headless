@@ -76,11 +76,12 @@ export function computeColorShares(items, { minCount = 3 } = {}) {
  * Общий тираж = сумма по цветам (больше forecast). Слабые цвета (сила ниже порога от
  * лучшего) уходят в сноску — не плодим микро-партии.
  *
- * Отбор в ассортимент: цвет входит в ядро, если его сила ≥ minRel ОТ лучшего ИЛИ он попадает
- * в топ-minColors по количеству. То есть minColors — гарантированный минимум расцветок для
- * ассортимента (добираем даже слабые), а порог лишь может РАСШИРИТЬ набор сверх минимума.
+ * Отбор в ассортимент: сперва НАДЁЖНЫЕ цвета (≥minCount карточек) — по силе, порог их
+ * фильтрует. Если надёжных меньше minColors — ДОБИРАЕМ до минимума «малоданными» цветами
+ * (<minCount карточек), но их силу ОГРАНИЧИВАЕМ сверху слабейшим надёжным цветом: у цвета
+ * с 1 карточкой Ср/арт может быть выше лидера случайно (выброс) — не даём ему всплыть.
  *
- * @param {Array} colors — из computeColorShares (нужны name, avgPerSku, skus, normShare).
+ * @param {Array} colors — из computeColorShares (нужны name, avgPerSku, skus, units, normShare).
  * @param {number} forecast — «Выкупы (прогноз)», объём лучшего цвета.
  * @param {{minRel?:number, minCount?:number, minColors?:number}} opts — minRel: порог силы
  *        относительно лучшего (0.4 = ≥40%); minCount: минимум карточек для доверия;
@@ -90,29 +91,33 @@ export function computeColorShares(items, { minCount = 3 } = {}) {
  */
 export function colorQuantities(colors, forecast, { minRel = 0.4, minCount = 3, minColors = 5 } = {}) {
   const F = Math.max(0, Number(forecast) || 0);
-  // Доверенные цвета: достаточно карточек и распознанный цвет (как для нормализ. доли).
-  const trusted = (colors || []).filter((c) => c && c.avgPerSku > 0 && (c.skus || 0) >= minCount && c.name !== 'не указан');
-  if (!trusted.length || !F) return { best: null, core: [], weak: [], grandTotal: 0, weakSummary: null, minRel, minColors };
-  const bestAvg = Math.max(...trusted.map((c) => c.avgPerSku));
-  const rows = trusted.map((c) => {
-    const rel = c.avgPerSku / bestAvg;                 // сила относительно лучшего (0..1)
-    return {
-      name: c.name,
-      avgPerSku: c.avgPerSku,
-      rel: Math.round(rel * 1000) / 10,                // % от лучшего
-      qty: Math.round(F * rel),                        // штук к пошиву
-      skus: c.skus,
-      normShare: c.normShare,
-    };
-  }).sort((a, b) => b.qty - a.qty);
-  // Ядро = максимум из: сколько проходят порог И сколько нужно для минимального ассортимента.
-  const passCount = rows.filter((r) => r.rel >= minRel * 100).length;
-  const keep = Math.min(rows.length, Math.max(passCount, Math.max(1, minColors || 1)));
-  const core = rows.slice(0, keep);
-  const weak = rows.slice(keep);
+  const named = (colors || []).filter((c) => c && c.avgPerSku > 0 && c.name !== 'не указан');
+  if (!named.length || !F) return { best: null, core: [], weak: [], grandTotal: 0, weakSummary: null, minRel, minColors };
+  const trusted = named.filter((c) => (c.skus || 0) >= minCount);
+  const lowData = named.filter((c) => (c.skus || 0) < minCount);
+  // Лидер и масштаб — по надёжным цветам (если надёжных нет вовсе, берём по всем).
+  const scalePool = trusted.length ? trusted : named;
+  const bestAvg = Math.max(...scalePool.map((c) => c.avgPerSku));
+  const mkRow = (c, low, capRel) => {
+    const rel = Math.min(c.avgPerSku / bestAvg, capRel);
+    return { name: c.name, avgPerSku: c.avgPerSku, rel: Math.round(rel * 1000) / 10, qty: Math.round(F * rel), skus: c.skus, units: c.units, normShare: c.normShare, lowData: !!low };
+  };
+  const trustedRows = trusted.map((c) => mkRow(c, false, Infinity)).sort((a, b) => b.qty - a.qty);
+  // Потолок силы для доборных = слабейший надёжный цвет (или порог, если надёжных нет).
+  const capRel = trustedRows.length ? (trustedRows[trustedRows.length - 1].rel / 100) : minRel;
+  // Доборные ранжируем по числу карточек (надёжнее), затем по объёму рынка — не по Ср/арт (шумит).
+  const lowRows = lowData.map((c) => mkRow(c, true, capRel))
+    .sort((a, b) => (b.skus - a.skus) || ((b.units || 0) - (a.units || 0)) || (b.qty - a.qty));
+
+  // Ядро: надёжные по порогу/минимуму, затем добор из малоданных до minColors.
+  const passCount = trustedRows.filter((r) => r.rel >= minRel * 100).length;
+  const ordered = [...trustedRows, ...lowRows];
+  const keep = Math.min(ordered.length, Math.max(passCount, Math.max(1, minColors || 1)));
+  const core = ordered.slice(0, keep);
+  const weak = ordered.slice(keep);
   const grandTotal = core.reduce((s, r) => s + r.qty, 0);
   const weakSummary = weak.length
     ? { count: weak.length, qty: weak.reduce((s, r) => s + r.qty, 0), names: weak.map((r) => r.name) }
     : null;
-  return { best: { name: rows[0].name, avgPerSku: rows[0].avgPerSku }, core, weak, grandTotal, weakSummary, minRel, minColors };
+  return { best: { name: trustedRows[0]?.name || core[0]?.name, avgPerSku: trustedRows[0]?.avgPerSku || core[0]?.avgPerSku }, core, weak, grandTotal, weakSummary, minRel, minColors };
 }
