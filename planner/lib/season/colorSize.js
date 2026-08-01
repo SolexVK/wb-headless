@@ -67,3 +67,45 @@ export function computeColorShares(items, { minCount = 3 } = {}) {
   })).sort((a, b) => (b.normShare ?? -1) - (a.normShare ?? -1) || b.units - a.units);
   return { colors, total: { units: Math.round(totalUnits), skus: totalSkus }, minCount };
 }
+
+/**
+ * Кол-во к пошиву по цветам. ВАЖНО: forecast — это объём ОДНОГО лучшего цвета (потолок
+ * карточки-чемпиона), а НЕ итог на все цвета. Поэтому лучший цвет = forecast (100%), а
+ * остальные масштабируются ОТНОСИТЕЛЬНО лучшего по силе продаж на 1 карточку (avgPerSku):
+ *   qty_i = forecast × avgPerSku_i / avgPerSku_best.
+ * Общий тираж = сумма по цветам (больше forecast). Слабые цвета (сила ниже порога от
+ * лучшего) уходят в сноску — не плодим микро-партии.
+ *
+ * @param {Array} colors — из computeColorShares (нужны name, avgPerSku, skus, normShare).
+ * @param {number} forecast — «Выкупы (прогноз)», объём лучшего цвета.
+ * @param {{minRel?:number, minCount?:number}} opts — minRel: порог силы относительно лучшего
+ *        (0.4 = ≥40% от лучшего); minCount: минимум карточек для доверия (совпадает с долями).
+ * @returns {{best:{name,avgPerSku}|null, core:Array, weak:Array, grandTotal:number,
+ *            weakSummary:{count,qty,names}|null, minRel:number}}
+ */
+export function colorQuantities(colors, forecast, { minRel = 0.4, minCount = 3 } = {}) {
+  const F = Math.max(0, Number(forecast) || 0);
+  // Доверенные цвета: достаточно карточек и распознанный цвет (как для нормализ. доли).
+  const trusted = (colors || []).filter((c) => c && c.avgPerSku > 0 && (c.skus || 0) >= minCount && c.name !== 'не указан');
+  if (!trusted.length || !F) return { best: null, core: [], weak: [], grandTotal: 0, weakSummary: null, minRel };
+  const bestAvg = Math.max(...trusted.map((c) => c.avgPerSku));
+  const best = trusted.find((c) => c.avgPerSku === bestAvg);
+  const rows = trusted.map((c) => {
+    const rel = c.avgPerSku / bestAvg;                 // сила относительно лучшего (0..1)
+    return {
+      name: c.name,
+      avgPerSku: c.avgPerSku,
+      rel: Math.round(rel * 1000) / 10,                // % от лучшего
+      qty: Math.round(F * rel),                        // штук к пошиву
+      skus: c.skus,
+      normShare: c.normShare,
+    };
+  }).sort((a, b) => b.qty - a.qty);
+  const core = rows.filter((r) => r.rel >= minRel * 100);
+  const weak = rows.filter((r) => r.rel < minRel * 100);
+  const grandTotal = core.reduce((s, r) => s + r.qty, 0);
+  const weakSummary = weak.length
+    ? { count: weak.length, qty: weak.reduce((s, r) => s + r.qty, 0), names: weak.map((r) => r.name) }
+    : null;
+  return { best: { name: best.name, avgPerSku: best.avgPerSku }, core, weak, grandTotal, weakSummary, minRel };
+}

@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-sizes-ranges-2026-08-01d';
+const APP_BUILD = 'season-colors-qty-2026-08-01e';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1341,6 +1341,7 @@ const seFmtRange = (a, b) => `${seFmtDate(a)} — ${seFmtDate(b)}`;
 let seasonBuildArticle = null;   // артикул в форме построения
 let seasonSelArticle = null;     // артикул в накопителе (просмотр)
 let seasonGran = 'day';          // день/неделя/месяц в таблице
+let seasonColorMinRel = 40;      // порог силы цвета относительно лучшего, % (слабее → в сноску)
 let seasonBuilding = false;
 let seasonPlansIndex = [];
 let seasonHasToken = null;
@@ -1939,7 +1940,7 @@ async function renderSeasonView(articleId) {
   const staleBanner = stale
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
-  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep) + seasonSizesBlock(rep) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep, p) + seasonSizesBlock(rep) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   installSeasonZoom();
   // Чекбоксы ТОП-15: отжатие → исключить конкурента и пересобрать план (дебаунс, кэш SERP).
   box.querySelectorAll('.se-comp-cb').forEach((cb) => {
@@ -2176,28 +2177,70 @@ function seasonSegmentsBlock(rep) {
   </details>`;
 }
 
-// Доли спроса по ЦВЕТАМ (нормализованные + сырые) из выборки конкурентов. Нормализованная
-// доля = среднее на 1 артикул (÷ Σсредних) — убирает перекос «белого больше выкладывают».
-function seasonColorsBlock(rep) {
+// Кол-во к пошиву по цветам. ЛОГИКА: «Выкупы (прогноз)» = объём ОДНОГО лучшего цвета, а не
+// итог на все. Поэтому лучший цвет = прогноз (100%), остальные масштабируются ОТНОСИТЕЛЬНО
+// лучшего по силе на 1 карточку (avgPerSku). Итог = сумма (больше прогноза). Зеркалит чистую
+// colorQuantities() из lib/season/colorSize.js (та же формула, проверена тестом).
+function seasonColorQuantities(colors, forecast, minRelPct, minCount) {
+  const F = Math.max(0, +forecast || 0);
+  const trusted = (colors || []).filter((c) => c && c.avgPerSku > 0 && (c.skus || 0) >= (minCount || 3) && c.name !== 'не указан');
+  if (!trusted.length || !F) return null;
+  const bestAvg = Math.max(...trusted.map((c) => c.avgPerSku));
+  const rows = trusted.map((c) => {
+    const rel = c.avgPerSku / bestAvg;
+    return { name: c.name, rel: Math.round(rel * 1000) / 10, qty: Math.round(F * rel), skus: c.skus, normShare: c.normShare };
+  }).sort((a, b) => b.qty - a.qty);
+  const core = rows.filter((r) => r.rel >= minRelPct);
+  const weak = rows.filter((r) => r.rel < minRelPct);
+  return {
+    best: rows[0], core, weak,
+    grandTotal: core.reduce((s, r) => s + r.qty, 0),
+    weakSummary: weak.length ? { count: weak.length, qty: weak.reduce((s, r) => s + r.qty, 0), names: weak.map((r) => r.name) } : null,
+  };
+}
+
+// Доли спроса по ЦВЕТАМ + количество к пошиву. Нормализованная доля = среднее на 1 артикул
+// (÷ Σсредних) — убирает перекос «белого больше выкладывают». Кол-во считается относительно
+// лучшего цвета (см. seasonColorQuantities).
+function seasonColorsBlock(rep, p) {
   const ca = rep.colorAnalysis;
   if (!ca || !Array.isArray(ca.colors) || !ca.colors.length) return '';
   const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
-  const rows = ca.colors.map((c) => `<tr class="${c.lowConfidence ? 'se-seg-thin' : ''}">
+  const forecast = Math.round(((p && p.forecastDaily) || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
+  const cq = seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount);
+  const qtyByName = new Map();
+  if (cq) { cq.core.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: true })); cq.weak.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: false })); }
+
+  const rows = ca.colors.map((c) => {
+    const q = qtyByName.get(c.name);
+    const qtyCell = q ? (q.core ? `<b>${fmt(q.qty)}</b>` : `<span class="mini">${fmt(q.qty)} · слабый</span>`) : '<span class="mini">—</span>';
+    const relCell = q ? `${q.rel}%` : '—';
+    return `<tr class="${(!q || q.core) ? '' : 'se-seg-thin'}">
       <td>${seEsc(c.name)}${c.lowConfidence ? ' <span class="mini">⚠ мало</span>' : ''}</td>
       <td class="num">${c.skus}</td>
-      <td class="num">${fmt(c.units)}</td>
-      <td class="num">${c.rawShare}%</td>
       <td class="num">${fmt(c.avgPerSku)}</td>
-      <td class="num se-share-cell">${c.normShare != null ? `<span class="se-share-bar" style="width:${Math.round(c.normShare * 2.2)}px"></span><b>${c.normShare}%</b>` : '—'}</td>
-    </tr>`).join('');
+      <td class="num">${relCell}</td>
+      <td class="num se-share-cell">${c.normShare != null ? `<span class="se-share-bar" style="width:${Math.round(c.normShare * 2.2)}px"></span>${c.normShare}%` : '—'}</td>
+      <td class="num">${qtyCell}</td>
+    </tr>`;
+  }).join('');
+
+  const head = cq
+    ? `<div class="mini"><b>Логика количества:</b> «Выкупы (прогноз)» = ${fmt(forecast)} шт — это объём <b>лучшего цвета</b> (${seEsc(cq.best.name)}), а не итог на все. Остальные цвета — меньше, <b>пропорционально силе относительно лучшего</b> (кол-во = прогноз × сила÷100). Цвета слабее <b>${seasonColorMinRel}%</b> от лучшего — в сноску (микро-партии не плодим).</div>`
+    : `<div class="mini">Нормализ. доля = средняя продажа на 1 карточку ÷ сумму средних — микс для пошива. Кол-во появится, когда есть прогноз и доверенные цвета.</div>`;
+  const totalLine = cq
+    ? `<div class="se-color-total"><b>Общий тираж (сумма ядровых цветов): ${fmt(cq.grandTotal)} шт</b> — это заметно больше прогноза, т.к. прогноз = только лучший цвет.${cq.weakSummary ? ` Слабые (${cq.weakSummary.count}): ${seEsc(cq.weakSummary.names.join(', '))} — ещё ~${fmt(cq.weakSummary.qty)} шт, если добавлять.` : ''}
+        <label class="mini" style="margin-left:8px">порог цвета: <input id="se-color-thr" type="number" min="5" max="100" step="5" value="${seasonColorMinRel}" style="width:56px" title="Цвета с силой ниже этого % от лучшего уходят в сноску"> %</label></div>`
+    : '';
   return `<details class="se-comp" open>
-    <summary>🎨 Доли спроса по цветам <span class="mini">(конкурентов ${ca.total.skus}, продаж ${fmt(ca.total.units)})</span></summary>
+    <summary>🎨 Цвета: доли спроса и кол-во к пошиву <span class="mini">(конкурентов ${ca.total.skus}, продаж ${fmt(ca.total.units)})</span></summary>
     <div class="se-comp-body">
-      <div class="mini"><b>Нормализ. доля</b> = средняя продажа на 1 карточку ÷ сумму средних — это твой микс для пошива (убирает перекос «белого просто больше выкладывают»). <b>Сырая доля</b> = объём рынка (для оценки насыщения). Цвета с &lt;${ca.minCount} артикулов — «мало данных».</div>
+      ${head}
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
-        <thead><tr><th>Цвет</th><th class="num" title="Артикулов конкурентов этого цвета">Тов.</th><th class="num">Продажи</th><th class="num" title="Доля объёма рынка">Сырая</th><th class="num" title="Средняя продажа на 1 карточку = продажи / количество">Ср/арт</th><th class="num" title="Нормализованная доля = ср/арт ÷ сумму ср/арт — микс для производства">Норм. доля</th></tr></thead>
+        <thead><tr><th>Цвет</th><th class="num" title="Артикулов конкурентов этого цвета">Тов.</th><th class="num" title="Средняя продажа на 1 карточку = продажи / количество">Ср/арт</th><th class="num" title="Сила относительно лучшего цвета = ср/арт ÷ ср/арт лучшего">К лучш.</th><th class="num" title="Нормализованная доля = ср/арт ÷ сумму ср/арт">Норм. доля</th><th class="num" title="Кол-во к пошиву = прогноз × силу относительно лучшего">Кол-во, шт</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
+      ${totalLine}
     </div>
   </details>`;
 }
@@ -2626,6 +2669,12 @@ function bindSeasonView(p) {
     const a = (state.articles || []).find((x) => x.id === seasonSelArticle);
     if (a) { a.buyoutPct = v; dirty = true; setStatus(); }
     renderSeasonView(seasonSelArticle); // пересчитать заказы в сводке и таблице
+  });
+  // Живой порог силы цвета: слабее X% от лучшего → в сноску. Пересобирать план не нужно.
+  const cthr = document.getElementById('se-color-thr');
+  cthr?.addEventListener('change', (e) => {
+    seasonColorMinRel = Math.max(5, Math.min(100, +e.target.value || 40));
+    renderSeasonView(seasonSelArticle);
   });
   document.querySelectorAll('.se-svg[data-chart]').forEach((svg) => attachSeasonTip(svg));
 }
