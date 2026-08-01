@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-colors-assort-2026-08-01f';
+const APP_BUILD = 'season-colors-fix-2026-08-01g';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1342,6 +1342,7 @@ let seasonBuildArticle = null;   // артикул в форме построе�
 let seasonSelArticle = null;     // артикул в накопителе (просмотр)
 let seasonGran = 'day';          // день/неделя/месяц в таблице
 let seasonColorMinRel = 40;      // порог силы цвета относительно лучшего, % (слабее → в сноску)
+let seasonColorMinCount = 5;     // минимум расцветок в ассортименте (добираем даже слабые)
 let seasonBuilding = false;
 let seasonPlansIndex = [];
 let seasonHasToken = null;
