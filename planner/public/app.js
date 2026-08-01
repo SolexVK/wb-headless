@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-sizes-2026-08-01a';
+const APP_BUILD = 'season-sizes-2026-08-01b';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2206,8 +2206,26 @@ function seasonColorsBlock(rep) {
 // сетки; сток-микс — стартовая оценка; убыль (день-к-дню) — реальный спрос, копится в фоне.
 function seasonSizesBlock(rep) {
   const sa = rep.sizeAnalysis;
-  if (!sa || !Array.isArray(sa.sizes) || !sa.sizes.length) return '';
+  if (!sa) return '';
   const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
+  // Пустой снимок — не прячем блок, а объясняем причину (иначе «ничего не появилось»).
+  if (!Array.isArray(sa.sizes) || !sa.sizes.length) {
+    const dg = sa.diag || {};
+    const st = (dg.statuses || []).join(', ') || '—';
+    const err = (dg.errors || [])[0];
+    const why = {
+      'no-live-nm': 'Среди конкурентов нет карточек с продажами — не с кого снимать остатки.',
+      'fetch-throw': `Запрос остатков упал с ошибкой${err ? `: ${seEsc(err)}` : ''}.`,
+      'empty-stock': `WB вернул пустой ответ по остаткам (HTTP-статусы: ${seEsc(st)}, товаров в ответе: ${dg.products || 0}). Обычно это гео/бот-защита эндпоинта card.wb.ru — он закрыт для этого IP.`,
+    }[dg.reason] || 'Снимок остатков по размерам недоступен.';
+    return `<details class="se-comp" open>
+      <summary>📏 Размерная сетка и спрос <span class="mini">(снимок остатков недоступен)</span></summary>
+      <div class="se-comp-body">
+        <div class="mini">${why}</div>
+        <div class="mini">Диагностика: эндпоинт <code>${seEsc(dg.endpoint || 'card.wb.ru')}</code>, запрошено nmID: ${dg.requested || 0}, источник: ${seEsc(dg.source || '—')}, получено с остатком: ${dg.withStock || 0}.</div>
+      </div>
+    </details>`;
+  }
   const isDepl = sa.method === 'depletion';
   const methodNote = isDepl
     ? `Доля спроса — по <b>убыли остатков</b> (снимков: ${sa.intervals + 1}, продано ${fmt(sa.deplTotal)} шт за период). Это фактические продажи по размерам.`

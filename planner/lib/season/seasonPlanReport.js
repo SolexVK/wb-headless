@@ -32,20 +32,23 @@ const lcName = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
 // Тихо возвращает null при офлайне/пустом ответе — раздел просто не покажется.
 async function gatherSizeCurve(perItemMeta, { day, topN = 60, enabled = true } = {}) {
   if (!enabled) return null;
+  const d = String(day || new Date().toISOString().slice(0, 10));
+  const diag = { endpoint: '', requested: 0, statuses: [], errors: [], products: 0, withStock: 0, reason: '' };
+  const empty = (reason) => ({ sizes: [], grid: { core: [], extreme: [] }, nmCount: diag.requested, snapshotDay: d, diag: { ...diag, reason } });
   const live = (perItemMeta || []).filter((m) => (m.unitsSoldLY || m.unitsSold || 0) > 0)
     .sort((a, b) => (b.unitsSoldLY || b.unitsSold || 0) - (a.unitsSoldLY || a.unitsSold || 0)).slice(0, topN);
   const nmIds = live.map((m) => Number(m.wb)).filter((n) => Number.isFinite(n) && n > 0);
-  if (!nmIds.length) return null;
+  if (!nmIds.length) return empty('no-live-nm');
   let stock;
-  try { stock = await fetchSizeStock(nmIds); } catch { return null; }
-  if (!stock || !stock.size) return null;
-  const d = String(day || new Date().toISOString().slice(0, 10));
+  try { stock = await fetchSizeStock(nmIds, diag); } catch (e) { diag.errors.push(String(e?.message || e).slice(0, 120)); return empty('fetch-throw'); }
+  if (!stock || !stock.size) return empty('empty-stock');
+  diag.withStock = stock.size;
   try { sizeSnapSave(stock, d); } catch { /* БД недоступна — не критично */ }
   let snapshots = [];
   try { snapshots = sizeSnapLoad(nmIds); } catch { snapshots = []; }
   const salesByNm = new Map(live.map((m) => [Number(m.wb), m.unitsSoldLY || m.unitsSold || 0]));
   const curve = computeSizeCurve(stock, salesByNm, snapshots);
-  return { ...curve, snapshotDay: d, nmCount: nmIds.length, withStock: stock.size };
+  return { ...curve, snapshotDay: d, nmCount: nmIds.length, withStock: stock.size, diag: { ...diag, reason: 'ok' } };
 }
 
 /**
