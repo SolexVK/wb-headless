@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-price-2026-08-01b';
+const APP_BUILD = 'season-price-2026-08-01c';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1494,9 +1494,9 @@ function seasonBuilderPanel() {
             </select>
           </div>
           <div class="field"><label title="Ручной коэффициент годового роста — перекрывает авто-расчёт. Напр. 1.25 = +25%/год, 0.9 = спад −10%/год. Пусто = считать автоматически по выбранному режиму. Полезно, если тренд ускоряется или замедляется.">Коэф. роста/год (ручной)</label><input id="se-growth-manual" type="number" step="0.05" min="0.5" max="3" value="${f.growthManual ?? ''}" placeholder="авто"></div>
-          <div class="field"><label title="Ценовой сегмент, в котором планируешь продавать. Выборка бьётся на 4 сегмента по квартилям медианной цены за год (адаптивно к нише). Выбор сегмента → объём, цена и ТОП-15 считаются по лидерам именно этого сегмента. «Авто» — весь диапазон. Таблица сегментов с выгодностью появится после построения.">Ценовой сегмент</label>
+          <div class="field"><label title="Ценовой сегмент, в котором планируешь продавать. Выборка бьётся на 4 сегмента по квартилям медианной цены за год (адаптивно к нише). Выбор сегмента → объём, цена и ТОП-15 считаются по лидерам именно этого сегмента и ПЕРЕОПРЕДЕЛЯЕТ окно от себестоимости. «Авто» → окно берётся от себестоимости×наценки (если заданы), иначе вся выборка.">Ценовой сегмент</label>
             <select id="se-segment">
-              <option value="auto"${['cheap','mid','high','premium'].includes(f.priceSegment) ? '' : ' selected'}>Авто — весь диапазон</option>
+              <option value="auto"${['cheap','mid','high','premium'].includes(f.priceSegment) ? '' : ' selected'}>Авто — от себестоимости / весь диапазон</option>
               <option value="cheap"${f.priceSegment === 'cheap' ? ' selected' : ''}>Дешёвый (нижние 25%)</option>
               <option value="mid"${f.priceSegment === 'mid' ? ' selected' : ''}>Средний (25–50%)</option>
               <option value="high"${f.priceSegment === 'high' ? ' selected' : ''}>Высокий (50–75%)</option>

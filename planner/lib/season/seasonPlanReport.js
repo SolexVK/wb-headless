@@ -829,13 +829,15 @@ export async function buildSeasonPlanReport({
     segmentsInfo = computePriceSegments(collected.perItemMeta, plan);
     const kSpp = 1 - Math.min(0.9, Math.max(0, (Number(plan.spp) || 0) / 100));
     const cost = Number(plan.cost) || 0, mLo = Number(plan.markupMin) || 0, mHi = Number(plan.markupMax) || 0;
+    // Приоритет: ЯВНО выбранный сегмент (Дешёвый/…/Премиум) переопределяет окно от
+    // себестоимости. «Авто» → окно от себестоимости (если задана), иначе вся выборка.
     let band = null, activeKey = null;
-    if (cost > 0 && mLo > 0 && mHi > 0) {
-      band = { lo: cost * Math.min(mLo, mHi) * kSpp, hi: cost * Math.max(mLo, mHi) * kSpp };
-      activeKey = 'cost';
-    } else if (segmentsInfo && plan.priceSegment && plan.priceSegment !== 'auto') {
+    if (segmentsInfo && plan.priceSegment && plan.priceSegment !== 'auto') {
       const b = segmentsInfo.bands.find((x) => x.key === plan.priceSegment);
       if (b && b.count > 0) { band = { lo: b.lo, hi: b.hi == null ? Infinity : b.hi }; activeKey = plan.priceSegment; }
+    } else if (cost > 0 && mLo > 0 && mHi > 0) {
+      band = { lo: cost * Math.min(mLo, mHi) * kSpp, hi: cost * Math.max(mLo, mHi) * kSpp };
+      activeKey = 'cost';
     }
     if (band && segmentsInfo) {
       const hi = band.hi == null ? Infinity : band.hi;
