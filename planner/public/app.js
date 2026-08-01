@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-colors-fill-2026-08-01h';
+const APP_BUILD = 'season-colors-pool-2026-08-01i';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2255,8 +2255,11 @@ function seasonColorsBlock(rep, p) {
         <label class="mini" style="margin-left:8px">цветов в ассортименте: <input id="se-color-count" type="number" min="1" max="20" step="1" value="${seasonColorMinCount}" style="width:52px" title="Гарантированный минимум расцветок — движок добирает даже слабые"></label>
         <label class="mini" style="margin-left:8px">порог силы: <input id="se-color-thr" type="number" min="5" max="100" step="5" value="${seasonColorMinRel}" style="width:52px" title="Цвета сильнее этого % от лучшего входят сверх минимума"> %</label></div>`
     : '';
+  const poolNote = ca.poolSize
+    ? `по <b>${ca.poolSize}</b> артикулам выдачи${ca.planSize && ca.poolSize > ca.planSize ? ` (план — по ТОП-${ca.planSize})` : ''}${ca.serpTotal ? ` из ${ca.serpTotal} найденных` : ''} · продаж ${fmt(ca.total.units)}`
+    : `конкурентов ${ca.total.skus}, продаж ${fmt(ca.total.units)}`;
   return `<details class="se-comp" open>
-    <summary>🎨 Цвета: доли спроса и кол-во к пошиву <span class="mini">(конкурентов ${ca.total.skus}, продаж ${fmt(ca.total.units)})</span></summary>
+    <summary>🎨 Цвета: доли спроса и кол-во к пошиву <span class="mini">(${poolNote})</span></summary>
     <div class="se-comp-body">
       ${head}
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">

@@ -251,7 +251,13 @@ export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, 
       return { date, sales: s, revenue: r, price: s > 0 ? r / s : it.price, balance: 0 };
     });
   }
-  return { periods: g.periods, items: all, total: g.total, fetched: g.total, kept: keptBeforeLimit, requests: g.requests, dailyLimit: g.dailyLimit, windowMonths: g.windowMonths };
+  // Пул для ДОЛЕЙ ПО ЦВЕТАМ: вся поведенческая выдача (кроме исключённых вручную), НЕ урезанная
+  // лимитом группы и не суженная строгим ключом в названии. Цвет+продажи уже собраны (0 сети).
+  // План (уровень/ранг) остаётся на строгом ТОП-N, а цвета считаем на максимуме артикулов.
+  const colorPool = g.items
+    .filter((it) => !excluded.has(Number(it.wb)))
+    .map((it) => ({ wb: it.wb, color: it.color, unitsSoldLY: it.salesLY || 0 }));
+  return { periods: g.periods, items: all, total: g.total, fetched: g.total, kept: keptBeforeLimit, requests: g.requests, dailyLimit: g.dailyLimit, windowMonths: g.windowMonths, colorPool, serpTotal: g.items.length };
 }
 
 /**
@@ -312,6 +318,7 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
     medianPrice, priceAnchor: medianPrice ? Math.round(medianPrice) : 0,
     deepMatch: false, cardsEnriched: 0, undetermined: [], structuralPool: all.fetched,
     dailyLimit: all.dailyLimit, source: 'serp',
+    colorPool: all.colorPool || null, serpTotal: all.serpTotal || 0, // расширенный пул для цветов
   };
 }
 
@@ -649,6 +656,9 @@ export async function collectFromCategory({
   // отсев по доле совпавших признаков НЕ применяем (иначе теряются релевантные с одним
   // совпадением). Сортировка по релевантности выше — только для порядка топ-выдачи.
   const keptBeforeLimit = items.length;
+  // Пул для ДОЛЕЙ ПО ЦВЕТАМ — весь релевантный набор ДО обрезки лимитом группы (цвет из
+  // обогащённых карточек уже есть, сети не нужно). План остаётся на ТОП-limit, цвета — на всех.
+  const colorPool = items.map((it) => ({ wb: it.wb, color: it.color, unitsSoldLY: it.sales }));
   if (limit && items.length > limit) items = items.slice(0, limit);
   L(`Итоговая выборка аналогов для плана: ${items.length}${keptBeforeLimit > items.length ? ` (из ${keptBeforeLimit} прошедших, ограничено размером группы ${limit})` : ''}.`);
 
@@ -700,6 +710,7 @@ export async function collectFromCategory({
     group: items.map(({ _raw, _card, _charText, _matchText, ...g }) => g),
     groupDaily,
     perItemMeta,
+    colorPool,
     attributesFound,
     total: Number.isFinite(total) ? total : raw.length,
     fetched: raw.length,
@@ -910,9 +921,14 @@ export async function buildSeasonPlanReport({
     : path ? { path, total: collected.total, fetched: collected.fetched, kept: collected.kept } : null;
 
   const { groupDaily, perItemMeta, dailyLimit } = collected;
-  // Доли спроса по цветам (нормализованные + сырые) из финальной выборки — для мини-инструмента
-  // «Размеры и цвета». Из уже собранных данных (color в serp), без доп. запросов.
-  const colorAnalysis = computeColorShares(perItemMeta);
+  // Доли спроса по цветам — на РАСШИРЕННОМ пуле (весь релевантный набор до обрезки лимитом
+  // группы), а не только на ТОП-N плана: больше артикулов → устойчивее доли. Данные (цвет+
+  // продажи) уже собраны, доп. сети нет. Fallback на perItemMeta, если пул пуст.
+  const colorPool = (collected.colorPool && collected.colorPool.length) ? collected.colorPool : perItemMeta;
+  const colorAnalysis = computeColorShares(colorPool);
+  colorAnalysis.poolSize = colorPool.length;         // сколько артикулов ушло в доли по цветам
+  colorAnalysis.planSize = perItemMeta.length;       // сколько в ТОП-N плана (для сравнения)
+  colorAnalysis.serpTotal = collected.serpTotal || 0; // вся выдача SERP (диагностика охвата)
   // Размерный спрос из MPStats sales/sizes по строгому ТОП-N конкурентов (cache-first, TTL,
   // квота-гард). Отключается plan.withSizes=false. Объект с diag даже при пустоте.
   const sizeAnalysis = await gatherSizeCurve(perItemMeta, {
