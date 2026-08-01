@@ -206,7 +206,7 @@ function buildEngineeredSeason(shape, cfg) {
     favorable: i >= rampDays && i < iSale && d.final >= 0.5 * peakF,
     kSales: round(d.relief, 4),
     plannedOrders: d.final,
-    price: round(cfg.meanPrice * (shape.priceIndex[d.k] || 1) * (cfg.priceAdj || 1), 0),
+    price: round(cfg.meanPrice * (shape.priceIndex[d.k] || 1) * (cfg.priceMultiplier || 1), 0),
     stock: d.ourStock, // НАШ плановый остаток на WB (пила поставок → к концу ≈ 0)
   }));
 
@@ -337,7 +337,7 @@ function buildAllSeasonYear(shape, cfg) {
     favorable: !!cfg.favorableMonth[Number(d.date.slice(5, 7))] && d.final >= 0.6 * peakF,
     kSales: round(d.relief, 4),
     plannedOrders: d.final,
-    price: round(cfg.meanPrice * (shape.priceIndex[d.k] || 1) * (cfg.priceAdj || 1), 0),
+    price: round(cfg.meanPrice * (shape.priceIndex[d.k] || 1) * (cfg.priceMultiplier || 1), 0),
     stock: d.ourStock,
     floor: floorAbs,
   }));
@@ -413,13 +413,17 @@ export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily
   const top3 = top3Daily > 0 ? top3Daily : baseDaily;
 
   const isAllSeason = opts.articleType === 'allseason';
+  // Множитель цены: цены год-к-году НЕ коррелируют с ростом продаж (могут и падать), поэтому
+  // авто-дрейф priceAdj к цене НЕ применяем — только исторический сезонный профиль × РУЧНОЙ
+  // множитель (по умолчанию 1.0). Измеренный дрейф остаётся в adjustments как подсказка.
+  const priceMultiplier = (opts.priceMultiplier != null && Number(opts.priceMultiplier) > 0) ? Number(opts.priceMultiplier) : 1;
   const eng = isAllSeason
     ? buildAllSeasonYear(shape, {
-        targetYear: year, asOf: opts.asOf, top3Daily: top3, volumeAdj, priceAdj, meanPrice,
+        targetYear: year, asOf: opts.asOf, top3Daily: top3, volumeAdj, priceMultiplier, meanPrice,
         seasonFrac: opts.seasonFrac, favorableMonth, deliveryBuffer: opts.deliveryBuffer,
       })
     : buildEngineeredSeason(shape, {
-        targetYear: year, asOf: opts.asOf, top3Daily: top3, volumeAdj, priceAdj, meanPrice,
+        targetYear: year, asOf: opts.asOf, top3Daily: top3, volumeAdj, priceMultiplier, meanPrice,
         rampDays: opts.rampDays, seasonFrac: opts.seasonFrac, favorableMonth,
       });
   const effectiveYear = eng.chosenYear || year; // движок мог сдвинуть год вперёд (сезон уже прошёл)
@@ -484,6 +488,7 @@ export function buildForecast({ history, recent60, prior60, baseDaily, top3Daily
     baseSource: opts.baseSource,
     phases,
     adjustments,
+    priceMultiplier,
     meanPrice,
     baseDaily: round(baseDaily, 2),
     favorable: { months: favMonths, share: round(favShare, 3), deficitScore: deficitScoreMap },

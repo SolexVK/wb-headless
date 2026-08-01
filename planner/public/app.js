@@ -4,7 +4,7 @@ import { unitParams, analyze } from './unitCalc.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-price-2026-08-01a';
+const APP_BUILD = 'season-price-2026-08-01b';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1509,6 +1509,7 @@ function seasonBuilderPanel() {
           </div>
           <div class="field"><label title="СПП — скидка постоянного покупателя (WB). Мост между твоей бухгалтерской ценой и ценой покупателя, которую показывает MPStats: цена_покупателя = бухгалтерская × (1 − СПП%). Задаётся вручную, у каждого товара своя. Напр. 20.">СПП, %</label><input id="se-spp" type="number" min="0" max="90" value="${f.spp ?? ''}" placeholder="напр. 20"></div>
           <div class="field"><label title="На сколько % подрезать цену ниже медианы сегмента (чтобы быть чуть дешевле конкурентов). 0 = по медиане. Напр. 10 = на 10% ниже.">Подрезать цену, %</label><input id="se-undercut" type="number" min="0" max="50" value="${f.priceUndercut ?? ''}" placeholder="0"></div>
+          <div class="field"><label title="Ручной множитель прогнозных ЦЕН по дням (не путать с ростом продаж — цены год-к-году не коррелируют с объёмом). 1.0 = историческая цена (медиана × сезонный профиль). Напр. 1.1 = поднять цены на 10%, 0.9 = снизить. Авто-дрейф цен не применяется — показан подсказкой.">Множитель цены</label><input id="se-price-mult" type="number" step="0.05" min="0.3" max="3" value="${f.priceMultiplier ?? ''}" placeholder="1.0"></div>
           <div class="field span2 se-opts">
             <label class="se-check"><input type="checkbox" id="se-oos"${f.oos !== false ? ' checked' : ''}> OOS-поправка</label>
             <label class="se-check"><input type="checkbox" id="se-weekly"${f.weekly !== false ? ' checked' : ''}> недельный профиль</label>
@@ -1581,7 +1582,7 @@ function collectSeasonForm() {
     priceSegment: (() => { const v = document.getElementById('se-segment')?.value; return ['cheap', 'mid', 'high', 'premium'].includes(v) ? v : 'auto'; })(),
     cost: v('se-cost'),
     markupMin: v('se-markup-min'), markupMax: v('se-markup-max'), spp: v('se-spp'),
-    priceUndercut: v('se-undercut'),
+    priceUndercut: v('se-undercut'), priceMultiplier: v('se-price-mult'),
     oos: document.getElementById('se-oos')?.checked !== false,
     weekly: document.getElementById('se-weekly')?.checked !== false,
   };
@@ -1846,7 +1847,7 @@ function bindSeasonBuilder() {
     set('se-limit', '60'); set('se-pmin', ''); set('se-pmax', ''); set('se-minsales', ''); set('se-minrev', '');
     set('se-year', String(new Date().getUTCFullYear()));
     set('se-growth-manual', ''); set('se-cost', ''); set('se-undercut', '');
-    set('se-markup-min', ''); set('se-markup-max', ''); set('se-spp', '');
+    set('se-markup-min', ''); set('se-markup-max', ''); set('se-spp', ''); set('se-price-mult', '');
     if (g('se-level')) g('se-level').value = 'top3';
     if (g('se-growth')) g('se-growth').value = 'cohort';
     if (g('se-segment')) g('se-segment').value = 'auto';
@@ -1874,7 +1875,7 @@ function bindSeasonBuilder() {
           limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, articleType: cfg.articleType,
           growthMode: cfg.growthMode, growthManual: cfg.growthManual,
           priceSegment: cfg.priceSegment, cost: cfg.cost, markupMin: cfg.markupMin, markupMax: cfg.markupMax, spp: cfg.spp,
-          priceUndercut: cfg.priceUndercut, oos: cfg.oos, weekly: cfg.weekly };
+          priceUndercut: cfg.priceUndercut, priceMultiplier: cfg.priceMultiplier, oos: cfg.oos, weekly: cfg.weekly };
         await recalc(true).catch(() => {});
       }
       // обновить остаток лимита после построения
@@ -2226,6 +2227,17 @@ function seasonPlanChecks(rep, p) {
 
 // Подпись к «Выкупам»: объём прибит к фактическим продажам ТОП-1/ТОП-3 финальной
 // выборки за аналогичный сезонный период прошлого года (форма кривой — синтетическая).
+// Подпись к «Цене»: цена = медиана продаж по штукам × сезонный профиль × ручной множитель.
+// Авто-дрейф цен год-к-году не применяется (показан подсказкой — можно учесть вручную).
+function seasonPriceBasis(p) {
+  const mult = (p.priceMultiplier != null) ? p.priceMultiplier : ((p.opts && p.opts.priceMultiplier) || 1);
+  const drift = p.adjustments && p.adjustments.priceAdj;
+  const anchor = p.priceInfo && p.priceInfo.anchor;
+  const base = `медиана по штукам${anchor ? ' ' + Math.round(anchor).toLocaleString('ru') + '₽' : ''} × сезонный профиль × множитель ${mult}`;
+  const hint = (drift && Math.abs(drift - 1) >= 0.05) ? ` · замеренный дрейф цен ×${drift} (не применён — крути «Множитель цены» вручную)` : '';
+  return base + hint;
+}
+
 function seasonVolumeBasis(p) {
   const st = p.levelInfo && p.levelInfo.seasonTargets;
   if (!st || !st.used) return 'MPStats «продажи» = выкупы · база для производства';
@@ -2260,7 +2272,7 @@ function seasonSummary(rep, p) {
       <div class="se-card"><div class="k">Ранг сезонности</div><div class="v">${rank.rank || '—'}</div><div class="mini">амплитуда p90/p50 = ${rank.amplitude ?? '—'}</div></div>
       <div class="se-card"><div class="k">Выкупы (прогноз), шт</div><div class="v good">${total.toLocaleString('ru')}</div><div class="mini">${seasonVolumeBasis(p)}</div></div>
       <div class="se-card"><div class="k">Заказы (оценка), шт</div><div class="v">${orders.toLocaleString('ru')}</div><div class="mini">выкупы ÷ выкуп: <input id="se-buyout" type="number" min="1" max="100" value="${buyout}" title="% выкупа"> %</div></div>
-      <div class="se-card"><div class="k">Цена, ₽</div><div class="v">${pmin ? pmin.toLocaleString('ru') + '–' + pmax.toLocaleString('ru') : '—'}</div><div class="mini">якорь: медиана ТОПов −10%</div></div>
+      <div class="se-card"><div class="k">Цена, ₽</div><div class="v">${pmin ? pmin.toLocaleString('ru') + '–' + pmax.toLocaleString('ru') : '—'}</div><div class="mini">${seasonPriceBasis(p)}</div></div>
       <div class="se-card"><div class="k">Благоприятные месяцы</div><div class="v">${favM || '—'}</div><div class="mini">спрос выше среднего, остатки ниже</div></div>
     </div>
     ${seasonModeNote(p)}

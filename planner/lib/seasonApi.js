@@ -129,6 +129,7 @@ export async function runForecast(cfg = {}) {
       markupMin: num(cfg.markupMin) > 0 ? num(cfg.markupMin) : null,
       markupMax: num(cfg.markupMax) > 0 ? num(cfg.markupMax) : null,
       spp: num(cfg.spp) > 0 ? num(cfg.spp) : 0,
+      priceMultiplier: num(cfg.priceMultiplier) > 0 ? num(cfg.priceMultiplier) : 1,
       priceUndercut: (num(cfg.priceUndercut) > 0) ? Math.min(0.5, num(cfg.priceUndercut) / 100) : 0,
       // «сегодня» = следующий день после конца истории (вчера) — прогноз строим вперёд от него
       asOf: ymd(new Date(Date.parse(hist.d2) + 86400000)) },
