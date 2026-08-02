@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'reconcile-plan-2026-08-02a';
+const APP_BUILD = 'colors-block-tidy-2026-08-02b';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2229,26 +2229,33 @@ function seasonColorsBlock(rep, p) {
   const bestName = cq ? cq.best.name : null;
   if (cq) { cq.core.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: true, lowData: r.lowData, efficient: r.efficient })); cq.weak.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: false, lowData: r.lowData, efficient: r.efficient })); }
 
-  // Сортируем строки как в расчёте (по объёму убыв.), чтобы лидер был сверху и подсвечен.
-  const ordered = cq
+  // Отображение — строго по «Доле объёма» убыв. (что просил пользователь). Значки ⚑ добор / ⚠ мало
+  // остаются на своих строках, но не ломают порядок: лидер (макс. доля) естественно оказывается сверху.
+  const ordered = (cq
     ? [...cq.core, ...cq.weak].map((r) => ca.colors.find((c) => c.name === r.name)).filter(Boolean)
       .concat(ca.colors.filter((c) => !qtyByName.has(c.name)))
-    : ca.colors;
+    : ca.colors.slice())
+    .slice().sort((x, y) => (y.rawShare || 0) - (x.rawShare || 0) || (y.units || 0) - (x.units || 0));
   const maxRaw = Math.max(1, ...ca.colors.map((c) => c.rawShare || 0)); // масштаб полоски доли объёма
+  // Ячейка «число + подпись»: число прижато к правому краю фикс-колонки, подпись (▲ эфф / ⚑ добор /
+  // · доп.) — в отдельной колонке справа. Так цифры Ср/арт и Кол-во стоят строго друг под другом,
+  // а надписи не смещают их влево (просьба пользователя по выравниванию).
+  const numCell = (val, note, title) => `<span class="numcell"><span class="nv">${val}</span><span class="nn"${title ? ` title="${title}"` : ''}>${note || ''}</span></span>`;
   const rows = ordered.map((c) => {
     const q = qtyByName.get(c.name);
     const isBest = c.name === bestName;
-    const qtyCell = q ? (q.core ? `<b>${fmt(q.qty)}</b>${q.lowData ? ' <span class="mini">⚑ добор</span>' : ''}` : `<span class="mini">${fmt(q.qty)} · доп.</span>`) : '<span class="mini">—</span>';
+    const qtyVal = q ? (q.core ? `<b>${fmt(q.qty)}</b>` : fmt(q.qty)) : '—';
+    const qtyNote = q ? (q.core ? (q.lowData ? '⚑ добор' : '') : '· доп.') : '';
     const cls = isBest ? 'se-color-best' : ((!q || q.core) ? '' : 'se-seg-thin');
-    const eff = q && q.efficient ? ' <span class="mini" title="Ср/арт выше, чем у лидера — цвет продаётся лучше на карточку при меньшем объёме: возможная недооценённая ниша">▲ эфф</span>' : '';
+    const effNote = q && q.efficient ? '▲ эфф' : '';
     const nameCell = `${isBest ? '★ <b>' : ''}${seEsc(c.name)}${isBest ? '</b> <span class="mini">лидер</span>' : ''}${c.lowConfidence ? ' <span class="mini">⚠ мало</span>' : ''}`;
     return `<tr class="${cls}"${isBest ? ' style="background:rgba(255,196,0,.16)"' : ''}>
       <td>${nameCell}</td>
       <td class="num">${c.skus}</td>
       <td class="num">${fmt(c.units)}</td>
       <td class="num se-share-cell"><span class="se-share-bar" style="width:${Math.round((c.rawShare || 0) / maxRaw * 90)}px"></span>${c.rawShare != null ? c.rawShare + '%' : '—'}</td>
-      <td class="num">${fmt(c.avgPerSku)}${eff}</td>
-      <td class="num">${qtyCell}</td>
+      <td class="num">${numCell(fmt(c.avgPerSku), effNote, effNote ? 'Ср/арт выше, чем у лидера — цвет продаётся лучше на карточку при меньшем объёме: возможная недооценённая ниша' : '')}</td>
+      <td class="num">${numCell(qtyVal, qtyNote)}</td>
     </tr>`;
   }).join('');
 
@@ -2268,7 +2275,7 @@ function seasonColorsBlock(rep, p) {
     <div class="se-comp-body">
       ${head}
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
-        <thead><tr><th>Цвет</th><th class="num" title="Артикулов конкурентов этого цвета">Тов.</th><th class="num" title="Суммарные продажи цвета за период (штук) — реальный спрос">Продажи</th><th class="num" title="Доля суммарного объёма продаж цвета от всех — база плана">Доля объёма</th><th class="num" title="Средняя продажа на 1 карточку (справочно); ▲ эфф = выше лидера">Ср/арт</th><th class="num" title="Кол-во к пошиву = прогноз × доля объёма относительно лидера">Кол-во, шт</th></tr></thead>
+        <thead><tr><th>Цвет</th><th class="num" title="Артикулов конкурентов этого цвета">Тов.</th><th class="num" title="Суммарные продажи цвета за период анализа (штук) — реальный спрос. Период определяется системой (лучший/заданный).">Продажи в период</th><th class="num" title="Доля суммарного объёма продаж цвета от всех — база плана">Доля объёма</th><th class="num" title="Средняя продажа на 1 карточку (справочно); ▲ эфф = выше лидера">Ср/арт</th><th class="num" title="Кол-во к пошиву = прогноз × доля объёма относительно лидера">Кол-во, шт</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
       ${totalLine}

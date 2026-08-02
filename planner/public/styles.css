@@ -588,6 +588,11 @@ html { overflow-x: hidden; }
 .se-seg-table td.se-seg-ok, .se-seg-table tr.se-seg-ok td:first-child { color: var(--ok, #16a34a); }
 .se-seg-table td.se-seg-thin, .se-seg-table tr.se-seg-thin td:first-child { color: var(--warn, #d97706); }
 .se-seg-table td.se-seg-loss, .se-seg-table tr.se-seg-loss td:first-child { color: var(--bad, #dc2626); }
+/* Ячейка «число + подпись»: число прижато к правому краю фикс-сетки, подпись — в колонке справа.
+   Цифры Ср/арт и Кол-во стоят строго друг под другом; ▲ эфф / ⚑ добор / · доп. не смещают их. */
+.numcell { display: grid; grid-template-columns: 1fr 62px; align-items: baseline; gap: 4px; }
+.numcell .nv { text-align: right; white-space: nowrap; }
+.numcell .nn { text-align: left; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; }
 /* Полоска нормализованной доли цвета (микс для пошива) */
 .se-share-cell { white-space: nowrap; }
 .se-share-bar { display: inline-block; height: 8px; min-width: 2px; background: var(--accent);
