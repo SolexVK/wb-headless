@@ -1,10 +1,12 @@
 // app.js — оболочка SPA: загрузка данных, вкладки, дашборд, формы, Гант.
 import { renderGantt } from './gantt.js';
 import { unitParams, analyze } from './unitCalc.js';
+import { reconcilePlan } from './reconcile.js';
+import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-colors-volume-2026-08-01k';
+const APP_BUILD = 'reconcile-plan-2026-08-02a';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1941,7 +1943,7 @@ async function renderSeasonView(articleId) {
   const staleBanner = stale
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
-  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep, p) + seasonSizesBlock(rep) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep, p) + seasonSizesBlock(rep) + seasonReconcileBlock(rep, p, articleId) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   installSeasonZoom();
   // Чекбоксы ТОП-15: отжатие → исключить конкурента и пересобрать план (дебаунс, кэш SERP).
   box.querySelectorAll('.se-comp-cb').forEach((cb) => {
@@ -1961,6 +1963,7 @@ async function renderSeasonView(articleId) {
     toast('Ключ вписан в конструктор — нажмите «Построить план»');
   }));
   bindSeasonView(p);
+  bindReconcile(rep, p, articleId); // Этап 3: слой примирения прогноз↔карточка → План по размерам
   // Пересборка в один клик прямо из баннера (тем же cfg, что сохранён у плана).
   if (canRebuild) {
     document.getElementById('se-rebuild')?.addEventListener('click', async (e) => {
@@ -2331,6 +2334,226 @@ function seasonSizesBlock(rep) {
       </table></div>
     </div>
   </details>`;
+}
+
+// ============ Этап 3: слой примирения прогноз ↔ карточка → «План по размерам» ============
+// Прогноз (Ранг сезонности) даёт кол-во по КАНОН-цветам × доли размеров-диапазонов. Карточка —
+// свои имена цветов и дискретный ряд. reconcilePlan() (public/reconcile.js) сводит их в матрицу
+// цвет×размер партии: авто-матч по канону/алиасам; ⚠ спорные и ➕ новые — на решение пользователю;
+// непокрытое — явно в «не размещено» (ноль потерь). Применение пишет НОВУЮ партию (существующие
+// не трогаются), учит алиасы (глобально) и привязки (пер-артикул), помечает новые цвета под ткань.
+
+// Интерактивное состояние панели предпросмотра (одно активное на артикул).
+let seasonReconcile = null; // { articleId, open, stageId, choices:{demand→цвет|'__new__'|'__skip__'}, newNames:{demand→строка} }
+
+// Вход движка из отчёта: кол-во по цветам (ядро ассортимента) + доли размеров (ядро сетки).
+function reconcileInputs(rep, p) {
+  const ca = rep.colorAnalysis, sa = rep.sizeAnalysis;
+  if (!ca || !Array.isArray(ca.colors) || !ca.colors.length) return null;
+  if (!sa || !Array.isArray(sa.sizes) || !sa.sizes.length) return null;
+  const forecast = Math.round(((p && p.forecastDaily) || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
+  const cq = seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount);
+  if (!cq) return null;
+  const core = sa.sizes.filter((s) => s.core);
+  return {
+    forecast,
+    colorRows: cq.core.map((r) => ({ name: r.name, qty: r.qty })),
+    sizeRows: (core.length ? core : sa.sizes).map((s) => ({ size: s.size, origin: s.origin, share: s.share })),
+  };
+}
+
+// Эффективная карточка с учётом решений пользователя — для предпросмотра И применения одинаково.
+function reconcileEffectiveArticle(article, choices, newNames) {
+  const colors = [...(article.colors || [])];
+  const colorMap = { ...(article.colorMap || {}) };
+  for (const [demand, choice] of Object.entries(choices || {})) {
+    if (!choice || choice === '__skip__') continue;
+    if (choice === '__new__') {
+      const nm = String((newNames && newNames[demand]) || demand).trim();
+      if (nm) { if (!colors.includes(nm)) colors.push(nm); colorMap[demand] = nm; }
+    } else if (colors.includes(choice)) colorMap[demand] = choice;
+  }
+  return { colors, sizes: article.sizes || [], colorMap };
+}
+
+// Прогнать движок в текущем состоянии решений. Возвращает { result, inp, article, eff } или null.
+function runReconcile(rep, p, articleId) {
+  const inp = reconcileInputs(rep, p);
+  const article = state.articles.find((x) => x.id === articleId);
+  if (!inp || !article) return null;
+  const sr = (seasonReconcile && seasonReconcile.articleId === articleId) ? seasonReconcile : { choices: {}, newNames: {} };
+  const eff = reconcileEffectiveArticle(article, sr.choices, sr.newNames);
+  const result = reconcilePlan(eff, inp.colorRows, inp.sizeRows, { aliases: (state.settings && state.settings.colorAliases) || {}, sizeSplit: 'equal' });
+  return { result, inp, article, eff };
+}
+
+// Блок-обёртка: кнопка + (если открыто) панель предпросмотра. Или объяснение, почему недоступно.
+function seasonReconcileBlock(rep, p, articleId) {
+  const article = state.articles.find((x) => x.id === articleId);
+  const inp = reconcileInputs(rep, p);
+  if (!article || !inp) {
+    const why = !article ? 'нет карточки артикула в «Данные»'
+      : (!(article.colors || []).length || !(article.sizes || []).length) ? 'в «Данные» не заданы цвета и/или размеры ряда'
+      : 'нет анализа цветов/размеров (построй план в Части 1)';
+    return `<details class="se-comp"><summary>🧩 План по размерам из прогноза <span class="mini">(недоступно)</span></summary>
+      <div class="se-comp-body"><div class="mini">Не могу собрать матрицу: ${why}.</div></div></details>`;
+  }
+  const open = seasonReconcile && seasonReconcile.articleId === articleId && seasonReconcile.open;
+  return `<details class="se-comp"${open ? ' open' : ''}>
+    <summary>🧩 План по размерам из прогноза <span class="mini">(цвет × размер → партия)</span></summary>
+    <div class="se-comp-body">
+      <div class="mini">Свести прогноз (кол-во по цветам × доли размеров) в матрицу партии по цветам и ряду карточки. Совпавшее — авто; спорное/новое — на твоё решение; непокрытое — явно «не размещено» (ничего не теряем). Ткань не трогаем: новым цветам поставим метку «заведи ткань».</div>
+      <div style="margin:8px 0"><button id="se-rec-open" class="btn">${open ? '↻ Обновить предпросмотр' : '→ Заполнить План по размерам'}</button></div>
+      <div id="se-reconcile">${open ? reconcilePanelHTML(rep, p, articleId) : ''}</div>
+    </div>
+  </details>`;
+}
+
+// HTML панели предпросмотра: матрица + секции цветов/размеров + «не размещено» + строка применения.
+function reconcilePanelHTML(rep, p, articleId) {
+  const r = runReconcile(rep, p, articleId);
+  if (!r) return '<div class="mini">Недостаточно данных для сведения.</div>';
+  const { result, eff, article } = r;
+  const sr = seasonReconcile;
+  const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
+  const artSizes = eff.sizes, artColors = eff.colors;
+
+  // — матрица цвет×размер (пустые строки скрыты)
+  const head = `<tr><th>Цвет \\ Размер</th>${artSizes.map((s) => `<th class="num">${seEsc(s)}</th>`).join('')}<th class="num">Σ</th></tr>`;
+  const body = artColors.map((col) => {
+    const row = result.matrix[col] || {};
+    const sum = artSizes.reduce((a, s) => a + (row[s] || 0), 0);
+    if (!sum) return '';
+    return `<tr><td><b>${seEsc(col)}</b></td>${artSizes.map((s) => `<td class="num">${row[s] ? fmt(row[s]) : '<span class="mini">·</span>'}</td>`).join('')}<td class="num"><b>${fmt(sum)}</b></td></tr>`;
+  }).join('');
+  const matrixTbl = `<div class="se-comp-scroll"><table class="se-comp-table se-seg-table"><thead>${head}</thead><tbody>${body || `<tr><td colspan="${artSizes.length + 2}" class="mini">пусто — сопоставь цвета ниже</td></tr>`}</tbody></table></div>`;
+
+  // — цвета: статус + управление
+  const colorRows = result.colors.map((c) => {
+    let ctrl;
+    if (c.status === 'matched') {
+      ctrl = `✅ <b>${seEsc(c.articleColor)}</b> <span class="mini">${c.explicit ? 'привязка' : 'авто'}</span>`;
+    } else {
+      const cur = (sr.choices || {})[c.demand] || (c.status === 'new' ? '__new__' : '');
+      const opts = [`<option value="__skip__"${cur === '__skip__' ? ' selected' : ''}>— пропустить —</option>`]
+        .concat((article.colors || []).map((ac) => `<option value="${seEsc(ac)}"${cur === ac ? ' selected' : ''}>→ ${seEsc(ac)}</option>`))
+        .concat(`<option value="__new__"${cur === '__new__' ? ' selected' : ''}>➕ создать новый цвет</option>`).join('');
+      const newNm = cur === '__new__' ? ` <input class="se-rec-newname" data-demand="${seEsc(c.demand)}" value="${seEsc((sr.newNames || {})[c.demand] || c.demand)}" style="width:130px" placeholder="имя цвета в карточке">` : '';
+      ctrl = `${c.status === 'ambiguous' ? '⚠️' : '➕'} <select class="se-rec-choice" data-demand="${seEsc(c.demand)}">${opts}</select>${newNm}`;
+    }
+    return `<tr><td><b>${seEsc(c.demand)}</b> <span class="mini">${fmt(c.qty)} шт</span></td><td>${ctrl}</td></tr>`;
+  }).join('');
+  const colorsTbl = `<table class="se-comp-table"><thead><tr><th>Цвет спроса</th><th>Куда в карточке</th></tr></thead><tbody>${colorRows}</tbody></table>`;
+
+  // — размеры: диапазон спроса → размеры ряда
+  const sizeRows = result.sizes.map((s) => `<tr><td><b>${seEsc(s.demand)}</b>${s.origin ? ` <span class="mini">${seEsc(s.origin)}</span>` : ''} <span class="mini">${s.share}%</span></td><td>${s.covered ? '→ ' + s.articleSizes.map(seEsc).join(', ') : '<span class="mini">⚠ нет в ряду → «не размещено»</span>'}</td></tr>`).join('');
+  const sizesTbl = `<table class="se-comp-table"><thead><tr><th>Размер спроса</th><th>Размеры ряда</th></tr></thead><tbody>${sizeRows}</tbody></table>`;
+
+  // — не размещено (явно, с причинами)
+  const un = result.unassigned;
+  const reasonRu = { 'new-color': 'новый цвет', 'ambiguous-color': 'спорный цвет', 'unmapped-size': 'размер вне ряда' };
+  const unItems = un.items.map((i) => `${seEsc(i.color)}${i.articleColor ? '→' + seEsc(i.articleColor) : ''}: <b>${fmt(i.qty)}</b> <span class="mini">(${reasonRu[i.reason] || i.reason})</span>`).join(' · ');
+  const unBox = `<div class="se-color-total"${un.total ? ' style="background:rgba(255,90,90,.12)"' : ''}><b>🧺 Не размещено: ${fmt(un.total)} шт</b>${un.total ? ' — ' + unItems : ' — всё разложено ✅'}</div>`;
+
+  // — применение: выбор этапа + кнопка
+  const stages = state.stages || [];
+  const defStage = sr.stageId || (stages[0] && stages[0].id) || '';
+  const stageOpts = stages.map((st, i) => `<option value="${st.id}"${st.id === defStage ? ' selected' : ''}>Этап ${i + 1} — ${seEsc(st.name)}</option>`).join('');
+  const newC = result.colors.filter((c) => (sr.choices || {})[c.demand] === '__new__').map((c) => (sr.newNames || {})[c.demand] || c.demand);
+  const fabWarn = newC.length ? `<div class="mini">➕ Новые цвета: <b>${newC.map(seEsc).join(', ')}</b> — после создания заведи им ткань (планшет/образец) в «Данные».</div>` : '';
+  const applyRow = `<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <label class="mini">В этап: <select id="se-rec-stage">${stageOpts}</select></label>
+    <button id="se-rec-apply" class="btn btn-primary"${result.totalPlanned ? '' : ' disabled'}>Применить в новую партию (${fmt(result.totalPlanned)} шт)</button>
+    <span class="mini">создастся новая партия — существующие не трогаются</span></div>${fabWarn}`;
+
+  return `${matrixTbl}
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
+      <div style="flex:1;min-width:260px"><div class="mini"><b>Цвета</b> (спрос → карточка)</div>${colorsTbl}</div>
+      <div style="flex:1;min-width:220px"><div class="mini"><b>Размеры</b> (диапазон → ряд, поровну)</div>${sizesTbl}</div>
+    </div>
+    ${unBox}${applyRow}`;
+}
+
+// Навесить события панели (вызывается и при первом рендере сезонки, и при ре-рендере панели).
+function bindReconcile(rep, p, articleId) {
+  const openBtn = document.getElementById('se-rec-open');
+  if (!openBtn) return;
+  openBtn.addEventListener('click', () => {
+    if (!seasonReconcile || seasonReconcile.articleId !== articleId) seasonReconcile = { articleId, choices: {}, newNames: {} };
+    seasonReconcile.open = true;
+    rerenderReconcile(rep, p, articleId);
+  });
+  bindReconcilePanel(rep, p, articleId);
+}
+
+function rerenderReconcile(rep, p, articleId) {
+  const host = document.getElementById('se-reconcile');
+  if (!host) return;
+  host.innerHTML = reconcilePanelHTML(rep, p, articleId);
+  const ob = document.getElementById('se-rec-open'); if (ob) ob.textContent = '↻ Обновить предпросмотр';
+  bindReconcilePanel(rep, p, articleId);
+}
+
+function bindReconcilePanel(rep, p, articleId) {
+  if (!seasonReconcile || seasonReconcile.articleId !== articleId) return;
+  document.querySelectorAll('.se-rec-choice').forEach((sel) => sel.addEventListener('change', () => {
+    seasonReconcile.choices[sel.dataset.demand] = sel.value;
+    rerenderReconcile(rep, p, articleId);
+  }));
+  document.querySelectorAll('.se-rec-newname').forEach((inp) => {
+    inp.addEventListener('input', () => { seasonReconcile.newNames[inp.dataset.demand] = inp.value; });
+    inp.addEventListener('change', () => rerenderReconcile(rep, p, articleId)); // пересобрать матрицу по Enter/blur
+  });
+  const stageSel = document.getElementById('se-rec-stage');
+  if (stageSel) stageSel.addEventListener('change', () => { seasonReconcile.stageId = stageSel.value; });
+  const applyBtn = document.getElementById('se-rec-apply');
+  if (applyBtn) applyBtn.addEventListener('click', () => applyReconcile(rep, p, articleId));
+}
+
+// Применить: создать новую партию с матрицей, выучить алиасы/привязки, завести новые цвета.
+async function applyReconcile(rep, p, articleId) {
+  const r = runReconcile(rep, p, articleId);
+  if (!r) return;
+  const { result, article } = r;
+  const stageId = seasonReconcile.stageId || (state.stages[0] && state.stages[0].id);
+  if (!stageId) { toast('Нет этапов для партии', true); return; }
+  if (!result.totalPlanned) { toast('Нечего размещать — сопоставь цвета', true); return; }
+  const aliases = (state.settings.colorAliases = state.settings.colorAliases || {});
+  const choices = seasonReconcile.choices || {}, newNames = seasonReconcile.newNames || {};
+  article.colorMap = article.colorMap || {};
+  article.fabricInfo = article.fabricInfo || {};
+  const createdColors = [];
+  for (const c of result.colors) {
+    if (c.status === 'matched' && !c.explicit) article.colorMap[c.demand] = c.articleColor; // зафиксировать авто-матч
+    const choice = choices[c.demand];
+    if (!choice || choice === '__skip__') continue;
+    if (choice === '__new__') {
+      const nm = String(newNames[c.demand] || c.demand).trim();
+      if (!nm) continue;
+      if (!article.colors.includes(nm)) { article.colors.push(nm); createdColors.push(nm); }
+      article.colorMap[c.demand] = nm;
+      if (!article.fabricInfo[nm]) article.fabricInfo[nm] = { plansheet: '', colorNo: '', image: '' }; // заготовка под ткань
+    } else if (article.colors.includes(choice)) {
+      article.colorMap[c.demand] = choice; // пер-артикул привязка
+      // глобальный синоним: словарь канонит выбранный цвет ИНАЧЕ, чем цвет спроса → выучить на будущее
+      if (canonColor(choice, aliases) !== c.demand) aliases[aliasKey(choice)] = c.demand;
+    }
+  }
+  // новая партия с матрицей (пустые цвета выкидываем)
+  const np = newPartia(articleId, stageId);
+  const mtx = JSON.parse(JSON.stringify(result.matrix));
+  for (const col of Object.keys(mtx)) if (Object.values(mtx[col]).reduce((a, v) => a + v, 0) <= 0) delete mtx[col];
+  np.planMatrix = mtx;
+  state.partias.push(np); recomputePartiaNumbers();
+  dirty = true;
+  try {
+    await recalc(true);
+    const un = result.unassigned.total;
+    toast(`Партия ${np.no} создана: ${result.totalPlanned.toLocaleString('ru')} шт${createdColors.length ? `, новых цветов ${createdColors.length} (заведи ткань)` : ''}${un ? `, не размещено ${un.toLocaleString('ru')} шт` : ''}`);
+    if (seasonReconcile) seasonReconcile.open = false;
+    matrixArticleId = articleId; matrixStageId = stageId; matrixPartiaId = np.id;
+    switchTab('matrix');
+  } catch (e) { toast('Ошибка сохранения: ' + e.message, true); }
 }
 
 // Блок «Характеристики выборки» — реальные Состав/Сезон/Крой с количеством из карточек

@@ -54,6 +54,10 @@ export function defaultSettings() {
     transferDays: 2,
     // правила настила (Фаза 2): ориентиры минимального кроя. Мягкие (предупреждают).
     nesting: { minSizeQty: 20, minColorQty: 400 },
+    // обученные синонимы цвета (Этап 3, слой примирения прогноз↔карточка):
+    // { aliasKey(строка цвета) → канон-цвет }. Глобальный словарь, копится по мере
+    // подтверждений пользователя. Расширяет COLOR_GROUPS частными случаями («небо»→голубой).
+    colorAliases: {},
   };
 }
 
@@ -187,6 +191,10 @@ export function normalizeState(input) {
   s.settings.transferDays = Math.max(0, Math.round(+s.settings.transferDays || 2));
   { const n = s.settings.nesting && typeof s.settings.nesting === 'object' ? s.settings.nesting : {};
     s.settings.nesting = { minSizeQty: Math.max(1, Math.round(+n.minSizeQty || 20)), minColorQty: Math.max(1, Math.round(+n.minColorQty || 400)) }; }
+  // словарь синонимов цвета: только пары строка→непустая-строка
+  { const ca = s.settings.colorAliases && typeof s.settings.colorAliases === 'object' ? s.settings.colorAliases : {};
+    const clean = {}; for (const [k, v] of Object.entries(ca)) if (k && typeof v === 'string' && v.trim()) clean[String(k)] = v.trim();
+    s.settings.colorAliases = clean; }
   s.unit = normalizeUnitGlobal(input.unit); // глобальные параметры ВБ/налогов (юнит-экономика)
   s.seasons = Array.isArray(input.seasons) && input.seasons.length ? input.seasons : base.seasons;
   s.stages = Array.isArray(input.stages) ? input.stages : base.stages;
@@ -234,6 +242,11 @@ export function normalizeState(input) {
     a.buyoutPct = (+a.buyoutPct > 0 && +a.buyoutPct <= 100) ? +a.buyoutPct : 40;
     a.colors = Array.isArray(a.colors) ? a.colors : [];
     a.sizes = Array.isArray(a.sizes) ? a.sizes : [];
+    // пер-артикул привязки цвета спроса → имя цвета карточки (Этап 3, слой примирения):
+    // { канон-цвет → имя из a.colors }. Хранится только для валидных цветов ряда.
+    { const cm = a.colorMap && typeof a.colorMap === 'object' ? a.colorMap : {};
+      const clean = {}; for (const [k, v] of Object.entries(cm)) if (k && a.colors.includes(v)) clean[String(k)] = v;
+      a.colorMap = clean; }
     // метаданные ткани по цвету: { цвет: { plansheet, colorNo, image(dataURL) } }
     a.fabricInfo = a.fabricInfo && typeof a.fabricInfo === 'object' ? a.fabricInfo : {};
     // конфиг фильтра аналогов для раздела «Ранг сезонности» (путь предмета, слова, ценовой коридор…)
