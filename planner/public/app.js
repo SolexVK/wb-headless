@@ -452,7 +452,8 @@ function renderTiming() {
         const { chunk, remainder } = splitMatrixClient(p.planMatrix, move, nestingRules());
         if (matrixSum(chunk) <= 0 || matrixSum(remainder) <= 0) { toast('Не удалось разделить (настил)', true); return; }
         save(() => {
-          const np = newPartia(p.articleId, p.stageId);
+          // осколок наследует срок/метку поставки исходной партии (чтобы дедлайн WB сохранился)
+          const np = newPartia(p.articleId, p.stageId, '', { deadline: p.deadline, deliveryTag: p.deliveryTag, origin: p.origin });
           np.planMatrix = chunk; np.workshopId = sp.dataset.rescueSplit;
           p.planMatrix = remainder;
           state.partias.push(np); recomputePartiaNumbers();
@@ -752,8 +753,12 @@ function articleStageMatrix(a, stageId) {
   return out;
 }
 function genPartiaIdClient() { return 'p_' + Math.random().toString(36).slice(2, 9); }
-function newPartia(articleId, stageId, workshopId = '') {
-  return { id: genPartiaIdClient(), no: 0, articleId, stageId, workshopId, planMatrix: {}, factMatrix: {}, status: 'plan', historical: false };
+function newPartia(articleId, stageId, workshopId = '', extra = {}) {
+  return {
+    id: genPartiaIdClient(), no: 0, articleId, stageId, workshopId,
+    planMatrix: {}, factMatrix: {}, status: 'plan', historical: false,
+    deadline: extra.deadline || '', deliveryTag: extra.deliveryTag || '', origin: extra.origin || 'manual',
+  };
 }
 // нумерация партий: у каждого цеха своя (1,2,3…); авто-партии — отдельная группа
 function recomputePartiaNumbers() {

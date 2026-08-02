@@ -114,7 +114,9 @@ export function buildSchedule(state) {
   const warnings = [];
   const cycles = [];
 
-  if (!state.stages.length || !state.workshops.length) {
+  // Раньше требовались этапы. Теперь партия-поставка живёт по своему deadline — этапы необязательны.
+  // Достаточно наличия цехов; если нет партий, конвейер просто вернёт пустой результат.
+  if (!state.workshops.length) {
     return { cycles, warnings, fabricOrders: aggregateFabric(cycles, state), generatedFor: [] };
   }
 
@@ -142,7 +144,8 @@ export function buildSchedule(state) {
     const stage = stageById[p.stageId];
     jobs.push({
       partia: p, article, units, stage,
-      deadline: stage ? stage.deadline : null,
+      // дедлайн партии-поставки — собственный (дата прихода на WB); иначе дедлайн этапа (legacy).
+      deadline: p.deadline || (stage ? stage.deadline : null),
       stageOrd: stageOrder[p.stageId] ?? 99,
       lockedWs: (p.workshopId && wsById[p.workshopId]) ? p.workshopId : null,
       done: false,
@@ -306,6 +309,7 @@ export function buildSchedule(state) {
       historical: !!job.partia.historical,
       stageId: job.partia.stageId,
       stageName: job.stage ? job.stage.name : '',
+      deliveryTag: job.partia.deliveryTag || '', // метка поставки (П1/П2/П3/подсорт) — если из прогноза
       articleId: job.article.id,
       articleName: job.article.name,
       workshopId: w.id,

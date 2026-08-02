@@ -327,13 +327,22 @@ function ensurePartias(s) {
       }
     }
   }
-  // выкинуть партии с несуществующими артикулом/этапом
-  s.partias = s.partias.filter((p) => articleIds.has(p.articleId) && stageIds.has(p.stageId));
+  // выкинуть партии с несуществующим артикулом. Этап больше НЕ обязателен: партия-поставка живёт
+  // по собственному deadline (дата прихода на WB). Оставляем партию, если у неё валидный этап
+  // ИЛИ задан собственный deadline (формат даты). Иначе — устаревшая привязка, выкидываем.
+  const validDeadline = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
+  s.partias = s.partias.filter((p) => articleIds.has(p.articleId) && (stageIds.has(p.stageId) || validDeadline(p.deadline)));
   // нормализация полей + чистка матриц от «осиротевших» цветов/размеров
   const artById = Object.fromEntries(s.articles.map((a) => [a.id, a]));
   for (const p of s.partias) {
     p.id = p.id || genPartiaId();
     p.workshopId = typeof p.workshopId === 'string' ? p.workshopId : '';
+    // Этап — теперь необязательная legacy-привязка. '' = партия живёт по собственному deadline.
+    p.stageId = stageIds.has(p.stageId) ? p.stageId : '';
+    // Поставка (Этап 3): собственная дата прихода на WB, метка и происхождение партии.
+    p.deadline = validDeadline(p.deadline) ? p.deadline : '';       // дата, к которой должна быть на WB
+    p.deliveryTag = typeof p.deliveryTag === 'string' ? p.deliveryTag : ''; // П1/П2/П3/подсорт·Окт
+    p.origin = p.origin === 'forecast' ? 'forecast' : 'manual';     // откуда партия: прогноз или ручная
     const a = artById[p.articleId];
     p.planMatrix = pruneMatrix(p.planMatrix, a);
     p.factMatrix = pruneMatrix(p.factMatrix, a);
@@ -350,13 +359,18 @@ function ensurePartias(s) {
 }
 
 // Нумерация партий: у КАЖДОГО цеха своя сквозная нумерация (1,2,3…).
-// Порядок внутри цеха — по этапам, затем по порядку добавления. Авто-партии
-// (без назначенного цеха) нумеруются в отдельной группе.
+// Порядок внутри цеха — по времени поставки (deadline), затем по этапу (legacy),
+// затем по порядку добавления. Авто-партии (без цеха) нумеруются отдельной группой.
 export function assignPartiaNumbers(partias, stages) {
   const stageOrder = {};
   stages.forEach((st, i) => { stageOrder[st.id] = i; });
+  // ключ времени: собственный deadline поставки, иначе дедлайн этапа, иначе «в конец».
+  const stageDl = {};
+  stages.forEach((st) => { stageDl[st.id] = st.deadline || ''; });
+  const timeKey = (p) => p.deadline || stageDl[p.stageId] || '9999-12-31';
   const indexed = partias.map((p, idx) => ({ p, idx }));
-  indexed.sort((A, B) => (stageOrder[A.p.stageId] ?? 99) - (stageOrder[B.p.stageId] ?? 99) || A.idx - B.idx);
+  indexed.sort((A, B) => timeKey(A.p).localeCompare(timeKey(B.p))
+    || (stageOrder[A.p.stageId] ?? 99) - (stageOrder[B.p.stageId] ?? 99) || A.idx - B.idx);
   const counters = {};
   for (const { p } of indexed) {
     const key = p.workshopId || '__auto__';
