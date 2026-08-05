@@ -20,6 +20,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
+// Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
+// (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
+const BACKEND_BUILD = 'deliveries-partias-2026-08-02g';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -374,9 +377,10 @@ app.get('/api/wb/logistics', requireView('unit'), async (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'planner' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'planner', backendBuild: BACKEND_BUILD }));
 
 app.listen(PORT, HOST, () => {
+  console.log(`[planner] backend build: ${BACKEND_BUILD}`);
   console.log(`[planner] слушает ${HOST}:${PORT}`);
   console.log(`[planner] локально: http://localhost:${PORT}`);
 });

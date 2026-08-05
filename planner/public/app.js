@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'apply-diagnostics-2026-08-02g';
+const APP_BUILD = 'backend-version-check-2026-08-02h';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -3910,6 +3910,18 @@ async function init() {
   });
 
   installReadonlyGuard();
+  // Проверка версии backend: если запущенный сервер держит старый код (не перезапущен после
+  // git pull), партии-поставки будут молча пропадать. Сверяем и предупреждаем баннером.
+  try {
+    const h = await api('/api/health');
+    console.log('[planner] backend build:', h.backendBuild || '(СТАРЫЙ — поле отсутствует, сервер не перезапущен)');
+    if (!h.backendBuild) { // старый сервер не знает про партии-поставки → они будут пропадать
+      const bar = document.createElement('div');
+      bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#dc2626;color:#fff;padding:8px 14px;font-size:13px;text-align:center';
+      bar.textContent = '⚠ Backend устарел (Node-сервер не перезапущен после обновления). Перезапусти процесс: npm start — иначе новые партии не сохранятся.';
+      document.body.appendChild(bar);
+    }
+  } catch { /* health недоступен — не критично */ }
   try {
     await loadPerms();
     applyAccessUI();
