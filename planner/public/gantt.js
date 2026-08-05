@@ -47,7 +47,10 @@ export function renderGantt(container, schedule, state, opts = {}) {
   // защита от «монстров»: если из-за битой мощности цеха партия уходит на годы,
   // не растягиваем всю шкалу — ограничиваем правый край горизонтом плана
   // (последний дедлайн + 60 дней). Такие блоки просто обрежутся по краю.
-  const deadlines = (state.stages || []).map((s) => s.deadline).filter(Boolean);
+  // горизонт учитывает и дедлайны этапов (legacy), и собственные дедлайны партий-поставок,
+  // иначе циклы поставок с датами за пределами этапов обрезались бы у правого края.
+  const deadlines = (state.stages || []).map((s) => s.deadline).filter(Boolean)
+    .concat((state.partias || []).map((p) => p.deadline).filter(Boolean));
   if (deadlines.length) {
     const latest = deadlines.reduce((m, d) => (parse(d) > parse(m) ? d : m), deadlines[0]);
     const cap = parse(latest) + 60 * MS;

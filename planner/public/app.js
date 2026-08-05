@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'plan-deliveries-workshops-2026-08-02e';
+const APP_BUILD = 'fix-delivery-date-drop-2026-08-02f';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2456,8 +2456,8 @@ function activeColors(a) {
 // не разбит на довозы. Берём только объём>0. Из объёмов используем ТОЛЬКО доли по времени (Разв.1-A).
 function reconcileDeliveries(p) {
   const dv = (p && Array.isArray(p.deliveries) ? p.deliveries : []).filter((d) => (+d.qty || 0) > 0);
-  if (dv.length) return dv.map((d) => ({ date: d.date || '', qty: Math.round(+d.qty || 0), tag: d.tag || '', title: d.title || '' }));
-  const end = (p && p.forecastPeriod && p.forecastPeriod.to) || '';
+  if (dv.length) return dv.map((d) => ({ date: String(d.date || '').slice(0, 10), qty: Math.round(+d.qty || 0), tag: d.tag || '', title: d.title || '' }));
+  const end = String((p && p.forecastPeriod && p.forecastPeriod.to) || '').slice(0, 10);
   return [{ date: end, qty: 1, tag: 'всё', title: 'вся партия одной поставкой' }];
 }
 
@@ -2680,8 +2680,9 @@ function bindReconcilePanel(rep, p, articleId) {
 // Применить: выучить привязки/алиасы, завести новые цвета, заархивировать лишние, затем создать
 // СЕРИЮ партий-поставок (доля времени × полный тираж), у каждой — своя дата прихода на WB.
 async function applyReconcile(rep, p, articleId) {
+ try {
   const r = runReconcile(rep, p, articleId);
-  if (!r) return;
+  if (!r) { toast('Не удалось собрать план (нет данных прогноза)', true); return; }
   const { result, article, choices } = r; // choices — с дефолтами (новые цвета создаются)
   if (!result.totalPlanned) { toast('Нечего размещать — сопоставь цвета', true); return; }
   const aliases = (state.settings.colorAliases = state.settings.colorAliases || {});
@@ -2723,24 +2724,27 @@ async function applyReconcile(rep, p, articleId) {
     const mtx = parts[i] || {};
     for (const col of Object.keys(mtx)) if (Object.values(mtx[col]).reduce((a, v) => a + v, 0) <= 0) delete mtx[col];
     if (!Object.keys(mtx).length) return; // пустую поставку не создаём
-    const np = newPartia(articleId, '', '', { deadline: d.date, deliveryTag: d.tag || ('П' + (i + 1)), origin: 'forecast' });
+    // дата на WB строго ГГГГ-ММ-ДД (иначе сервер отбраковывает партию без этапа); фолбэк — конец периода
+    const dl = String(d.date || '').slice(0, 10) || String((p && p.forecastPeriod && p.forecastPeriod.to) || '').slice(0, 10);
+    const np = newPartia(articleId, '', '', { deadline: dl, deliveryTag: d.tag || ('П' + (i + 1)), origin: 'forecast' });
     np.planMatrix = mtx;
     state.partias.push(np); made++; if (!firstId) firstId = np.id;
   });
+  if (!made) { toast('Не удалось сформировать партии (пустая матрица)', true); return; }
   recomputePartiaNumbers();
   dirty = true;
-  try {
-    await recalc(true);
-    const un = result.unassigned.total;
-    toast(`Создано партий-поставок: ${made} · ${result.totalPlanned.toLocaleString('ru')} шт`
-      + `${createdColors.length ? `, новых цветов ${createdColors.length} (заведи ткань)` : ''}`
-      + `${archived.length ? `, в архив ${archived.length}` : ''}`
-      + `${un ? `, не размещено ${un.toLocaleString('ru')} шт` : ''}`);
-    if (seasonReconcile) seasonReconcile.open = false;
-    // партии-поставки не привязаны к этапу — показываем результат на Ганте (полное управление и
-    // выбор цеха появятся на листе «План по размерам», шаг 4).
-    switchTab('gantt');
-  } catch (e) { toast('Ошибка сохранения: ' + e.message, true); }
+  await recalc(true);
+  const un = result.unassigned.total;
+  toast(`Создано партий-поставок: ${made} · ${result.totalPlanned.toLocaleString('ru')} шт`
+    + `${createdColors.length ? `, новых цветов ${createdColors.length} (заведи ткань)` : ''}`
+    + `${archived.length ? `, в архив ${archived.length}` : ''}`
+    + `${un ? `, не размещено ${un.toLocaleString('ru')} шт` : ''}`);
+  if (seasonReconcile) seasonReconcile.open = false;
+  // Переходим на «План по размерам» с выбранным артикулом и первой партией — там видны все
+  // партии-поставки (и распределение по цехам). На Ганте они появятся после «Сохранить план».
+  matrixArticleId = articleId; matrixPartiaId = firstId;
+  switchTab('matrix');
+ } catch (e) { toast('Ошибка применения: ' + (e && e.message || e), true); console.error('[applyReconcile]', e); }
 }
 
 // Блок «Характеристики выборки» — реальные Состав/Сезон/Крой с количеством из карточек

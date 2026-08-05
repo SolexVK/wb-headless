@@ -334,7 +334,7 @@ function ensurePartias(s) {
   // выкинуть партии с несуществующим артикулом. Этап больше НЕ обязателен: партия-поставка живёт
   // по собственному deadline (дата прихода на WB). Оставляем партию, если у неё валидный этап
   // ИЛИ задан собственный deadline (формат даты). Иначе — устаревшая привязка, выкидываем.
-  const validDeadline = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
+  const validDeadline = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '').slice(0, 10)); // терпим к ISO со временем
   s.partias = s.partias.filter((p) => articleIds.has(p.articleId) && (stageIds.has(p.stageId) || validDeadline(p.deadline)));
   // нормализация полей + чистка матриц от «осиротевших» цветов/размеров
   const artById = Object.fromEntries(s.articles.map((a) => [a.id, a]));
@@ -344,7 +344,8 @@ function ensurePartias(s) {
     // Этап — теперь необязательная legacy-привязка. '' = партия живёт по собственному deadline.
     p.stageId = stageIds.has(p.stageId) ? p.stageId : '';
     // Поставка (Этап 3): собственная дата прихода на WB, метка и происхождение партии.
-    p.deadline = validDeadline(p.deadline) ? p.deadline : '';       // дата, к которой должна быть на WB
+    // Терпим к ISO-датам со временем — берём первые 10 символов, затем валидируем.
+    { const d10 = String(p.deadline || '').slice(0, 10); p.deadline = validDeadline(d10) ? d10 : ''; } // дата на WB
     p.deliveryTag = typeof p.deliveryTag === 'string' ? p.deliveryTag : ''; // П1/П2/П3/подсорт·Окт
     p.origin = p.origin === 'forecast' ? 'forecast' : 'manual';     // откуда партия: прогноз или ручная
     const a = artById[p.articleId];
