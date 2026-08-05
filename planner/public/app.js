@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'colors-total-btnfx-2026-08-02d';
+const APP_BUILD = 'plan-deliveries-workshops-2026-08-02e';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -146,7 +146,7 @@ function switchTab(tab) {
 // ---------- сезоны (мультисезон) ----------
 let activeSeasonId = '';
 function seasonStages() { return activeSeasonId ? state.stages.filter((s) => s.seasonId === activeSeasonId) : state.stages.slice(); }
-function stageInSeason(stageId) { if (!activeSeasonId) return true; const st = state.stages.find((s) => s.id === stageId); return !!st && st.seasonId === activeSeasonId; }
+function stageInSeason(stageId) { if (!activeSeasonId) return true; if (!stageId) return true; const st = state.stages.find((s) => s.id === stageId); return !!st && st.seasonId === activeSeasonId; }
 function refreshSeasonFilter() {
   const sel = document.getElementById('season-filter');
   if (!sel) return;
@@ -213,9 +213,10 @@ function renderFact() {
     if (factFilterArticle && !artOpts.has(factFilterArticle)) { factFilterArticle = ''; changed = true; }
     if (factFilterWs && !wsOpts.has(factFilterWs)) { factFilterWs = ''; changed = true; }
   }
-  const stageOrder = {}; state.stages.forEach((s, i) => { stageOrder[s.id] = i; });
+  const stageOrder = {}, stageDl = {}; state.stages.forEach((s, i) => { stageOrder[s.id] = i; stageDl[s.id] = s.deadline || ''; });
+  const tKey = (p) => p.deadline || stageDl[p.stageId] || '9999-12-31';
   const parts = base.filter((p) => passStage(p) && passArticle(p) && passWs(p))
-    .sort((x, y) => (stageOrder[x.stageId] - stageOrder[y.stageId]) || (x.workshopId || '').localeCompare(y.workshopId || '') || x.no - y.no);
+    .sort((x, y) => tKey(x).localeCompare(tKey(y)) || (x.workshopId || '').localeCompare(y.workshopId || '') || x.no - y.no);
   const gIdx = (id) => state.stages.findIndex((z) => z.id === id) + 1;
   const stageList = seasonStages().filter((s) => stageOpts.has(s.id));
   const artList = articlesSorted().filter((a) => artOpts.has(a.id));
@@ -243,8 +244,11 @@ function renderFact() {
   factPartiaId = p.id;
   const a = state.articles.find((x) => x.id === p.articleId);
   const stage = state.stages.find((s) => s.id === p.stageId);
-  if (!a || !stage) { root.innerHTML = '<div class="panel"><div class="mini">Партия ссылается на удалённый артикул/этап.</div></div>'; return; }
-  const stIdx = state.stages.findIndex((s) => s.id === stage.id) + 1;
+  if (!a) { root.innerHTML = '<div class="panel"><div class="mini">Партия ссылается на удалённый артикул.</div></div>'; return; }
+  const stIdx = stage ? state.stages.findIndex((s) => s.id === stage.id) + 1 : 0;
+  // подпись периода: этап (legacy) или метка/срок поставки
+  const periodLbl = stage ? `Этап ${stIdx}${stage.salesMonths ? ' (' + stage.salesMonths + ')' : ''}`
+    : (p.deliveryTag ? `Поставка ${seEsc(p.deliveryTag)}` : 'Ручная') + (p.deadline ? ` · WB ${p.deadline.slice(8, 10)}.${p.deadline.slice(5, 7)}` : '');
   const ws = state.workshops.find((w) => w.id === p.workshopId);
   p.factMatrix = p.factMatrix || {};
   const F = p.factMatrix, PM = p.planMatrix || {};
@@ -269,7 +273,7 @@ function renderFact() {
         <button id="fact-copy" class="btn">Скопировать план → факт</button>
         <button id="fact-save" class="btn btn-primary">Сохранить факт</button>
       </div>
-      <div class="mini" style="margin-bottom:10px">Партия ${p.no} · <b>${a.id}</b> ${a.name} · Этап ${stIdx} ${stage.salesMonths ? '(' + stage.salesMonths + ')' : ''} · цех ${ws ? ws.name : 'авто'} · статус ${statusBadge(p.status)}. Введи фактически произведённое — оно уедет на склад WB (план остаётся для производства).</div>
+      <div class="mini" style="margin-bottom:10px">Партия ${p.no} · <b>${a.id}</b> ${a.name} · ${periodLbl} · цех ${ws ? ws.name : 'авто'} · статус ${statusBadge(p.status)}. Введи фактически произведённое — оно уедет на склад WB (план остаётся для производства).</div>
       <div class="fab-summary">
         <div><div class="k">План</div><div class="v">${planTotal.toLocaleString('ru')} шт</div></div>
         <div><div class="k">Факт</div><div class="v ${factTotal > 0 ? 'good' : ''}">${factTotal.toLocaleString('ru')} шт</div></div>
@@ -736,6 +740,64 @@ const PARTIA_STATUS_LIST = ['plan', 'cutting', 'sewing', 'done', 'shipped'];
 function partiasOf(articleId, stageId) {
   return (state.partias || []).filter((p) => p.articleId === articleId && p.stageId === stageId).sort((a, b) => a.no - b.no);
 }
+// Все партии артикула (любой этап/поставка) — по времени поставки (deadline), затем по номеру.
+function partiasOfArticle(articleId) {
+  return (state.partias || []).filter((p) => p.articleId === articleId)
+    .sort((a, b) => (a.deadline || '9999-12-31').localeCompare(b.deadline || '9999-12-31') || (a.no - b.no));
+}
+// Метка партии для выпадающих списков (поставка/этап/ручная + срок WB + цех + объём).
+function partiaLabel(p) {
+  const ws = p.workshopId ? (state.workshops.find((w) => w.id === p.workshopId)?.name || '') : 'авто';
+  const when = p.deliveryTag || (p.stageId ? (state.stages.find((s) => s.id === p.stageId)?.name || '') : 'ручная');
+  const dl = p.deadline ? ` · WB ${p.deadline.slice(8, 10)}.${p.deadline.slice(5, 7)}` : '';
+  return `Партия ${p.no} · ${when}${dl} · ${ws} · ${partiaPlanUnits(p)} шт`;
+}
+function roleRankClient(w) { return w.own ? 0 : (w.role === 'main' ? 1 : 2); }
+// Оценка рабочих дней от «сегодня» (или planningDate) до даты (6-дневка ≈ ×6/7).
+function workingDaysUntil(dateISO) {
+  if (!dateISO) return 60;
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(state.settings.planningDate) ? state.settings.planningDate : new Date().toISOString().slice(0, 10);
+  const days = Math.round((new Date(dateISO) - new Date(today)) / 86400000);
+  return Math.max(1, Math.round(days * 6 / 7));
+}
+// Распределить матрицу партии по цехам пропорционально мощности, чтобы уложиться в срок.
+// Свой цех — первым; добавляем цеха, пока суммарной мощности хватает. Настил соблюдается.
+// Возвращает [{workshopId, matrix}] (1..N).
+function distributeByCapacity(matrix, deadline) {
+  const total = matrixSum(matrix);
+  if (total <= 0) return [{ workshopId: '', matrix }];
+  const buffer = state.settings.riskBufferDays || 0;
+  const availDays = Math.max(1, workingDaysUntil(deadline) - buffer);
+  const ws = state.workshops.filter((w) => (w.capacities && w.capacities.sew) > 0)
+    .sort((a, b) => (roleRankClient(a) - roleRankClient(b)) || (b.capacities.sew - a.capacities.sew));
+  if (!ws.length) return [{ workshopId: '', matrix }];
+  const chosen = []; let cap = 0;
+  for (const w of ws) { chosen.push(w); cap += w.capacities.sew * availDays; if (cap >= total) break; }
+  if (chosen.length === 1) return [{ workshopId: chosen[0].id, matrix }];
+  const capSum = chosen.reduce((s, w) => s + w.capacities.sew, 0);
+  const out = []; let rem = JSON.parse(JSON.stringify(matrix));
+  for (let i = 0; i < chosen.length - 1; i++) {
+    const target = Math.round(total * chosen[i].capacities.sew / capSum);
+    const { chunk, remainder } = splitMatrixClient(rem, target, nestingRules());
+    if (matrixSum(chunk) > 0) out.push({ workshopId: chosen[i].id, matrix: chunk });
+    rem = remainder;
+    if (matrixSum(rem) <= 0) break;
+  }
+  if (matrixSum(rem) > 0) out.push({ workshopId: chosen[chosen.length - 1].id, matrix: rem });
+  return out;
+}
+// Применить распределение по мощностям к одной партии: первый кусок — в неё, остальные — новые
+// партии (наследуют срок/метку/происхождение). Возвращает число получившихся частей.
+function distributePartiaByCapacity(p, articleId) {
+  if (p.status !== 'plan' || matrixSum(p.planMatrix) < 2) return 0;
+  const pieces = distributeByCapacity(p.planMatrix, p.deadline);
+  p.planMatrix = pieces[0].matrix; p.workshopId = pieces[0].workshopId;
+  for (let i = 1; i < pieces.length; i++) {
+    const np = newPartia(articleId, p.stageId, pieces[i].workshopId, { deadline: p.deadline, deliveryTag: p.deliveryTag, origin: p.origin });
+    np.planMatrix = pieces[i].matrix; state.partias.push(np);
+  }
+  return pieces.length;
+}
 function partiaPlanUnits(p) { return sumMatrix(p.planMatrix); }
 function partiaFactUnits(p) { return sumMatrix(p.factMatrix); }
 function partiaEffMatrix(p) { return partiaFactUnits(p) > 0 ? p.factMatrix : (p.planMatrix || {}); }
@@ -815,37 +877,29 @@ function renderMatrix() {
   const root = document.getElementById('matrix');
   if (!state.articles.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет артикулов. Добавь их во вкладке «Данные».</div></div>'; return; }
   if (!matrixArticleId || !state.articles.find((a) => a.id === matrixArticleId)) matrixArticleId = state.articles[0].id;
-  const sStages = seasonStages();
-  if (!matrixStageId || !sStages.find((s) => s.id === matrixStageId)) matrixStageId = sStages[0]?.id;
-
   const a = state.articles.find((x) => x.id === matrixArticleId);
-  const stage = state.stages.find((s) => s.id === matrixStageId);
-  if (!stage) { root.innerHTML = '<div class="panel"><div class="mini">В выбранном сезоне нет этапов.</div></div>'; return; }
-  const stIdx = state.stages.findIndex((s) => s.id === stage.id) + 1;
-  const parts = partiasOf(a.id, stage.id);
+  const parts = partiasOfArticle(a.id); // все партии артикула (поставки + ручные + legacy-этапы)
   // выбранная партия
   let p = parts.find((x) => x.id === matrixPartiaId);
   if (!p) { p = parts[0] || null; matrixPartiaId = p ? p.id : null; }
 
   const controls = `
     <div class="matrix-controls">
-      <label>Этап (период):
-        <select id="mx-stage">${sStages.map((s) => `<option value="${s.id}"${s.id === stage.id ? ' selected' : ''}>Этап ${state.stages.findIndex((z) => z.id === s.id) + 1}${s.salesMonths ? ' · ' + s.salesMonths : ''}</option>`).join('')}</select>
-      </label>
       <label>Артикул:
         <select id="mx-article">${articlesSorted().map((x) => `<option value="${x.id}"${x.id === a.id ? ' selected' : ''}>${x.id} — ${x.name}</option>`).join('')}</select>
       </label>
       <label>Партия:
-        <select id="mx-partia">${parts.map((x) => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>Партия ${x.no}${x.workshopId ? ' · ' + (state.workshops.find((w) => w.id === x.workshopId)?.name || '') : ' · авто'} · ${partiaPlanUnits(x)} шт</option>`).join('') || '<option>нет партий</option>'}</select>
+        <select id="mx-partia">${parts.map((x) => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>${seEsc(partiaLabel(x))}</option>`).join('') || '<option>нет партий</option>'}</select>
       </label>
-      <button id="mx-add-partia" class="btn">＋ партия</button>
+      <button id="mx-add-partia" class="btn">＋ партия (ручная)</button>
+      ${parts.some((x) => x.status === 'plan') ? '<button id="mx-distribute-all" class="btn" title="Раздробить каждую партию этого артикула по цехам пропорционально мощности, чтобы уложиться в сроки">⚙ Распределить все по мощностям</button>' : ''}
     </div>`;
 
   if (!p) {
     root.innerHTML = `<div class="panel">${controls}
-      <div class="mini" style="margin:10px 0">На этот артикул и этап партий пока нет. Нажми <b>«＋ партия»</b>, чтобы создать план-заявку.</div></div>`;
-    bindMatrixControls(a, stage);
-    document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a, stage));
+      <div class="mini" style="margin:10px 0">На этот артикул партий пока нет. Заполни «🧩 План по размерам из прогноза» в разделе «Ранг сезонности» — оттуда перенесутся партии-поставки. Или нажми <b>«＋ партия (ручная)»</b> для срочной внеплановой партии.</div></div>`;
+    bindMatrixControls(a);
+    document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a));
     applyCollapsibles();
     return;
   }
@@ -860,13 +914,15 @@ function renderMatrix() {
     <div class="panel">
       ${controls}
       <div class="partia-bar">
-        <span class="partia-badge">Партия ${p.no}${p.workshopId ? '' : ' (авто)'}</span>
+        <span class="partia-badge">Партия ${p.no}${p.deliveryTag ? ' · ' + seEsc(p.deliveryTag) : ''}${p.origin === 'forecast' ? ' <span class="mini">из прогноза</span>' : ''}</span>
         <label>Цех:
           <select id="mx-ws"><option value="">Авто (распределит система)</option>
             ${state.workshops.map((w) => `<option value="${w.id}"${w.id === p.workshopId ? ' selected' : ''}>${w.name}${w.role === 'aux' ? ' (вспом.)' : ''}</option>`).join('')}
           </select>
         </label>
-        <button id="mx-split-partia" class="btn" title="Разделить партию на две по правилам настила (цвета целиком; при необходимости — по размерам ≥ мин)">✂ Разделить партию</button>
+        <label>Срок WB: <input type="date" id="mx-deadline" value="${p.deadline || ''}"></label>
+        <button id="mx-distribute" class="btn" title="Раздробить партию по цехам пропорционально мощности, чтобы уложиться в срок (свой цех первым; настил соблюдается)">⚙ Распределить по мощностям</button>
+        <button id="mx-split-partia" class="btn" title="Разделить партию на две по правилам настила (цвета целиком; при необходимости — по размерам ≥ мин)">✂ Разделить пополам</button>
         <button id="mx-del-partia" class="btn btn-danger">Удалить партию</button>
         <button id="mx-save" class="btn btn-primary">Сохранить план</button>
       </div>
@@ -881,17 +937,35 @@ function renderMatrix() {
       ${(() => { const v = nestingViolations(M, nestingRules()); if (!v.length) return ''; const r = nestingRules(); return `<div style="margin-top:10px;padding:8px 10px;border:1px solid #d97706;border-radius:8px;background:rgba(245,158,11,.1)"><div class="mini"><b>Настил (ориентир):</b> ${v.map((x) => x.kind === 'color' ? `цвет «${x.color}» ${x.qty} шт (&lt;${r.minColorQty})` : `${x.color}/${x.size} ${x.qty} шт (&lt;${r.minSizeQty})`).join(' · ')}. Мягкое предупреждение — можно продолжать.</div></div>`; })()}
     </div>`;
 
-  bindMatrixControls(a, stage);
+  bindMatrixControls(a);
   document.getElementById('mx-tpl-one').addEventListener('click', () => exportPlanXlsx([a.id], `plan_${a.id}.xlsx`));
   document.getElementById('mx-tpl-all').addEventListener('click', () => exportPlanXlsx(state.articles.map((x) => x.id), 'plan_all.xlsx'));
   document.getElementById('mx-import').addEventListener('change', (e) => importPlanAnyFile(e.target.files && e.target.files[0]));
   document.getElementById('mx-partia').addEventListener('change', (e) => { matrixPartiaId = e.target.value; renderMatrix(); });
-  document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a, stage));
+  document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a));
   document.getElementById('mx-ws').addEventListener('change', (e) => { p.workshopId = e.target.value; recomputePartiaNumbers(); dirty = true; renderMatrix(); });
+  document.getElementById('mx-deadline').addEventListener('change', (e) => { p.deadline = e.target.value || ''; recomputePartiaNumbers(); dirty = true; renderMatrix(); });
   document.getElementById('mx-del-partia').addEventListener('click', () => {
     if (!confirm(`Удалить Партию ${p.no}?`)) return;
     state.partias = state.partias.filter((x) => x.id !== p.id);
     matrixPartiaId = null; dirty = true; renderMatrix();
+  });
+  document.getElementById('mx-distribute').addEventListener('click', () => {
+    if (p.status !== 'plan') { toast('Распределять можно только не начатую партию (статус «план»)', true); return; }
+    if (matrixSum(p.planMatrix) < 2) { toast('Партия слишком мала для распределения', true); return; }
+    const n = distributePartiaByCapacity(p, a.id);
+    recomputePartiaNumbers(); dirty = true; renderMatrix();
+    toast(n <= 1 ? 'Одного цеха достаточно к сроку — закреплён. Нажми «Сохранить план».'
+      : `Распределено на ${n} цеха по мощностям. Нажми «Сохранить план».`);
+  });
+  const distAll = document.getElementById('mx-distribute-all');
+  if (distAll) distAll.addEventListener('click', () => {
+    let touched = 0, added = 0;
+    for (const pt of partiasOfArticle(a.id).filter((x) => x.status === 'plan' && matrixSum(x.planMatrix) >= 2)) {
+      const n = distributePartiaByCapacity(pt, a.id); if (n >= 1) touched++; if (n > 1) added += n - 1;
+    }
+    recomputePartiaNumbers(); dirty = true; renderMatrix();
+    toast(touched ? `Распределены все партии по мощностям (+${added} новых). Нажми «Сохранить план».` : 'Нечего распределять', !touched);
   });
   document.getElementById('mx-split-partia').addEventListener('click', () => {
     const total = matrixSum(p.planMatrix);
@@ -899,7 +973,8 @@ function renderMatrix() {
     if (p.status !== 'plan') { toast('Делить можно только не начатую партию (статус «план»)', true); return; }
     const { chunk, remainder } = splitMatrixClient(p.planMatrix, Math.round(total / 2), nestingRules());
     if (matrixSum(chunk) <= 0 || matrixSum(remainder) <= 0) { toast('Не удалось разделить (проверь настил-ориентиры)', true); return; }
-    const np = newPartia(a.id, stage.id);
+    // осколок наследует срок/метку поставки исходной партии
+    const np = newPartia(a.id, p.stageId, '', { deadline: p.deadline, deliveryTag: p.deliveryTag, origin: p.origin });
     np.planMatrix = chunk;
     p.planMatrix = remainder;
     state.partias.push(np);
@@ -1091,16 +1166,16 @@ function importPlanAnyFile(file) {
   reader.readAsArrayBuffer(file);
 }
 
-function bindMatrixControls(a, stage) {
-  document.getElementById('mx-stage').addEventListener('change', (e) => { matrixStageId = e.target.value; matrixPartiaId = null; renderMatrix(); });
+function bindMatrixControls(a) {
   document.getElementById('mx-article').addEventListener('change', (e) => { matrixArticleId = e.target.value; matrixPartiaId = null; renderMatrix(); });
 }
-function addPartia(a, stage) {
-  const parts = partiasOf(a.id, stage.id);
-  const np = newPartia(a.id, stage.id);
+function addPartia(a) {
+  // ручная срочная партия: без этапа, без даты (пользователь задаст «Срок WB» и цех в баре)
+  const np = newPartia(a.id, '', '', { origin: 'manual' });
   state.partias.push(np);
+  recomputePartiaNumbers();
   matrixPartiaId = np.id; dirty = true; renderMatrix();
-  toast(`Создана Партия ${np.no}`);
+  toast(`Создана ручная Партия ${np.no}`);
 }
 
 // строка с цехом(ами), отшивающими артикул на данном этапе
