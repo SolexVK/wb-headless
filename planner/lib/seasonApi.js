@@ -95,7 +95,20 @@ function buildFilter(f = {}) {
 export async function runForecast(cfg = {}) {
   if (!process.env.MPSTATS_TOKEN) throw new Error('MPSTATS_TOKEN не задан в окружении службы (planner/data/.env)');
   const hist = default2Years();
-  const targetYear = num(cfg.targetYear) || (Number(hist.d2.slice(0, 4)) + 1);
+  // «Сегодня» = день после конца истории. Старт плана продаж (asOf) — главный рычаг: движок строит
+  // прогноз вперёд от него, а год цели выводится из него же. Режимы:
+  //   manual → asOf = заданная дата; auto → asOf = сегодня + срок запуска (ткань+пошив+логистика),
+  //   чтобы успеть произвести; если сезон недостижим — сезонный движок сам сдвинет на след. окно.
+  const today = ymd(new Date(Date.parse(hist.d2) + 86400000));
+  const validDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '').slice(0, 10));
+  let asOf;
+  if (cfg.salesStartMode === 'manual' && validDate(cfg.salesStartDate)) {
+    asOf = String(cfg.salesStartDate).slice(0, 10);
+  } else {
+    const lead = Math.min(365, Math.max(0, num(cfg.launchLeadDays) || 60));
+    asOf = ymd(new Date(Date.parse(today) + lead * 86400000));
+  }
+  const targetYear = num(cfg.targetYear) || Number(asOf.slice(0, 4)); // год выводится из старта продаж
   const phrases = phraseList(cfg.phrases);
   if (!phrases.length) throw new Error('Не указаны целевые фразы (по ним ищем товары-аналоги)');
   const minusWords = list(cfg.minusWords) || list(cfg.exclude) || [];
@@ -132,8 +145,8 @@ export async function runForecast(cfg = {}) {
       priceMultiplier: num(cfg.priceMultiplier) > 0 ? num(cfg.priceMultiplier) : 1,
       priceUndercut: (num(cfg.priceUndercut) > 0) ? Math.min(0.5, num(cfg.priceUndercut) / 100) : 0,
       withSizes: cfg.withSizes !== false, // размерный спрос из бесплатного снимка WB (0 запросов MPStats)
-      // «сегодня» = следующий день после конца истории (вчера) — прогноз строим вперёд от него
-      asOf: ymd(new Date(Date.parse(hist.d2) + 86400000)) },
+      // старт плана продаж (с учётом срока запуска или заданный вручную) — прогноз строим вперёд от него
+      asOf },
   });
   // Учёт запросов MPStats (SERP: 1 на фразу) + память запроса.
   if (dbAvailable()) {

@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'matrix-buttons-filter-2026-08-02i';
+const APP_BUILD = 'sales-start-date-2026-08-02j';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1537,6 +1537,14 @@ function seasonBuilderPanel() {
   seasonBuildArticle = aid;
   const a = arts.find((x) => x.id === aid);
   const f = a.seasonFilter || {};
+  // срок запуска (дней) по умолчанию: ткань (лид+буфер) + логистика (середина) + пошив (номинал) + риск-буфер.
+  // Это минимальное время от «сегодня» до появления первой поставки на WB — старт продаж не раньше.
+  const st = state.settings || {};
+  const fab = st.fabric || {}, logi = st.logistics || {};
+  const leadDefault = Math.round((+fab.leadTimeDays || 21) + (+fab.bufferDays || 4)
+    + ((+logi.minDays || 10) + (+logi.maxDays || 15)) / 2 + 30 /* пошив первой партии */ + (+st.riskBufferDays || 2));
+  const startMode = f.salesStartMode === 'manual' ? 'manual' : 'auto';
+  const leadVal = (f.launchLeadDays != null && f.launchLeadDays !== '') ? f.launchLeadDays : leadDefault;
   const warn = seasonHasToken ? ''
     : '<div class="season-warn">⚠ Не задан <b>MPSTATS_TOKEN</b> в окружении службы — построение недоступно. Добавь токен в <code>planner/data/.env</code> на Mac mini (см. DEPLOY.md) и перезапусти службу.</div>';
   return `<div class="panel season-builder">
@@ -1582,7 +1590,16 @@ function seasonBuilderPanel() {
           <div class="field"><label>Мин. продаж/мес</label><input id="se-minsales" type="number" value="${f.minSales ?? ''}"></div>
           <div class="field"><label>Мин. выручка/мес, ₽</label><input id="se-minrev" type="number" value="${f.minRevenue ?? ''}"></div>
           <div class="field"><label title="Сколько верхних по выручке аналогов брать в основу ранга. До 200 на одну фразу; для 300 используйте 2 фразы (выборки объединятся).">Размер группы аналогов</label><input id="se-limit" type="number" value="${f.limit ?? 60}"></div>
-          <div class="field"><label title="Год, в котором планируете продавать. Если сезон в этом году ещё впереди — план строится на него; если сезон уже прошёл — движок сам сдвинет прогноз на следующий год (всегда вперёд от сегодня).">Целевой год продаж</label><input id="se-year" type="number" min="2024" max="2032" value="${f.targetYear || (new Date().getUTCFullYear())}"></div>
+          <div class="field span2"><label title="Дата, с которой начинается план продаж (год цели выводится из неё). Авто — система берёт реальную дату = сегодня + время запуска (ткань + пошив + логистика до WB), чтобы успеть произвести; если ближайший сезон уже недостижим, план сам сдвигается на следующее окно. Вручную — задаёшь свою дату старта.">Старт плана продаж</label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <select id="se-start-mode">
+                <option value="auto"${startMode === 'manual' ? '' : ' selected'}>Авто (с учётом запуска)</option>
+                <option value="manual"${startMode === 'manual' ? ' selected' : ''}>Вручную (дата)</option>
+              </select>
+              <span id="se-start-auto"${startMode === 'manual' ? ' style="display:none"' : ''}>срок запуска: <input id="se-lead" type="number" min="0" max="365" value="${leadVal}" style="width:60px"> дн <span class="mini" id="se-start-preview"></span></span>
+              <input id="se-start-date" type="date" value="${f.salesStartDate || ''}"${startMode === 'manual' ? '' : ' style="display:none"'}>
+            </div>
+          </div>
           <div class="field span2"><label title="ТОП-3 — средняя трёх сильнейших аналогов (реалистично). ТОП-1 — уровень самого сильного аналога по выручке в сегменте (амбициозно).">Целевой уровень (пик плана)</label>
             <select id="se-level">
               <option value="top3"${f.targetLevel === 'top1' ? '' : ' selected'}>ТОП-3 — средний (реалистично)</option>
@@ -1677,7 +1694,11 @@ function collectSeasonForm() {
     excludedIds: [...(seasonExcludedByArticle[seasonBuildArticle] || [])],
     gender: document.getElementById('se-gender')?.value || '',
     priceMin: v('se-pmin'), priceMax: v('se-pmax'), minSales: v('se-minsales'), minRevenue: v('se-minrev'),
-    limit: v('se-limit'), targetYear: v('se-year'),
+    limit: v('se-limit'),
+    // старт плана продаж (главный контрол; год цели выводится из него на бэкенде)
+    salesStartMode: (document.getElementById('se-start-mode')?.value === 'manual') ? 'manual' : 'auto',
+    salesStartDate: v('se-start-date'),
+    launchLeadDays: v('se-lead'),
     targetLevel: (document.getElementById('se-level')?.value === 'top1') ? 'top1' : 'top3',
     articleType: (document.getElementById('se-arttype')?.value === 'allseason') ? 'allseason' : 'seasonal',
     growthMode: (() => { const v = document.getElementById('se-growth')?.value; return ['cohort', 'market', 'none'].includes(v) ? v : 'cohort'; })(),
@@ -1945,10 +1966,35 @@ function bindSeasonBuilder() {
     const a = state.articles.find((x) => x.id === seasonBuildArticle); if (!a) return;
     a.seasonFilter = a.seasonFilter || {}; a.seasonFilter.articleType = g('se-arttype').value; unitPersist();
   });
+  // Старт плана продаж: переключение авто/вручную + живое превью расчётной даты (сегодня + запуск).
+  const seasonStartPersist = () => {
+    const a = state.articles.find((x) => x.id === seasonBuildArticle); if (!a) return;
+    a.seasonFilter = a.seasonFilter || {};
+    a.seasonFilter.salesStartMode = g('se-start-mode')?.value || 'auto';
+    a.seasonFilter.salesStartDate = g('se-start-date')?.value || '';
+    a.seasonFilter.launchLeadDays = g('se-lead')?.value || '';
+    unitPersist();
+  };
+  const updateStartPreview = () => {
+    const auto = (g('se-start-mode')?.value || 'auto') !== 'manual';
+    if (g('se-start-auto')) g('se-start-auto').style.display = auto ? '' : 'none';
+    if (g('se-start-date')) g('se-start-date').style.display = auto ? 'none' : '';
+    const prev = g('se-start-preview');
+    if (prev && auto) {
+      const lead = Math.max(0, Math.round(+g('se-lead')?.value || 0));
+      const d = new Date(Date.now() + lead * 86400000);
+      prev.textContent = `→ старт ≈ ${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+    }
+  };
+  g('se-start-mode')?.addEventListener('change', () => { updateStartPreview(); seasonStartPersist(); });
+  g('se-lead')?.addEventListener('input', () => { updateStartPreview(); seasonStartPersist(); });
+  g('se-start-date')?.addEventListener('input', seasonStartPersist);
+  updateStartPreview();
   g('se-filter-reset')?.addEventListener('click', () => {
     const set = (id, val) => { const el = g(id); if (el) el.value = val; };
     set('se-limit', '60'); set('se-pmin', ''); set('se-pmax', ''); set('se-minsales', ''); set('se-minrev', '');
-    set('se-year', String(new Date().getUTCFullYear()));
+    if (g('se-start-mode')) g('se-start-mode').value = 'auto';
+    set('se-lead', String(leadDefault)); set('se-start-date', '');
     set('se-growth-manual', ''); set('se-cost', ''); set('se-undercut', '');
     set('se-markup-min', ''); set('se-markup-max', ''); set('se-spp', ''); set('se-price-mult', '');
     if (g('se-level')) g('se-level').value = 'top3';
@@ -1975,7 +2021,8 @@ function bindSeasonBuilder() {
           phrases: g('se-phrases')?.value || '', minusWords: cfg.minusWords, nicheWords: cfg.nicheWords,
           approvedIds: cfg.approvedIds, excludedIds: cfg.excludedIds, gender: cfg.gender,
           priceMin: cfg.priceMin, priceMax: cfg.priceMax, minSales: cfg.minSales, minRevenue: cfg.minRevenue,
-          limit: cfg.limit, targetYear: cfg.targetYear, targetLevel: cfg.targetLevel, articleType: cfg.articleType,
+          limit: cfg.limit, salesStartMode: cfg.salesStartMode, salesStartDate: cfg.salesStartDate, launchLeadDays: cfg.launchLeadDays,
+          targetLevel: cfg.targetLevel, articleType: cfg.articleType,
           growthMode: cfg.growthMode, growthManual: cfg.growthManual,
           priceSegment: cfg.priceSegment, cost: cfg.cost, markupMin: cfg.markupMin, markupMax: cfg.markupMax, spp: cfg.spp,
           priceUndercut: cfg.priceUndercut, priceMultiplier: cfg.priceMultiplier, oos: cfg.oos, weekly: cfg.weekly };
@@ -2878,10 +2925,25 @@ function seasonSummary(rep, p) {
       <div class="se-card"><div class="k">Цена, ₽</div><div class="v">${pmin ? pmin.toLocaleString('ru') + '–' + pmax.toLocaleString('ru') : '—'}</div><div class="mini">${seasonPriceBasis(p)}</div></div>
       <div class="se-card"><div class="k">Благоприятные месяцы</div><div class="v">${favM || '—'}</div><div class="mini">спрос выше среднего, остатки ниже</div></div>
     </div>
+    ${seasonStartNote(p)}
     ${seasonModeNote(p)}
     ${seasonLevelNote(p)}
     <div class="mini">Группа-аналогов: ${rep.itemsWithData ?? '—'} из ${rep.groupSize ?? '—'} · сбор: ${rep.method === 'category-bulk' ? 'одним запросом по категории' : rep.method === 'per-sku' ? 'по каждому товару' : (rep.method || '—')} (${rep.requests ?? '—'} обращ. к MPStats) · построено ${gen}</div>
   </div>`;
+}
+
+// Баннер старта плана продаж: дата, запас от «сегодня», и предупреждение о сдвиге сезона.
+function seasonStartNote(p) {
+  const startISO = (p.forecastPeriod && p.forecastPeriod.from) || '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startISO)) return '';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const start = new Date(startISO + 'T00:00:00');
+  const days = Math.round((start - today) / 86400000);
+  const df = `${startISO.slice(8, 10)}.${startISO.slice(5, 7)}.${startISO.slice(0, 4)}`;
+  const shifted = p.mode !== 'allseason' && start.getFullYear() > today.getFullYear();
+  return `<div class="mini se-mode-note">🚀 Старт плана продаж: <b>${df}</b>${days > 0 ? ` (через ${days} дн — с запасом на запуск: ткань + пошив + логистика)` : ''}.`
+    + `${shifted ? ` <span style="color:#d97706">В сезон текущего года производство не успевает — план сдвинут на ${start.getFullYear()}.</span>` : ''}`
+    + ` Производство планируется назад от первой поставки на WB.</div>`;
 }
 
 // Бейдж режима плана + мини-сезоны (для круглогодичного).
