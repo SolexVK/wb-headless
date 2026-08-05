@@ -88,6 +88,12 @@ input, select { font: inherit; }
 .btn:hover { border-color: var(--accent); }
 .btn:active { transform: translateY(1px); }
 .btn.is-loading { opacity: 0.75; cursor: progress; }
+/* заметная кнопка распределения по цехам (акцент, отличный от primary «Сохранить») */
+.btn-accent { background: var(--accent-2, #16a34a); border-color: var(--accent-2, #16a34a); color: #fff; font-weight: 600; }
+.btn-accent:hover { filter: brightness(1.08); }
+/* неприметная второстепенная кнопка (ручное разрезание) */
+.btn-subtle { background: transparent; border-color: var(--line); color: var(--muted); font-size: 12px; padding: 5px 9px; }
+.btn-subtle:hover { color: var(--text); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-icon { padding: 6px 10px; line-height: 1; }
 .season-pick { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }

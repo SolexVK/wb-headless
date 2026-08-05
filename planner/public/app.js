@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'backend-version-check-2026-08-02h';
+const APP_BUILD = 'matrix-buttons-filter-2026-08-02i';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -837,6 +837,7 @@ function recomputePartiaNumbers() {
 }
 
 let matrixStageId = null, matrixArticleId = null, matrixPartiaId = null;
+let matrixWsFilter = ''; // фильтр списка партий по цеху ('' = все, '__auto__' = не распределённые)
 
 // ── настил (клиентские хелперы, зеркало lib/nesting.js) ──
 function nestingRules() { const n = state.settings.nesting || {}; return { minSizeQty: +n.minSizeQty || 20, minColorQty: +n.minColorQty || 400 }; }
@@ -878,21 +879,34 @@ function renderMatrix() {
   if (!state.articles.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет артикулов. Добавь их во вкладке «Данные».</div></div>'; return; }
   if (!matrixArticleId || !state.articles.find((a) => a.id === matrixArticleId)) matrixArticleId = state.articles[0].id;
   const a = state.articles.find((x) => x.id === matrixArticleId);
-  const parts = partiasOfArticle(a.id); // все партии артикула (поставки + ручные + legacy-этапы)
-  // выбранная партия
+  const allParts = partiasOfArticle(a.id); // все партии артикула (поставки + ручные + legacy-этапы)
+  // фильтр по цеху: '' = все, '__auto__' = не распределённые (без цеха), иначе — id цеха
+  const parts = matrixWsFilter
+    ? allParts.filter((x) => (matrixWsFilter === '__auto__' ? !x.workshopId : x.workshopId === matrixWsFilter))
+    : allParts;
+  // выбранная партия (в пределах фильтра)
   let p = parts.find((x) => x.id === matrixPartiaId);
   if (!p) { p = parts[0] || null; matrixPartiaId = p ? p.id : null; }
+  // какие цеха реально встречаются среди партий артикула (для наполнения фильтра)
+  const usedWs = new Set(allParts.map((x) => x.workshopId || '__auto__'));
 
   const controls = `
     <div class="matrix-controls">
       <label>Артикул:
         <select id="mx-article">${articlesSorted().map((x) => `<option value="${x.id}"${x.id === a.id ? ' selected' : ''}>${x.id} — ${x.name}</option>`).join('')}</select>
       </label>
+      <label>Цех:
+        <select id="mx-ws-filter"><option value=""${matrixWsFilter === '' ? ' selected' : ''}>все цеха</option>
+          ${usedWs.has('__auto__') ? `<option value="__auto__"${matrixWsFilter === '__auto__' ? ' selected' : ''}>не распределённые</option>` : ''}
+          ${state.workshops.filter((w) => usedWs.has(w.id)).map((w) => `<option value="${w.id}"${matrixWsFilter === w.id ? ' selected' : ''}>${w.name}</option>`).join('')}
+        </select>
+      </label>
       <label>Партия:
         <select id="mx-partia">${parts.map((x) => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>${seEsc(partiaLabel(x))}</option>`).join('') || '<option>нет партий</option>'}</select>
       </label>
       <button id="mx-add-partia" class="btn">＋ партия (ручная)</button>
-      ${parts.some((x) => x.status === 'plan') ? '<button id="mx-distribute-all" class="btn" title="Раздробить каждую партию этого артикула по цехам пропорционально мощности, чтобы уложиться в сроки">⚙ Распределить все по мощностям</button>' : ''}
+      ${allParts.some((x) => x.status === 'plan') ? '<button id="mx-distribute-all" class="btn btn-accent" title="Раздробить все партии артикула по цехам пропорционально мощности, чтобы уложиться в сроки (свой цех первым; настил соблюдается)">⚙ Распределить по цехам</button>' : ''}
+      ${allParts.length ? '<button id="mx-del-all" class="btn btn-danger" title="Удалить ВСЕ партии этого артикула">🗑 Удалить все партии</button>' : ''}
     </div>`;
 
   if (!p) {
@@ -921,10 +935,9 @@ function renderMatrix() {
           </select>
         </label>
         <label>Срок WB: <input type="date" id="mx-deadline" value="${p.deadline || ''}"></label>
-        <button id="mx-distribute" class="btn" title="Раздробить партию по цехам пропорционально мощности, чтобы уложиться в срок (свой цех первым; настил соблюдается)">⚙ Распределить по мощностям</button>
-        <button id="mx-split-partia" class="btn" title="Разделить партию на две по правилам настила (цвета целиком; при необходимости — по размерам ≥ мин)">✂ Разделить пополам</button>
         <button id="mx-del-partia" class="btn btn-danger">Удалить партию</button>
         <button id="mx-save" class="btn btn-primary">Сохранить план</button>
+        <button id="mx-split-partia" class="btn btn-subtle" title="Разрезать эту партию надвое вручную (по правилам настила), без учёта мощностей">✂ разрезать вручную</button>
       </div>
       <div class="matrix-io">
         <span class="mini">Ввод: вручную · <b>вставка из буфера</b> (встань на ячейку и Ctrl+V — блок из Excel/Sheets) · через .xlsx-шаблон:</span>
@@ -950,14 +963,6 @@ function renderMatrix() {
     state.partias = state.partias.filter((x) => x.id !== p.id);
     matrixPartiaId = null; dirty = true; renderMatrix();
   });
-  document.getElementById('mx-distribute').addEventListener('click', () => {
-    if (p.status !== 'plan') { toast('Распределять можно только не начатую партию (статус «план»)', true); return; }
-    if (matrixSum(p.planMatrix) < 2) { toast('Партия слишком мала для распределения', true); return; }
-    const n = distributePartiaByCapacity(p, a.id);
-    recomputePartiaNumbers(); dirty = true; renderMatrix();
-    toast(n <= 1 ? 'Одного цеха достаточно к сроку — закреплён. Нажми «Сохранить план».'
-      : `Распределено на ${n} цеха по мощностям. Нажми «Сохранить план».`);
-  });
   const distAll = document.getElementById('mx-distribute-all');
   if (distAll) distAll.addEventListener('click', () => {
     let touched = 0, added = 0;
@@ -965,7 +970,7 @@ function renderMatrix() {
       const n = distributePartiaByCapacity(pt, a.id); if (n >= 1) touched++; if (n > 1) added += n - 1;
     }
     recomputePartiaNumbers(); dirty = true; renderMatrix();
-    toast(touched ? `Распределены все партии по мощностям (+${added} новых). Нажми «Сохранить план».` : 'Нечего распределять', !touched);
+    toast(touched ? `Распределено по цехам (+${added} новых партий). Нажми «Сохранить план».` : 'Нечего распределять', !touched);
   });
   document.getElementById('mx-split-partia').addEventListener('click', () => {
     const total = matrixSum(p.planMatrix);
@@ -1167,7 +1172,17 @@ function importPlanAnyFile(file) {
 }
 
 function bindMatrixControls(a) {
-  document.getElementById('mx-article').addEventListener('change', (e) => { matrixArticleId = e.target.value; matrixPartiaId = null; renderMatrix(); });
+  document.getElementById('mx-article').addEventListener('change', (e) => { matrixArticleId = e.target.value; matrixPartiaId = null; matrixWsFilter = ''; renderMatrix(); });
+  const wf = document.getElementById('mx-ws-filter');
+  if (wf) wf.addEventListener('change', (e) => { matrixWsFilter = e.target.value; matrixPartiaId = null; renderMatrix(); });
+  const da = document.getElementById('mx-del-all');
+  if (da) da.addEventListener('click', () => {
+    const n = partiasOfArticle(a.id).length;
+    if (!confirm(`Удалить ВСЕ партии артикула ${a.id} (${n} шт)? Действие необратимо.`)) return;
+    state.partias = (state.partias || []).filter((x) => x.articleId !== a.id);
+    matrixPartiaId = null; matrixWsFilter = ''; dirty = true; renderMatrix();
+    toast(`Удалены все партии артикула ${a.id} (${n})`);
+  });
 }
 function addPartia(a) {
   // ручная срочная партия: без этапа, без даты (пользователь задаст «Срок WB» и цех в баре)
@@ -2455,8 +2470,16 @@ function activeColors(a) {
 // Поставки прогноза (приход на WB частями). Фолбэк — одна поставка на конец периода, если план
 // не разбит на довозы. Берём только объём>0. Из объёмов используем ТОЛЬКО доли по времени (Разв.1-A).
 function reconcileDeliveries(p) {
+  const MON = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
   const dv = (p && Array.isArray(p.deliveries) ? p.deliveries : []).filter((d) => (+d.qty || 0) > 0);
-  if (dv.length) return dv.map((d) => ({ date: String(d.date || '').slice(0, 10), qty: Math.round(+d.qty || 0), tag: d.tag || '', title: d.title || '' }));
+  if (dv.length) return dv.map((d, i) => {
+    // круглогодичный план: партии называем по месяцу довоза (не «подсорт» и не «П1/П2/П3»);
+    // сезонный — оставляем метки прогноза П1/П2/П3.
+    let tag = d.tag || ('П' + (i + 1));
+    const m = String(d.month || (d.date || '')).match(/^(\d{4})-(\d{2})/);
+    if (m && (d.month || d.tag === 'подсорт')) tag = `Довоз ${MON[+m[2] - 1] || m[2]} ${m[1].slice(2)}`;
+    return { date: String(d.date || '').slice(0, 10), qty: Math.round(+d.qty || 0), tag, title: d.title || '' };
+  });
   const end = String((p && p.forecastPeriod && p.forecastPeriod.to) || '').slice(0, 10);
   return [{ date: end, qty: 1, tag: 'всё', title: 'вся партия одной поставкой' }];
 }
