@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'fix-delivery-date-drop-2026-08-02f';
+const APP_BUILD = 'apply-diagnostics-2026-08-02g';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2733,7 +2733,16 @@ async function applyReconcile(rep, p, articleId) {
   if (!made) { toast('Не удалось сформировать партии (пустая матрица)', true); return; }
   recomputePartiaNumbers();
   dirty = true;
+  console.log('[apply] до сохранения: articleId=%s, партий создано=%d, дедлайны=%o, цвета матрицы=%o',
+    articleId, made, dvs.map((d) => d.date), Object.keys(result.matrix));
   await recalc(true);
+  // диагностика: сколько партий этого артикула ВЫЖИЛО после серверной нормализации
+  const survived = (state.partias || []).filter((p) => p.articleId === articleId).length;
+  console.log('[apply] после сохранения: партий артикула %s = %d (всего %d)', articleId, survived, (state.partias || []).length);
+  if (made > 0 && survived === 0) {
+    toast('⚠ Партии созданы, но сервер их отбраковал. Скорее всего НЕ перезапущен backend (npm start) — старый model.js. Детали: консоль [apply].', true);
+    return;
+  }
   const un = result.unassigned.total;
   toast(`Создано партий-поставок: ${made} · ${result.totalPlanned.toLocaleString('ru')} шт`
     + `${createdColors.length ? `, новых цветов ${createdColors.length} (заведи ткань)` : ''}`
