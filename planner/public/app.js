@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'reconcile-deliveries-2026-08-02c';
+const APP_BUILD = 'colors-total-btnfx-2026-08-02d';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2279,6 +2279,13 @@ function seasonColorsBlock(rep, p) {
   const poolNote = ca.poolSize
     ? `по <b>${ca.poolSize}</b> артикулам выдачи${ca.planSize && ca.poolSize > ca.planSize ? ` (план — по ТОП-${ca.planSize})` : ''}${ca.serpTotal ? ` из ${ca.serpTotal} найденных` : ''} · продаж ${fmt(ca.total.units)}`
     : `конкурентов ${ca.total.skus}, продаж ${fmt(ca.total.units)}`;
+  // строка ВСЕГО: суммарный тираж по всем цветам (что реально отшивается) — прямо под колонкой Кол-во
+  const totSkus = ordered.reduce((s, c) => s + (c.skus || 0), 0);
+  const totUnits = ordered.reduce((s, c) => s + (c.units || 0), 0);
+  const totQty = ordered.reduce((s, c) => { const q = qtyByName.get(c.name); return s + (q ? q.qty : 0); }, 0);
+  const footRow = cq
+    ? `<tfoot><tr class="mx-vsego"><th>ВСЕГО (${ordered.filter((c) => qtyByName.get(c.name)).length} цв.)</th><th class="num">${totSkus}</th><th class="num">${fmt(totUnits)}</th><th class="num">100%</th><th class="num">—</th><th class="num"><b>${fmt(totQty)}</b></th></tr></tfoot>`
+    : '';
   return `<details class="se-comp" open>
     <summary>🎨 Цвета: доли спроса и кол-во к пошиву <span class="mini">(${poolNote})</span></summary>
     <div class="se-comp-body">
@@ -2286,6 +2293,7 @@ function seasonColorsBlock(rep, p) {
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
         <thead><tr><th>Цвет</th><th class="num" title="Артикулов конкурентов этого цвета">Тов.</th><th class="num" title="Суммарные продажи цвета за период анализа (штук) — реальный спрос. Период определяется системой (лучший/заданный).">Продажи в период</th><th class="num" title="Доля суммарного объёма продаж цвета от всех — база плана">Доля объёма</th><th class="num" title="Средняя продажа на 1 карточку (справочно); ▲ эфф = выше лидера">Ср/арт</th><th class="num" title="Кол-во к пошиву = прогноз × доля объёма относительно лидера">Кол-во, шт</th></tr></thead>
         <tbody>${rows}</tbody>
+        ${footRow}
       </table></div>
       ${totalLine}
     </div>
@@ -2586,7 +2594,12 @@ function bindReconcilePanel(rep, p, articleId) {
     rerenderReconcile(rep, p, articleId); // обновить счётчик архива в строке применения
   }));
   const applyBtn = document.getElementById('se-rec-apply');
-  if (applyBtn) applyBtn.addEventListener('click', () => applyReconcile(rep, p, articleId));
+  if (applyBtn) applyBtn.addEventListener('click', async () => {
+    applyBtn.disabled = true; applyBtn.classList.add('is-loading'); applyBtn.textContent = '⏳ Создаю партии-поставки…';
+    await applyReconcile(rep, p, articleId);
+    // при успехе панель закрывается и открывается Гант; при ошибке — вернуть кнопку в рабочее состояние
+    if (seasonReconcile && seasonReconcile.open) rerenderReconcile(rep, p, articleId);
+  });
 }
 
 // Применить: выучить привязки/алиасы, завести новые цвета, заархивировать лишние, затем создать

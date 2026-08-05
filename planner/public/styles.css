@@ -86,6 +86,8 @@ input, select { font: inherit; }
   padding: 7px 14px; border-radius: 8px;
 }
 .btn:hover { border-color: var(--accent); }
+.btn:active { transform: translateY(1px); }
+.btn.is-loading { opacity: 0.75; cursor: progress; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-icon { padding: 6px 10px; line-height: 1; }
 .season-pick { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
