@@ -588,6 +588,11 @@ html { overflow-x: hidden; }
 .se-seg-table td.se-seg-ok, .se-seg-table tr.se-seg-ok td:first-child { color: var(--ok, #16a34a); }
 .se-seg-table td.se-seg-thin, .se-seg-table tr.se-seg-thin td:first-child { color: var(--warn, #d97706); }
 .se-seg-table td.se-seg-loss, .se-seg-table tr.se-seg-loss td:first-child { color: var(--bad, #dc2626); }
+/* Этап 3: блок «План по размерам из прогноза» — архив и поставки */
+.se-rec-archbox { margin: 8px 0; padding: 6px 10px; border: 1px dashed var(--line); border-radius: 8px; }
+.se-rec-arch { display: inline-flex; align-items: center; gap: 4px; margin: 2px 8px 2px 0; white-space: nowrap; }
+.se-rec-deliv { margin-top: 10px; }
+.se-rec-deliv table tfoot th { border-top: 2px solid var(--line); }
 /* Ячейка «число + подпись»: число прижато к правому краю фикс-сетки, подпись — в колонке справа.
    Цифры Ср/арт и Кол-во стоят строго друг под другом; ▲ эфф / ⚑ добор / · доп. не смещают их. */
 .numcell { display: grid; grid-template-columns: 1fr 62px; align-items: baseline; gap: 4px; }

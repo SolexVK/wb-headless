@@ -247,6 +247,10 @@ export function normalizeState(input) {
     { const cm = a.colorMap && typeof a.colorMap === 'object' ? a.colorMap : {};
       const clean = {}; for (const [k, v] of Object.entries(cm)) if (k && a.colors.includes(v)) clean[String(k)] = v;
       a.colorMap = clean; }
+    // архивные цвета (Этап 3): есть в карточке, но выведены из оборота новым прогнозом. Остаются в
+    // a.colors (данные/образцы не теряются), но на прочих листах скрыты и не считаются. Только валидные.
+    { const arch = Array.isArray(a.archivedColors) ? a.archivedColors : [];
+      a.archivedColors = [...new Set(arch.filter((c) => a.colors.includes(c)))]; }
     // метаданные ткани по цвету: { цвет: { plansheet, colorNo, image(dataURL) } }
     a.fabricInfo = a.fabricInfo && typeof a.fabricInfo === 'object' ? a.fabricInfo : {};
     // конфиг фильтра аналогов для раздела «Ранг сезонности» (путь предмета, слова, ценовой коридор…)

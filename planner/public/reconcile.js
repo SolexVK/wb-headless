@@ -141,3 +141,29 @@ export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, size
     totalPlanned,
   };
 }
+
+/**
+ * Разложить готовую матрицу цвет×размер на N частей по долям поставок (Этап 3, серия поставок).
+ * Каждая ячейка делится методом Хэмилтона → целые, Σчастей = исходная ячейка (НОЛЬ ПОТЕРЬ).
+ * Пропорции берём только по времени (доли объёмов поставок) — полный цветной тираж сохраняется.
+ * @param {Object} matrix — {цвет → {размер → шт}} (например result.matrix).
+ * @param {number[]} shares — веса поставок (напр. qty каждой поставки); нормируются внутри.
+ * @returns {Array<Object>} массив из shares.length матриц того же формата.
+ */
+export function splitMatrixByShares(matrix, shares) {
+  const n = Array.isArray(shares) ? shares.length : 0;
+  if (n <= 1) return [JSON.parse(JSON.stringify(matrix || {}))]; // одна поставка — вся матрица целиком
+  const total = shares.reduce((a, b) => a + Math.max(0, b), 0) || 1;
+  const norm = shares.map((s) => Math.max(0, s) / total);
+  const idx = norm.map((_, i) => i);
+  const out = Array.from({ length: n }, () => ({}));
+  for (const color of Object.keys(matrix || {})) {
+    for (const size of Object.keys(matrix[color] || {})) {
+      const v = Math.round(matrix[color][size] || 0);
+      if (v <= 0) continue;
+      const { alloc } = apportion(v, idx, (i) => norm[i]);
+      for (let i = 0; i < n; i++) if (alloc[i] > 0) (out[i][color] = out[i][color] || {})[size] = alloc[i];
+    }
+  }
+  return out;
+}
