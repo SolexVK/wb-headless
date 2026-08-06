@@ -596,6 +596,15 @@ html { overflow-x: hidden; }
 .se-seg-table td.se-seg-ok, .se-seg-table tr.se-seg-ok td:first-child { color: var(--ok, #16a34a); }
 .se-seg-table td.se-seg-thin, .se-seg-table tr.se-seg-thin td:first-child { color: var(--warn, #d97706); }
 .se-seg-table td.se-seg-loss, .se-seg-table tr.se-seg-loss td:first-child { color: var(--bad, #dc2626); }
+/* Планы продаж по цветам: чипы-фильтр + сворачиваемые карточки */
+.se-cp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.se-cp-chip { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 14px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+.se-cp-chip:hover { border-color: var(--accent); }
+.se-cp-chip.off { opacity: 0.45; text-decoration: line-through; }
+.se-cp-card { border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; margin: 6px 0; }
+.se-cp-card > summary { cursor: pointer; font-size: 13px; }
+.se-cp-cols { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; }
+.se-cp-tbl { min-width: 200px; }
 /* Этап 3: блок «План по размерам из прогноза» — архив и поставки */
 .se-rec-archbox { margin: 8px 0; padding: 6px 10px; border: 1px dashed var(--line); border-radius: 8px; }
 .se-rec-arch { display: inline-flex; align-items: center; gap: 4px; margin: 2px 8px 2px 0; white-space: nowrap; }

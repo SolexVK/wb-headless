@@ -301,8 +301,11 @@ function buildAllSeasonYear(shape, cfg) {
   }
   miniSeasons.sort((a, b) => a.peakDate.localeCompare(b.peakDate));
 
-  // ── ДНЕВНОЙ ПЛАН ── чистый рельеф × масштаб (без разгона/обнуления)
-  for (const d of days) { d.final = round(d.relief * scale, 1); }
+  // ── ДНЕВНОЙ ПЛАН ── рельеф × масштаб + короткий разгон в начале (14 дн): новая карточка
+  // набирает скорость продаж не мгновенно, стартует от малого к плановому уровню.
+  const RAMP_DAYS = 14;
+  const rampF = (i) => Math.min(1, (i + 1) / RAMP_DAYS); // 1/14 → 1.0 за 14 дней (линейный выход)
+  for (const d of days) { d.final = round(d.relief * scale * rampF(d.i), 1); }
   const vals = days.map((d) => d.final);
   const peakF = Math.max(...vals, 1);
 
@@ -333,7 +336,7 @@ function buildAllSeasonYear(shape, cfg) {
 
   const forecastDaily = days.map((d) => ({
     date: d.date,
-    stage: inSeason(d.k) ? 'Сезон' : 'Межсезонье',
+    stage: d.i < RAMP_DAYS ? 'Разгон' : (inSeason(d.k) ? 'Сезон' : 'Межсезонье'),
     favorable: !!cfg.favorableMonth[Number(d.date.slice(5, 7))] && d.final >= 0.6 * peakF,
     kSales: round(d.relief, 4),
     plannedOrders: d.final,

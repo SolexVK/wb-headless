@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'sales-start-date-2026-08-02j';
+const APP_BUILD = 'ramp-and-color-plans-2026-08-02k';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1444,6 +1444,7 @@ let seasonSelArticle = null;     // артикул в накопителе (пр
 let seasonGran = 'day';          // день/неделя/месяц в таблице
 let seasonColorMinRel = 40;      // порог силы цвета относительно лучшего, % (слабее → в сноску)
 let seasonColorMinCount = 5;     // минимум расцветок в ассортименте (добираем даже слабые)
+let seasonColorPlanHidden = new Set(); // цвета, скрытые фильтром в блоке «Планы продаж по цветам»
 let seasonBuilding = false;
 let seasonPlansIndex = [];
 let seasonHasToken = null;
@@ -2089,7 +2090,7 @@ async function renderSeasonView(articleId) {
   const staleBanner = stale
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
-  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep, p) + seasonSizesBlock(rep) + seasonReconcileBlock(rep, p, articleId) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep, p) + seasonSizesBlock(rep) + seasonColorPlansBlock(rep, p) + seasonReconcileBlock(rep, p, articleId) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
   installSeasonZoom();
   // Чекбоксы ТОП-15: отжатие → исключить конкурента и пересобрать план (дебаунс, кэш SERP).
   box.querySelectorAll('.se-comp-cb').forEach((cb) => {
@@ -2110,6 +2111,7 @@ async function renderSeasonView(articleId) {
   }));
   bindSeasonView(p);
   bindReconcile(rep, p, articleId); // Этап 3: слой примирения прогноз↔карточка → План по размерам
+  bindSeasonColorPlans(rep, p); // планы продаж по цветам (фильтр/сворачивание)
   // Пересборка в один клик прямо из баннера (тем же cfg, что сохранён у плана).
   if (canRebuild) {
     document.getElementById('se-rebuild')?.addEventListener('click', async (e) => {
@@ -2967,6 +2969,62 @@ function seasonLevelNote(p) {
   const alt = isTop1 ? `реалистичный ТОП-3 дал бы ${li.top3Daily}` : `амбициозный ТОП-1 дал бы ${li.top1Daily}`;
   const who = isTop1 && li.top1Name ? ` (сильнейший аналог: «${seEsc(String(li.top1Name).slice(0, 46))}»)` : '';
   return `<div class="mini se-level-note">🎯 Целевой уровень пика: <b>${active}</b> ≈ <b>${cur}</b> шт/день${who}. ${alt} шт/день — переключается в конструкторе и требует пересборки.</div>`;
+}
+
+// ── Планы продаж ПО КАЖДОМУ ЦВЕТУ ── отдельный план на расцветку (форма кривой общая, объёмы —
+// по доле цвета). Фильтр показывает/скрывает расцветки, каждый план сворачивается. Числа
+// согласованы с производством: помесячные выкупы и объёмы поставок этого цвета = его доля × кривая.
+const SE_MON_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+function seasonColorPlansData(rep, p) {
+  const ca = rep.colorAnalysis;
+  if (!ca || !Array.isArray(ca.colors) || !ca.colors.length) return null;
+  const forecast = Math.round((p.forecastDaily || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
+  const cq = seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount);
+  if (!cq || !forecast) return null;
+  // помесячная форма кривой (одинаковая для всех цветов, масштаб — по доле цвета)
+  const byMonth = {};
+  for (const d of (p.forecastDaily || [])) { const m = String(d.date).slice(0, 7); byMonth[m] = (byMonth[m] || 0) + (+d.plannedOrders || 0); }
+  const months = Object.keys(byMonth).sort();
+  const dvs = (p.deliveries || []).filter((d) => (+d.qty || 0) > 0);
+  const dvTot = dvs.reduce((s, d) => s + (+d.qty || 0), 0) || 1;
+  return { forecast, assortment: [...cq.core, ...cq.weak], byMonth, months, dvs, dvTot };
+}
+function seasonColorPlansInner(rep, p) {
+  const D = seasonColorPlansData(rep, p);
+  if (!D) return '<div class="mini">Нет данных по цветам (построй анализ цветов).</div>';
+  const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
+  const df = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(2, 4)}` : '—');
+  const monLbl = (m) => `${SE_MON_SHORT[+m.slice(5, 7) - 1] || m.slice(5, 7)} ${m.slice(2, 4)}`;
+  const chips = D.assortment.map((c) => `<button class="se-cp-chip${seasonColorPlanHidden.has(c.name) ? ' off' : ''}" data-cp="${seEsc(c.name)}">${seEsc(c.name)} <span class="mini">${fmt(c.qty)}</span></button>`).join('');
+  const shown = D.assortment.filter((c) => !seasonColorPlanHidden.has(c.name));
+  const cards = shown.map((c, idx) => {
+    const ratio = c.qty / D.forecast; // доля этого цвета относительно кривой (лидер = 1)
+    const mRows = D.months.map((m) => `<tr><td>${monLbl(m)}</td><td class="num">${fmt(D.byMonth[m] * ratio)}</td></tr>`).join('');
+    const dRows = D.dvs.map((d, i) => `<tr><td><b>${seEsc(d.tag || ('П' + (i + 1)))}</b></td><td class="num">${df(String(d.date).slice(0, 10))}</td><td class="num">${fmt((+d.qty || 0) / D.dvTot * c.qty)}</td></tr>`).join('');
+    return `<details class="se-cp-card"${idx === 0 ? ' open' : ''}><summary><b>${seEsc(c.name)}</b> — ${fmt(c.qty)} шт</summary>
+      <div class="se-cp-cols">
+        <div><div class="mini"><b>Выкупы по месяцам</b></div><table class="se-comp-table se-cp-tbl"><thead><tr><th>Месяц</th><th class="num">Выкупы</th></tr></thead><tbody>${mRows}</tbody></table></div>
+        <div><div class="mini"><b>Поставки на WB</b> (этот цвет)</div><table class="se-comp-table se-cp-tbl"><thead><tr><th>Поставка</th><th class="num">Дата</th><th class="num">Кол-во</th></tr></thead><tbody>${dRows}</tbody></table></div>
+      </div></details>`;
+  }).join('');
+  return `<div class="mini">Фильтр — покажи/скрой расцветки; каждый план сворачивается. Числа согласованы с производством (в партиях те же объёмы по цвету).</div>
+    <div class="se-cp-chips">${chips}</div>
+    ${cards || '<div class="mini">Все расцветки скрыты фильтром — включи хотя бы одну выше.</div>'}`;
+}
+function seasonColorPlansBlock(rep, p) {
+  if (!seasonColorPlansData(rep, p)) return '';
+  return `<details class="se-comp"><summary>📊 Планы продаж по цветам <span class="mini">(отдельно по каждой расцветке)</span></summary>
+    <div class="se-comp-body"><div id="se-color-plans">${seasonColorPlansInner(rep, p)}</div></div></details>`;
+}
+function bindSeasonColorPlans(rep, p) {
+  const host = document.getElementById('se-color-plans');
+  if (!host) return;
+  host.querySelectorAll('.se-cp-chip').forEach((b) => b.addEventListener('click', () => {
+    const name = b.dataset.cp;
+    if (seasonColorPlanHidden.has(name)) seasonColorPlanHidden.delete(name); else seasonColorPlanHidden.add(name);
+    host.innerHTML = seasonColorPlansInner(rep, p);
+    bindSeasonColorPlans(rep, p); // перебиндить после перерисовки
+  }));
 }
 
 function seasonChartsBlock(rep, p) {
