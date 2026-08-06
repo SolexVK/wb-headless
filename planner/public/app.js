@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'ramp-and-color-plans-2026-08-02k';
+const APP_BUILD = 'color-daily-plans-in-table-2026-08-06a';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1486,6 +1486,8 @@ function seasonTipEl() {
 function attachSeasonTip(svg) {
   const meta = SE_CHARTS[svg.dataset.chart];
   if (!meta) return;
+  if (svg.dataset.tipBound === '1') return; // не навешивать повторно при перерисовке таблицы
+  svg.dataset.tipBound = '1';
   const cursor = svg.querySelector('.se-cursor');
   const tip = seasonTipEl();
   svg.addEventListener('mousemove', (e) => {
@@ -2090,7 +2092,7 @@ async function renderSeasonView(articleId) {
   const staleBanner = stale
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
-  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep, p) + seasonSizesBlock(rep) + seasonColorPlansBlock(rep, p) + seasonReconcileBlock(rep, p, articleId) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(p)}</div>`;
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep, p) + seasonSizesBlock(rep) + seasonReconcileBlock(rep, p, articleId) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(rep, p)}</div>`;
   installSeasonZoom();
   // Чекбоксы ТОП-15: отжатие → исключить конкурента и пересобрать план (дебаунс, кэш SERP).
   box.querySelectorAll('.se-comp-cb').forEach((cb) => {
@@ -2109,9 +2111,8 @@ async function renderSeasonView(articleId) {
     inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus();
     toast('Ключ вписан в конструктор — нажмите «Построить план»');
   }));
-  bindSeasonView(p);
+  bindSeasonView(rep, p);
   bindReconcile(rep, p, articleId); // Этап 3: слой примирения прогноз↔карточка → План по размерам
-  bindSeasonColorPlans(rep, p); // планы продаж по цветам (фильтр/сворачивание)
   // Пересборка в один клик прямо из баннера (тем же cfg, что сохранён у плана).
   if (canRebuild) {
     document.getElementById('se-rebuild')?.addEventListener('click', async (e) => {
@@ -3019,44 +3020,6 @@ function seasonColorPlansData(rep, p) {
   const dvTot = dvs.reduce((s, d) => s + (+d.qty || 0), 0) || 1;
   return { forecast, assortment: [...cq.core, ...cq.weak], byMonth, months, dvs, dvTot };
 }
-function seasonColorPlansInner(rep, p) {
-  const D = seasonColorPlansData(rep, p);
-  if (!D) return '<div class="mini">Нет данных по цветам (построй анализ цветов).</div>';
-  const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
-  const df = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(2, 4)}` : '—');
-  const monLbl = (m) => `${SE_MON_SHORT[+m.slice(5, 7) - 1] || m.slice(5, 7)} ${m.slice(2, 4)}`;
-  const chips = D.assortment.map((c) => `<button class="se-cp-chip${seasonColorPlanHidden.has(c.name) ? ' off' : ''}" data-cp="${seEsc(c.name)}">${seEsc(c.name)} <span class="mini">${fmt(c.qty)}</span></button>`).join('');
-  const shown = D.assortment.filter((c) => !seasonColorPlanHidden.has(c.name));
-  const cards = shown.map((c, idx) => {
-    const ratio = c.qty / D.forecast; // доля этого цвета относительно кривой (лидер = 1)
-    const mRows = D.months.map((m) => `<tr><td>${monLbl(m)}</td><td class="num">${fmt(D.byMonth[m] * ratio)}</td></tr>`).join('');
-    const dRows = D.dvs.map((d, i) => `<tr><td><b>${seEsc(d.tag || ('П' + (i + 1)))}</b></td><td class="num">${df(String(d.date).slice(0, 10))}</td><td class="num">${fmt((+d.qty || 0) / D.dvTot * c.qty)}</td></tr>`).join('');
-    return `<details class="se-cp-card"${idx === 0 ? ' open' : ''}><summary><b>${seEsc(c.name)}</b> — ${fmt(c.qty)} шт</summary>
-      <div class="se-cp-cols">
-        <div><div class="mini"><b>Выкупы по месяцам</b></div><table class="se-comp-table se-cp-tbl"><thead><tr><th>Месяц</th><th class="num">Выкупы</th></tr></thead><tbody>${mRows}</tbody></table></div>
-        <div><div class="mini"><b>Поставки на WB</b> (этот цвет)</div><table class="se-comp-table se-cp-tbl"><thead><tr><th>Поставка</th><th class="num">Дата</th><th class="num">Кол-во</th></tr></thead><tbody>${dRows}</tbody></table></div>
-      </div></details>`;
-  }).join('');
-  return `<div class="mini">Фильтр — покажи/скрой расцветки; каждый план сворачивается. Числа согласованы с производством (в партиях те же объёмы по цвету).</div>
-    <div class="se-cp-chips">${chips}</div>
-    ${cards || '<div class="mini">Все расцветки скрыты фильтром — включи хотя бы одну выше.</div>'}`;
-}
-function seasonColorPlansBlock(rep, p) {
-  if (!seasonColorPlansData(rep, p)) return '';
-  return `<details class="se-comp"><summary>📊 Планы продаж по цветам <span class="mini">(отдельно по каждой расцветке)</span></summary>
-    <div class="se-comp-body"><div id="se-color-plans">${seasonColorPlansInner(rep, p)}</div></div></details>`;
-}
-function bindSeasonColorPlans(rep, p) {
-  const host = document.getElementById('se-color-plans');
-  if (!host) return;
-  host.querySelectorAll('.se-cp-chip').forEach((b) => b.addEventListener('click', () => {
-    const name = b.dataset.cp;
-    if (seasonColorPlanHidden.has(name)) seasonColorPlanHidden.delete(name); else seasonColorPlanHidden.add(name);
-    host.innerHTML = seasonColorPlansInner(rep, p);
-    bindSeasonColorPlans(rep, p); // перебиндить после перерисовки
-  }));
-}
-
 function seasonChartsBlock(rep, p) {
   for (const k of Object.keys(SE_CHARTS)) delete SE_CHARTS[k]; // сброс реестра тултипов
   const fp = rep.forecastPeriod, hp = rep.historyPeriod;
@@ -3263,30 +3226,83 @@ function seasonAgg(rows, gran, buyout) {
   }));
 }
 
-function seasonTableBlock(p) {
+// Одна и та же вёрстка таблицы плана — для сводного плана и для планов по каждому цвету.
+function seasonPlanTableHTML(rows, total, totalOrders) {
+  const num = (v) => Math.round(+v || 0).toLocaleString('ru');
+  const body = rows.map((r) => {
+    const c = PHASE_COLORS[r.stage];
+    return `<tr style="background:${c ? c.row : 'transparent'}"><td>${r.label}</td><td>${r.stage || '—'}</td><td class="num">${num(r.units)}</td><td class="num se-orders">${num(r.orders)}</td><td class="num">${r.price ? num(r.price) : '—'}</td><td>${r.favorable ? '⭐' : ''}</td></tr>`;
+  }).join('');
+  return `<div class="matrix-scroll"><table class="matrix-table se-plan-table">
+      <thead><tr><th>Период</th><th>Этап сезона</th><th class="num" title="MPStats «продажи» = выкупы. База для производства.">Выкупы, шт</th><th class="num" title="Заказы = выкупы через ~${SEASON_LAG} дн ÷ %выкупа (лаг «заказ→доставка→выкуп»).">Заказы, шт</th><th class="num">Цена, ₽</th><th>Благопр.</th></tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr><th colspan="2">ИТОГО</th><th class="num">${num(total)}</th><th class="num se-orders">${num(totalOrders)}</th><th colspan="2"></th></tr></tfoot>
+    </table></div>`;
+}
+
+// Планы продаж ПО КАЖДОМУ ЦВЕТУ — в той же гранулярности (день/неделя/месяц), что и сводный.
+// Кривая заказов/выкупов/цены общая; объёмы масштабируются долей цвета (лидер = 1). Фильтр по
+// чипам показывает/скрывает расцветку; каждый план сворачивается. Итоги согласованы с
+// производством (в партиях те же объёмы по цвету).
+function seasonColorPlansSection(rep, p, baseRows) {
+  const D = seasonColorPlansData(rep, p);
+  if (!D) return '';
+  const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
+  const chips = D.assortment.map((c) => `<button class="se-cp-chip${seasonColorPlanHidden.has(c.name) ? ' off' : ''}" type="button" data-cp="${seEsc(c.name)}">${seEsc(c.name)} <span class="mini">${fmt(c.qty)}</span></button>`).join('');
+  const shown = D.assortment.filter((c) => !seasonColorPlanHidden.has(c.name));
+  const cards = shown.map((c, idx) => {
+    const ratio = D.forecast ? c.qty / D.forecast : 0; // доля цвета относительно кривой лидера
+    const cRows = baseRows.map((r) => ({ ...r, units: r.units * ratio, orders: r.orders * ratio }));
+    const cTotal = cRows.reduce((s, r) => s + r.units, 0);
+    const cOrders = cRows.reduce((s, r) => s + r.orders, 0);
+    return `<details class="se-cp-card"${idx === 0 ? ' open' : ''}><summary><b>${seEsc(c.name)}</b> — ${fmt(c.qty)} шт <span class="mini">(доля ${Math.round(ratio * 100)}% от лидера)</span></summary>
+      ${seasonPlanTableHTML(cRows, cTotal, cOrders)}</details>`;
+  }).join('');
+  return `<div class="se-cp-wrap">
+      <div class="se-table-head"><b>Планы продаж по цветам</b> <span class="mini">— фильтр показывает/скрывает расцветку, каждый план сворачивается. Числа согласованы с производством (в партиях те же объёмы по цвету и размеру).</span></div>
+      <div class="se-cp-chips">${chips || '<span class="mini">нет расцветок</span>'}</div>
+      ${cards || '<div class="mini">Все расцветки скрыты фильтром — включите хотя бы одну выше.</div>'}
+    </div>`;
+}
+
+function seasonTableBlock(rep, p) {
   const buyout = seasonBuyoutOf(seasonSelArticle);
   const rows = seasonAgg(p.forecastDaily || [], seasonGran, buyout);
   const total = rows.reduce((s, r) => s + r.units, 0);
   const totalOrders = rows.reduce((s, r) => s + r.orders, 0);
   const gbtn = (g, t) => `<button class="btn se-gran${seasonGran === g ? ' active' : ''}" type="button" data-gran="${g}">${t}</button>`;
+  const granWord = seasonGran === 'day' ? 'дням' : seasonGran === 'week' ? 'неделям' : 'месяцам';
   return `<div class="se-table-head">
-      <b>План продаж по ${seasonGran === 'day' ? 'дням' : seasonGran === 'week' ? 'неделям' : 'месяцам'}</b>
+      <b>План продаж по ${granWord}</b>
       <span class="se-gran-group">${gbtn('day', 'дни')}${gbtn('week', 'недели')}${gbtn('month', 'месяцы')}</span>
     </div>
-    <div class="matrix-scroll"><table class="matrix-table se-plan-table">
-      <thead><tr><th>Период</th><th>Этап сезона</th><th class="num" title="MPStats «продажи» = выкупы. База для производства.">Выкупы, шт</th><th class="num" title="Заказы = выкупы через ~${SEASON_LAG} дн ÷ %выкупа (лаг «заказ→доставка→выкуп»).">Заказы, шт</th><th class="num">Цена, ₽</th><th>Благопр.</th></tr></thead>
-      <tbody>${rows.map((r) => { const c = PHASE_COLORS[r.stage]; return `<tr style="background:${c ? c.row : 'transparent'}"><td>${r.label}</td><td>${r.stage || '—'}</td><td class="num">${r.units.toLocaleString('ru')}</td><td class="num se-orders">${r.orders.toLocaleString('ru')}</td><td class="num">${r.price ? r.price.toLocaleString('ru') : '—'}</td><td>${r.favorable ? '⭐' : ''}</td></tr>`; }).join('')}</tbody>
-      <tfoot><tr><th colspan="2">ИТОГО</th><th class="num">${total.toLocaleString('ru')}</th><th class="num se-orders">${totalOrders.toLocaleString('ru')}</th><th colspan="2"></th></tr></tfoot>
-    </table></div>`;
+    ${seasonPlanTableHTML(rows, total, totalOrders)}
+    ${seasonColorPlansSection(rep, p, rows)}`;
 }
 
-function bindSeasonView(p) {
-  document.querySelectorAll('.se-gran').forEach((b) => b.addEventListener('click', () => {
-    seasonGran = b.dataset.gran;
+// Лёгкая перерисовка ТОЛЬКО таблицы плана (#se-table) — гранулярность и фильтр цвета.
+// Внешние контролы (%выкупа, пороги цветов, тултипы графиков) не трогаем, чтобы не плодить
+// повторные слушатели: они привязаны один раз в bindSeasonView.
+function bindSeasonTableLocal(rep, p) {
+  const rerender = () => {
     const box = document.getElementById('se-table');
-    if (box) box.innerHTML = seasonTableBlock(p);
-    bindSeasonView(p);
+    if (box) box.innerHTML = seasonTableBlock(rep, p);
+    bindSeasonTableLocal(rep, p);
+  };
+  document.querySelectorAll('#se-table .se-gran').forEach((b) => b.addEventListener('click', () => {
+    seasonGran = b.dataset.gran;
+    rerender();
   }));
+  // Фильтр цвета: чип показывает/скрывает план расцветки — перерисовываем только таблицу.
+  document.querySelectorAll('#se-table .se-cp-chip').forEach((b) => b.addEventListener('click', () => {
+    const name = b.dataset.cp;
+    if (seasonColorPlanHidden.has(name)) seasonColorPlanHidden.delete(name); else seasonColorPlanHidden.add(name);
+    rerender();
+  }));
+}
+
+function bindSeasonView(rep, p) {
+  bindSeasonTableLocal(rep, p);
   const bo = document.getElementById('se-buyout');
   bo?.addEventListener('change', (e) => {
     const v = Math.max(1, Math.min(100, +e.target.value || 40));
