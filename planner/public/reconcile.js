@@ -99,16 +99,19 @@ export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, size
   const rows = (sizeRows || []).filter((s) => (+s.share || 0) > 0);
   const totShare = rows.reduce((s, r) => s + (+r.share || 0), 0) || 1;
   const sizeWeights = Object.fromEntries(artSizes.map((s) => [s, 0]));
-  let unassignedSizeFraction = 0;
   const sizes = rows.map((r) => {
-    const norm = (+r.share || 0) / totShare; // нормируем доли к 1 по ядру размеров
+    const norm = (+r.share || 0) / totShare;
     const covered = artSizes.filter((as) => sizeCovers(r.size, r.origin, as));
-    if (!covered.length) { unassignedSizeFraction += norm; return { demand: r.size, origin: r.origin || '', share: r.share, articleSizes: [], covered: false }; }
-    const per = norm / covered.length; // ПОРОВНУ между накрытыми размерами ряда
-    for (const as of covered) sizeWeights[as] += per;
-    return { demand: r.size, origin: r.origin || '', share: r.share, articleSizes: covered, covered: true };
+    if (covered.length) { const per = norm / covered.length; for (const as of covered) sizeWeights[as] += per; } // ПОРОВНУ между накрытыми
+    return { demand: r.size, origin: r.origin || '', share: r.share, articleSizes: covered, covered: covered.length > 0 };
   });
-  const assignedFraction = Math.max(0, 1 - unassignedSizeFraction);
+  // Непокрытые размерные доли (размер спроса, которого нет в ряду) НЕ теряем, а перераспределяем на
+  // существующие размеры: нормируем веса к 1. Тогда ПОЛНОЕ кол-во цвета попадает в матрицу — суммы
+  // по цвету в 🧩 совпадают с 🎨. Полностью неразмещённым цвет остаётся только если ряд пуст (wSum=0).
+  const wSum = artSizes.reduce((s, as) => s + sizeWeights[as], 0);
+  if (wSum > 0) for (const as of artSizes) sizeWeights[as] /= wSum;
+  const assignedFraction = wSum > 0 ? 1 : 0;
+  const unassignedSizeFraction = wSum > 0 ? 0 : 1;
 
   // ── МАТРИЦА: для сопоставленных цветов раскидываем qty×assignedFraction по размерам (Хэмилтон).
   const matrix = {};

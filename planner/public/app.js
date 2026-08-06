@@ -2533,6 +2533,36 @@ function reconcileDeliveries(p) {
   return [{ date: end, qty: 1, tag: 'всё', title: 'вся партия одной поставкой' }];
 }
 
+// Мин. размер производственной партии (шт). Меньше — неэффективно: под каждый артикул
+// перенастраивается линия, а на 1 размер×цвет приходится совсем мало.
+const MIN_PROD_BATCH = 2000;
+// Для ГОДОВОГО плана объединяем мелкие месячные довозы в производственные партии ≥ MIN_PROD_BATCH
+// (объединяем подряд идущие месяцы). ПЛАН ПРОДАЖ (помесячный) при этом не меняется — это только
+// про производство. Дата объединённой партии = самого раннего месяца (готова к началу периода).
+// Сезонный план (3 фикс. поставки) не трогаем.
+function mergeDeliveriesForProduction(dvs, totalPlanned, mode) {
+  if (mode !== 'allseason' || !Array.isArray(dvs) || dvs.length <= 1) return dvs;
+  const shareTot = dvs.reduce((s, d) => s + (+d.qty || 0), 0) || 1;
+  const psize = (q) => Math.round(q / shareTot * (totalPlanned || 0)); // реальный размер партии = доля × тираж
+  const MON = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const monLbl = (d) => { const m = String(d.date || '').match(/^(\d{4})-(\d{2})/); return m ? `${MON[+m[2] - 1]} ${m[1].slice(2)}` : ''; };
+  const out = []; let acc = null;
+  const flush = () => {
+    if (!acc) return;
+    const t = acc.labels;
+    const tag = t.length > 1 ? `Довоз ${t[0].split(' ')[0]}–${t[t.length - 1]}` : `Довоз ${t[0]}`;
+    out.push({ date: acc.date, qty: acc.qty, tag, title: t.length > 1 ? `объединено ${t.length} мес (мин. партия ${MIN_PROD_BATCH} шт)` : '' });
+    acc = null;
+  };
+  for (const d of dvs) {
+    if (!acc) acc = { date: d.date, qty: +d.qty || 0, labels: [monLbl(d)] };
+    else { acc.qty += (+d.qty || 0); acc.labels.push(monLbl(d)); }
+    if (psize(acc.qty) >= MIN_PROD_BATCH) flush();
+  }
+  flush(); // остаток (последний хвост — даже если меньше минимума)
+  return out;
+}
+
 // Дефолт решений: новый цвет по умолчанию СОЗДАЁТСЯ (иначе его объём молча уходил в «не размещено» —
 // это и был баг «создать цвет не пишется»). Возвращает копию choices с заполненными дефолтами.
 function resolveChoices(result, sr) {
@@ -2652,7 +2682,7 @@ function reconcilePanelHTML(rep, p, articleId) {
   const colorsTbl = `<table class="se-comp-table"><thead><tr><th>Цвет спроса</th><th>Куда в карточке</th></tr></thead><tbody>${result.colors.map(colorRow).join('')}</tbody></table>`;
 
   // — размеры: диапазон спроса → размеры ряда
-  const sizeRows = result.sizes.map((s) => `<tr><td><b>${seEsc(s.demand)}</b>${s.origin ? ` <span class="mini">${seEsc(s.origin)}</span>` : ''} <span class="mini">${s.share}%</span></td><td>${s.covered ? '→ ' + s.articleSizes.map(seEsc).join(', ') : '<span class="mini">⚠ нет в ряду → «не размещено»</span>'}</td></tr>`).join('');
+  const sizeRows = result.sizes.map((s) => `<tr><td><b>${seEsc(s.demand)}</b>${s.origin ? ` <span class="mini">${seEsc(s.origin)}</span>` : ''} <span class="mini">${s.share}%</span></td><td>${s.covered ? '→ ' + s.articleSizes.map(seEsc).join(', ') : '<span class="mini">нет в ряду → доля перераспределена на другие размеры</span>'}</td></tr>`).join('');
   const sizesTbl = `<table class="se-comp-table"><thead><tr><th>Размер спроса</th><th>Размеры ряда</th></tr></thead><tbody>${sizeRows}</tbody></table>`;
 
   // — АРХИВ: активные цвета карточки, которым новый план не дал объёма → предложить архивировать.
@@ -2672,7 +2702,7 @@ function reconcilePanelHTML(rep, p, articleId) {
   const unBox = `<div class="se-color-total"${un.total ? ' style="background:rgba(255,90,90,.12)"' : ''}><b>🧺 Не размещено: ${fmt(un.total)} шт</b>${un.total ? ' — ' + unItems : ' — всё разложено ✅'}</div>`;
 
   // — ПОСТАВКИ: серия довозов на WB (доля времени × полный тираж). Каждая станет партией с датой WB.
-  const dvs = reconcileDeliveries(p);
+  const dvs = mergeDeliveriesForProduction(reconcileDeliveries(p), result.totalPlanned, p.mode);
   const totQ = dvs.reduce((a, d) => a + d.qty, 0) || 1;
   const parts = splitMatrixByShares(result.matrix, dvs.map((d) => d.qty));
   const partUnits = parts.map((m) => Object.values(m).reduce((a, row) => a + Object.values(row).reduce((x, v) => x + v, 0), 0));
@@ -2789,7 +2819,7 @@ async function applyReconcile(rep, p, articleId) {
   }
 
   // серия партий-поставок: полный тираж → доли по времени (Хэмилтон, ноль потерь)
-  const dvs = reconcileDeliveries(p);
+  const dvs = mergeDeliveriesForProduction(reconcileDeliveries(p), result.totalPlanned, p.mode);
   const parts = splitMatrixByShares(result.matrix, dvs.map((d) => d.qty));
   let firstId = null, made = 0;
   dvs.forEach((d, i) => {
