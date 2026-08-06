@@ -6,20 +6,25 @@
 а столбцы 4..N — остатки по дням (заголовки-даты). Формат совпадает с
 выгрузкой «Остатки по дням».
 
+Обработка:
+  * размеры консолидируются — суммируются по каждому (Артикул × Склад),
+    в итоговом дашборде размерность «Размер» отсутствует, остаётся общее
+    количество;
+  * склады без реальных остатков отбрасываются — строки (Артикул × Склад),
+    где остаток равен нулю за весь период, в дашборд не попадают.
+
 Запуск:
     python build_dashboard.py <input.xlsx> [output.xlsx] [--sheet "Остатки по дням"]
 
 Результат — рабочая книга с листами:
-    Дашборд      — 3 фильтра (Артикул/Размер/Склад, «ВСЕ» = без фильтра),
-                   KPI и график динамики на живых SUMIFS (пересчёт при смене фильтра);
+    Дашборд      — 2 фильтра (Артикул / Склад, «ВСЕ» = без фильтра),
+                   KPI и график динамики остатка на живых SUMIFS;
     По артикулам — таблица по всем артикулам × дням + изм./%, цветовая шкала, топ-15;
-    По размерам  — сводка по размерам + график начало/конец;
-    По складам   — сводка по складам + топ-15;
-    Данные       — исходный снимок (на него ссылаются формулы дашборда).
+    По складам   — сводка по складам с реальным остатком + топ по движению;
+    Данные       — консолидированный снимок (на него ссылаются формулы дашборда).
 
 Зависимости: openpyxl, pandas.
 """
-import sys
 import argparse
 import pandas as pd
 import openpyxl
@@ -37,7 +42,6 @@ def main():
     ap.add_argument("output", nargs="?", default="dashboard.xlsx")
     ap.add_argument("--sheet", default=None, help="Имя листа с данными (по умолчанию — первый)")
     args = ap.parse_args()
-
     df = pd.read_excel(args.input, sheet_name=args.sheet or 0)
     build(df, args.output)
     print("saved", args.output)
@@ -71,68 +75,66 @@ def cell(ws, ref, value=None, *, bold=False, size=11, color="000000",
 
 
 def build(df, out_path):
-    cols = list(df.columns)
-    key_cols = cols[:3]              # Артикул, Размер, Склад
-    dcols = cols[3:]                 # даты
-    ART, SIZE, WH = key_cols
+    src_cols = list(df.columns)
+    ART, SIZE, WH = src_cols[0], src_cols[1], src_cols[2]
+    dcols = src_cols[3:]
+
+    # --- consolidate sizes: sum across sizes per (article, warehouse) ---
+    df = df.groupby([ART, WH], as_index=False)[dcols].sum()
+    # --- drop warehouses/rows without real stock (all-zero over the whole period) ---
+    df = df[df[dcols].sum(axis=1) > 0].reset_index(drop=True)
+
     NDAY = len(dcols)
     first, last = dcols[0], dcols[-1]
     NROW = len(df)
     DATA_LAST = NROW + 1
 
-    # orderings (values live via formulas / precomputed; only order comes from here)
     art = df.groupby(ART)[dcols].sum(); art["chg"] = art[last] - art[first]
     articles_by_change = art.sort_values("chg").index.tolist()
-    sz = df.groupby(SIZE)[dcols].sum(); sz["chg"] = sz[last] - sz[first]
-    sizes_by_stock = sz.sort_values(first, ascending=False).index.tolist()
     wh = df.groupby(WH)[dcols].sum(); wh["chg"] = wh[last] - wh[first]
     wh_by_change = wh.sort_values("chg").index.tolist()
     all_articles = sorted(df[ART].unique().tolist())
-    all_sizes = sorted(df[SIZE].unique().tolist())
-    all_wh = sorted(df[WH].unique().tolist())
+    all_wh = sorted(df[WH].unique().tolist())          # only warehouses with real stock
 
     wb = openpyxl.Workbook()
 
-    # ---------------- Данные (raw) ----------------
+    # ---------------- Данные (consolidated snapshot: Артикул, Склад, days) ----------------
     wsd = wb.active
     wsd.title = "Данные"
-    for j, col in enumerate(cols, 1):
-        cell(wsd, f"{get_column_letter(j)}1", str(col), bold=True, color=WHITE,
+    headers = [ART, WH] + [str(d) for d in dcols]
+    for j, h in enumerate(headers, 1):
+        cell(wsd, f"{get_column_letter(j)}1", h, bold=True, color=WHITE,
              fill=NAVY, align="center", border=True)
     for i, row in enumerate(df.itertuples(index=False), 2):
         for j, val in enumerate(row, 1):
             c = wsd.cell(row=i, column=j, value=val)
             c.font = Font(name=FONT, size=10)
-            if j >= 4:
+            if j >= 3:
                 c.number_format = INT
                 c.alignment = Alignment(horizontal="center")
-    wsd.freeze_panes = "D2"
+    wsd.freeze_panes = "C2"
     wsd.column_dimensions["A"].width = 34
-    wsd.column_dimensions["B"].width = 10
-    wsd.column_dimensions["C"].width = 30
-    for j in range(4, 4 + NDAY):
-        wsd.column_dimensions[get_column_letter(j)].width = 12
+    wsd.column_dimensions["B"].width = 30
+    for j in range(3, 3 + NDAY):
+        wsd.column_dimensions[get_column_letter(j)].width = 11
 
     DN = "Данные"
-    A_RNG = f"{DN}!$A$2:$A${DATA_LAST}"
-    B_RNG = f"{DN}!$B$2:$B${DATA_LAST}"
-    C_RNG = f"{DN}!$C$2:$C${DATA_LAST}"
+    A_RNG = f"{DN}!$A$2:$A${DATA_LAST}"     # Артикул
+    B_RNG = f"{DN}!$B$2:$B${DATA_LAST}"     # Склад
 
-    def day_rng(i):
-        L = get_column_letter(4 + i)
+    def day_rng(i):                          # day i -> column C, D, ...
+        L = get_column_letter(3 + i)
         return f"{DN}!${L}$2:${L}${DATA_LAST}"
 
     # ---------------- Списки (hidden, dropdowns) ----------------
     wsl = wb.create_sheet("Списки")
-    wsl["A1"], wsl["C1"], wsl["E1"] = "Артикулы", "Размеры", "Склады"
-    wsl["A2"] = wsl["C2"] = wsl["E2"] = "ВСЕ"
+    wsl["A1"], wsl["C1"] = "Артикулы", "Склады"
+    wsl["A2"] = wsl["C2"] = "ВСЕ"
     for i, a in enumerate(all_articles, 3):
         wsl[f"A{i}"] = a
-    for i, s in enumerate(all_sizes, 3):
-        wsl[f"C{i}"] = s
     for i, w in enumerate(all_wh, 3):
-        wsl[f"E{i}"] = w
-    ART_LAST, SZ_LAST, WH_LAST = 2 + len(all_articles), 2 + len(all_sizes), 2 + len(all_wh)
+        wsl[f"C{i}"] = w
+    ART_LAST, WH_LAST = 2 + len(all_articles), 2 + len(all_wh)
     wsl.sheet_state = "hidden"
 
     # ---------------- Дашборд ----------------
@@ -148,31 +150,28 @@ def build(df, out_path):
     ws.row_dimensions[2].height = 30
     ws.merge_cells("B3:J3")
     cell(ws, "B3", f"Период {first} – {last} · {df[ART].nunique()} артикулов · "
-                   f"{df[SIZE].nunique()} размеров · {df[WH].nunique()} складов",
+                   f"{df[WH].nunique()} складов с остатком · размеры консолидированы",
          size=10, color=WHITE, fill=BLUE)
     ws.row_dimensions[3].height = 18
 
     cell(ws, "B5", "ФИЛЬТРЫ", bold=True, color=NAVY)
     filters = [("B6", "Артикул", "C6", f"Списки!$A$2:$A${ART_LAST}"),
-               ("B7", "Размер", "C7", f"Списки!$C$2:$C${SZ_LAST}"),
-               ("B8", "Склад", "C8", f"Списки!$E$2:$E${WH_LAST}")]
+               ("B7", "Склад", "C7", f"Списки!$C$2:$C${WH_LAST}")]
     for lref, lab, vref, listrng in filters:
         cell(ws, lref, lab, bold=True, color="344054", fill=LGREY, align="right", border=True)
         cell(ws, vref, "ВСЕ", bold=True, color=NAVY, fill=LBLUE, align="left", border=True)
         dv = DataValidation(type="list", formula1=listrng, allow_blank=False)
         ws.add_data_validation(dv)
         dv.add(ws[vref])
-    ws.merge_cells("D6:J6")
-    cell(ws, "D6", "◄ Выберите значения из списков. «ВСЕ» = без фильтра. "
-                   "График и KPI ниже пересчитываются автоматически.",
+    ws.merge_cells("D6:J7")
+    cell(ws, "D6", "◄ Выберите значения из списков. «ВСЕ» = без фильтра. В списке складов "
+                   "только склады с реальным остатком. График и KPI пересчитываются автоматически.",
          italic=True, size=10, color="667085", wrap=True)
-    ws.merge_cells("D7:J8")
 
     # criteria helpers ("<>" matches any non-empty cell — no wildcard settings needed)
     ws["M6"] = '=IF(C6="ВСЕ","<>",C6)'
     ws["M7"] = '=IF(C7="ВСЕ","<>",C7)'
-    ws["M8"] = '=IF(C8="ВСЕ","<>",C8)'
-    for r in (6, 7, 8):
+    for r in (6, 7):
         ws[f"M{r}"].font = Font(name=FONT, size=10, color=WHITE)
     ws.column_dimensions["M"].hidden = True
 
@@ -184,7 +183,7 @@ def build(df, out_path):
     for i, d in enumerate(dcols):
         r = SER_FIRST + i
         cell(ws, f"B{r}", str(d), align="center", border=True, size=10)
-        f = (f"=SUMIFS({day_rng(i)},{A_RNG},$M$6,{B_RNG},$M$7,{C_RNG},$M$8)")
+        f = f"=SUMIFS({day_rng(i)},{A_RNG},$M$6,{B_RNG},$M$7)"
         cell(ws, f"C{r}", f, align="center", border=True, num=INT)
     SER_LAST = SER_FIRST + NDAY - 1
 
@@ -207,7 +206,7 @@ def build(df, out_path):
             ("D13", "Максимум", f"=MAX(C{SER_FIRST}:C{SER_LAST})"),
             ("F13", "Среднее", f"=ROUND(AVERAGE(C{SER_FIRST}:C{SER_LAST}),0)"),
             ("H13", "Строк в выборке",
-             f"=SUMPRODUCT((COUNTIFS({A_RNG},$M$6,{B_RNG},$M$7,{C_RNG},$M$8)))")]
+             f"=SUMPRODUCT((COUNTIFS({A_RNG},$M$6,{B_RNG},$M$7)))")]
     for ref, lab, formula in mini:
         c2 = chr(ord(ref[0]) + 1) + "13"
         ws.merge_cells(f"{ref}:{c2}")
@@ -240,7 +239,7 @@ def build(df, out_path):
         wt.column_dimensions["A"].width = 2
         wt.column_dimensions["B"].width = key_width
         for j in range(3, 3 + NDAY):
-            wt.column_dimensions[get_column_letter(j)].width = 11
+            wt.column_dimensions[get_column_letter(j)].width = 10
         chg_col, pct_col = 3 + NDAY, 4 + NDAY
         wt.column_dimensions[get_column_letter(chg_col)].width = 12
         wt.column_dimensions[get_column_letter(pct_col)].width = 11
@@ -249,15 +248,15 @@ def build(df, out_path):
         cell(wt, "B1", title.upper(), bold=True, size=15, color=WHITE, fill=NAVY)
         wt.row_dimensions[1].height = 26
         wt.merge_cells(start_row=2, start_column=2, end_row=2, end_column=pct_col)
-        cell(wt, "B2", "Значения рассчитаны из листа «Данные». "
-                       "Отсортировано по величине изменения за период.",
+        cell(wt, "B2", "Значения рассчитаны из листа «Данные» (размеры консолидированы, "
+                       "нулевые склады исключены). Отсортировано по изменению за период.",
              italic=True, size=9, color="667085")
 
         hr = 3
         cell(wt, f"B{hr}", key_header, bold=True, color=WHITE, fill=BLUE, border=True)
         for i, d in enumerate(dcols):
             cell(wt, f"{get_column_letter(3+i)}{hr}", str(d), bold=True, color=WHITE,
-                 fill=BLUE, align="center", border=True, size=9)
+                 fill=BLUE, align="center", border=True, size=8)
         cell(wt, f"{get_column_letter(chg_col)}{hr}", "Изм., шт", bold=True, color=WHITE,
              fill=BLUE, align="center", border=True, size=9)
         cell(wt, f"{get_column_letter(pct_col)}{hr}", "Изм., %", bold=True, color=WHITE,
@@ -271,7 +270,7 @@ def build(df, out_path):
             vals = [int(agg.loc[key, d]) for d in dcols]
             for i in range(NDAY):
                 cell(wt, f"{get_column_letter(3+i)}{r}", vals[i], num=INT,
-                     align="center", border=True, size=10, fill=fillc)
+                     align="center", border=True, size=9, fill=fillc)
             change = vals[-1] - vals[0]
             pct = (change / vals[0]) if vals[0] else 0
             cell(wt, f"{get_column_letter(chg_col)}{r}", change, num=SGN,
@@ -287,7 +286,7 @@ def build(df, out_path):
         for i in range(NDAY):
             L = get_column_letter(3 + i)
             cell(wt, f"{L}{tr}", f"=SUM({L}{start}:{L}{end})", num=INT, align="center",
-                 border=True, bold=True, color=WHITE, fill=NAVY, size=10)
+                 border=True, bold=True, color=WHITE, fill=NAVY, size=9)
         cell(wt, f"{cL}{tr}", f"={lL}{tr}-{fL}{tr}", num=SGN, align="center",
              border=True, bold=True, color=WHITE, fill=NAVY, size=10)
         cell(wt, f"{pL}{tr}", f"=IFERROR(({lL}{tr}-{fL}{tr})/{fL}{tr},0)", num=PCT,
@@ -303,7 +302,7 @@ def build(df, out_path):
         ch = BarChart()
         ch.type = "bar"
         ch.title = chart_title
-        ch.height, ch.width = max(8, 0.55 * chart_n), 16
+        ch.height, ch.width = max(8, 0.5 * chart_n), 16
         ch.legend = None
         rr0, rr1 = start, start + chart_n - 1
         ch.add_data(Reference(wt, min_col=chg_col, min_row=rr0, max_row=rr1), titles_from_data=False)
@@ -315,24 +314,11 @@ def build(df, out_path):
     build_table("По артикулам", articles_by_change, art, ART, 34,
                 "Топ-15 артикулов по снижению остатка", min(15, len(articles_by_change)))
     build_table("По складам", wh_by_change, wh, WH, 30,
-                "Топ-15 складов по снижению остатка", min(15, len(wh_by_change)))
-    wsz, s0, s1, _, szpct = build_table("По размерам", sizes_by_stock, sz, SIZE, 12,
-                                        "Изменение остатка по размерам, шт", len(sizes_by_stock))
-    cc = BarChart(); cc.type = "col"
-    cc.title = "Остаток на начало и конец периода по размерам"
-    cc.height, cc.width = 9, 20
-    cc.y_axis.title = "шт"
-    cc.add_data(Reference(wsz, min_col=3, min_row=s0 - 1, max_row=s1), titles_from_data=True)
-    cc.add_data(Reference(wsz, min_col=3 + NDAY - 1, min_row=s0 - 1, max_row=s1), titles_from_data=True)
-    cc.set_categories(Reference(wsz, min_col=2, min_row=s0, max_row=s1))
-    cc.series[0].graphicalProperties.solidFill = BLUE
-    cc.series[1].graphicalProperties.solidFill = NAVY
-    wsz.add_chart(cc, f"{get_column_letter(szpct + 2)}{s0 + 18}")
+                "Склады по изменению остатка", min(15, len(wh_by_change)))
 
-    order = ["Дашборд", "По артикулам", "По размерам", "По складам", "Данные", "Списки"]
+    order = ["Дашборд", "По артикулам", "По складам", "Данные", "Списки"]
     wb._sheets.sort(key=lambda s: order.index(s.title))
     wb.active = 0
-    # recalc every formula on open (headless LibreOffice recalc not required)
     wb.calculation.calcMode = "auto"
     wb.calculation.fullCalcOnLoad = True
     wb.save(out_path)
