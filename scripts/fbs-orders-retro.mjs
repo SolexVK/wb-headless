@@ -29,10 +29,41 @@ const arg = (name, def) => {
   const i = process.argv.indexOf('--' + name);
   return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : def;
 };
-const DAYS = Number(arg('days', 7));
 const CRIT_H = Number(arg('crit', 48));   // порог «критически долго», часов
 const jsonOnly = process.argv.includes('--json');
 const log = (...a) => process.stderr.write(a.join(' ') + '\n');
+
+// ── Период выборки ──────────────────────────────────────────────────────────
+// Варианты (первый сработавший):
+//   --day YYYY-MM-DD [--tz +03:00]   — один календарный день (по умолч. МСК, UTC+3)
+//   --from ISO|unix --to ISO|unix    — явный диапазон
+//   --days N                         — скользящее окно N суток от «сейчас» (по умолч. 7)
+// Даты для WB /api/v3/orders — Unix-секунды UTC.
+const TZ = arg('tz', '+03:00'); // деловой день считаем по Москве
+const toSecFromAny = (v) => (/^\d+$/.test(String(v)) ? Number(v) : Math.floor(Date.parse(v) / 1000));
+const dmy = (sec) => new Date(sec * 1000).toLocaleDateString('ru-RU', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' });
+
+function resolveRange() {
+  const day = arg('day', null);
+  const from = arg('from', null);
+  const to = arg('to', null);
+  if (day) {
+    const start = Math.floor(Date.parse(`${day}T00:00:00${TZ}`) / 1000);
+    const end = start + 86400;
+    return { fromSec: start, toSec: end, days: 1, label: `за ${dmyLocal(day)}` };
+  }
+  if (from && to) {
+    const fromSec = toSecFromAny(from), toSec = toSecFromAny(to);
+    return { fromSec, toSec, days: Math.max(1, Math.round((toSec - fromSec) / 86400)), label: `${dmy(fromSec)} – ${dmy(toSec)}` };
+  }
+  const days = Number(arg('days', 7));
+  const toSec = Math.floor(Date.now() / 1000);
+  return { fromSec: toSec - days * 86400, toSec, days, label: `последние ${days} дн.` };
+}
+const dmyLocal = (dayStr) => { const [y, m, d] = dayStr.split('-'); return `${d}.${m}.${y}`; };
+const snapshotISO = (sec) => new Date(sec * 1000).toISOString().slice(0, 16).replace('T', ' ');
+const RANGE = resolveRange();
+const DAYS = RANGE.days;
 
 const wb = new WbClient({ tokenType: process.env.WB_TOKEN_TYPE || 'personal' });
 const MP_LIMIT = { limit: 300, periodSec: 60, burst: 20 };
@@ -46,13 +77,12 @@ try {
 
 // ── 1. Все сборочные задания за период (пагинация по next) ──────────────────
 async function fetchOrders() {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const fromSec = nowSec - DAYS * 24 * 3600;
+  const { fromSec, toSec } = RANGE;
   const orders = [];
   let next = 0;
   for (let page = 1; ; page++) {
     const { data } = await wb.get('marketplace', '/api/v3/orders', {
-      query: { limit: 1000, next, dateFrom: fromSec, dateTo: nowSec },
+      query: { limit: 1000, next, dateFrom: fromSec, dateTo: toSec },
       methodLimit: MP_LIMIT,
     });
     const batch = data.orders || [];
@@ -127,7 +157,7 @@ const median = (arr) => {
 };
 const fmtH = (h) => (h >= 24 ? (h / 24).toFixed(1) + ' сут' : h.toFixed(1) + ' ч');
 
-log(`Период: последние ${DAYS} дн. | порог критичности: ${CRIT_H} ч`);
+log(`Период: ${RANGE.label} (${snapshotISO(RANGE.fromSec)} → ${snapshotISO(RANGE.toSec)} UTC) | порог критичности: ${CRIT_H} ч`);
 const orders = await fetchOrders();
 const supplyIds = new Set(orders.map((o) => o.supplyId).filter(Boolean));
 const supplies = await fetchSupplies(supplyIds);
@@ -190,6 +220,9 @@ for (const t of allTimes) {
 const snapshot = {
   generatedAt: new Date().toISOString(),
   periodDays: DAYS,
+  periodLabel: RANGE.label,
+  periodFrom: new Date(RANGE.fromSec * 1000).toISOString(),
+  periodTo: new Date(RANGE.toSec * 1000).toISOString(),
   criticalThresholdHours: CRIT_H,
   ordersTotal: orders.length,
   processedTotal: rows.reduce((s, r) => s + r.processed, 0),

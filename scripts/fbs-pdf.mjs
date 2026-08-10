@@ -20,6 +20,7 @@ const R = (p) => path.join(REPO, 'reports-output', p);
 const stock = JSON.parse(fs.readFileSync(R('fbs-stock.json'), 'utf8'));
 const retro = JSON.parse(fs.readFileSync(R('fbs-orders-retro.json'), 'utf8'));
 const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+const periodLabel = retro.periodLabel || `последние ${retro.periodDays} дн.`;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const nf = (n) => Number(n || 0).toLocaleString('ru-RU');
@@ -56,7 +57,7 @@ function stackBar(status, h = 9) {
 
 const kpis = [
   ['штук на FBS', nf(grandStock), 'accent'],
-  [`заказов / ${retro.periodDays} дн.`, nf(retro.ordersTotal), ''],
+  [`заказов · ${periodLabel}`, nf(retro.ordersTotal), ''],
   ['обработано', processedPct.toFixed(0) + '%', ''],
   ['медиана обработки', fmtH(retro.overallMedianHours), ''],
   ['среднее обработки', fmtH(retro.overallAvgHours), ''],
@@ -199,9 +200,9 @@ const body = `
     <div>
       <p class="eyebrow">Wildberries · FBS · операционный отчёт</p>
       <h1>FBS: остатки и обработка заказов по фулфилментам</h1>
-      <p class="sub">Что лежит на складах продавца сейчас и как за последние ${retro.periodDays} дней обрабатывались заказы каждым фулфилментом.</p>
+      <p class="sub">Что лежит на складах продавца сейчас и как ${periodLabel} обрабатывались заказы каждым фулфилментом.</p>
     </div>
-    <div class="stamp">Снимок<br><b>${stamp}</b><br>период: ${retro.periodDays} дн.</div>
+    <div class="stamp">Снимок<br><b>${stamp}</b><br>период: ${periodLabel}</div>
   </div>
 
   <div class="kpis">${kpis}</div>
@@ -216,7 +217,7 @@ const body = `
   </section>
 
   <section class="section">
-    <h2>2 · Заказы по фулфилменту за ${retro.periodDays} дн. <span class="muted">— ${nf(retro.ordersTotal)} заказов, обработано ${processedPct.toFixed(0)}%</span></h2>
+    <h2>2 · Заказы по фулфилменту — ${periodLabel} <span class="muted">— ${nf(retro.ordersTotal)} заказов, обработано ${processedPct.toFixed(0)}%</span></h2>
     <table class="flow">
       ${flowCols}
       <thead><tr>

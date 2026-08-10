@@ -23,6 +23,7 @@ const R = (p) => path.join(REPO, 'reports-output', p);
 const stock = JSON.parse(fs.readFileSync(R('fbs-stock.json'), 'utf8'));
 const retro = JSON.parse(fs.readFileSync(R('fbs-orders-retro.json'), 'utf8'));
 const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+const periodLabel = retro.periodLabel || `последние ${retro.periodDays} дн.`;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const nf = (n) => Number(n || 0).toLocaleString('ru-RU');
@@ -69,7 +70,7 @@ function stackBar(status, className = 'sbar') {
 // KPI-обзор
 const kpis = `
   <div class="kpi kpi-accent"><div class="kpi-num">${nf(grandStock)}</div><div class="kpi-lab">штук на FBS-складах</div></div>
-  <div class="kpi"><div class="kpi-num">${nf(retro.ordersTotal)}</div><div class="kpi-lab">заказов за ${retro.periodDays} дн.</div></div>
+  <div class="kpi"><div class="kpi-num">${nf(retro.ordersTotal)}</div><div class="kpi-lab">заказов · ${periodLabel}</div></div>
   <div class="kpi"><div class="kpi-num">${processedPct.toFixed(0)}<span class="kpi-of">%</span></div><div class="kpi-lab">обработано (${nf(retro.processedTotal)})</div></div>
   <div class="kpi"><div class="kpi-num">${fmtH(retro.overallMedianHours)}</div><div class="kpi-lab">медиана обработки</div></div>
   <div class="kpi"><div class="kpi-num">${fmtH(retro.overallAvgHours)}</div><div class="kpi-lab">среднее обработки</div></div>
@@ -142,9 +143,9 @@ const body = `<div class="wrap">
     <div>
       <p class="eyebrow">Wildberries · FBS · операционная панель</p>
       <h1>FBS: остатки и обработка заказов по фулфилментам</h1>
-      <p class="sub">Единый обзор по нашим складам продавца: что лежит на складе сейчас и как за последние ${retro.periodDays} дней обрабатывались заказы каждым фулфилментом.</p>
+      <p class="sub">Единый обзор по нашим складам продавца: что лежит на складе сейчас и как ${periodLabel} обрабатывались заказы каждым фулфилментом.</p>
     </div>
-    <div class="stamp">Снимок<br><b>${stamp}</b><br><span class="muted">период: ${retro.periodDays} дн.</span></div>
+    <div class="stamp">Снимок<br><b>${stamp}</b><br><span class="muted">период: ${periodLabel}</span></div>
   </header>
 
   <section class="kpis">${kpis}</section>
@@ -160,7 +161,7 @@ const body = `<div class="wrap">
   </section>
 
   <section class="block">
-    <div class="block-head"><h2>2 · Заказы по фулфилменту за ${retro.periodDays} дн.</h2><span class="muted">${nf(retro.ordersTotal)} заказов · обработано ${processedPct.toFixed(0)}%</span></div>
+    <div class="block-head"><h2>2 · Заказы по фулфилменту — ${periodLabel}</h2><span class="muted">${nf(retro.ordersTotal)} заказов · обработано ${processedPct.toFixed(0)}%</span></div>
     <div class="table-scroll"><table class="flow">
       <thead><tr>
         <th>Фулфилмент</th><th class="ta-r">Остаток</th><th class="ta-r">Заказов</th>
