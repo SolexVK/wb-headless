@@ -92,6 +92,31 @@ async function fetchSupplies(neededIds) {
   return map;
 }
 
+// ── 3. Статусы сборочных заданий (supplierStatus), чанки по 1000 ────────────
+async function fetchStatuses(ids) {
+  const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
+  const map = new Map(); // id → supplierStatus
+  let page = 0;
+  for (const part of chunk(ids, 1000)) {
+    const { data } = await wb.request('marketplace', '/api/v3/orders/status', {
+      method: 'POST', body: { orders: part }, methodLimit: MP_LIMIT,
+    });
+    for (const s of data.orders || []) map.set(s.id, s.supplierStatus);
+    log(`  statuses: чанк ${++page}, +${(data.orders || []).length} (всего ${map.size})`);
+  }
+  return map;
+}
+
+// Группируем supplierStatus в укрупнённые корзины для «в работе / не отгружено».
+const STATUS_BUCKET = {
+  new: 'new',            // новое — не взято в сборку (не отгружено)
+  confirm: 'confirm',    // на сборке — в работе
+  complete: 'complete',  // в доставке — обработано/отгружено
+  cancel: 'cancel',
+  cancel_carrier: 'cancel',
+};
+const emptyStatus = () => ({ new: 0, confirm: 0, complete: 0, cancel: 0 });
+
 // ── main ────────────────────────────────────────────────────────────────────
 const hrs = (a, b) => (new Date(b) - new Date(a)) / 3600000;
 const median = (arr) => {
@@ -106,15 +131,19 @@ log(`Период: последние ${DAYS} дн. | порог критичн�
 const orders = await fetchOrders();
 const supplyIds = new Set(orders.map((o) => o.supplyId).filter(Boolean));
 const supplies = await fetchSupplies(supplyIds);
+const statuses = await fetchStatuses(orders.map((o) => o.id));
 
 // Группировка по нашему фулфилменту (warehouseId).
 const byWh = new Map();
 const critical = [];
 for (const o of orders) {
   const wid = o.warehouseId;
-  if (!byWh.has(wid)) byWh.set(wid, { warehouseId: wid, name: WH_NAME[wid] || String(wid), made: 0, processed: 0, pending: 0, times: [] });
+  if (!byWh.has(wid)) byWh.set(wid, { warehouseId: wid, name: WH_NAME[wid] || String(wid), made: 0, processed: 0, pending: 0, times: [], status: emptyStatus() });
   const g = byWh.get(wid);
   g.made++;
+
+  const bucket = STATUS_BUCKET[statuses.get(o.id)] || 'new';
+  g.status[bucket]++;
 
   const sup = o.supplyId ? supplies.get(o.supplyId) : null;
   const closedAt = sup && (sup.done || sup.closedAt) ? sup.closedAt : null;
@@ -139,13 +168,27 @@ const rows = [...byWh.values()].map((g) => {
     avgHours: +avg.toFixed(2), medianHours: +median(g.times).toFixed(2),
     maxHours: g.times.length ? +Math.max(...g.times).toFixed(2) : 0,
     criticalCount: critical.filter((c) => c.warehouseId === g.warehouseId).length,
+    status: { ...g.status },
   };
 }).sort((a, b) => b.made - a.made);
 
 critical.sort((a, b) => b.hours - a.hours);
 
+const statusTotals = rows.reduce((t, r) => {
+  for (const k of ['new', 'confirm', 'complete', 'cancel']) t[k] += r.status[k];
+  return t;
+}, emptyStatus());
+
 const allTimes = rows.flatMap((r) => byWh.get(r.warehouseId).times);
+const timingBuckets = { '<6ч': 0, '6-24ч': 0, '24-48ч': 0, '>48ч': 0 };
+for (const t of allTimes) {
+  if (t < 6) timingBuckets['<6ч']++;
+  else if (t < 24) timingBuckets['6-24ч']++;
+  else if (t < 48) timingBuckets['24-48ч']++;
+  else timingBuckets['>48ч']++;
+}
 const snapshot = {
+  generatedAt: new Date().toISOString(),
   periodDays: DAYS,
   criticalThresholdHours: CRIT_H,
   ordersTotal: orders.length,
@@ -153,6 +196,8 @@ const snapshot = {
   pendingTotal: rows.reduce((s, r) => s + r.pending, 0),
   overallAvgHours: allTimes.length ? +(allTimes.reduce((a, b) => a + b, 0) / allTimes.length).toFixed(2) : 0,
   overallMedianHours: +median(allTimes).toFixed(2),
+  statusTotals,
+  timingBuckets,
   byFulfillment: rows,
   critical,
 };
@@ -165,7 +210,8 @@ for (const r of rows) {
   log(r.name.padEnd(20) + String(r.made).padStart(9) + String(r.processed).padStart(8) + String(r.pending).padStart(10) +
     fmtH(r.avgHours).padStart(10) + fmtH(r.medianHours).padStart(10) + fmtH(r.maxHours).padStart(10) + String(r.criticalCount).padStart(7));
 }
-log(`\nОбщее среднее время обработки: ${fmtH(snapshot.overallAvgHours)} | медиана: ${fmtH(snapshot.overallMedianHours)}`);
+log(`\nСтатусы (supplierStatus): новых ${statusTotals.new} · на сборке ${statusTotals.confirm} · в доставке ${statusTotals.complete} · отменено ${statusTotals.cancel}`);
+log(`Общее среднее время обработки: ${fmtH(snapshot.overallAvgHours)} | медиана: ${fmtH(snapshot.overallMedianHours)}`);
 log(`Критически долгих (> ${CRIT_H} ч): ${critical.length}`);
 for (const c of critical.slice(0, 12)) {
   log(`   ${fmtH(c.hours).padStart(9)}  ${c.warehouse.padEnd(18)} ${String(c.article).padEnd(24)} заказ ${c.orderId} | ${c.createdAt.slice(0, 16)} → ${c.closedAt.slice(0, 16)}`);

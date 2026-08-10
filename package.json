@@ -20,7 +20,8 @@
     "wb:warehouses": "node scripts/wb-warehouses.mjs",
     "fbs:stock": "node scripts/fbs-stock.mjs",
     "fbs:dashboard": "node scripts/fbs-dashboard.mjs",
-    "fbs:retro": "node scripts/fbs-orders-retro.mjs"
+    "fbs:retro": "node scripts/fbs-orders-retro.mjs",
+    "fbs:report": "node scripts/fbs-report.mjs"
   },
   "engines": {
     "node": ">=18"
