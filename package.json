@@ -17,7 +17,9 @@
     "token:check": "node scripts/wb-token-check.mjs",
     "docs:fetch": "node scripts/fetch-wb-docs.mjs",
     "docs:limits": "node scripts/fetch-wb-docs.mjs https://dev.wildberries.ru/docs/openapi/api-information docs/wb-api/limits.md",
-    "wb:warehouses": "node scripts/wb-warehouses.mjs"
+    "wb:warehouses": "node scripts/wb-warehouses.mjs",
+    "fbs:stock": "node scripts/fbs-stock.mjs",
+    "fbs:dashboard": "node scripts/fbs-dashboard.mjs"
   },
   "engines": {
     "node": ">=18"
