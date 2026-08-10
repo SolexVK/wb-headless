@@ -7,10 +7,17 @@
     "puppeteer": "^22.10.0",
     "uuid": "^9.0.1"
   },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  },
   "scripts": {
     "build:chrome": "npx @puppeteer/browsers install chrome@stable --install-dir=./chrome --cache-dir=./chrome",
     "start": "node server.js",
-    "report:stock": "node report-stock.js"
+    "report:stock": "node report-stock.js",
+    "token:check": "node scripts/wb-token-check.mjs",
+    "docs:fetch": "node scripts/fetch-wb-docs.mjs",
+    "docs:limits": "node scripts/fetch-wb-docs.mjs https://dev.wildberries.ru/docs/openapi/api-information docs/wb-api/limits.md",
+    "wb:warehouses": "node scripts/wb-warehouses.mjs"
   },
   "engines": {
     "node": ">=18"
