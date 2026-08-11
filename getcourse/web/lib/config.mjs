@@ -1,4 +1,5 @@
 // Central place for environment-driven settings (limits, storage, billing).
+import './loadenv.mjs'; // MUST be first: populate process.env from .env before we read it
 import path from 'node:path';
 
 const num = (v, d) => (v === undefined || v === '' ? d : Number(v));

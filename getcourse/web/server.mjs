@@ -10,6 +10,7 @@
 //
 // Binds to 127.0.0.1 by default; expose with `tailscale funnel` (public) or
 // `tailscale serve` (private) — see scripts/tailscale-serve.sh.
+import './lib/loadenv.mjs'; // MUST be first: load .env before any env-reading module
 import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -26,17 +27,8 @@ import { listDir, createDir, resolveWritableOutput, ROOT } from './lib/fsbrowse.
 import { startJanitor } from './lib/janitor.mjs';
 import * as yookassa from './lib/billing_yookassa.mjs';
 
-// load .env from the getcourse root
+// (.env already loaded by ./lib/loadenv.mjs, imported first above)
 const here = path.dirname(fileURLToPath(import.meta.url));
-for (const p of [path.join(here, '..', '.env')]) {
-  if (fs.existsSync(p)) for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
-    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line);
-    if (m && !(m[1] in process.env)) {
-      let v = m[2]; if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-      process.env[m[1]] = v;
-    }
-  }
-}
 
 ensureAdminSeed();
 
