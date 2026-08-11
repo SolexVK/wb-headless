@@ -25,10 +25,15 @@ if ! command -v brew >/dev/null; then
 fi
 echo "[*] brew: $(brew --version | head -1)"
 
-# --- 2. ffmpeg + tailscale (CLI) ---
-for pkg in ffmpeg tailscale; do
-  if ! brew list "$pkg" >/dev/null 2>&1; then echo "[*] brew install $pkg"; brew install "$pkg"; fi
-done
+# --- 2. ffmpeg + tailscale (only if the command is missing) ---
+# Checked by command presence, NOT `brew list`: Tailscale may already be present
+# as the standalone/GUI app — we must not install a duplicate brew CLI over it.
+if ! command -v ffmpeg >/dev/null; then echo "[*] brew install ffmpeg"; brew install ffmpeg; fi
+if ! command -v tailscale >/dev/null; then
+  echo "[*] tailscale не найден — установите приложение Tailscale или 'brew install tailscale'";
+else
+  echo "[*] tailscale уже установлен: $(tailscale version | head -1)"
+fi
 echo "[*] ffmpeg: $(ffmpeg -version | head -1)"
 
 # --- 3. nvm + isolated Node ---
