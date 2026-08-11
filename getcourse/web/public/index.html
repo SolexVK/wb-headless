@@ -98,16 +98,42 @@
 
       <!-- Download tab -->
       <div id="tab-download" class="tabpane">
+        <!-- Step 1: GetCourse access -->
         <div class="card">
-          <h2>Новое скачивание</h2>
+          <h2>1. Доступ к GetCourse</h2>
           <div class="grid2">
             <label>Email GetCourse<input id="gc-email" autocomplete="off" placeholder="you@example.com"></label>
             <label>Пароль GetCourse<input id="gc-pass" type="password" autocomplete="off"></label>
           </div>
-          <label>Ссылка на курс (страница со списком уроков)
-            <input id="gc-url" placeholder="https://школа.getcourse.ru/teach/control/stream/view/id/000000000">
+          <label>Адрес школы GetCourse
+            <input id="gc-school" placeholder="например, influencezakupka.getcourse.ru">
           </label>
-          <p class="hint" style="margin-top:-6px">Откройте нужный курс на GetCourse так, чтобы был виден список уроков, и скопируйте адрес из строки браузера — он должен содержать <code>/stream/view/id/ЧИСЛО</code>. Можно и адрес отдельного урока (<code>/lesson/view/id/ЧИСЛО</code>). Ссылка на общий список курсов (<code>/teach/control/stream</code>) не подойдёт.</p>
+          <label class="check"><input id="gc-remember" type="checkbox" checked> Запомнить пароль (хранится в зашифрованном виде на сервере)</label>
+          <button id="btn-courses" class="primary">Показать мои курсы</button>
+          <div id="courses-msg" class="muted"></div>
+          <details class="adv">
+            <summary>Или открыть по прямой ссылке на курс/урок</summary>
+            <label>Ссылка<input id="gc-url" placeholder="https://школа.getcourse.ru/teach/control/stream/view/id/000000000"></label>
+            <button id="btn-direct" type="button">Открыть по ссылке</button>
+            <p class="hint">Адрес должен содержать <code>/stream/view/id/ЧИСЛО</code> или <code>/lesson/view/id/ЧИСЛО</code>.</p>
+          </details>
+        </div>
+
+        <!-- Step 2: courses -->
+        <div id="courses-card" class="card hidden">
+          <h2>2. Выберите курс</h2>
+          <div id="courses-list"></div>
+        </div>
+
+        <!-- Step 3: lessons tree + target + download -->
+        <div id="tree-card" class="card hidden">
+          <h2 id="tree-title">3. Выберите уроки</h2>
+          <div class="tree-actions">
+            <button id="sel-all" type="button" class="link">Выбрать все</button>
+            <button id="sel-none" type="button" class="link">Снять выбор</button>
+            <span id="sel-count" class="muted"></span>
+          </div>
+          <div id="tree" class="tree"></div>
 
           <!-- owner/admin: server folder -->
           <label id="folder-block">Папка для сохранения (на Mac Mini)
@@ -116,8 +142,7 @@
               <button id="btn-browse" type="button">Обзор…</button>
             </div>
           </label>
-
-          <!-- delivery: local folder on user's computer -->
+          <!-- delivery: local folder -->
           <div id="delivery-note" class="note hidden">
             Видео скачивается во временное хранилище и затем передаётся вам. Файлы
             удаляются автоматически через <b id="note-retention">30</b> мин —
@@ -132,20 +157,19 @@
             </label>
             <div id="local-unsupported" class="muted hidden">
               Ваш браузер не поддерживает выбор папки — готовые видео можно будет
-              скачать кнопкой во вкладке «Задачи» (обычно в папку «Загрузки»).
+              скачать кнопкой во вкладке «Задачи».
             </div>
           </div>
-
           <details class="adv">
             <summary>Дополнительно</summary>
-            <div class="grid2">
-              <label>Параллельных загрузок<input id="gc-conc" type="number" min="1" max="20" value="10"></label>
-              <label>Лимит уроков (0 = все)<input id="gc-limit" type="number" min="0" value="0"></label>
-            </div>
+            <label>Параллельных загрузок<input id="gc-conc" type="number" min="1" max="20" value="10"></label>
           </details>
-          <button id="btn-start" class="primary">Начать скачивание</button>
-          <div id="start-msg" class="muted"></div>
-          <p class="hint">Пароль GetCourse используется только для этого запуска и не сохраняется на сервере. Качество берётся максимальное из доступных, видео склеивается в MP4 без «иканья».</p>
+          <div class="dl-buttons">
+            <button id="btn-download-sel" class="primary">Скачать выбранные</button>
+            <button id="btn-download-all" type="button">Скачать весь курс</button>
+          </div>
+          <div id="dl-msg" class="muted"></div>
+          <p class="hint">Качество берётся максимальное из доступных, видео склеивается в MP4 без «иканья».</p>
         </div>
       </div>
 

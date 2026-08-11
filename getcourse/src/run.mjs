@@ -27,6 +27,7 @@ export async function runCourseDownload(opts) {
     output,
     concurrency = 10,
     limit = 0,
+    plan = null, // optional pre-selected blocks [{title, lessons:[{title,url}]}] — skips crawl
     onEvent = () => {},
     shouldCancel = () => false,
   } = opts;
@@ -34,8 +35,9 @@ export async function runCourseDownload(opts) {
   const emit = (type, data = {}) => { try { onEvent({ type, ...data }); } catch (e) {} };
   const log = (message) => emit('log', { message });
 
-  if (!email || !password || !startUrl) throw new Error('email, password and startUrl are required');
-  const origin = new URL(startUrl).origin;
+  const originSource = startUrl || plan?.[0]?.lessons?.[0]?.url || plan?.[0]?.url;
+  if (!email || !password || !originSource) throw new Error('email, password and a course URL (or selection) are required');
+  const origin = new URL(originSource).origin;
   const OUT = path.resolve(output || './output');
 
   const summary = { ok: 0, skipped: 0, problems: 0, items: [], output: OUT };
@@ -46,11 +48,17 @@ export async function runCourseDownload(opts) {
     emit('login', { ok: okLogin });
     if (!okLogin) throw new Error('login failed — check GetCourse credentials');
 
-    log('Обход структуры курса...');
-    const blocks = await crawlCourse(page, startUrl);
-    const totalLessons = blocks.reduce((n, b) => n + b.lessons.length, 0);
+    let blocks;
+    if (plan && plan.length) {
+      log('Скачивание выбранных уроков...');
+      blocks = plan;
+    } else {
+      log('Обход структуры курса...');
+      blocks = await crawlCourse(page, startUrl);
+    }
+    const totalLessons = blocks.reduce((n, b) => n + (b.lessons ? b.lessons.length : 0), 0);
     if (totalLessons === 0) {
-      throw new Error('На этой странице не найдено уроков. Скопируйте адрес страницы курса со списком уроков — обычно вида .../teach/control/stream/view/id/ЧИСЛО (или адрес конкретного урока .../lesson/view/id/ЧИСЛО).');
+      throw new Error('Не найдено уроков для скачивания. Скопируйте адрес страницы курса со списком уроков — обычно вида .../teach/control/stream/view/id/ЧИСЛО (или адрес конкретного урока .../lesson/view/id/ЧИСЛО).');
     }
     fs.mkdirSync(OUT, { recursive: true });
     fs.writeFileSync(path.join(OUT, 'course_map.json'), JSON.stringify(blocks, null, 2));

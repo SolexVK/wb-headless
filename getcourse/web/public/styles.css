@@ -98,6 +98,22 @@ tr.unread td{font-weight:600}
 .report-view{margin-top:12px;background:#0c0f1d;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:360px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,monospace;color:#b9c2e6;white-space:pre-wrap;word-break:break-word}
 .report-fab{position:fixed;right:18px;bottom:18px;z-index:30;background:var(--warn);color:#231a00;border:none;font-weight:700;padding:11px 16px;border-radius:24px;box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .report-fab:hover{filter:brightness(1.05)}
+/* course list + lesson tree */
+#courses-list{display:flex;flex-direction:column;gap:8px}
+.course-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+.course-item:hover{border-color:var(--primary)}
+.course-name{font-weight:600}
+.course-sub{font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tree-actions{display:flex;gap:14px;align-items:center;margin-bottom:8px}
+.tree{border:1px solid var(--line);border-radius:10px;max-height:360px;overflow:auto;padding:6px 10px;margin-bottom:14px}
+.tree-block{padding:6px 0;border-bottom:1px solid var(--line)}
+.tree-block:last-child{border-bottom:none}
+.tree-block-head{display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer;padding:4px 0}
+.tree-block-head input{width:auto;margin:0}
+.tree-lesson{display:flex;align-items:center;gap:8px;padding:3px 0 3px 24px;font-size:14px;color:var(--muted);cursor:pointer}
+.tree-lesson input{width:auto;margin:0}
+.tree-lesson:hover{color:var(--text)}
+.dl-buttons{display:flex;gap:10px;flex-wrap:wrap}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:20}
 .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);width:min(560px,92vw);max-height:80vh;display:flex;flex-direction:column;padding:16px}
 .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}

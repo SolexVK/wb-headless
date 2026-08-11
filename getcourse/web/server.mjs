@@ -29,6 +29,18 @@ import { startJanitor } from './lib/janitor.mjs';
 import * as yookassa from './lib/billing_yookassa.mjs';
 import * as google from './lib/google.mjs';
 import { saveReport, listReports, readReport, unreadCount } from './lib/reports.mjs';
+import { saveCreds, credsView, getEmail, getPassword } from './lib/gccreds.mjs';
+import { listCourses, courseTree } from './lib/gcbrowse.mjs';
+
+// Resolve GetCourse credentials for an action: use what the client sent, else
+// the stored ones. Optionally persist them (remember).
+function resolveGc(user, body) {
+  const email = (body.email && String(body.email).trim()) || getEmail(user);
+  const password = (body.password && String(body.password)) || getPassword(user);
+  if (body.remember && (body.email || body.password)) saveCreds(user, { email, password, remember: true });
+  else if (body.email !== undefined && !body.password && body.remember) saveCreds(user, { email, remember: true });
+  return { email, password };
+}
 
 // Public base URL for building OAuth redirect + reset links.
 function baseUrl(req) {
@@ -71,8 +83,35 @@ app.get('/api/me', (req, res) => {
     browseRoot: req.user.localAccess ? ROOT : null,
     usage: usageView(req.user),
     yookassaEnabled: yookassa.isEnabled(),
+    gc: credsView(req.user),
     capabilities,
   });
+});
+
+// ---------- GetCourse discovery ----------
+app.post('/api/gc/creds', requireAuth, (req, res) => {
+  const { email, password, remember } = req.body || {};
+  saveCreds(req.user, { email, password, remember });
+  res.json({ gc: credsView(req.user) });
+});
+app.post('/api/gc/courses', requireAuth, requireSubscription, async (req, res) => {
+  try {
+    const { email, password } = resolveGc(req.user, req.body || {});
+    if (!email || !password) return res.status(400).json({ error: 'no_creds', message: 'Введите email и пароль GetCourse' });
+    const school = (req.body && req.body.school) || email.split('@')[0];
+    const courses = await listCourses(email, password, req.body.school || req.body.schoolUrl || school);
+    res.json({ courses });
+  } catch (e) { res.status(400).json({ error: 'gc_courses', message: e.message }); }
+});
+app.post('/api/gc/tree', requireAuth, requireSubscription, async (req, res) => {
+  try {
+    const { email, password } = resolveGc(req.user, req.body || {});
+    const { courseUrl } = req.body || {};
+    if (!courseUrl) return res.status(400).json({ error: 'no_url', message: 'Не указан курс' });
+    if (!email || !password) return res.status(400).json({ error: 'no_creds', message: 'Введите email и пароль GetCourse' });
+    const blocks = await courseTree(email, password, courseUrl);
+    res.json({ blocks });
+  } catch (e) { res.status(400).json({ error: 'gc_tree', message: e.message }); }
 });
 app.get('/api/usage', requireAuth, (req, res) => res.json(usageView(req.user)));
 
@@ -232,7 +271,9 @@ app.get('/api/jobs/:id', requireAuth, (req, res) => {
 });
 app.post('/api/jobs', requireAuth, requireSubscription, (req, res) => {
   try {
-    const { email, password, startUrl, output, concurrency, limit } = req.body || {};
+    const { startUrl, output, concurrency, limit, plan } = req.body || {};
+    const { email, password } = resolveGc(req.user, req.body || {});
+    if (!email || !password) return res.status(400).json({ error: 'no_creds', message: 'Введите email и пароль GetCourse' });
     let outAbs;
     if (req.user.localAccess) outAbs = resolveWritableOutput(output); // save on the Mac Mini
     // delivery users: output is ignored; a per-user spool folder is used
@@ -240,6 +281,7 @@ app.post('/api/jobs', requireAuth, requireSubscription, (req, res) => {
       email, password, startUrl, output: outAbs,
       concurrency: Math.min(20, Math.max(1, +concurrency || 10)),
       limit: Math.max(0, +limit || 0),
+      plan: Array.isArray(plan) && plan.length ? plan : null,
     });
     res.json({ job });
   } catch (e) { res.status(400).json({ error: 'job_failed', message: e.message }); }

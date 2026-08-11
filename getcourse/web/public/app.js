@@ -1,7 +1,7 @@
 'use strict';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-let ME = null, CAPS = { signup: true, google: false };
+let ME = null, CAPS = { signup: true, google: false }, GC = null;
 let YK_ENABLED = false;
 let localDirHandle = null;            // File System Access API handle (delivery)
 const streams = new Map();            // jobId -> EventSource
@@ -59,6 +59,7 @@ async function init() {
   try {
     const me = await api('/api/me');
     CAPS = me.capabilities || CAPS;
+    GC = me.gc || null;
     if (me.user) { ME = me.user; showMain(); return; }
   } catch {}
   showLogin();
@@ -136,6 +137,7 @@ function showMain() {
     $('#local-unsupported').classList.toggle('hidden', supported);
     $('#btn-local').classList.toggle('hidden', !supported);
   }
+  fillCreds();
   updateGate();
   refreshUsage();
   loadJobs();
@@ -252,34 +254,125 @@ async function saveToLocalFolder(job) {
   alert('Готово: файлы сохранены в «' + localDirHandle.name + '».');
 }
 
-// ---------- start job ----------
-$('#btn-start').addEventListener('click', async () => {
-  const body = {
+// ---------- GetCourse: credentials + course/lesson selection ----------
+function fillCreds() {
+  if (!GC) return;
+  if (GC.email && !$('#gc-email').value) $('#gc-email').value = GC.email;
+  if (GC.hasPassword) $('#gc-pass').placeholder = '•••••••• (сохранён)';
+}
+function gcPayload(extra = {}) {
+  return Object.assign({
     email: $('#gc-email').value.trim(),
     password: $('#gc-pass').value,
-    startUrl: $('#gc-url').value.trim(),
-    output: $('#gc-out').dataset.rel || $('#gc-out').value.trim(),
-    concurrency: +$('#gc-conc').value || 10,
-    limit: +$('#gc-limit').value || 0,
-  };
-  const msg = $('#start-msg');
-  const needFolder = !!ME.localAccess;
-  if (!body.email || !body.password || !body.startUrl || (needFolder && !body.output)) {
-    msg.textContent = needFolder ? 'Заполните email, пароль, ссылку и папку.' : 'Заполните email, пароль и ссылку.';
-    return;
+    school: $('#gc-school').value.trim() || undefined,
+    remember: $('#gc-remember').checked,
+  }, extra);
+}
+
+$('#btn-courses').addEventListener('click', async () => {
+  const msg = $('#courses-msg'); msg.textContent = 'Вхожу в GetCourse и ищу курсы…';
+  try {
+    const { courses } = await api('/api/gc/courses', { method: 'POST', body: gcPayload() });
+    renderCourses(courses);
+    msg.textContent = courses.length ? '' : 'Курсы не найдены — проверьте адрес школы.';
+    try { const me = await api('/api/me'); GC = me.gc; fillCreds(); } catch {}
+  } catch (err) { msg.textContent = err.message || 'Не удалось получить курсы'; if (err.status === 402) updateGate(); }
+});
+function renderCourses(courses) {
+  const card = $('#courses-card'), list = $('#courses-list');
+  card.classList.remove('hidden'); list.innerHTML = '';
+  courses.forEach(c => {
+    const a = document.createElement('button'); a.type = 'button'; a.className = 'course-item';
+    a.innerHTML = `<span class="course-name">${esc(c.title)}</span><span class="course-sub muted">${esc(c.subtitle || '')}</span>`;
+    a.addEventListener('click', () => loadTree(c.url, c.title));
+    list.appendChild(a);
+  });
+}
+$('#btn-direct').addEventListener('click', () => {
+  const url = $('#gc-url').value.trim();
+  if (!url) { $('#courses-msg').textContent = 'Вставьте ссылку.'; return; }
+  loadTree(url, url);
+});
+
+let TREE = null;
+async function loadTree(url, title) {
+  const card = $('#tree-card'), treeEl = $('#tree');
+  card.classList.remove('hidden');
+  $('#tree-title').textContent = '3. Выберите уроки — ' + (title || '');
+  treeEl.innerHTML = '<div class="muted">Загружаю структуру курса… (может занять до минуты)</div>';
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  try {
+    const { blocks } = await api('/api/gc/tree', { method: 'POST', body: gcPayload({ courseUrl: url }) });
+    TREE = blocks; renderTree(blocks);
+  } catch (err) { treeEl.innerHTML = '<div class="error">' + esc(err.message || 'Ошибка') + '</div>'; if (err.status === 402) updateGate(); }
+}
+function renderTree(blocks) {
+  const el = $('#tree'); el.innerHTML = '';
+  if (!blocks.length) { el.innerHTML = '<div class="muted">Уроки не найдены.</div>'; return; }
+  blocks.forEach((b, bi) => {
+    const blk = document.createElement('div'); blk.className = 'tree-block';
+    const head = document.createElement('label'); head.className = 'tree-block-head';
+    const bc = document.createElement('input'); bc.type = 'checkbox'; bc.className = 'block-check'; bc.dataset.bi = bi;
+    bc.addEventListener('change', () => { el.querySelectorAll(`input.lesson-check[data-bi="${bi}"]`).forEach(x => x.checked = bc.checked); updateSel(); });
+    head.appendChild(bc); head.appendChild(document.createTextNode(' ' + b.title + ' (' + b.lessons.length + ')'));
+    blk.appendChild(head);
+    b.lessons.forEach((l, li) => {
+      const row = document.createElement('label'); row.className = 'tree-lesson';
+      const c = document.createElement('input'); c.type = 'checkbox'; c.className = 'lesson-check'; c.dataset.bi = bi; c.dataset.li = li;
+      c.addEventListener('change', updateSel);
+      row.appendChild(c); row.appendChild(document.createTextNode(' ' + l.title));
+      blk.appendChild(row);
+    });
+    el.appendChild(blk);
+  });
+  updateSel();
+}
+function updateSel() {
+  const n = $('#tree').querySelectorAll('input.lesson-check:checked').length;
+  const t = $('#tree').querySelectorAll('input.lesson-check').length;
+  $('#sel-count').textContent = `выбрано ${n} из ${t}`;
+}
+$('#sel-all').addEventListener('click', () => { $('#tree').querySelectorAll('input[type=checkbox]').forEach(c => c.checked = true); updateSel(); });
+$('#sel-none').addEventListener('click', () => { $('#tree').querySelectorAll('input[type=checkbox]').forEach(c => c.checked = false); updateSel(); });
+
+function buildPlan(all) {
+  if (!TREE) return [];
+  const plan = [];
+  TREE.forEach((b, bi) => {
+    const lessons = [];
+    b.lessons.forEach((l, li) => {
+      const checked = all || $('#tree').querySelector(`input.lesson-check[data-bi="${bi}"][data-li="${li}"]`)?.checked;
+      if (checked) lessons.push({ title: l.title, url: l.url });
+    });
+    if (lessons.length) plan.push({ title: b.title, lessons });
+  });
+  return plan;
+}
+async function startDownload(all) {
+  const msg = $('#dl-msg');
+  const plan = buildPlan(all);
+  if (!plan.length) { msg.textContent = 'Отметьте хотя бы один урок (или нажмите «Скачать весь курс»).'; return; }
+  const body = gcPayload({ plan, concurrency: +$('#gc-conc').value || 10 });
+  if (ME.localAccess) {
+    const out = $('#gc-out').dataset.rel || $('#gc-out').value.trim();
+    if (!out) { msg.textContent = 'Выберите папку на Mac Mini.'; return; }
+    body.output = out;
   }
-  msg.textContent = 'Запуск…';
+  const count = plan.reduce((n, b) => n + b.lessons.length, 0);
+  msg.textContent = `Запуск (${count} уроков)…`;
   try {
     await api('/api/jobs', { method: 'POST', body });
     $('#gc-pass').value = '';
     msg.textContent = 'Задача создана.';
-    slog('job', 'created');
+    slog('job', 'created ' + count);
     $$('.tab').find(b => b.dataset.tab === 'jobs').click();
   } catch (err) {
     if (err.status === 402) { msg.textContent = 'Требуется активная подписка.'; updateGate(); }
     else msg.textContent = err.message || 'Ошибка запуска';
   }
-});
+}
+$('#btn-download-sel').addEventListener('click', () => startDownload(false));
+$('#btn-download-all').addEventListener('click', () => startDownload(true));
 
 // ---------- jobs ----------
 async function loadJobs() {

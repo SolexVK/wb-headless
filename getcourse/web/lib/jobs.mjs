@@ -98,8 +98,8 @@ async function runNext() {
   broadcast(job, { type: 'status', status: 'running' });
   try {
     await runCourseDownload({
-      email: job._email, password: job._password, startUrl: job.startUrl,
-      output: job.output, concurrency: job.concurrency, limit: job.limit,
+      email: job._email, password: job._password, startUrl: job.realStartUrl,
+      output: job.output, concurrency: job.concurrency, limit: job.limit, plan: job.plan,
       onEvent: (evt) => onEvent(job, evt),
       shouldCancel: () => {
         if (job.cancel) return true;
@@ -122,8 +122,8 @@ async function runNext() {
   }
 }
 
-export function createJob(user, { email, password, startUrl, output, concurrency = 10, limit = 0 }) {
-  if (!email || !password || !startUrl) throw new Error('нужны email, password и startUrl');
+export function createJob(user, { email, password, startUrl, output, concurrency = 10, limit = 0, plan = null }) {
+  if (!email || !password || (!startUrl && !(plan && plan.length))) throw new Error('нужны email, password и ссылка (или выбор уроков)');
   const mode = user.localAccess ? 'local' : 'delivery';
   const id = crypto.randomUUID();
   let outDir;
@@ -137,9 +137,12 @@ export function createJob(user, { email, password, startUrl, output, concurrency
     const block = quotaBlock(user, 0);
     if (block) throw new Error(block);
   }
+  const planLessons = plan ? plan.reduce((n, b) => n + (b.lessons ? b.lessons.length : 0), 0) : 0;
   const job = {
     id, userId: user.id, username: user.username, mode,
-    startUrl, output: outDir, concurrency, limit,
+    realStartUrl: startUrl || null, // actual URL passed to the engine (null for plan)
+    startUrl: startUrl || (plan ? `Выбранные уроки: ${planLessons}` : ''), // display label
+    plan, output: outDir, concurrency, limit,
     status: 'queued', createdAt: new Date().toISOString(), startedAt: null, finishedAt: null,
     log: [], course: null, current: null, completedVideos: 0, summary: null,
     files: [], cancel: false, quotaStopped: false, subscribers: new Set(),
