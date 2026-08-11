@@ -57,9 +57,20 @@ echo "[*] .nvmrc зафиксирован: $(cat "$PROJECT_DIR/.nvmrc")"
 # Slow/flaky links time out mid-install; use generous timeouts + retries and
 # fetch the (large) Chromium separately so a hiccup there doesn't fail npm.
 echo "[*] Устанавливаю зависимости проекта..."
+# macOS often stalls talking to the npm registry over IPv6 -> force IPv4, use
+# fewer parallel sockets and generous timeouts to survive slow/flaky links.
+export NODE_OPTIONS="${NODE_OPTIONS:-} --dns-result-order=ipv4first"
 npm config set fetch-timeout 600000 >/dev/null 2>&1 || true
-npm config set fetch-retries 8 >/dev/null 2>&1 || true
-for i in 1 2 3; do npm install --ignore-scripts --no-audit --no-fund && break; echo "  npm повтор $i..."; sleep 5; done
+npm config set fetch-retries 10 >/dev/null 2>&1 || true
+npm config set fetch-retry-maxtimeout 600000 >/dev/null 2>&1 || true
+NPM_FLAGS="--ignore-scripts --no-audit --no-fund --maxsockets 3"
+ok=0
+for i in 1 2 3 4 5; do npm install $NPM_FLAGS && { ok=1; break; }; echo "  npm повтор $i..."; sleep 5; done
+if [ "$ok" != "1" ]; then
+  echo "  Реестр npm недоступен по основному адресу — пробую зеркало npmmirror..."
+  for i in 1 2 3; do npm install $NPM_FLAGS --registry=https://registry.npmmirror.com && { ok=1; break; }; echo "  зеркало повтор $i..."; sleep 5; done
+fi
+[ "$ok" = "1" ] || { echo "!!! Не удалось установить зависимости (сеть). Повторите позже: npm install $NPM_FLAGS"; exit 1; }
 echo "[*] Устанавливаю Chromium для Playwright (может занять время на медленной сети)..."
 for i in 1 2 3 4 5; do npx playwright install chromium && break; echo "  Chromium повтор $i..."; sleep 5; done
 
