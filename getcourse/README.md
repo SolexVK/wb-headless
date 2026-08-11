@@ -209,12 +209,23 @@ npm run web               # поднимает http://127.0.0.1:7837
 
 ### Автозапуск на Mac Mini (LaunchAgent)
 
+Сервис запускается через launchd и живёт без открытого терминала (перезапуск при
+сбое — `KeepAlive`). Настройки берутся из `.env`, поэтому пароль в plist не дублируется.
+
 ```bash
 cp scripts/com.getcourse.downloader.plist.example \
    ~/Library/LaunchAgents/com.getcourse.downloader.plist
-# отредактируйте пути и GCUI_ADMIN_PASS внутри, затем:
-launchctl load ~/Library/LaunchAgents/com.getcourse.downloader.plist
+# внутри поправьте: путь к nvm-node (~/.nvm/versions/node/<версия>/bin/node),
+# путь к проекту и тот же node-каталог в PATH. Остановите ручной сервер (Ctrl+C),
+# затем:
+launchctl load -w ~/Library/LaunchAgents/com.getcourse.downloader.plist
 ```
+
+Управление: перезапуск после обновления кода —
+`launchctl kickstart -k gui/$(id -u)/com.getcourse.downloader`;
+остановить — `launchctl unload -w ~/Library/LaunchAgents/com.getcourse.downloader.plist`;
+логи — `/tmp/getcourse-downloader.out` и `.err`. LaunchAgent стартует при входе в
+сессию; для запуска до логина используйте LaunchDaemon.
 
 ### Безопасность
 

@@ -1,16 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  LaunchAgent to auto-start the GetCourse Downloader web UI on the Mac Mini.
+  LaunchAgent to auto-start the GetCourse Downloader web UI on a Mac Mini.
+
+  Adjust the three things marked below to YOUR machine:
+    1. the node path      (nvm layout: ~/.nvm/versions/node/<VERSION>/bin/node)
+    2. the project path    (…/getcourse-app/getcourse)
+    3. the PATH's node dir  (same node bin dir as #1)
+  GCUI_* settings are read from the project's .env — no need to duplicate them
+  here (so the admin password is not stored in this file).
 
   Install:
-    1. Edit the paths/values below (node path, project path, admin pass).
-    2. cp scripts/com.getcourse.downloader.plist.example \
-         ~/Library/LaunchAgents/com.getcourse.downloader.plist
-    3. launchctl load ~/Library/LaunchAgents/com.getcourse.downloader.plist
-    4. launchctl start com.getcourse.downloader
+    cp scripts/com.getcourse.downloader.plist.example \
+       ~/Library/LaunchAgents/com.getcourse.downloader.plist
+    # edit the paths inside, then:
+    launchctl load -w ~/Library/LaunchAgents/com.getcourse.downloader.plist
 
-  Logs: /tmp/getcourse-downloader.out / .err
-  Stop:  launchctl unload ~/Library/LaunchAgents/com.getcourse.downloader.plist
+  Restart after a code update:
+    launchctl kickstart -k gui/$(id -u)/com.getcourse.downloader
+  Stop / disable:
+    launchctl unload -w ~/Library/LaunchAgents/com.getcourse.downloader.plist
+  Logs: /tmp/getcourse-downloader.out  and  .err
+
+  Note: a LaunchAgent starts on user login (GUI session). For start-before-login
+  / headless 24-7, use a LaunchDaemon in /Library/LaunchDaemons instead.
 -->
 <plist version="1.0">
 <dict>
@@ -18,21 +31,17 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/homebrew/bin/node</string>
-    <string>/Users/YOU/wb-headless/getcourse/web/server.mjs</string>
+    <string>/Users/YOU/.nvm/versions/node/v24.19.0/bin/node</string>
+    <string>/Users/YOU/getcourse-app/getcourse/web/server.mjs</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/YOU/wb-headless/getcourse</string>
+  <string>/Users/YOU/getcourse-app/getcourse</string>
 
   <key>EnvironmentVariables</key>
   <dict>
-    <key>GCUI_PORT</key><string>7837</string>
-    <key>GCUI_HOST</key><string>127.0.0.1</string>
-    <key>GCUI_ADMIN_USER</key><string>admin</string>
-    <key>GCUI_ADMIN_PASS</key><string>ЗАМЕНИТЕ_МЕНЯ</string>
-    <key>GCUI_BROWSE_ROOT</key><string>/Users/YOU/Movies</string>
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>/Users/YOU/.nvm/versions/node/v24.19.0/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>FFMPEG</key><string>/opt/homebrew/bin/ffmpeg</string>
   </dict>
 
   <key>RunAtLoad</key><true/>
