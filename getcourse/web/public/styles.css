@@ -62,6 +62,16 @@ h2{font-size:16px;margin:0 0 14px}
 table{width:100%;border-collapse:collapse;font-size:14px}
 th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line)}
 th{color:var(--muted);font-weight:600;font-size:12px}
+.note{background:#20283f;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;color:var(--muted);margin:8px 0}
+.usage{max-width:820px;margin:0 auto 4px;padding:6px 16px}
+.bar.slim{height:6px;margin:6px 0 0}
+.usage .bar>span{background:var(--ok)}
+.files{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+.file{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.file .fname{word-break:break-all;flex:1}
+.file .fmeta{color:var(--muted);font-size:12px;white-space:nowrap}
+.file a.dl{background:var(--primary);color:#fff;border-radius:8px;padding:5px 12px;text-decoration:none;font-weight:600;font-size:13px}
+.file .exp{color:var(--warn);font-size:11px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:20}
 .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);width:min(560px,92vw);max-height:80vh;display:flex;flex-direction:column;padding:16px}
 .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}

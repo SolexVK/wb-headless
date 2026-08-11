@@ -5,3 +5,5 @@ output/
 *.ts
 *.mp4
 web/data/
+web/spool/
+.nvmrc

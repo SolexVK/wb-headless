@@ -19,7 +19,7 @@ export function findUser(username) {
   return db.users.find(u => u.username.toLowerCase() === String(username || '').toLowerCase());
 }
 
-export function createUser({ username, password, role = 'user', subscriptionActive = false }) {
+export function createUser({ username, password, role = 'user', subscriptionActive = false, localAccess }) {
   if (findUser(username)) throw new Error('пользователь уже существует');
   const { salt, hash } = hashPassword(password);
   const user = {
@@ -27,6 +27,10 @@ export function createUser({ username, password, role = 'user', subscriptionActi
     username,
     salt, hash,
     role, // 'admin' | 'user'
+    // localAccess: may browse and save into the Mac Mini's own folders.
+    // Only the owner/admin gets this; regular subscribers use delivery mode and
+    // never see the server's filesystem.
+    localAccess: localAccess === undefined ? role === 'admin' : !!localAccess,
     subscription: { active: !!subscriptionActive, expires: null },
     createdAt: new Date().toISOString(),
   };
@@ -114,5 +118,9 @@ export function requireSubscription(req, res, next) {
 
 export function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, username: u.username, role: u.role, subscription: u.subscription, active: hasActiveSubscription(u), createdAt: u.createdAt };
+  return {
+    id: u.id, username: u.username, role: u.role,
+    localAccess: u.localAccess === undefined ? u.role === 'admin' : !!u.localAccess,
+    subscription: u.subscription, active: hasActiveSubscription(u), createdAt: u.createdAt,
+  };
 }

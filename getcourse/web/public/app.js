@@ -25,6 +25,7 @@ async function init() {
   } catch { showLogin(); }
 }
 function showLogin() { $('#view-login').classList.remove('hidden'); $('#view-main').classList.add('hidden'); }
+let YK_ENABLED = false;
 function showMain() {
   $('#view-login').classList.add('hidden');
   $('#view-main').classList.remove('hidden');
@@ -33,9 +34,26 @@ function showMain() {
   sub.textContent = ME.active ? 'подписка активна' : 'нет подписки';
   sub.className = 'badge ' + (ME.active ? 'ok' : 'no');
   $$('.admin-only').forEach(e => e.classList.toggle('hidden', ME.role !== 'admin'));
+  // storage mode: owner/admin sees folder picker; subscribers get delivery mode
+  const local = !!ME.localAccess;
+  $('#folder-block').classList.toggle('hidden', !local);
+  $('#delivery-note').classList.toggle('hidden', local);
+  $('#usage-box').classList.toggle('hidden', local);
   updateGate();
+  refreshUsage();
   loadJobs();
   if (ME.role === 'admin') loadUsers();
+}
+async function refreshUsage() {
+  if (ME.localAccess) return;
+  try {
+    const u = await api('/api/usage');
+    $('#note-retention').textContent = u.retentionMin;
+    $('#note-limit').textContent = u.dailyGB + ' ГБ';
+    const gb = b => (b / 1073741824).toFixed(1);
+    $('#usage-text').textContent = `Сегодня скачано: ${gb(u.bytes)} / ${u.dailyGB} ГБ` + (u.dailyFiles ? `, файлов ${u.files}/${u.dailyFiles}` : '');
+    $('#usage-bar').style.width = Math.min(100, Math.round(u.bytes / u.dailyBytes * 100)) + '%';
+  } catch {}
 }
 
 // ---------- auth ----------
@@ -66,8 +84,22 @@ async function updateGate() {
   const gate = $('#sub-gate');
   if (ME.active) { gate.classList.add('hidden'); return; }
   gate.classList.remove('hidden');
-  try { const info = await api('/api/billing/info'); $('#sub-note').textContent = info.priceNote || ''; } catch {}
+  try {
+    const info = await api('/api/billing/info');
+    $('#sub-note').textContent = info.priceNote || '';
+    YK_ENABLED = !!info.yookassaEnabled;
+    const yk = $('#pay-yk');
+    yk.textContent = YK_ENABLED ? 'Оплатить картой (ЮKassa)' : 'Оплата картой — скоро';
+    yk.disabled = !YK_ENABLED;
+  } catch {}
 }
+$('#pay-yk').addEventListener('click', async () => {
+  if (!YK_ENABLED) return;
+  try {
+    const r = await api('/api/billing/yookassa/create', { method: 'POST' });
+    if (r.confirmationUrl) location.href = r.confirmationUrl;
+  } catch (err) { $('#redeem-msg').textContent = err.message || 'ЮKassa недоступна'; }
+});
 $('#redeem-form').addEventListener('submit', async e => {
   e.preventDefault();
   try {
@@ -123,7 +155,11 @@ $('#btn-start').addEventListener('click', async () => {
     limit: +$('#gc-limit').value || 0,
   };
   const msg = $('#start-msg');
-  if (!body.email || !body.password || !body.startUrl || !body.output) { msg.textContent = 'Заполните email, пароль, ссылку и папку.'; return; }
+  const needFolder = !!ME.localAccess;
+  if (!body.email || !body.password || !body.startUrl || (needFolder && !body.output)) {
+    msg.textContent = needFolder ? 'Заполните email, пароль, ссылку и папку.' : 'Заполните email, пароль и ссылку.';
+    return;
+  }
   msg.textContent = 'Запуск…';
   try {
     await api('/api/jobs', { method: 'POST', body });
@@ -159,6 +195,7 @@ function renderJob(j) {
       </div>
       <div class="bar"><span></span></div>
       <div class="job-meta"></div>
+      <div class="files hidden"></div>
       <div class="log"></div>`;
     el.querySelector('.cancel').addEventListener('click', () => api('/api/jobs/' + j.id + '/cancel', { method: 'POST' }));
   }
@@ -168,7 +205,7 @@ function renderJob(j) {
   updateJobView(el, j);
   return el;
 }
-function statusRu(s){return {queued:'в очереди',running:'идёт',done:'готово',error:'ошибка',cancelled:'отменено'}[s]||s;}
+function statusRu(s){return {queued:'в очереди',running:'идёт',done:'готово',error:'ошибка',cancelled:'отменено',limited:'лимит дня'}[s]||s;}
 function updateJobView(el, j) {
   const total = j.totalLessons || 0;
   const completed = j.completedVideos || 0;
@@ -181,7 +218,34 @@ function updateJobView(el, j) {
   if (cur && cur.total) meta.push(`текущий: сегменты ${cur.done}/${cur.total}`);
   if (cur && cur.title) meta.push(cur.title);
   if (j.summary) meta.push(`итог: ${j.summary.ok} скачано, ${j.summary.skipped} пропущено, ${j.summary.problems} проблем`);
+  if (j.quotaStopped) meta.push('остановлено по дневному лимиту');
   el.querySelector('.job-meta').textContent = meta.join('  •  ');
+  renderFiles(el, j);
+}
+function renderFiles(el, j) {
+  const box = el.querySelector('.files');
+  if (!j.files) { box.classList.add('hidden'); return; } // local mode: nothing to serve
+  box.classList.remove('hidden');
+  box.innerHTML = j.files.length ? '<div class="muted" style="font-size:12px;margin-bottom:4px">Готовые файлы — сохраните на свой компьютер:</div>' : '';
+  j.files.forEach(f => {
+    const row = document.createElement('div');
+    row.className = 'file';
+    const mb = (f.bytes / 1048576).toFixed(1);
+    const mins = Math.max(0, Math.round((f.expiresAt - Date.now()) / 60000));
+    row.innerHTML = `<span class="fname">${esc(f.name)}</span>
+      <span class="fmeta">${f.height ? f.height + 'p, ' : ''}${mb} МБ</span>`;
+    if (f.available) {
+      const a = document.createElement('a');
+      a.className = 'dl'; a.href = `/api/jobs/${j.id}/files/${f.index}/download`; a.textContent = 'Скачать'; a.setAttribute('download', '');
+      row.appendChild(a);
+      const exp = document.createElement('span'); exp.className = 'exp'; exp.textContent = `удалится через ~${mins} мин`;
+      row.appendChild(exp);
+    } else {
+      const g = document.createElement('span'); g.className = 'exp'; g.textContent = 'удалён';
+      row.appendChild(g);
+    }
+    box.appendChild(row);
+  });
 }
 function appendLog(el, lines) {
   const box = el.querySelector('.log');
@@ -203,7 +267,10 @@ function attachStream(id) {
       appendLog(el, [{ message: d.message }]);
     } else if (d.type === 'status' || d.type === 'fatal') {
       loadJobs();
-      if (d.type === 'status' && (d.status === 'done' || d.status === 'error' || d.status === 'cancelled')) { es.close(); streams.delete(id); }
+      refreshUsage();
+      if (d.type === 'status' && (d.status === 'done' || d.status === 'error' || d.status === 'cancelled' || d.status === 'limited')) { es.close(); streams.delete(id); }
+    } else if (d.type === 'file') {
+      refreshJob(id); refreshUsage();
     } else {
       // progress-ish events: refresh the compact view by refetching job state cheaply
       refreshJob(id);
@@ -245,7 +312,7 @@ async function loadUsers() {
   } catch {}
 }
 $('#nu-create').addEventListener('click', async () => {
-  const body = { username: $('#nu-name').value.trim(), password: $('#nu-pass').value, role: $('#nu-admin').checked ? 'admin' : 'user', subscriptionActive: $('#nu-sub').checked };
+  const body = { username: $('#nu-name').value.trim(), password: $('#nu-pass').value, role: $('#nu-admin').checked ? 'admin' : 'user', subscriptionActive: $('#nu-sub').checked, localAccess: $('#nu-local').checked };
   try { await api('/api/admin/users', { method: 'POST', body }); $('#nu-name').value = ''; $('#nu-pass').value = ''; $('#nu-msg').textContent = 'Создан.'; loadUsers(); }
   catch (err) { $('#nu-msg').textContent = err.message; }
 });
