@@ -49,6 +49,9 @@ export async function runCourseDownload(opts) {
     log('Обход структуры курса...');
     const blocks = await crawlCourse(page, startUrl);
     const totalLessons = blocks.reduce((n, b) => n + b.lessons.length, 0);
+    if (totalLessons === 0) {
+      throw new Error('На этой странице не найдено уроков. Скопируйте адрес страницы курса со списком уроков — обычно вида .../teach/control/stream/view/id/ЧИСЛО (или адрес конкретного урока .../lesson/view/id/ЧИСЛО).');
+    }
     fs.mkdirSync(OUT, { recursive: true });
     fs.writeFileSync(path.join(OUT, 'course_map.json'), JSON.stringify(blocks, null, 2));
     emit('course', { blocks: blocks.map(b => ({ title: b.title, lessons: b.lessons.length })), totalLessons });

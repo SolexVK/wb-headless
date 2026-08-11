@@ -104,9 +104,10 @@
             <label>Email GetCourse<input id="gc-email" autocomplete="off" placeholder="you@example.com"></label>
             <label>Пароль GetCourse<input id="gc-pass" type="password" autocomplete="off"></label>
           </div>
-          <label>Ссылка на курс (любая страница блока)
+          <label>Ссылка на курс (страница со списком уроков)
             <input id="gc-url" placeholder="https://школа.getcourse.ru/teach/control/stream/view/id/000000000">
           </label>
+          <p class="hint" style="margin-top:-6px">Откройте нужный курс на GetCourse так, чтобы был виден список уроков, и скопируйте адрес из строки браузера — он должен содержать <code>/stream/view/id/ЧИСЛО</code>. Можно и адрес отдельного урока (<code>/lesson/view/id/ЧИСЛО</code>). Ссылка на общий список курсов (<code>/teach/control/stream</code>) не подойдёт.</p>
 
           <!-- owner/admin: server folder -->
           <label id="folder-block">Папка для сохранения (на Mac Mini)
