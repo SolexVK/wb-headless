@@ -83,7 +83,8 @@ export async function resolveMedia(playlistUrl) {
 
 // Download all segments of a media playlist and remux to a single gapless mp4.
 // Returns { ok, height, seconds, bytes }.
-export async function downloadToMp4(playlistUrl, outFile, { concurrency = 10 } = {}) {
+// onProgress({done,total}) is called as segments complete (optional).
+export async function downloadToMp4(playlistUrl, outFile, { concurrency = 10, onProgress } = {}) {
   const { mediaUrl, mediaText, height } = await resolveMedia(playlistUrl);
   const segUrls = parseMedia(mediaText, mediaUrl);
   if (!segUrls.length) throw new Error('no segments in media playlist');
@@ -94,10 +95,12 @@ export async function downloadToMp4(playlistUrl, outFile, { concurrency = 10 } =
   try {
     // download segments in parallel
     const fails = [];
+    let done = 0;
+    const total = segUrls.length;
     await pool(segUrls, async (url, idx) => {
       const f = path.join(work, `seg${String(idx).padStart(6, '0')}.ts`);
       for (let t = 0; t < 4; t++) {
-        if (await curlToFile(url, f)) return;
+        if (await curlToFile(url, f)) { done++; if (onProgress) onProgress({ done, total }); return; }
       }
       fails.push(idx);
     }, concurrency);

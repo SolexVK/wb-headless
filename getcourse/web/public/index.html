@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GetCourse Downloader</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Login -->
+    <section id="view-login" class="view center">
+      <form id="login-form" class="card narrow">
+        <h1>GetCourse Downloader</h1>
+        <p class="muted">Вход в личный кабинет</p>
+        <label>Логин<input name="username" autocomplete="username" required></label>
+        <label>Пароль<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary" type="submit">Войти</button>
+        <div id="login-error" class="error"></div>
+      </form>
+    </section>
+
+    <!-- Main -->
+    <section id="view-main" class="view hidden">
+      <header class="topbar">
+        <div class="brand">GetCourse Downloader</div>
+        <nav>
+          <button data-tab="download" class="tab active">Скачивание</button>
+          <button data-tab="jobs" class="tab">Задачи</button>
+          <button data-tab="admin" class="tab admin-only hidden">Пользователи</button>
+        </nav>
+        <div class="user">
+          <span id="whoami" class="muted"></span>
+          <span id="sub-badge" class="badge"></span>
+          <button id="logout" class="link">Выйти</button>
+        </div>
+      </header>
+
+      <!-- Subscription gate -->
+      <div id="sub-gate" class="banner hidden">
+        <strong>Нужна активная подписка.</strong>
+        <span id="sub-note" class="muted"></span>
+        <form id="redeem-form" class="inline">
+          <input name="code" placeholder="Ключ доступа">
+          <button class="primary" type="submit">Активировать</button>
+        </form>
+        <div id="redeem-msg" class="muted"></div>
+      </div>
+
+      <!-- Download tab -->
+      <div id="tab-download" class="tabpane">
+        <div class="card">
+          <h2>Новое скачивание</h2>
+          <div class="grid2">
+            <label>Email GetCourse<input id="gc-email" autocomplete="off" placeholder="you@example.com"></label>
+            <label>Пароль GetCourse<input id="gc-pass" type="password" autocomplete="off"></label>
+          </div>
+          <label>Ссылка на курс (любая страница блока)
+            <input id="gc-url" placeholder="https://школа.getcourse.ru/teach/control/stream/view/id/000000000">
+          </label>
+          <label>Папка для сохранения
+            <div class="folder-row">
+              <input id="gc-out" placeholder="выберите папку…" readonly>
+              <button id="btn-browse" type="button">Обзор…</button>
+            </div>
+          </label>
+          <details class="adv">
+            <summary>Дополнительно</summary>
+            <div class="grid2">
+              <label>Параллельных загрузок<input id="gc-conc" type="number" min="1" max="20" value="10"></label>
+              <label>Лимит уроков (0 = все)<input id="gc-limit" type="number" min="0" value="0"></label>
+            </div>
+          </details>
+          <button id="btn-start" class="primary">Начать скачивание</button>
+          <div id="start-msg" class="muted"></div>
+          <p class="hint">Пароль GetCourse используется только для этого запуска и не сохраняется на сервере. Качество берётся максимальное из доступных, видео склеивается в MP4 без «иканья».</p>
+        </div>
+      </div>
+
+      <!-- Jobs tab -->
+      <div id="tab-jobs" class="tabpane hidden">
+        <div id="jobs-list"></div>
+        <p id="jobs-empty" class="muted">Пока нет задач.</p>
+      </div>
+
+      <!-- Admin tab -->
+      <div id="tab-admin" class="tabpane hidden">
+        <div class="card">
+          <h2>Создать пользователя</h2>
+          <div class="grid2">
+            <label>Логин<input id="nu-name"></label>
+            <label>Пароль<input id="nu-pass"></label>
+          </div>
+          <label class="check"><input id="nu-admin" type="checkbox"> Администратор</label>
+          <label class="check"><input id="nu-sub" type="checkbox" checked> Активная подписка</label>
+          <button id="nu-create" class="primary">Создать</button>
+          <div id="nu-msg" class="muted"></div>
+        </div>
+        <div class="card">
+          <h2>Пользователи</h2>
+          <table id="users-table"><thead><tr><th>Логин</th><th>Роль</th><th>Подписка</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Folder picker modal -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <b>Выбор папки</b>
+        <button id="modal-close" class="link">✕</button>
+      </div>
+      <div class="crumbs"><code id="cur-path"></code></div>
+      <div id="dir-list" class="dir-list"></div>
+      <div class="modal-actions">
+        <form id="mkdir-form" class="inline">
+          <input name="name" placeholder="новая папка">
+          <button type="submit">Создать</button>
+        </form>
+        <button id="pick-here" class="primary">Сохранять сюда</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

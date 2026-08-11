@@ -4,3 +4,4 @@ output/
 *.log
 *.ts
 *.mp4
+web/data/
