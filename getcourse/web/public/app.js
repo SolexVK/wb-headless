@@ -32,6 +32,13 @@ async function api(path, opts = {}) {
   return data;
 }
 
+// ---------- localStorage cache (course structure) ----------
+const cache = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+
 // ---------- password eye toggles ----------
 function attachEyes(root = document) {
   $$('input[type="password"]', root).forEach(inp => {
@@ -138,6 +145,7 @@ function showMain() {
     $('#btn-local').classList.toggle('hidden', !supported);
   }
   fillCreds();
+  restoreCachedCourses();
   updateGate();
   refreshUsage();
   loadJobs();
@@ -246,7 +254,7 @@ async function saveToLocalFolder(job) {
     try {
       const res = await fetch(`/api/jobs/${job.id}/files/${f.index}/download`);
       const blob = await res.blob();
-      const safe = f.name.replace(/\s*\/\s*/g, ' - ').replace(/[\\/:*?"<>|]+/g, '-');
+      const safe = f.downloadName || f.name.replace(/[\/\\:*?"<>|]+/g, '_');
       const fh = await localDirHandle.getFileHandle(safe, { create: true });
       const w = await fh.createWritable(); await w.write(blob); await w.close();
     } catch (e) { noteError('Не удалось сохранить ' + f.name + ': ' + e.message); }
@@ -271,13 +279,22 @@ function gcPayload(extra = {}) {
 
 $('#btn-courses').addEventListener('click', async () => {
   const msg = $('#courses-msg'); msg.textContent = 'Вхожу в GetCourse и ищу курсы…';
+  const school = $('#gc-school').value.trim();
   try {
     const { courses } = await api('/api/gc/courses', { method: 'POST', body: gcPayload() });
     renderCourses(courses);
+    if (school) { cache.set('gc_courses:' + school, courses); cache.set('gc_last_school', school); }
     msg.textContent = courses.length ? '' : 'Курсы не найдены — проверьте адрес школы.';
     try { const me = await api('/api/me'); GC = me.gc; fillCreds(); } catch {}
   } catch (err) { msg.textContent = err.message || 'Не удалось получить курсы'; if (err.status === 402) updateGate(); }
 });
+// Restore cached courses on load so a repeat visit shows them without re-querying.
+function restoreCachedCourses() {
+  const school = cache.get('gc_last_school');
+  if (school && !$('#gc-school').value) $('#gc-school').value = school;
+  const courses = school && cache.get('gc_courses:' + school);
+  if (courses && courses.length) { renderCourses(courses); $('#courses-msg').textContent = 'Показаны сохранённые курсы. «Показать мои курсы» — обновить.'; }
+}
 function renderCourses(courses) {
   const card = $('#courses-card'), list = $('#courses-list');
   card.classList.remove('hidden'); list.innerHTML = '';
@@ -294,18 +311,27 @@ $('#btn-direct').addEventListener('click', () => {
   loadTree(url, url);
 });
 
-let TREE = null;
-async function loadTree(url, title) {
+let TREE = null, CUR_COURSE = null;
+async function loadTree(url, title, force = false) {
+  CUR_COURSE = { url, title };
   const card = $('#tree-card'), treeEl = $('#tree');
   card.classList.remove('hidden');
   $('#tree-title').textContent = '3. Выберите уроки — ' + (title || '');
-  treeEl.innerHTML = '<div class="muted">Загружаю структуру курса… (может занять до минуты)</div>';
   card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // cached structure -> show instantly, no GetCourse request
+  const key = 'gc_tree:' + url;
+  if (!force) {
+    const c = cache.get(key);
+    if (c && c.blocks && c.blocks.length) { TREE = c.blocks; renderTree(c.blocks); $('#tree-cached').classList.remove('hidden'); return; }
+  }
+  $('#tree-cached').classList.add('hidden');
+  treeEl.innerHTML = '<div class="muted">Загружаю структуру курса… (может занять до минуты)</div>';
   try {
     const { blocks } = await api('/api/gc/tree', { method: 'POST', body: gcPayload({ courseUrl: url }) });
-    TREE = blocks; renderTree(blocks);
+    TREE = blocks; renderTree(blocks); cache.set(key, { blocks });
   } catch (err) { treeEl.innerHTML = '<div class="error">' + esc(err.message || 'Ошибка') + '</div>'; if (err.status === 402) updateGate(); }
 }
+$('#tree-refresh').addEventListener('click', () => { if (CUR_COURSE) loadTree(CUR_COURSE.url, CUR_COURSE.title, true); });
 function renderTree(blocks) {
   const el = $('#tree'); el.innerHTML = '';
   if (!blocks.length) { el.innerHTML = '<div class="muted">Уроки не найдены.</div>'; return; }
@@ -398,6 +424,7 @@ function renderJob(j) {
       <div class="bar"><span></span></div>
       <div class="job-meta"></div>
       <div class="files hidden"></div>
+      <div class="failures hidden"></div>
       <div class="log"></div>`;
     el.querySelector('.cancel').addEventListener('click', () => api('/api/jobs/' + j.id + '/cancel', { method: 'POST' }));
   }
@@ -419,6 +446,7 @@ function updateJobView(el, j) {
   if (j.quotaStopped) meta.push('остановлено по дневному лимиту');
   el.querySelector('.job-meta').textContent = meta.join('  •  ');
   renderFiles(el, j);
+  renderFailures(el, j);
 }
 function renderFiles(el, j) {
   const box = el.querySelector('.files');
@@ -440,9 +468,12 @@ function renderFiles(el, j) {
     const mb = (f.bytes / 1048576).toFixed(1);
     const mins = Math.max(0, Math.round((f.expiresAt - Date.now()) / 60000));
     row.innerHTML = `<span class="fname">${esc(f.name)}</span><span class="fmeta">${f.height ? f.height + 'p, ' : ''}${mb} МБ</span>`;
+    const ok = document.createElement('span'); ok.className = 'pill ok'; ok.textContent = 'Скачано успешно';
+    row.appendChild(ok);
     if (f.available) {
       const a = document.createElement('a');
-      a.className = 'dl'; a.href = `/api/jobs/${j.id}/files/${f.index}/download`; a.textContent = 'Скачать'; a.setAttribute('download', '');
+      a.className = 'dl'; a.href = `/api/jobs/${j.id}/files/${f.index}/download`; a.textContent = 'Скачать';
+      a.setAttribute('download', f.downloadName || f.filename || '');
       row.appendChild(a);
       const exp = document.createElement('span'); exp.className = 'exp'; exp.textContent = `удалится через ~${mins} мин`;
       row.appendChild(exp);
@@ -450,6 +481,21 @@ function renderFiles(el, j) {
       const g = document.createElement('span'); g.className = 'exp'; g.textContent = 'удалён';
       row.appendChild(g);
     }
+    box.appendChild(row);
+  });
+}
+function renderFailures(el, j) {
+  const box = el.querySelector('.failures');
+  const fails = j.failures || [];
+  if (!fails.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  box.classList.remove('hidden');
+  box.innerHTML = '<div class="muted" style="font-size:12px;margin:4px 0">Не удалось скачать:</div>';
+  fails.forEach(f => {
+    const row = document.createElement('div'); row.className = 'file';
+    row.innerHTML = `<span class="fname">${esc(f.name)}</span>`;
+    const bad = document.createElement('span'); bad.className = 'pill err'; bad.textContent = 'Ошибка';
+    if (f.error) bad.title = f.error;
+    row.appendChild(bad);
     box.appendChild(row);
   });
 }
@@ -475,6 +521,7 @@ function attachStream(id) {
       if (d.type === 'status' && ['done','error','cancelled','limited'].includes(d.status)) { es.close(); streams.delete(id); }
     }
     else if (d.type === 'file') { refreshJob(id); refreshUsage(); }
+    else if (d.type === 'failure') { slog('job', 'file failed: ' + (d.failure && d.failure.name)); refreshJob(id); }
     else if (d.type === 'lesson-error') { slog('job', 'lesson-error: ' + d.error); refreshJob(id); }
     else refreshJob(id);
   };
@@ -488,6 +535,17 @@ function refreshJob(id) {
     try { const { job } = await api('/api/jobs/' + id); const el = document.getElementById('job-' + id); if (el && job) { const st = el.querySelector('.status'); st.textContent = statusRu(job.status); st.className = 'status ' + job.status; updateJobView(el, job); } } catch {}
   }, 600);
 }
+
+$('#btn-clear-history').addEventListener('click', async () => {
+  if (!confirm('Очистить историю завершённых задач? Готовые файлы во временном хранилище тоже будут удалены.')) return;
+  try {
+    for (const es of streams.values()) es.close();
+    streams.clear();
+    const r = await api('/api/jobs', { method: 'DELETE' });
+    slog('jobs', 'history cleared ' + r.cleared);
+    loadJobs();
+  } catch (e) { alert(e.message || 'Не удалось очистить'); }
+});
 
 // ---------- error report ----------
 $('#report-btn').addEventListener('click', async () => {

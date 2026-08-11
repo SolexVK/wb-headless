@@ -23,7 +23,7 @@ import {
 import { db } from './lib/db.mjs';
 import { cfg } from './lib/config.mjs';
 import { usageView } from './lib/quota.mjs';
-import { createJob, cancelJob, subscribe, listJobs, getJob, getJobFile } from './lib/jobs.mjs';
+import { createJob, cancelJob, subscribe, listJobs, getJob, getJobFile, clearHistory } from './lib/jobs.mjs';
 import { listDir, createDir, resolveWritableOutput, ROOT } from './lib/fsbrowse.mjs';
 import { startJanitor } from './lib/janitor.mjs';
 import * as yookassa from './lib/billing_yookassa.mjs';
@@ -287,6 +287,7 @@ app.post('/api/jobs', requireAuth, requireSubscription, (req, res) => {
   } catch (e) { res.status(400).json({ error: 'job_failed', message: e.message }); }
 });
 app.post('/api/jobs/:id/cancel', requireAuth, (req, res) => res.json({ ok: cancelJob(req.params.id, req.user) }));
+app.delete('/api/jobs', requireAuth, (req, res) => res.json({ cleared: clearHistory(req.user) }));
 app.get('/api/jobs/:id/events', requireAuth, (req, res) => subscribe(req.params.id, res, req.user));
 
 // download a finished delivery file to the user's own computer

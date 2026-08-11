@@ -131,7 +131,9 @@
           <div class="tree-actions">
             <button id="sel-all" type="button" class="link">Выбрать все</button>
             <button id="sel-none" type="button" class="link">Снять выбор</button>
+            <button id="tree-refresh" type="button" class="link">🔄 Обновить структуру</button>
             <span id="sel-count" class="muted"></span>
+            <span id="tree-cached" class="muted hidden">из кэша</span>
           </div>
           <div id="tree" class="tree"></div>
 
@@ -175,6 +177,9 @@
 
       <!-- Jobs tab -->
       <div id="tab-jobs" class="tabpane hidden">
+        <div class="jobs-toolbar">
+          <button id="btn-clear-history" type="button" class="link">🗑 Очистить историю скачиваний</button>
+        </div>
         <div id="jobs-list"></div>
         <p id="jobs-empty" class="muted">Пока нет задач.</p>
       </div>

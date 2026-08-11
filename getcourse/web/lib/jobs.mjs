@@ -43,12 +43,19 @@ function pushLog(job, message) {
   if (job.log.length > MAX_LOG) job.log.splice(0, job.log.length - MAX_LOG);
 }
 
+// Full download filename: block folder + lesson, forbidden chars -> "_".
+function toDownloadName(name) {
+  return name.replace(/[\/\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim();
+}
+
 function registerFile(job, evt) {
   // delivery mode: expose the finished file for browser download + quota
   const rel = path.relative(job.output, evt.file);
+  const name = rel.split(path.sep).join(' / ');
   const rec = {
     index: job.files.length,
-    name: rel.split(path.sep).join(' / '),
+    name,
+    downloadName: toDownloadName(name),
     filename: path.basename(evt.file),
     absPath: evt.file,
     bytes: evt.bytes,
@@ -71,6 +78,16 @@ function onEvent(job, evt) {
       job.completedVideos = (job.completedVideos || 0) + 1;
       if (job.mode === 'delivery') registerFile(job, evt);
       break;
+    case 'lesson-error': {
+      const block = (job.course && job.course[evt.bi] && job.course[evt.bi].title) || '';
+      const lesson = (job.current && job.current.title) || '';
+      const name = (block ? block + ' / ' : '') + (lesson || evt.error || 'урок');
+      job.failures = job.failures || [];
+      const rec = { name, error: evt.error, status: 'error' };
+      job.failures.push(rec);
+      broadcast(job, { type: 'failure', failure: rec });
+      break;
+    }
     case 'done': job.summary = { ok: evt.ok, skipped: evt.skipped, problems: evt.problems }; break;
     case 'log': pushLog(job, evt.message); break;
   }
@@ -145,7 +162,7 @@ export function createJob(user, { email, password, startUrl, output, concurrency
     plan, output: outDir, concurrency, limit,
     status: 'queued', createdAt: new Date().toISOString(), startedAt: null, finishedAt: null,
     log: [], course: null, current: null, completedVideos: 0, summary: null,
-    files: [], cancel: false, quotaStopped: false, subscribers: new Set(),
+    files: [], failures: [], cancel: false, quotaStopped: false, subscribers: new Set(),
     _email: email, _password: password,
   };
   jobs.set(id, job);
@@ -179,7 +196,8 @@ export function subscribe(id, res, user) {
 
 function publicFile(f) {
   return {
-    index: f.index, name: f.name, filename: f.filename, bytes: f.bytes, height: f.height,
+    index: f.index, name: f.name, filename: f.filename, downloadName: f.downloadName || f.filename,
+    bytes: f.bytes, height: f.height, status: 'ok',
     completedAt: f.completedAt, expiresAt: f.expiresAt,
     available: fsExists(f.absPath),
   };
@@ -196,6 +214,7 @@ export function publicJob(job) {
     completedVideos: job.completedVideos, summary: job.summary, error: job.error,
     quotaStopped: job.quotaStopped,
     files: job.mode === 'delivery' ? job.files.map(publicFile) : undefined,
+    failures: (job.failures || []).map(f => ({ name: f.name, error: f.error, status: 'error' })),
   };
 }
 
@@ -221,5 +240,27 @@ export function getJobFile(id, user, index) {
   if (job.mode !== 'delivery') return null;
   const f = job.files[+index];
   if (!f || !fsExists(f.absPath)) return null;
-  return { absPath: f.absPath, filename: f.filename };
+  return { absPath: f.absPath, filename: f.downloadName || f.filename };
+}
+
+// Clear a user's finished jobs (and their delivery spool files). Running/queued
+// jobs are kept. Returns the number of cleared jobs.
+export function clearHistory(user) {
+  const finished = new Set(['done', 'error', 'cancelled', 'limited']);
+  let n = 0;
+  for (const [id, job] of [...jobs.entries()]) {
+    if (job.userId !== user.id && user.role !== 'admin') continue;
+    if (!finished.has(job.status)) continue;
+    for (const res of job.subscribers) { try { res.end(); } catch {} }
+    if (job.mode === 'delivery') {
+      const dir = path.join(cfg.spoolRoot, job.userId, id);
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+    jobs.delete(id);
+    const di = db.jobs.findIndex(j => j.id === id);
+    if (di > -1) db.jobs.splice(di, 1);
+    n++;
+  }
+  db.save();
+  return n;
 }

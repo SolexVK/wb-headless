@@ -114,6 +114,10 @@ tr.unread td{font-weight:600}
 .tree-lesson input{width:auto;margin:0}
 .tree-lesson:hover{color:var(--text)}
 .dl-buttons{display:flex;gap:10px;flex-wrap:wrap}
+.jobs-toolbar{display:flex;justify-content:flex-end;margin-bottom:8px}
+.pill{font-size:11px;padding:2px 9px;border-radius:20px;white-space:nowrap}
+.pill.ok{background:rgba(55,211,155,.15);color:var(--ok);border:1px solid var(--ok)}
+.pill.err{background:rgba(255,92,122,.12);color:var(--err);border:1px solid var(--err)}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:20}
 .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);width:min(560px,92vw);max-height:80vh;display:flex;flex-direction:column;padding:16px}
 .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
