@@ -6,7 +6,7 @@ import path from 'node:path';
 const DATA_DIR = path.resolve(process.env.GCUI_DATA || path.join(process.cwd(), 'web', 'data'));
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-const empty = { users: [], sessions: [], jobs: [] };
+const empty = { users: [], sessions: [], jobs: [], resets: [], reports: [] };
 let state = null;
 
 function ensure() {
@@ -33,5 +33,7 @@ export const db = {
   get users() { return ensure().users; },
   get sessions() { return ensure().sessions; },
   get jobs() { return ensure().jobs; },
+  get resets() { return ensure().resets; },
+  get reports() { return ensure().reports; },
   save,
 };

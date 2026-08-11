@@ -22,6 +22,34 @@ export const cfg = {
   // Max spool footprint per user at any moment (disk safety); 0 = same as dailyGB.
   userQuotaGB: num(process.env.GCUI_USER_QUOTA_GB, 200),
 
+  // Public URL (for OAuth redirects / reset links). Falls back to the request
+  // origin when empty.
+  publicUrl: (process.env.GCUI_PUBLIC_URL || '').replace(/\/+$/, ''),
+
+  // Registration
+  allowSignup: process.env.GCUI_ALLOW_SIGNUP === undefined ? true : process.env.GCUI_ALLOW_SIGNUP !== '0',
+  // Auto-grant a license on signup (until real payment is wired). Set 0 to
+  // require payment/keys instead.
+  signupLicenseDays: num(process.env.GCUI_SIGNUP_LICENSE_DAYS, 30),
+
+  // Google OAuth (optional). Set both to enable "Sign in with Google".
+  google: {
+    clientId: process.env.GCUI_GOOGLE_CLIENT_ID || '',
+    clientSecret: process.env.GCUI_GOOGLE_CLIENT_SECRET || '',
+    get enabled() { return !!(this.clientId && this.clientSecret); },
+  },
+
+  // SMTP for password-reset emails (optional). Without it, reset links are
+  // surfaced to the admin panel for manual delivery.
+  smtp: {
+    host: process.env.GCUI_SMTP_HOST || '',
+    port: num(process.env.GCUI_SMTP_PORT, 587),
+    user: process.env.GCUI_SMTP_USER || '',
+    pass: process.env.GCUI_SMTP_PASS || '',
+    from: process.env.GCUI_SMTP_FROM || '',
+    get enabled() { return !!(this.host && this.user); },
+  },
+
   // Billing
   licenseKeys: (process.env.GCUI_LICENSE_KEYS || '').split(',').map(s => s.trim()).filter(Boolean),
   licenseDays: num(process.env.GCUI_LICENSE_DAYS, 30),

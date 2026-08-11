@@ -8,16 +8,57 @@
 </head>
 <body>
   <div id="app">
-    <!-- Login -->
+    <!-- Auth -->
     <section id="view-login" class="view center">
-      <form id="login-form" class="card narrow">
+      <div class="card narrow">
         <h1>GetCourse Downloader</h1>
-        <p class="muted">Вход в личный кабинет</p>
-        <label>Логин<input name="username" autocomplete="username" required></label>
-        <label>Пароль<input name="password" type="password" autocomplete="current-password" required></label>
-        <button class="primary" type="submit">Войти</button>
-        <div id="login-error" class="error"></div>
-      </form>
+
+        <!-- Login -->
+        <form id="login-form" class="authform">
+          <p class="muted">Вход в личный кабинет</p>
+          <label>Email или логин<input name="username" autocomplete="username" required></label>
+          <label>Пароль<input name="password" type="password" autocomplete="current-password" required></label>
+          <button class="primary" type="submit">Войти</button>
+          <div class="auth-links">
+            <a href="#" data-go="forgot">Забыли пароль?</a>
+            <a href="#" data-go="register">Регистрация</a>
+          </div>
+        </form>
+
+        <!-- Register -->
+        <form id="register-form" class="authform hidden">
+          <p class="muted">Регистрация</p>
+          <label>Email<input name="email" type="email" autocomplete="email" required></label>
+          <label>Пароль<input name="password" type="password" autocomplete="new-password" required minlength="6"></label>
+          <button class="primary" type="submit">Зарегистрироваться</button>
+          <div class="auth-links"><a href="#" data-go="login">Уже есть аккаунт? Войти</a></div>
+        </form>
+
+        <!-- Forgot -->
+        <form id="forgot-form" class="authform hidden">
+          <p class="muted">Восстановление пароля</p>
+          <label>Email аккаунта<input name="email" type="email" required></label>
+          <button class="primary" type="submit">Прислать ссылку для сброса</button>
+          <div class="auth-links"><a href="#" data-go="login">Назад ко входу</a></div>
+        </form>
+
+        <!-- Reset (shown when URL has ?reset=TOKEN) -->
+        <form id="reset-form" class="authform hidden">
+          <p class="muted">Новый пароль</p>
+          <label>Новый пароль<input name="password" type="password" autocomplete="new-password" required minlength="6"></label>
+          <button class="primary" type="submit">Сохранить пароль</button>
+        </form>
+
+        <div id="google-block" class="hidden">
+          <div class="or"><span>или</span></div>
+          <a class="btn-google" href="/api/auth/google/start">
+            <span class="g">G</span> Войти через Google
+          </a>
+        </div>
+
+        <div id="auth-error" class="error"></div>
+        <div id="auth-msg" class="muted"></div>
+      </div>
     </section>
 
     <!-- Main -->
@@ -28,6 +69,7 @@
           <button data-tab="download" class="tab active">Скачивание</button>
           <button data-tab="jobs" class="tab">Задачи</button>
           <button data-tab="admin" class="tab admin-only hidden">Пользователи</button>
+          <button data-tab="reports" class="tab admin-only hidden">Обращения<span id="reports-badge" class="mini-badge hidden">0</span></button>
         </nav>
         <div class="user">
           <span id="whoami" class="muted"></span>
@@ -44,7 +86,7 @@
           <input name="code" placeholder="Ключ доступа">
           <button class="primary" type="submit">Активировать</button>
         </form>
-        <button id="pay-yk" class="link" type="button" title="Оплата картой">Оплатить картой (ЮKassa)</button>
+        <button id="pay-yk" class="link" type="button">Оплатить картой (ЮKassa)</button>
         <div id="redeem-msg" class="muted"></div>
       </div>
 
@@ -65,18 +107,34 @@
           <label>Ссылка на курс (любая страница блока)
             <input id="gc-url" placeholder="https://школа.getcourse.ru/teach/control/stream/view/id/000000000">
           </label>
+
+          <!-- owner/admin: server folder -->
           <label id="folder-block">Папка для сохранения (на Mac Mini)
             <div class="folder-row">
               <input id="gc-out" placeholder="выберите папку…" readonly>
               <button id="btn-browse" type="button">Обзор…</button>
             </div>
           </label>
+
+          <!-- delivery: local folder on user's computer -->
           <div id="delivery-note" class="note hidden">
-            Видео скачивается во временное хранилище и станет доступно для загрузки
-            на ваш компьютер во вкладке «Задачи». Файлы удаляются автоматически
-            через <b id="note-retention">30</b> мин после скачивания — успевайте сохранить.
-            Дневной лимит: <b id="note-limit">200 ГБ</b>.
+            Видео скачивается во временное хранилище и затем передаётся вам. Файлы
+            удаляются автоматически через <b id="note-retention">30</b> мин —
+            успевайте сохранить. Дневной лимит: <b id="note-limit">200 ГБ</b>.
           </div>
+          <div id="local-folder-block" class="hidden">
+            <label>Папка на вашем компьютере (куда сохранять готовые файлы)
+              <div class="folder-row">
+                <input id="local-out" placeholder="не выбрана — файлы пойдут в «Загрузки»" readonly>
+                <button id="btn-local" type="button">Выбрать…</button>
+              </div>
+            </label>
+            <div id="local-unsupported" class="muted hidden">
+              Ваш браузер не поддерживает выбор папки — готовые видео можно будет
+              скачать кнопкой во вкладке «Задачи» (обычно в папку «Загрузки»).
+            </div>
+          </div>
+
           <details class="adv">
             <summary>Дополнительно</summary>
             <div class="grid2">
@@ -96,13 +154,13 @@
         <p id="jobs-empty" class="muted">Пока нет задач.</p>
       </div>
 
-      <!-- Admin tab -->
+      <!-- Admin: users -->
       <div id="tab-admin" class="tabpane hidden">
         <div class="card">
           <h2>Создать пользователя</h2>
           <div class="grid2">
-            <label>Логин<input id="nu-name"></label>
-            <label>Пароль<input id="nu-pass"></label>
+            <label>Email / логин<input id="nu-name"></label>
+            <label>Пароль<input id="nu-pass" type="password"></label>
           </div>
           <label class="check"><input id="nu-admin" type="checkbox"> Администратор</label>
           <label class="check"><input id="nu-sub" type="checkbox" checked> Активная подписка</label>
@@ -112,13 +170,26 @@
         </div>
         <div class="card">
           <h2>Пользователи</h2>
-          <table id="users-table"><thead><tr><th>Логин</th><th>Роль</th><th>Подписка</th><th></th></tr></thead><tbody></tbody></table>
+          <table id="users-table"><thead><tr><th>Email</th><th>Роль</th><th>Подписка</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+        <div class="card">
+          <h2>Запросы на сброс пароля</h2>
+          <div id="resets-list" class="muted">—</div>
+        </div>
+      </div>
+
+      <!-- Admin: reports -->
+      <div id="tab-reports" class="tabpane hidden">
+        <div class="card">
+          <h2>Обращения и логи ошибок</h2>
+          <table id="reports-table"><thead><tr><th>Когда</th><th>Пользователь</th><th>Сообщение</th><th></th></tr></thead><tbody></tbody></table>
+          <pre id="report-view" class="report-view hidden"></pre>
         </div>
       </div>
     </section>
   </div>
 
-  <!-- Folder picker modal -->
+  <!-- Server folder picker modal -->
   <div id="modal" class="modal hidden">
     <div class="modal-card">
       <div class="modal-head">
@@ -136,6 +207,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Error report button (appears after an error) -->
+  <button id="report-btn" class="report-fab hidden" title="Отправить лог ошибки администратору">⚠ Сообщить об ошибке</button>
 
   <script src="/app.js"></script>
 </body>

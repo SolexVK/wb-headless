@@ -16,8 +16,9 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  ensureAdminSeed, findUser, verifyPassword, createUser, createSession, destroySession,
+  ensureAdminSeed, findUser, findByEmail, verifyPassword, createUser, createSession, destroySession,
   currentUser, requireAuth, requireAdmin, requireSubscription, hasActiveSubscription, publicUser,
+  registerUser, upsertGoogleUser, grantLicense, createReset, peekReset, consumeReset, setPassword,
 } from './lib/auth.mjs';
 import { db } from './lib/db.mjs';
 import { cfg } from './lib/config.mjs';
@@ -26,6 +27,15 @@ import { createJob, cancelJob, subscribe, listJobs, getJob, getJobFile } from '.
 import { listDir, createDir, resolveWritableOutput, ROOT } from './lib/fsbrowse.mjs';
 import { startJanitor } from './lib/janitor.mjs';
 import * as yookassa from './lib/billing_yookassa.mjs';
+import * as google from './lib/google.mjs';
+import { saveReport, listReports, readReport, unreadCount } from './lib/reports.mjs';
+
+// Public base URL for building OAuth redirect + reset links.
+function baseUrl(req) {
+  if (cfg.publicUrl) return cfg.publicUrl;
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  return `${proto}://${req.headers.host}`;
+}
 
 // (.env already loaded by ./lib/loadenv.mjs, imported first above)
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -45,8 +55,8 @@ function requireLocalAccess(req, res, next) {
 // ---------- auth ----------
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body || {};
-  const u = findUser(username);
-  if (!u || !verifyPassword(String(password || ''), u.salt, u.hash)) {
+  const u = findUser(username) || findByEmail(username);
+  if (!u || !u.salt || !u.hash || !verifyPassword(String(password || ''), u.salt, u.hash)) {
     return res.status(401).json({ error: 'invalid_credentials', message: 'Неверный логин или пароль' });
   }
   createSession(res, u.id);
@@ -54,15 +64,72 @@ app.post('/api/login', (req, res) => {
 });
 app.post('/api/logout', (req, res) => { destroySession(req, res); res.json({ ok: true }); });
 app.get('/api/me', (req, res) => {
-  if (!req.user) return res.json({ user: null });
+  const capabilities = { signup: cfg.allowSignup, google: google.isEnabled() };
+  if (!req.user) return res.json({ user: null, capabilities });
   res.json({
     user: publicUser(req.user),
     browseRoot: req.user.localAccess ? ROOT : null,
     usage: usageView(req.user),
     yookassaEnabled: yookassa.isEnabled(),
+    capabilities,
   });
 });
 app.get('/api/usage', requireAuth, (req, res) => res.json(usageView(req.user)));
+
+// ---------- registration & account recovery ----------
+app.post('/api/register', (req, res) => {
+  if (!cfg.allowSignup) return res.status(403).json({ error: 'signup_disabled', message: 'Регистрация отключена' });
+  try {
+    const { email, password } = req.body || {};
+    const u = registerUser({ email, password });
+    createSession(res, u.id);
+    res.json({ user: publicUser(u) });
+  } catch (e) { res.status(400).json({ error: 'register_failed', message: e.message }); }
+});
+
+// "Forgot password": always answers 200 (no account enumeration). If SMTP is
+// configured we'd email the link; otherwise it's surfaced to the admin panel.
+app.post('/api/password/forgot', (req, res) => {
+  const { email } = req.body || {};
+  const u = findByEmail(email) || findUser(email);
+  if (u && u.provider !== 'google') {
+    const token = createReset(u);
+    const link = `${baseUrl(req)}/?reset=${token}`;
+    // TODO: if cfg.smtp.enabled -> send email with `link`. For now the admin
+    // relays it (visible in the admin panel).
+    if (process.env.GCUI_DEBUG_RESET) console.log('reset link for', u.username, link);
+  }
+  res.json({ ok: true, message: 'Если аккаунт существует, ссылка для сброса подготовлена. Если письмо не пришло, обратитесь к администратору.' });
+});
+app.get('/api/password/check', (req, res) => {
+  res.json({ valid: !!peekReset(String(req.query.token || '')) });
+});
+app.post('/api/password/reset', (req, res) => {
+  try {
+    const { token, password } = req.body || {};
+    const u = consumeReset(String(token || ''), String(password || ''));
+    createSession(res, u.id);
+    res.json({ user: publicUser(u) });
+  } catch (e) { res.status(400).json({ error: 'reset_failed', message: e.message }); }
+});
+
+// ---------- Google OAuth ----------
+app.get('/api/auth/google/start', (req, res) => {
+  if (!google.isEnabled()) return res.status(404).send('Google вход не настроен');
+  res.redirect(google.authUrl(baseUrl(req)));
+});
+app.get('/api/auth/google/callback', async (req, res) => {
+  try {
+    if (!google.isEnabled()) return res.status(404).send('Google вход не настроен');
+    const { code, state } = req.query;
+    if (!code || !google.checkState(String(state || ''))) return res.status(400).send('Некорректный ответ Google');
+    const profile = await google.exchangeCode(String(code), baseUrl(req));
+    if (!profile.email || !profile.emailVerified) return res.status(400).send('Google не подтвердил email');
+    const user = upsertGoogleUser(profile);
+    createSession(res, user.id);
+    res.redirect('/');
+  } catch (e) { res.status(400).send('Google вход не удался: ' + e.message); }
+});
 
 // ---------- billing ----------
 app.get('/api/billing/info', requireAuth, (req, res) => {
@@ -114,6 +181,36 @@ app.delete('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
   if (i < 0) return res.status(404).json({ error: 'not_found' });
   db.users.splice(i, 1); db.save();
   res.json({ ok: true });
+});
+// admin: generate a password-reset link for a user (to relay manually)
+app.post('/api/admin/users/:id/reset-link', requireAuth, requireAdmin, (req, res) => {
+  const u = db.users.find(x => x.id === req.params.id);
+  if (!u) return res.status(404).json({ error: 'not_found' });
+  const token = createReset(u);
+  res.json({ link: `${baseUrl(req)}/?reset=${token}` });
+});
+// admin: pending (unused, unexpired) reset requests, with ready links
+app.get('/api/admin/resets', requireAuth, requireAdmin, (req, res) => {
+  const now = Date.now();
+  const items = db.resets
+    .filter(r => !r.used && r.expires > now)
+    .map(r => ({ email: r.email, createdAt: r.createdAt, link: `${baseUrl(req)}/?reset=${r.token}` }));
+  res.json({ resets: items });
+});
+
+// ---------- session logs / error reports ----------
+app.post('/api/report', requireAuth, (req, res) => {
+  const { message, entries, context } = req.body || {};
+  const r = saveReport(req.user, { message, entries, context });
+  res.json({ ok: true, id: r.id });
+});
+app.get('/api/admin/reports', requireAuth, requireAdmin, (req, res) => {
+  res.json({ reports: listReports(), unread: unreadCount() });
+});
+app.get('/api/admin/reports/:id', requireAuth, requireAdmin, (req, res) => {
+  const doc = readReport(req.params.id);
+  if (!doc) return res.status(404).json({ error: 'not_found' });
+  res.json({ report: doc });
 });
 
 // ---------- filesystem browser (owner/admin only) ----------
@@ -168,5 +265,5 @@ app.listen(cfg.port, cfg.host, () => {
   console.log(`GetCourse Downloader UI: http://${cfg.host}:${cfg.port}`);
   console.log(`Локальный обзор папок ограничен: ${ROOT}`);
   console.log(`Спул доставки: ${cfg.spoolRoot} (хранение ${cfg.retentionMin} мин, лимит ${cfg.dailyGB} ГБ/сут)`);
-  console.log(`ЮKassa: ${yookassa.isEnabled() ? 'включена' : 'выключена (заглушка)'}`);
+  console.log(`Регистрация: ${cfg.allowSignup ? 'включена' : 'выключена'} | Google-вход: ${google.isEnabled() ? 'включён' : 'выключен'} | ЮKassa: ${yookassa.isEnabled() ? 'включена' : 'выключена (заглушка)'}`);
 });
