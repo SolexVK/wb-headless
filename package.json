@@ -22,7 +22,8 @@
     "fbs:dashboard": "node scripts/fbs-dashboard.mjs",
     "fbs:retro": "node scripts/fbs-orders-retro.mjs",
     "fbs:report": "node scripts/fbs-report.mjs",
-    "fbs:pdf": "node scripts/fbs-pdf.mjs"
+    "fbs:pdf": "node scripts/fbs-pdf.mjs",
+    "fbs:stock:pdf": "node scripts/fbs-stock-pdf.mjs"
   },
   "engines": {
     "node": ">=18"
