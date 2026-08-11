@@ -54,10 +54,14 @@ echo "[*] Node (изолированный): $(node -v)  npm: $(npm -v)"
 echo "[*] .nvmrc зафиксирован: $(cat "$PROJECT_DIR/.nvmrc")"
 
 # --- 4. dependencies (+ Chromium for Playwright) ---
+# Slow/flaky links time out mid-install; use generous timeouts + retries and
+# fetch the (large) Chromium separately so a hiccup there doesn't fail npm.
 echo "[*] Устанавливаю зависимости проекта..."
-npm install
-echo "[*] Устанавливаю Chromium для Playwright..."
-npx playwright install chromium
+npm config set fetch-timeout 600000 >/dev/null 2>&1 || true
+npm config set fetch-retries 8 >/dev/null 2>&1 || true
+for i in 1 2 3; do npm install --ignore-scripts --no-audit --no-fund && break; echo "  npm повтор $i..."; sleep 5; done
+echo "[*] Устанавливаю Chromium для Playwright (может занять время на медленной сети)..."
+for i in 1 2 3 4 5; do npx playwright install chromium && break; echo "  Chromium повтор $i..."; sleep 5; done
 
 # --- 5. .env + spool ---
 if [ ! -f .env ]; then
