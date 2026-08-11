@@ -183,22 +183,29 @@ npm run web               # поднимает http://127.0.0.1:7837
 пересечения нет; проверьте `scripts/inspect-macmini.sh`). Порт/адрес меняются
 через `GCUI_PORT` / `GCUI_HOST`.
 
-### Внешний доступ через Tailscale (публичный Funnel + понятное имя)
+### Внешний доступ через Tailscale (публичный Funnel)
 
-Для доступа клиентов из интернета:
+Если на машине уже есть Funnel на `:443` (у другого проекта), трогать его
+нельзя. Поэтому по умолчанию скрипт вешает наш сервис на **порт 8443** того же
+узла (Funnel разрешает 443/8443/10000) — **аддитивно, существующий 443 не
+затрагивается**:
 
 ```bash
-PUBLIC=1 ./scripts/tailscale-serve.sh        # публичный Funnel
-# приватно, только свой tailnet (для теста):  ./scripts/tailscale-serve.sh
+./scripts/tailscale-serve.sh
 ```
 
-Скрипт поднимает **отдельный узел Tailscale** с именем `getcourse` (меняется
-через `TS_HOSTNAME`), поэтому адрес — понятное имя, а не IP:
-`https://getcourse.<ваш-tailnet>.ts.net`, и он не конфликтует с другими
-проектами и их `:443` на этой машине. Требуется CLI-версия Tailscale
-(`brew install tailscale`); для варианта из Mac App Store в скрипте есть заметка.
+Адрес получится вида `https://<имя-мака>.<tailnet>.ts.net:8443` — это понятное
+имя узла, а не IP. Снять только наш маршрут (не трогая 443):
+`tailscale serve --https=8443 off`.
 
-Проверить Tailscale перед этим: `tailscale version` и `tailscale status`.
+Приватный доступ (только свой tailnet, без публикации): `PRIVATE=1 ./scripts/tailscale-serve.sh`.
+
+Отдельное «красивое» имя `https://getcourse.<tailnet>.ts.net` возможно через
+выделенный узел: `MODE=node TS_HOSTNAME=getcourse ./scripts/tailscale-serve.sh`
+(нужен бинарь `tailscaled` и включённый атрибут `funnel` для узла в ACL тейлнета).
+
+Проверить Tailscale заранее: `tailscale version`, `tailscale status`,
+`tailscale serve status`.
 
 ### Автозапуск на Mac Mini (LaunchAgent)
 
