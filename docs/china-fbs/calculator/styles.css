@@ -218,3 +218,6 @@ input[type="number"]:focus, select:focus {
 }
 .logistics-explain b { color: var(--text); font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); font-weight: 400; }
+
+/* ---- Предупреждение о лимитах ---- */
+.logistics-explain .warn { margin-top: 8px; color: var(--neg); font-weight: 600; }
