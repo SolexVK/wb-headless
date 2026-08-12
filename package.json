@@ -28,7 +28,9 @@
     "fbs:delivery:dash": "node scripts/fbs-delivery-dashboard.mjs",
     "fbs:accepted:dash": "node scripts/fbs-accepted-dashboard.mjs",
     "fbs:stock:articles": "node scripts/fbs-stock-by-article.mjs",
-    "fbs:dashboards": "npm run fbs:stock && npm run fbs:delivery && npm run fbs:delivery:dash && npm run fbs:accepted:dash && npm run fbs:stock:articles"
+    "fbs:dashboards": "npm run fbs:stock && npm run fbs:delivery && npm run fbs:delivery:dash && npm run fbs:accepted:dash && npm run fbs:stock:articles",
+    "fbs:replenish": "node scripts/fbs-replenishment.mjs",
+    "fbs:replenish:dash": "node scripts/fbs-replenishment-dashboard.mjs"
   },
   "engines": {
     "node": ">=18"
