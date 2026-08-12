@@ -221,3 +221,10 @@ input[type="number"]:focus, select:focus {
 
 /* ---- Предупреждение о лимитах ---- */
 .logistics-explain .warn { margin-top: 8px; color: var(--neg); font-weight: 600; }
+
+/* ---- Инфо-карточка China POP ---- */
+.infocard { max-width: 1320px; margin: 0 auto 18px; }
+.layout + .infocard { margin-top: 0; }
+.infolist { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.infolist li { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.infolist b { color: var(--text); font-weight: 700; }
