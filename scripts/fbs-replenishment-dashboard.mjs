@@ -24,6 +24,17 @@ const t = snap.totals;
 const STATUS = {
   'нет остатка': 'crit', 'риск': 'warn', 'ок': 'ok', 'неликвид': 'dead', 'нет спроса': 'mute',
 };
+const STATUS_ORDER = ['нет остатка', 'риск', 'ок', 'неликвид', 'нет спроса'];
+// Разбивка статусов по цветам для верхнего блока (кол-во артикулов + шт к дозаказу).
+const statusAgg = {};
+for (const r of snap.rows) {
+  const a = statusAgg[r.status] || { count: 0, reorder: 0 };
+  a.count += 1; a.reorder += r.reorderQty || 0; statusAgg[r.status] = a;
+}
+const statusList = STATUS_ORDER.filter((s) => statusAgg[s]);
+const statusTotal = snap.rows.length || 1;
+const statusBar = statusList.map((s) => `<span class="seg seg-${STATUS[s]}" style="width:${(statusAgg[s].count / statusTotal * 100).toFixed(2)}%" title="${s}: ${statusAgg[s].count}"></span>`).join('');
+const statusLegend = statusList.map((s) => `<div class="lg"><span class="dot dot-${STATUS[s]}"></span><span class="lg-lab">${s}</span><span class="lg-num">${nf(statusAgg[s].count)}</span><span class="lg-sub">${statusAgg[s].reorder ? '+' + nf(statusAgg[s].reorder) + ' шт' : ''}</span></div>`).join('');
 const dtzClass = (d) => (d == null ? 'ok' : d <= snap.lowThresholdDays ? 'crit' : d <= snap.targetDays ? 'warn' : 'ok');
 
 const rows = snap.rows.map((r) => {
@@ -57,6 +68,12 @@ const body = `<div class="wrap">
     <div class="kpi"><div class="kpi-num">${nf(t.outOfStock)}</div><div class="kpi-lab">уже 0 при наличии спроса</div></div>
     <div class="kpi"><div class="kpi-num">${nf(t.stockUnits)}</div><div class="kpi-lab">штук на складах сейчас</div></div>
     <div class="kpi"><div class="kpi-num">${t.demandPerDay.toLocaleString('ru-RU')}</div><div class="kpi-lab">спрос, шт/день</div></div>
+  </section>
+
+  <section class="statusbar">
+    <div class="statusbar-head"><h2>Статусы товаров</h2><span class="muted">${nf(snap.rows.length)} артикул+цвет · по цветам как в таблице</span></div>
+    <div class="sbar">${statusBar}</div>
+    <div class="legend">${statusLegend}</div>
   </section>
 
   <section class="panel">
@@ -122,6 +139,17 @@ body{margin:0;background:var(--ground);color:var(--ink);font-family:-apple-syste
 .kpi-crit .kpi-num{color:var(--crit);} .kpi-warn .kpi-num{color:var(--warn);}
 .kpi-lab{margin-top:6px;font-size:11.5px;color:var(--muted);}
 
+.statusbar{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;box-shadow:var(--shadow);margin-bottom:18px;}
+.statusbar-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:11px;flex-wrap:wrap;}
+.statusbar-head h2{margin:0;font-size:14px;font-weight:700;} .statusbar-head .muted{font-size:11.5px;}
+.sbar{display:flex;height:16px;border-radius:6px;overflow:hidden;background:var(--surface-2);}
+.sbar .seg{display:block;height:100%;}
+.seg-crit{background:var(--crit);} .seg-warn{background:var(--warn);} .seg-ok{background:var(--ok);} .seg-dead{background:var(--dead);} .seg-mute{background:var(--line-2);}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:12px;}
+.lg{display:flex;align-items:center;gap:8px;font-size:12.5px;}
+.lg .dot{width:10px;height:10px;border-radius:3px;flex:none;}
+.dot-crit{background:var(--crit);} .dot-warn{background:var(--warn);} .dot-ok{background:var(--ok);} .dot-dead{background:var(--dead);} .dot-mute{background:var(--line-2);}
+.lg-lab{color:var(--muted);} .lg-num{font-weight:700;font-variant-numeric:tabular-nums;} .lg-sub{color:var(--faint);font-size:11px;font-variant-numeric:tabular-nums;}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:var(--shadow);}
 .panel-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:14px;flex-wrap:wrap;}
 .panel-head h2{margin:0;font-size:15.5px;font-weight:700;} .panel-head .muted{font-size:11.5px;}
