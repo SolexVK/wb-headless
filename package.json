@@ -26,7 +26,8 @@
     "fbs:stock:pdf": "node scripts/fbs-stock-pdf.mjs",
     "fbs:delivery": "node scripts/fbs-delivery-daily.mjs",
     "fbs:delivery:dash": "node scripts/fbs-delivery-dashboard.mjs",
-    "fbs:accepted:dash": "node scripts/fbs-accepted-dashboard.mjs"
+    "fbs:accepted:dash": "node scripts/fbs-accepted-dashboard.mjs",
+    "fbs:stock:articles": "node scripts/fbs-stock-by-article.mjs"
   },
   "engines": {
     "node": ">=18"
