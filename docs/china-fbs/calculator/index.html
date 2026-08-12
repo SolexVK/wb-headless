@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Юнит-калькулятор WB · Китай FBS</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Юнит-экономика WB — Китай (FBS)</h1>
+    <span class="sub">Расчёт в юанях (CNY) · по оферте WB</span>
+    <span class="spacer"></span>
+    <button class="btn" id="reset">Сбросить к примеру</button>
+    <button class="btn" id="theme">Тема</button>
+  </header>
+
+  <div class="layout">
+    <!-- Левая колонка: ввод -->
+    <main id="form"></main>
+
+    <!-- Правая колонка: результаты -->
+    <aside class="results">
+      <section class="card">
+        <h3 class="card-title">Результат</h3>
+        <div id="kpi"></div>
+      </section>
+
+      <section class="card">
+        <h3 class="card-title">Разбивка затрат (на выкупленную единицу)</h3>
+        <div id="breakdown"></div>
+      </section>
+
+      <section class="card">
+        <h3 class="card-title">Чувствительность маржи</h3>
+        <div id="sensitivity"></div>
+        <p class="note">
+          Строки — доля выкупа, столбцы — ставка комиссии кВВ. Прочие параметры берутся из формы.
+          Зелёный — прибыльно, жёлтый — на грани, красный — убыток.
+        </p>
+      </section>
+    </aside>
+  </div>
+
+  <p class="footer">
+    Все суммы — в юанях (CNY), валюта договора (п. 5.12). Приоритет — русская версия оферты (п. 2.5).
+    Тарифы ВБ меняются ежедневно (пп. 6.6, 7.2) — обновляйте ставки перед расчётом.
+  </p>
+
+  <script src="app.js"></script>
+</body>
+</html>
