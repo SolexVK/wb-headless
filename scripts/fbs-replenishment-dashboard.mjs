@@ -65,18 +65,21 @@ const whSection = (w) => {
 };
 const whSections = snap.warehouses.map(whSection).join('');
 
-// Новинки.
+// Новинки — матрица артикул × склад (завоз seed на каждый фулфилмент).
+const seedWh = (snap.newProducts?.[0] && Object.keys(snap.newProducts[0].seedByWarehouse)) || snap.warehouses.map((w) => w.name);
+const newHeadWh = seedWh.map((n) => `<th class="ta-r">${esc(n)}</th>`).join('');
 const newRows = (snap.newProducts || []).map((n) => `<tr>
     <td class="art">${esc(n.articleNum || '—')}</td>
     <td class="a-name">${esc(n.variant)}</td>
     <td class="mono muted">${esc(n.nmID)}</td>
-    <td class="ta-r num reorder">${nf(n.seedQty)}</td>
+    ${seedWh.map((w) => `<td class="ta-r num">${nf(n.seedByWarehouse[w] || 0)}</td>`).join('')}
+    <td class="ta-r num reorder">${nf(n.seedTotal)}</td>
   </tr>`).join('');
 const newSection = (snap.newProducts || []).length ? `<section class="panel">
-    <div class="panel-head"><h2>Новинки — завезти для старта</h2><span class="wh-tot">${nf(t.newProducts)} позиций · ${nf(t.seedUnits)} шт (по ${nf(P.seedMin)})</span></div>
-    <p class="note">Товары из номенклатуры, которые ни разу не заводились ни на один FF-склад (нет остатка и нет заказов за ${P.historyDays} дн). Заводим минимальным количеством, чтобы начать мерить скорость продаж, а дальше считать подсорт как обычно.</p>
+    <div class="panel-head"><h2>Новинки — завезти для старта</h2><span class="wh-tot">${nf(t.newProducts)} позиций · по ${nf(P.seedMin)} шт на каждый из ${nf(t.seedWarehouses)} складов · итого ${nf(t.seedUnits)} шт</span></div>
+    <p class="note">Товары из номенклатуры, которые ни разу не заводились ни на один FF-склад (нет остатка и нет заказов за ${P.historyDays} дн). Заводим по ${nf(P.seedMin)} шт на КАЖДЫЙ действующий фулфилмент, чтобы начать мерить скорость продаж отдельно по складу, а дальше считать подсорт как обычно.</p>
     <div class="table-scroll"><table>
-      <thead><tr><th class="ta-r">Арт</th><th class="tl">Цвет / вариант</th><th class="tl">nmID</th><th class="ta-r">Завоз, шт</th></tr></thead>
+      <thead><tr><th class="ta-r">Арт</th><th class="tl">Цвет / вариант</th><th class="tl">nmID</th>${newHeadWh}<th class="ta-r">Итого</th></tr></thead>
       <tbody>${newRows}</tbody>
     </table></div>
   </section>` : '';

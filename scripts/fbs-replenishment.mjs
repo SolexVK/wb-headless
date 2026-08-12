@@ -156,9 +156,17 @@ for (const w of warehouses) {
 whReports.sort((a, b) => b.reorderUnits - a.reorderUnits || b.stockUnits - a.stockUnits);
 
 // ── Новинки: в номенклатуре, но ни разу не на FF ────────────────────────────
+// Заводим на КАЖДЫЙ действующий фулфилмент (тот, что сейчас в работе — есть
+// остаток или продажи) по seed-min штук, чтобы начать мерить скорость на нём.
+const seedWarehouses = whReports.map((w) => w.name);
 const newProducts = cards
   .filter((c) => !everPlacedNm.has(c.nmID))
-  .map((c) => { const { num, numInt, variant } = parseArt(c.vendorCode); return { nmID: c.nmID, vendorCode: c.vendorCode, articleNum: num, articleNumInt: numInt, variant, seedQty: SEED_MIN }; })
+  .map((c) => {
+    const { num, numInt, variant } = parseArt(c.vendorCode);
+    const seedByWarehouse = {};
+    for (const name of seedWarehouses) seedByWarehouse[name] = SEED_MIN;
+    return { nmID: c.nmID, vendorCode: c.vendorCode, articleNum: num, articleNumInt: numInt, variant, seedByWarehouse, seedTotal: seedWarehouses.length * SEED_MIN };
+  })
   .sort((a, b) => (a.articleNumInt - b.articleNumInt) || a.variant.localeCompare(b.variant, 'ru'));
 
 const snapshot = {
@@ -169,7 +177,8 @@ const snapshot = {
     reorderUnits: whReports.reduce((s, w) => s + w.reorderUnits, 0),
     riskRows: whReports.reduce((s, w) => s + w.riskCount, 0),
     newProducts: newProducts.length,
-    seedUnits: newProducts.length * SEED_MIN,
+    seedWarehouses: whReports.length,
+    seedUnits: newProducts.length * whReports.length * SEED_MIN,
     nomenclature: cards.length,
   },
   warehouses: whReports,
@@ -187,8 +196,8 @@ for (const w of whReports) {
   if (w.rows.length > 12) log(`  … ещё ${w.rows.length - 12} строк`);
 }
 if (newProducts.length) {
-  log(`\n=== НОВИНКИ (ни разу не на FF) — завезти по ${SEED_MIN} шт ===`);
-  for (const n of newProducts.slice(0, 20)) log('  ' + n.articleNum.padEnd(6) + n.variant.slice(0, 30).padEnd(31) + `→ ${n.seedQty} шт  nmID ${n.nmID}`);
+  log(`\n=== НОВИНКИ (ни разу не на FF) — завезти по ${SEED_MIN} шт на КАЖДЫЙ из ${seedWarehouses.length} складов: ${seedWarehouses.join(', ')} ===`);
+  for (const n of newProducts.slice(0, 20)) log('  ' + n.articleNum.padEnd(6) + n.variant.slice(0, 30).padEnd(31) + `→ ${n.seedTotal} шт (по ${SEED_MIN}×${seedWarehouses.length})  nmID ${n.nmID}`);
   if (newProducts.length > 20) log(`  … ещё ${newProducts.length - 20}`);
 }
 
