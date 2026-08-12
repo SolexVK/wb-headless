@@ -166,3 +166,55 @@ input[type="number"]:focus, select:focus {
 
 .note { font-size: 11.5px; color: var(--muted); margin-top: 10px; line-height: 1.4; }
 .footer { text-align: center; color: var(--muted); font-size: 11px; padding: 20px; }
+
+/* ---- Tooltips (справки простым языком) ---- */
+.tip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  font-size: 10px; font-weight: 700; cursor: help;
+  color: #fff; background: var(--accent-2); opacity: .85; position: relative;
+  font-style: normal; vertical-align: middle;
+}
+.tip:hover, .tip:focus { opacity: 1; outline: none; }
+.tip::after {
+  content: attr(data-tip);
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  width: 260px; max-width: 62vw; padding: 9px 11px; z-index: 50;
+  background: var(--tip-bg); color: var(--tip-text);
+  border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow);
+  font-size: 11.5px; font-weight: 500; line-height: 1.4; text-align: left;
+  white-space: normal; opacity: 0; visibility: hidden; transition: opacity .12s;
+  pointer-events: none;
+}
+.tip:hover::after, .tip:focus::after { opacity: 1; visibility: visible; }
+:root { --tip-bg: #1a2230; --tip-text: #f0f3f8; }
+:root[data-theme="dark"] { --tip-bg: #26324a; --tip-text: #eef2f9; }
+
+/* ---- Курс: кнопка и статус ---- */
+.mini-btn {
+  margin-top: 6px; align-self: flex-start; background: var(--panel-2); color: var(--accent);
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; font-size: 11.5px;
+  font-weight: 600; cursor: pointer;
+}
+.mini-btn:hover { border-color: var(--accent-2); }
+.rate-status { font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+.rate-status.ok { color: var(--pos); }
+.rate-status.err { color: var(--neg); }
+
+/* ---- Цены на витрине ---- */
+.price-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border); flex-wrap: wrap; }
+.price-row:last-of-type { border-bottom: none; }
+.price-row span { font-size: 12.5px; color: var(--muted); }
+.price-row b { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; margin-left: auto; }
+.price-row small { flex-basis: 100%; text-align: right; font-size: 10.5px; color: var(--muted); }
+.price-row.hl b { color: var(--accent-2); }
+.price-note { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.4; }
+
+/* ---- Пояснение логистики ---- */
+.logistics-explain {
+  margin-top: 12px; padding: 10px 12px; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 9px;
+  font-size: 11.5px; color: var(--muted); line-height: 1.5;
+}
+.logistics-explain b { color: var(--text); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); font-weight: 400; }
