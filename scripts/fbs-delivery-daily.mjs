@@ -75,40 +75,55 @@ const orders = await fetchOrders();
 const supplies = await fetchSupplies(new Set(orders.map((o) => o.supplyId).filter(Boolean)));
 
 // ── Агрегация по дням ───────────────────────────────────────────────────────
-// day → { fact: {wid:count}, plan: {wid:count} }
+// Два потока на каждый день/склад:
+//   accepted  — принято на фулфилмент = сборочные задания, созданные в этот день;
+//   delivered — передано в доставку   = задания, чья поставка закрыта в этот день.
 const byDay = new Map();
 const bump = (day, kind, wid) => {
   if (!inWindow.has(day)) return;
-  if (!byDay.has(day)) byDay.set(day, { fact: {}, plan: {} });
+  if (!byDay.has(day)) byDay.set(day, { accepted: {}, delivered: {} });
   const g = byDay.get(day)[kind];
   g[wid] = (g[wid] || 0) + 1;
 };
 const whSeen = new Set();
 for (const o of orders) {
   whSeen.add(o.warehouseId);
-  bump(dayOf(o.createdAt), 'plan', o.warehouseId);              // план — по дате создания
+  bump(dayOf(o.createdAt), 'accepted', o.warehouseId);          // принято — по дате создания задания
   const s = o.supplyId ? supplies.get(o.supplyId) : null;
   const closed = s && (s.done || s.closedAt) ? s.closedAt : null;
-  if (closed) bump(dayOf(closed), 'fact', o.warehouseId);       // факт — по дате передачи в доставку
+  if (closed) bump(dayOf(closed), 'delivered', o.warehouseId);  // передано — по дате передачи в доставку
 }
 
 const fulfillments = [...whSeen].map((id) => ({ id, name: WH_NAME[id] || String(id) })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 const nameById = Object.fromEntries(fulfillments.map((f) => [f.id, f.name]));
+const byName = (src) => {
+  const o = {}; let total = 0;
+  for (const [wid, c] of Object.entries(src || {})) { o[nameById[wid] || wid] = c; total += c; }
+  return { total, byFulfillment: o };
+};
 
 const days = windowDays.map((date) => {
   const isToday = date === todayStr;
-  const kind = isToday ? 'plan' : 'fact';
-  const src = byDay.get(date)?.[kind] || {};
-  const byFulfillment = {};
-  let total = 0;
-  for (const [wid, c] of Object.entries(src)) { byFulfillment[nameById[wid] || wid] = c; total += c; }
-  const extra = isToday ? { shippedToday: Object.values(byDay.get(date)?.fact || {}).reduce((a, b) => a + b, 0) } : {};
-  return { date, isToday, kind, metric: isToday ? 'заданий в плане' : 'передано в доставку', total, byFulfillment, ...extra };
+  const accepted = byName(byDay.get(date)?.accepted);
+  const delivered = byName(byDay.get(date)?.delivered);
+  // Разница «передано − принято» по складам и всего.
+  const diffBy = {};
+  for (const n of new Set([...Object.keys(accepted.byFulfillment), ...Object.keys(delivered.byFulfillment)])) {
+    diffBy[n] = (delivered.byFulfillment[n] || 0) - (accepted.byFulfillment[n] || 0);
+  }
+  const diff = { total: delivered.total - accepted.total, byFulfillment: diffBy };
+  // Совместимость с дашбордом #1: total/byFulfillment = передано (прошлые дни) / принято (сегодня-план).
+  const compat = isToday ? accepted : delivered;
+  return { date, isToday, accepted, delivered, diff, total: compat.total, byFulfillment: compat.byFulfillment,
+    metric: isToday ? 'заданий в плане' : 'передано в доставку' };
 });
 
-// Итоги по фулфилментам за 7 прошедших дней (факт).
-const totalsByFulfillment = {};
-for (const d of days) if (!d.isToday) for (const [n, c] of Object.entries(d.byFulfillment)) totalsByFulfillment[n] = (totalsByFulfillment[n] || 0) + c;
+const sumBy = (pick) => days.filter((d) => !d.isToday).reduce((acc, d) => {
+  for (const [n, c] of Object.entries(pick(d).byFulfillment)) acc[n] = (acc[n] || 0) + c;
+  return acc;
+}, {});
+const totalsByFulfillment = sumBy((d) => d.delivered);   // передано за 7 дн. по складам
+const acceptedByFulfillment = sumBy((d) => d.accepted);  // принято за 7 дн. по складам
 
 const snapshot = {
   generatedAt: new Date().toISOString(),
@@ -118,15 +133,18 @@ const snapshot = {
   fulfillments: fulfillments.map((f) => f.name),
   days,
   totalsByFulfillment,
-  factTotal7d: days.filter((d) => !d.isToday).reduce((s, d) => s + d.total, 0),
-  planToday: days.find((d) => d.isToday)?.total || 0,
+  acceptedByFulfillment,
+  factTotal7d: days.filter((d) => !d.isToday).reduce((s, d) => s + d.delivered.total, 0),
+  acceptedTotal7d: days.filter((d) => !d.isToday).reduce((s, d) => s + d.accepted.total, 0),
+  planToday: days.find((d) => d.isToday)?.accepted.total || 0,
 };
+snapshot.diffTotal7d = snapshot.factTotal7d - snapshot.acceptedTotal7d;
 
 log(`\nОкно (МСК): ${windowDays.join(', ')}`);
-log('День'.padEnd(12) + 'Метрика'.padEnd(22) + 'Всего'.padStart(8));
-for (const d of days) log(d.date.padEnd(12) + (d.isToday ? 'план (создано сегодня)' : 'передано в доставку').padEnd(22) + String(d.total).padStart(8));
-log(`\nФакт за ${PAST_DAYS} дн.: ${snapshot.factTotal7d} | план сегодня: ${snapshot.planToday}`);
-log('По фулфилментам (7 дн.): ' + Object.entries(totalsByFulfillment).map(([n, c]) => `${n} ${c}`).join(' · '));
+log('День'.padEnd(12) + 'Принято'.padStart(9) + 'Передано'.padStart(10) + 'Разница'.padStart(10));
+for (const d of days) log(d.date.padEnd(12) + String(d.accepted.total).padStart(9) + String(d.delivered.total).padStart(10) + (d.diff.total >= 0 ? '+' : '') + String(d.diff.total).padStart(d.diff.total >= 0 ? 9 : 10));
+log(`\nПринято за ${PAST_DAYS} дн.: ${snapshot.acceptedTotal7d} | передано: ${snapshot.factTotal7d} | разница: ${snapshot.diffTotal7d >= 0 ? '+' : ''}${snapshot.diffTotal7d}`);
+log('Принято по фулфилментам (7 дн.): ' + Object.entries(acceptedByFulfillment).map(([n, c]) => `${n} ${c}`).join(' · '));
 
 if (!jsonOnly) {
   const out = path.join(REPO, 'reports-output', 'fbs-delivery-daily.json');

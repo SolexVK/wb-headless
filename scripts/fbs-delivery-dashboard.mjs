@@ -67,7 +67,7 @@ const body = `<div class="wrap">
   <header class="head">
     <div>
       <p class="eyebrow">Wildberries · FBS · передано в доставку</p>
-      <h1>Выберите день</h1>
+      <h1>Количество переданных в доставку товаров</h1>
       <p class="sub">В прошедших днях показано фактически переданное в доставку количество заданий по нашим фулфилментам. Сегодня — задания в плане (созданные сегодня).</p>
     </div>
     <div class="stamp">Снимок<br><b>${stamp}</b><br><span class="muted">пояс: МСК (${esc(snap.tz)})</span></div>
