@@ -27,7 +27,8 @@
     "fbs:delivery": "node scripts/fbs-delivery-daily.mjs",
     "fbs:delivery:dash": "node scripts/fbs-delivery-dashboard.mjs",
     "fbs:accepted:dash": "node scripts/fbs-accepted-dashboard.mjs",
-    "fbs:stock:articles": "node scripts/fbs-stock-by-article.mjs"
+    "fbs:stock:articles": "node scripts/fbs-stock-by-article.mjs",
+    "fbs:dashboards": "npm run fbs:stock && npm run fbs:delivery && npm run fbs:delivery:dash && npm run fbs:accepted:dash && npm run fbs:stock:articles"
   },
   "engines": {
     "node": ">=18"
