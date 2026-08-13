@@ -89,9 +89,31 @@ CALC_USER="ваш_логин" CALC_PASS="надёжный_пароль" bash ins
 Funnel через `--bg` уже сохраняется в Tailscale и поднимается сам после перезагрузки — отдельного
 автозапуска для него не нужно.
 
-> Служба ставится как **LaunchAgent** и работает, пока пользователь залогинен. Для «безголового»
-> Mac Mini включите автологин (System Settings → Users & Groups → Automatically log in) или
-> держите сессию открытой.
+> Служба ставится как **LaunchAgent** и работает, пока пользователь залогинен.
+
+### Автозапуск без входа в систему (LaunchDaemon) — для «безголового» Mac Mini
+Чтобы сервер поднимался **при загрузке, без логина**, переносим службу в системные демоны.
+Пароль берём из уже установленного LaunchAgent (копируем plist — не нужно вводить заново):
+```bash
+PL=~/Library/LaunchAgents/com.wbcalc.calculator.plist
+TMP=$(mktemp); cp "$PL" "$TMP"
+/usr/libexec/PlistBuddy -c "Add :UserName string $(whoami)" "$TMP" 2>/dev/null \
+  || /usr/libexec/PlistBuddy -c "Set :UserName $(whoami)" "$TMP"
+launchctl bootout gui/$(id -u)/com.wbcalc.calculator 2>/dev/null; rm -f "$PL"
+sudo cp "$TMP" /Library/LaunchDaemons/com.wbcalc.calculator.plist; rm -f "$TMP"
+sudo chown root:wheel /Library/LaunchDaemons/com.wbcalc.calculator.plist
+sudo chmod 600 /Library/LaunchDaemons/com.wbcalc.calculator.plist
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.wbcalc.calculator.plist
+sudo launchctl kickstart -k system/com.wbcalc.calculator
+```
+Управление демоном (с `sudo`):
+```bash
+sudo launchctl list | grep wbcalc                          # статус
+sudo launchctl kickstart -k system/com.wbcalc.calculator   # перезапуск
+sudo launchctl bootout system/com.wbcalc.calculator        # остановить/снять
+```
+Плюс включите автозапуск самого Mac после сбоя питания: *System Settings → Energy → Start up
+automatically after a power failure* (или `sudo pmset -a autorestart 1`).
 
 ---
 
