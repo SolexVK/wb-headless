@@ -74,9 +74,15 @@ const FIELDS = [
   { id: 'weight', group: 'Габариты и вес', label: 'Вес с упаковкой', unit: 'кг', type: 'num', def: 0.4, step: 0.05,
     tip: 'Вес одной единицы с упаковкой, кг. Именно от веса считается логистика (округляется вверх до 100 г). Тариф разный для заказов 0,1–0,3 кг и 0,4–20 кг. Максимум 20 кг.' },
 
-  // --- Логистика ---
-  { id: 'logisticsProduct', group: 'Логистика (из Китая)', label: 'Способ доставки / склад', type: 'logistics',
-    tip: 'Способ доставки из Китая определяет тариф. Тариф = ставка за кг × вес + фикс за заказ. По оферте тариф УЖЕ включает обратную доставку возвратов на фулфилмент в РФ и хранение — поэтому отдельных строк «хранение» и «обратная логистика» нет.' },
+  // --- Логистика WB (доставка покупателю) ---
+  { id: 'logisticsProduct', group: 'Логистика WB (до покупателя)', label: 'Способ доставки / склад', type: 'logistics',
+    tip: 'Логистика WB — доставка от склада WB покупателю. Тариф = ставка за кг × вес + фикс за заказ. По оферте тариф УЖЕ включает обратную доставку возвратов на фулфилмент в РФ и хранение — поэтому отдельных строк «хранение» и «обратная логистика» нет. Это НЕ то же самое, что ваша доставка товара из Китая на ФФ (см. ниже).' },
+
+  // --- Первая миля и фулфилмент (ваши расходы до передачи в WB) ---
+  { id: 'chinaFreightPerKg', group: 'Доставка Китай→ФФ и фулфилмент', label: 'Доставка Китай→ФФ', unit: 'CNY/кг', type: 'num', def: 15, step: 0.5,
+    tip: 'Ваша логистика: доставка товара из Китая на склад фулфилмента. Считается по весу: тариф за кг × вес 1 шт. Прибавляется к закупке и даёт «общую себестоимость до ВБ».' },
+  { id: 'ffFeeRub', group: 'Доставка Китай→ФФ и фулфилмент', label: 'Услуги фулфилмента', unit: '₽/шт', type: 'num', def: 30, step: 5,
+    tip: 'Стоимость услуг фулфилмента за 1 штуку: приёмка на склад ФФ с пересчётом, приёмка и обработка заказов от WB, наклейка QR-кодов, доставка и сдача в сортировочный центр WB. В рублях — пересчитывается в юани по курсу ЦБ.' },
 
   // --- Выкуп и возвраты ---
   { id: 'buyback', group: 'Выкуп и возвраты', label: 'Процент выкупа', unit: '%', type: 'pct', def: 65, step: 1,
@@ -126,12 +132,18 @@ function computeUnit(v) {
 
   const vat = v.vatPayer ? revenue - revenue / (1 + v.vatRate) : 0;
 
+  const firstMile = v.chinaFreightPerKg * v.weight;  // Китай→ФФ, ¥ на 1 шт (по весу)
+  const ffCost    = cbr > 0 ? v.ffFeeRub / cbr : 0;  // услуги ФФ, ₽→¥
+  const cogsTotal = v.cogs + firstMile;              // общая себестоимость до ВБ
+
   const costs = {
     cogs:      v.cogs,
+    firstMile,                                       // доставка Китай→ФФ
+    ff:        ffCost,                               // услуги фулфилмента
     commission,
     fin,
-    logistics: logOrder * ordersPerSale,             // логистика на все заказы (вкл. возвраты)
-    lossGoods: v.cogs * returnsPerSale * brak,        // потеря себестоимости на брак-возвраты
+    logistics: logOrder * ordersPerSale,             // логистика WB на все заказы (вкл. возвраты)
+    lossGoods: cogsTotal * returnsPerSale * brak,    // потеря общей себестоимости на брак-возвраты
     utilFee:   v.utilFee * returnsPerSale * brak,
     promo:     revenue * v.drr,
     vat,
@@ -151,6 +163,7 @@ function computeUnit(v) {
   return {
     wbRate, cbr,
     baseRub, priceRub, buyerRub, revenue, cogsRub: v.cogs * cbr,
+    firstMile, ffCost, cogsTotal, cogsTotalRub: cogsTotal * cbr,
     kvvApplied, weightKg, logOrder, lpName: lp.name,
     ordersPerSale, returnsPerSale,
     costs, totalCost,
@@ -168,7 +181,9 @@ function marginFor(v, buyback, drr) {
 
 /* ---------------- UI ---------------- */
 const COST_LABELS = {
-  cogs:      'Себестоимость товара',
+  cogs:      'Себестоимость закупки',
+  firstMile: 'Логистика Китай→ФФ',
+  ff:        'Услуги фулфилмента',
   commission:'Комиссия WB',
   fin:       'Эквайринг + конвертация',
   logistics: 'Логистика (вкл. возвраты и хранение)',
@@ -271,7 +286,8 @@ function render() {
     <div class="price-row"><span>Базовая цена (до скидок)</span><b>${fmt(r.baseRub, 0)} ₽</b></div>
     <div class="price-row"><span>Цена продажи Рц (без скидки WB)</span><b>${fmt(r.priceRub, 0)} ₽</b><small>${fmt(r.revenue, 2)} ¥ — от неё считается комиссия и выплата</small></div>
     <div class="price-row hl"><span>Цена для покупателя (со скидкой WB)</span><b>${fmt(r.buyerRub, 0)} ₽</b></div>
-    <div class="price-note">Витрина — по Курсу ВБ ${fmt(r.wbRate, 2)} ₽/¥ (ЦБ ${fmt(r.cbr, 2)} + надбавка). Прибыль в ₽ — по курсу ЦБ (реальная стоимость юаней). Себестоимость ${fmt(v.cogs, 2)} ¥ ≈ ${fmt(r.cogsRub, 2)} ₽.</div>`;
+    <div class="price-row"><span>Общая себестоимость до ВБ (закупка + Китай→ФФ)</span><b>${fmt(r.cogsTotal, 2)} ¥</b><small>≈ ${fmt(r.cogsTotalRub, 0)} ₽ · закупка ${fmt(v.cogs, 0)} ¥ + доставка ${fmt(r.firstMile, 2)} ¥</small></div>
+    <div class="price-note">Витрина — по Курсу ВБ ${fmt(r.wbRate, 2)} ₽/¥ (ЦБ ${fmt(r.cbr, 2)} + надбавка). Прибыль в ₽ — по курсу ЦБ (реальная стоимость юаней). Услуги ФФ ${fmt(v.ffFeeRub, 0)} ₽ ≈ ${fmt(r.ffCost, 2)} ¥.</div>`;
 
   const maxCost = Math.max(r.revenue, ...Object.values(r.costs));
   const rows = Object.keys(COST_LABELS).map(k => {
