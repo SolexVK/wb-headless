@@ -15,6 +15,7 @@
     "start": "node server.js",
     "report:stock": "node report-stock.js",
     "report:fire": "node report-fire-losses.mjs",
+    "pdf:fire": "node scripts/build-fire-pdf.mjs",
     "token:check": "node scripts/wb-token-check.mjs",
     "docs:fetch": "node scripts/fetch-wb-docs.mjs",
     "docs:limits": "node scripts/fetch-wb-docs.mjs https://dev.wildberries.ru/docs/openapi/api-information docs/wb-api/limits.md"
