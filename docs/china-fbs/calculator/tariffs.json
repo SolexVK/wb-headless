@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "updated": "2026-08-13",
+    "effective": "July 22, 2026",
+    "source": "https://static-basket-02.wbbasket.ru/vol20/China/warehouse_and_tarrifs/0726.pdf"
+  },
+  "logistics": {
+    "standard": { "name": "WB Standard — авто, 15–30 дн (большинство складов КНР)", "light": { "kg": 58, "item": 2 }, "heavy": { "kg": 43, "item": 8 }, "limitSum": 200, "limitSide": 120 },
+    "plus":     { "name": "WB Plus — авиа+авто, 6–7 дн (Хуньчунь/Дунгуань/Дуннин)", "light": { "kg": 48, "item": 9 }, "heavy": { "kg": 48, "item": 9 }, "limitSum": 200, "limitSide": 120 },
+    "hk":       { "name": "WB Express — Гонконг, авиа, 10 дн", "light": { "kg": 89, "item": 17 }, "heavy": { "kg": 89, "item": 17 }, "limitSum": 90, "limitSide": 60 },
+    "express":  { "name": "WB Express — Дунгуань, авиа, 10 дн", "light": { "kg": 122, "item": 19 }, "heavy": { "kg": 122, "item": 19 }, "limitSum": 200, "limitSide": 100 }
+  },
+  "categories": [
+    { "name": "Одежда", "kvv": 10 },
+    { "name": "Обувь", "kvv": 10 },
+    { "name": "Аксессуары", "kvv": 13 },
+    { "name": "Сумки", "kvv": 13 },
+    { "name": "Красота и уход", "kvv": 12 },
+    { "name": "Здоровье", "kvv": 10 },
+    { "name": "Товары для дома", "kvv": 12 },
+    { "name": "Кухня и посуда", "kvv": 12 },
+    { "name": "Детские товары", "kvv": 10 },
+    { "name": "Игрушки", "kvv": 13 },
+    { "name": "Спорт и отдых", "kvv": 12 },
+    { "name": "Электроника", "kvv": 10 },
+    { "name": "Бытовая техника", "kvv": 8 },
+    { "name": "Автотовары", "kvv": 12 },
+    { "name": "Ювелирные изделия", "kvv": 16 },
+    { "name": "Прочее", "kvv": 12 }
+  ]
+}

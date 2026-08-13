@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Обновление тарифов логистики WB для Китая в калькуляторе.
+Обновление тарифов логистики WB для Китая — БЕЗ правки кода.
 
-Скачивает официальный тарифный PDF WB и перегенерирует блок между маркерами
-  // TARIFFS_AUTOGEN_START ... // TARIFFS_AUTOGEN_END
-в файле ../calculator/app.js, а также пишет wb_tariffs.json для истории.
+Скачивает официальный тарифный PDF WB, парсит ставки и пишет их в
+  ../calculator/tariffs.override.json   (этот файл в .gitignore)
+Калькулятор читает override поверх tariffs.json при загрузке страницы —
+поэтому обновление тарифов не трогает код и не конфликтует с git.
 
 Запуск:
     python3 update-wb-tariffs.py [URL_PDF]
@@ -19,10 +20,7 @@ import sys, os, re, json, subprocess, datetime, tempfile
 
 DEFAULT_URL = "https://static-basket-02.wbbasket.ru/vol20/China/warehouse_and_tarrifs/0726.pdf"
 HERE = os.path.dirname(os.path.abspath(__file__))
-APP_JS = os.path.normpath(os.path.join(HERE, "..", "calculator", "app.js"))
-JSON_OUT = os.path.join(HERE, "wb_tariffs.json")
-START = "// TARIFFS_AUTOGEN_START"
-END = "// TARIFFS_AUTOGEN_END"
+OVERRIDE_OUT = os.path.normpath(os.path.join(HERE, "..", "calculator", "tariffs.override.json"))
 
 # Строка PDF: № | продукт | склад-описание | 4 ставки (X,XX) | лимиты+локация
 ROW_RE = re.compile(
@@ -110,27 +108,6 @@ def build_logistics(rows):
     return out
 
 
-def js_block(logistics, url, effective):
-    today = datetime.date.today().isoformat()
-    lines = [START + " — блок регенерируется скриптом tools/update-wb-tariffs.py из официального тарифа WB"]
-    lines.append("const TARIFFS_META = {")
-    lines.append(f"  updated:  '{today}',")
-    lines.append(f"  effective:'{effective}',")
-    lines.append(f"  source:   '{url}',")
-    lines.append("};")
-    lines.append("const LOGISTICS = {")
-    for key, (name, r) in logistics.items():
-        lines.append(
-            f"  {key + ':':<9} {{ name: '{name}', "
-            f"light: {{ kg: {r['light']['kg']:g}, item: {r['light']['item']:g} }}, "
-            f"heavy: {{ kg: {r['heavy']['kg']:g}, item: {r['heavy']['item']:g} }}, "
-            f"limitSum: {r['limitSum']}, limitSide: {r['limitSide']} }},"
-        )
-    lines.append("};")
-    lines.append(END)
-    return "\n".join(lines)
-
-
 def main():
     url = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_URL
     print(f"Скачиваю тариф: {url}")
@@ -139,29 +116,29 @@ def main():
     logistics = build_logistics(rows)
     print(f"Найдено способов доставки: {', '.join(logistics.keys())}; действует с: {effective}")
 
-    block = js_block(logistics, url, effective)
-
-    # Обновляем app.js между маркерами
-    with open(APP_JS, encoding="utf-8") as f:
-        src = f.read()
-    if START not in src or END not in src:
-        raise SystemExit(f"Маркеры {START}/{END} не найдены в {APP_JS}")
-    new = re.sub(re.escape(START) + r".*?" + re.escape(END), block, src, flags=re.S)
-    with open(APP_JS, "w", encoding="utf-8") as f:
-        f.write(new)
-
-    # Пишем json для истории
-    with open(JSON_OUT, "w", encoding="utf-8") as f:
-        json.dump({
+    payload = {
+        "meta": {
             "updated": datetime.date.today().isoformat(),
-            "effective": effective, "source": url,
-            "logistics": {k: {"name": n, **{kk: vv for kk, vv in r.items() if kk in ("light", "heavy", "limitSum", "limitSide")}}
-                          for k, (n, r) in logistics.items()},
-        }, f, ensure_ascii=False, indent=2)
+            "effective": effective,
+            "source": url,
+        },
+        "logistics": {
+            k: {
+                "name": n,
+                "light": r["light"], "heavy": r["heavy"],
+                "limitSum": r["limitSum"], "limitSide": r["limitSide"],
+            } for k, (n, r) in logistics.items()
+        },
+    }
 
-    print(f"Обновлён: {APP_JS}")
-    print(f"Записан:  {JSON_OUT}")
-    print("Далее пересоберите standalone.html/артефакт (см. README).")
+    # Пишем ТОЛЬКО tariffs.override.json (gitignored) — код и git не трогаются.
+    # Категории (комиссии) сюда не пишем: калькулятор берёт их из tariffs.json (merge поверх).
+    with open(OVERRIDE_OUT, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    print(f"Записан: {OVERRIDE_OUT}")
+    print("Калькулятор подхватит новые тарифы сам (перезапуск сервера не обязателен —")
+    print("файл читается при загрузке страницы). Код не изменён, git-конфликтов не будет.")
 
 
 if __name__ == "__main__":

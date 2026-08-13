@@ -3,3 +3,6 @@ chrome/
 reports-output/
 .env
 *.log
+
+# Runtime tariff override (written by update-wb-tariffs.py) — not tracked
+docs/china-fbs/calculator/tariffs.override.json

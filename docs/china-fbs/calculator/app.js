@@ -7,46 +7,45 @@
 
 'use strict';
 
-/* -------- Категории и ориентировочные комиссии кВВ (%) --------
-   China POP: по факту 5–16%, у большинства категорий ~10%.
-   ТОЧНЫЕ ставки смотрите в кабинете WB — их можно поправить вручную. */
-const CATEGORIES = [
-  { name: 'Одежда',            kvv: 10 },
-  { name: 'Обувь',             kvv: 10 },
-  { name: 'Аксессуары',        kvv: 13 },
-  { name: 'Сумки',             kvv: 13 },
-  { name: 'Красота и уход',    kvv: 12 },
-  { name: 'Здоровье',          kvv: 10 },
-  { name: 'Товары для дома',   kvv: 12 },
-  { name: 'Кухня и посуда',    kvv: 12 },
-  { name: 'Детские товары',    kvv: 10 },
-  { name: 'Игрушки',           kvv: 13 },
-  { name: 'Спорт и отдых',     kvv: 12 },
-  { name: 'Электроника',       kvv: 10 },
-  { name: 'Бытовая техника',   kvv: 8  },
-  { name: 'Автотовары',        kvv: 12 },
-  { name: 'Ювелирные изделия', kvv: 16 },
-  { name: 'Прочее',            kvv: 12 },
-];
+/* -------- Справочники тарифов и комиссий --------
+   Живые данные подтягиваются из tariffs.json (и tariffs.override.json, если есть)
+   через loadConfig() — чтобы обновлять тарифы без правки кода и без конфликтов с git.
+   Ниже — встроенный слепок-fallback: используется офлайн (одиночный standalone-файл,
+   file://, артефакт), когда fetch недоступен. Обновляется при сборке. */
+const EMBEDDED = {
+  meta: { updated: '2026-08-13', effective: 'July 22, 2026', source: 'https://static-basket-02.wbbasket.ru/vol20/China/warehouse_and_tarrifs/0726.pdf' },
+  logistics: {
+    standard: { name: 'WB Standard — авто, 15–30 дн (большинство складов КНР)', light: { kg: 58, item: 2 }, heavy: { kg: 43, item: 8 }, limitSum: 200, limitSide: 120 },
+    plus:     { name: 'WB Plus — авиа+авто, 6–7 дн (Хуньчунь/Дунгуань/Дуннин)', light: { kg: 48, item: 9 }, heavy: { kg: 48, item: 9 }, limitSum: 200, limitSide: 120 },
+    hk:       { name: 'WB Express — Гонконг, авиа, 10 дн', light: { kg: 89, item: 17 }, heavy: { kg: 89, item: 17 }, limitSum: 90, limitSide: 60 },
+    express:  { name: 'WB Express — Дунгуань, авиа, 10 дн', light: { kg: 122, item: 19 }, heavy: { kg: 122, item: 19 }, limitSum: 200, limitSide: 100 },
+  },
+  categories: [
+    { name: 'Одежда', kvv: 10 }, { name: 'Обувь', kvv: 10 }, { name: 'Аксессуары', kvv: 13 },
+    { name: 'Сумки', kvv: 13 }, { name: 'Красота и уход', kvv: 12 }, { name: 'Здоровье', kvv: 10 },
+    { name: 'Товары для дома', kvv: 12 }, { name: 'Кухня и посуда', kvv: 12 }, { name: 'Детские товары', kvv: 10 },
+    { name: 'Игрушки', kvv: 13 }, { name: 'Спорт и отдых', kvv: 12 }, { name: 'Электроника', kvv: 10 },
+    { name: 'Бытовая техника', kvv: 8 }, { name: 'Автотовары', kvv: 12 }, { name: 'Ювелирные изделия', kvv: 16 },
+    { name: 'Прочее', kvv: 12 },
+  ],
+};
+let CATEGORIES = EMBEDDED.categories;
+let LOGISTICS = EMBEDDED.logistics;
+let TARIFFS_META = EMBEDDED.meta;
 
-/* -------- Логистические продукты WB (реальные тарифы, ¥) --------
-   Тариф = ставка_за_кг × вес(округл. до 100 г) + фикс_за_заказ.
-   Тариф ВКЛЮЧАЕТ обратную доставку на ФФ в РФ и хранение (оферта 13.1.11.2).
-   light — заказы 0,1–0,3 кг; heavy — заказы 0,4–20 кг.
-   limitSum / limitSide — лимиты габаритов упаковки, см. */
-// TARIFFS_AUTOGEN_START — блок регенерируется скриптом tools/update-wb-tariffs.py из официального тарифа WB
-const TARIFFS_META = {
-  updated:  '2026-08-13',
-  effective:'July 22, 2026',
-  source:   'https://static-basket-02.wbbasket.ru/vol20/China/warehouse_and_tarrifs/0726.pdf',
-};
-const LOGISTICS = {
-  standard: { name: 'WB Standard — авто, 15–30 дн (большинство складов КНР)', light: { kg: 58, item: 2 }, heavy: { kg: 43, item: 8 }, limitSum: 200, limitSide: 120 },
-  plus:     { name: 'WB Plus — авиа+авто, 6–7 дн (Хуньчунь/Дунгуань/Дуннин)', light: { kg: 48, item: 9 }, heavy: { kg: 48, item: 9 }, limitSum: 200, limitSide: 120 },
-  hk:       { name: 'WB Express — Гонконг, авиа, 10 дн', light: { kg: 89, item: 17 }, heavy: { kg: 89, item: 17 }, limitSum: 90, limitSide: 60 },
-  express:  { name: 'WB Express — Дунгуань, авиа, 10 дн', light: { kg: 122, item: 19 }, heavy: { kg: 122, item: 19 }, limitSum: 200, limitSide: 100 },
-};
-// TARIFFS_AUTOGEN_END
+async function fetchJson(url) {
+  try { const r = await fetch(url, { cache: 'no-store' }); return r.ok ? await r.json() : null; }
+  catch (e) { return null; }
+}
+// Подтягивает свежие тарифы: базовый tariffs.json + необязательный tariffs.override.json поверх.
+async function loadConfig() {
+  const base = await fetchJson('tariffs.json');
+  const over = await fetchJson('tariffs.override.json');
+  const cfg = Object.assign({}, EMBEDDED, base || {}, over || {});
+  if (cfg.logistics)  LOGISTICS = cfg.logistics;
+  if (cfg.categories) CATEGORIES = cfg.categories;
+  if (cfg.meta)       TARIFFS_META = cfg.meta;
+}
 
 /* -------- Поля формы -------- */
 const FIELDS = [
@@ -420,7 +419,8 @@ function resetDefaults() {
   render();
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadConfig();
   buildForm();
   document.getElementById('form').addEventListener('input', render);
   document.getElementById('form').addEventListener('change', render);
