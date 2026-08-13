@@ -77,3 +77,6 @@ npm run fbs:delivery:dash && npm run fbs:accepted:dash
 - Нужен единый операционный отчёт (остатки + ретроспектива заказов) или PDF —
   это отдельные команды: `npm run fbs:report` (HTML), `npm run fbs:pdf`
   (единый PDF), `npm run fbs:stock:pdf` (PDF остатков к заказу).
+- **Расчёт подсорта** (заказ на пополнение по складам + пробный завоз новинок) —
+  это отдельный скилл **`/fbs-podsort`** (`npm run fbs:podsort` → дашборд + Excel;
+  настройки в `config/replenishment.json`). Для «что дозаказать» используем его.
