@@ -65,21 +65,24 @@ const whSection = (w) => {
 };
 const whSections = snap.warehouses.map(whSection).join('');
 
-// Новинки — матрица артикул × склад (завоз seed на каждый фулфилмент).
-const seedWh = (snap.newProducts?.[0] && Object.keys(snap.newProducts[0].seedByWarehouse)) || snap.warehouses.map((w) => w.name);
+// Пробный завоз — матрица артикул × склад (seed на склады без товара).
+const seedGrid = snap.seedGrid || [];
+const seedWh = snap.warehouseList || (seedGrid[0] && Object.keys(seedGrid[0].seedByWarehouse)) || snap.warehouses.map((w) => w.name);
 const newHeadWh = seedWh.map((n) => `<th class="ta-r">${esc(n)}</th>`).join('');
-const newRows = (snap.newProducts || []).map((n) => `<tr>
+const newRows = seedGrid.map((n) => `<tr>
     <td class="art">${esc(n.articleNum || '—')}</td>
     <td class="a-name">${esc(n.variant)}</td>
     <td class="mono muted">${esc(n.nmID)}</td>
-    ${seedWh.map((w) => `<td class="ta-r num">${nf(n.seedByWarehouse[w] || 0)}</td>`).join('')}
+    <td class="ta-r num muted">${nf(n.sizeCount)}</td>
+    <td><span class="pill pill-${n.kind === 'новинка' ? 'new' : 'refill'}">${esc(n.kind)}</span></td>
+    ${seedWh.map((w) => (n.seedByWarehouse[w] != null ? `<td class="ta-r num">${nf(n.seedByWarehouse[w])}</td>` : '<td class="ta-r has">✓</td>')).join('')}
     <td class="ta-r num reorder">${nf(n.seedTotal)}</td>
   </tr>`).join('');
-const newSection = (snap.newProducts || []).length ? `<section class="panel">
-    <div class="panel-head"><h2>Новинки — завезти для старта</h2><span class="wh-tot">${nf(t.newProducts)} позиций · по ${nf(P.seedMin)} шт на каждый из ${nf(t.seedWarehouses)} складов · итого ${nf(t.seedUnits)} шт</span></div>
-    <p class="note">Товары из номенклатуры, которые ни разу не заводились ни на один FF-склад (нет остатка и нет заказов за ${P.historyDays} дн). Заводим по ${nf(P.seedMin)} шт на КАЖДЫЙ действующий фулфилмент, чтобы начать мерить скорость продаж отдельно по складу, а дальше считать подсорт как обычно.</p>
+const newSection = seedGrid.length ? `<section class="panel">
+    <div class="panel-head"><h2>Пробный завоз — новинки и докладки по складам</h2><span class="wh-tot">${nf(t.seedRows)} позиций (новинок ${nf(t.seedNovelty)} + докладок ${nf(t.seedRefill)}) · итого <b class="accent">${nf(t.seedUnits)}</b> шт</span></div>
+    <p class="note">Seed = <b>${nf(P.seedMin)} шт на каждый размер</b> (столбец «Разм.») на каждый склад, где товара ещё не было (нет остатка и нет заказов за ${P.historyDays} дн). «✓» — на складе уже есть, завоз не нужен. <b>новинка</b> — не была ни на одном FF; <b>докладка</b> — продаётся на других складах, но на этом не было. Цель — начать мерить скорость по каждому складу.</p>
     <div class="table-scroll"><table>
-      <thead><tr><th class="ta-r">Арт</th><th class="tl">Цвет / вариант</th><th class="tl">nmID</th>${newHeadWh}<th class="ta-r">Итого</th></tr></thead>
+      <thead><tr><th class="ta-r">Арт</th><th class="tl">Цвет / вариант</th><th class="tl">nmID</th><th class="ta-r">Разм.</th><th class="tl">Тип</th>${newHeadWh}<th class="ta-r">Итого</th></tr></thead>
       <tbody>${newRows}</tbody>
     </table></div>
   </section>` : '';
@@ -97,9 +100,9 @@ const body = `<div class="wrap">
   <section class="kpis">
     <div class="kpi kpi-accent"><div class="kpi-num">${nf(t.reorderUnits)}</div><div class="kpi-lab">штук к подсорту (всего)</div></div>
     <div class="kpi kpi-crit"><div class="kpi-num">${nf(t.riskRows)}</div><div class="kpi-lab">строк в риске разрыва</div></div>
-    <div class="kpi"><div class="kpi-num">${nf(t.newProducts)}</div><div class="kpi-lab">новинок к заводу</div></div>
-    <div class="kpi"><div class="kpi-num">${nf(t.seedUnits)}</div><div class="kpi-lab">штук на завоз новинок</div></div>
-    <div class="kpi"><div class="kpi-num">${nf(t.warehouses)}</div><div class="kpi-lab">складов в расчёте</div></div>
+    <div class="kpi"><div class="kpi-num">${nf(t.seedRows)}</div><div class="kpi-lab">позиций на пробный завоз<br><span class="faint">новинок ${nf(t.seedNovelty)} + докладок ${nf(t.seedRefill)}</span></div></div>
+    <div class="kpi"><div class="kpi-num">${nf(t.seedUnits)}</div><div class="kpi-lab">штук пробного завоза</div></div>
+    <div class="kpi"><div class="kpi-num">${nf(t.registeredWarehouses)}</div><div class="kpi-lab">складов (все зарегистр.)</div></div>
   </section>
 
   <section class="statusbar">
@@ -189,6 +192,8 @@ tbody tr:last-child td{border-bottom:none;}
 .pill{font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;white-space:nowrap;}
 .pill-crit{background:var(--crit-soft);color:var(--crit);} .pill-warn{background:var(--warn-soft);color:var(--warn);}
 .pill-ok{background:var(--ok-soft);color:var(--ok);} .pill-dead{background:var(--surface-2);color:var(--dead);} .pill-mute{background:var(--surface-2);color:var(--muted);}
+.pill-new{background:var(--accent-soft);color:var(--accent-d);} .pill-refill{background:var(--warn-soft);color:var(--warn);}
+.faint{color:var(--faint);font-size:10.5px;} .has{color:var(--ok);text-align:right;font-weight:700;}
 .note{margin:10px 0 0;font-size:12px;color:var(--muted);}
 .foot{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);}
 
