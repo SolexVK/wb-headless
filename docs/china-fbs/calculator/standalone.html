@@ -454,11 +454,11 @@ function computeUnit(v) {
   const costs = {
     cogs:      v.cogs,
     firstMile,                                       // доставка селлера (Китай→ФФ), 1× на штуку
-    ff:        ffFirst,                               // первичная обработка ФФ (1× на штуку)
+    ff:        isSeller ? ffFirst : 0,               // ФФ только в режиме «доставка силами селлера»
     commission,
     fin,
     logistics: wbLogistics,                          // логистика WB на все заказы (вкл. возвраты)
-    ffReturn:  ffReturn * returnsPerSale,            // обработка возвратов ФФ (за каждый возврат)
+    ffReturn:  isSeller ? ffReturn * returnsPerSale : 0, // обработка возвратов ФФ (только у селлера)
     lossGoods: cogsTotal * returnsPerSale * brak,    // потеря общей себестоимости на брак-возвраты
     utilFee:   v.utilFee * returnsPerSale * brak,
     promo:     revenue * v.drr,
@@ -587,11 +587,16 @@ function render() {
   const r = computeUnit(v);
   const cls = r.profit >= 0 ? 'pos' : 'neg';
 
-  // Поле тарифа селлера показываем только для «доставка силами селлера»
+  // Поле тарифа селлера и весь блок «Фулфилмент» — только для «доставка силами селлера»
   const freightEl = document.getElementById('chinaFreightPerKg');
   if (freightEl) {
     const wrap = freightEl.closest('.field');
     if (wrap) wrap.style.display = r.isSeller ? '' : 'none';
+  }
+  const ffEl = document.getElementById('ffFeeRub');
+  if (ffEl) {
+    const card = ffEl.closest('.card');
+    if (card) card.style.display = r.isSeller ? '' : 'none';
   }
 
   document.getElementById('kpi').innerHTML = `
@@ -615,13 +620,13 @@ function render() {
     <div class="price-row"><span>Цена продажи Рц (без скидки WB)</span><b>${fmt(r.priceRub, 0)} ₽</b><small>${fmt(r.revenue, 2)} ¥ — от неё считается комиссия и выплата</small></div>
     <div class="price-row hl"><span>Цена для покупателя (со скидкой WB)</span><b>${fmt(r.buyerRub, 0)} ₽</b></div>
     <div class="price-row"><span>Общая себестоимость до ВБ (закупка + Китай→ФФ)</span><b>${fmt(r.cogsTotal, 2)} ¥</b><small>≈ ${fmt(r.cogsTotalRub, 0)} ₽ · закупка ${fmt(v.cogs, 0)} ¥ + доставка ${fmt(r.firstMile, 2)} ¥</small></div>
-    <div class="price-note">Витрина — по Курсу ВБ ${fmt(r.wbRate, 2)} ₽/¥ (ЦБ ${fmt(r.cbr, 2)} + надбавка). Прибыль в ₽ — по курсу ЦБ. Доставка Китай→ФФ ${fmt(v.chinaFreightPerKg, 2)} $/кг → ${fmt(r.firstMile, 2)} ¥/шт. ФФ: первичная ${fmt(v.ffFeeRub, 0)} ₽ ≈ ${fmt(r.ffFirst, 2)} ¥ + возвраты ${fmt(v.ffReturnFeeRub, 0)} ₽ × ${fmt(r.returnsPerSale, 2)} ≈ ${fmt(r.ffReturnUnit, 2)} ¥.</div>`;
+    <div class="price-note">Витрина — по Курсу ВБ ${fmt(r.wbRate, 2)} ₽/¥ (ЦБ ${fmt(r.cbr, 2)} + надбавка). Прибыль в ₽ — по курсу ЦБ.${r.isSeller ? ` Доставка Китай→ФФ ${fmt(v.chinaFreightPerKg, 2)} $/кг → ${fmt(r.firstMile, 2)} ¥/шт. ФФ: первичная ${fmt(v.ffFeeRub, 0)} ₽ ≈ ${fmt(r.ffFirst, 2)} ¥ + возвраты ${fmt(v.ffReturnFeeRub, 0)} ₽ × ${fmt(r.returnsPerSale, 2)} ≈ ${fmt(r.ffReturnUnit, 2)} ¥.` : ` Доставка WB — фулфилмент не учитывается (возвраты обрабатывает WB).`}</div>`;
 
   const maxCost = Math.max(r.revenue, ...Object.values(r.costs));
   const rows = Object.keys(COST_LABELS).map(k => {
     const val = r.costs[k];
-    // Скрываем нерелевантную строку логистики в зависимости от способа доставки
-    if (k === 'firstMile' && r.isSeller === false) return '';
+    // В режиме WB: нет доставки селлера и нет фулфилмента; в режиме селлера: нет логистики WB
+    if ((k === 'firstMile' || k === 'ff' || k === 'ffReturn') && r.isSeller === false) return '';
     if (k === 'logistics' && r.isSeller === true) return '';
     const w = maxCost > 0 ? (val / maxCost) * 100 : 0;
     const share = r.revenue > 0 ? val / r.revenue : 0;
