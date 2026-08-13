@@ -332,12 +332,19 @@ const CATEGORIES = [
    Тариф ВКЛЮЧАЕТ обратную доставку на ФФ в РФ и хранение (оферта 13.1.11.2).
    light — заказы 0,1–0,3 кг; heavy — заказы 0,4–20 кг.
    limitSum / limitSide — лимиты габаритов упаковки, см. */
-const LOGISTICS = {
-  standard: { name: 'WB Standard — авто, 15–30 дн (большинство складов КНР)', light: { kg: 58, item: 2 }, heavy: { kg: 43, item: 8 },  limitSum: 200, limitSide: 120 },
-  plus:     { name: 'WB Plus — авиа+авто, 6–7 дн (Хуньчунь/Дунгуань/Дуннин)',  light: { kg: 48, item: 9 }, heavy: { kg: 48, item: 9 },  limitSum: 200, limitSide: 120 },
-  hk:       { name: 'WB Express — Гонконг, авиа, 10 дн',                        light: { kg: 89, item: 17 }, heavy: { kg: 89, item: 17 }, limitSum: 90,  limitSide: 60  },
-  express:  { name: 'WB Express — Дунгуань, авиа, 10 дн',                       light: { kg: 122, item: 19 }, heavy: { kg: 122, item: 19 }, limitSum: 200, limitSide: 100 },
+// TARIFFS_AUTOGEN_START — блок регенерируется скриптом tools/update-wb-tariffs.py из официального тарифа WB
+const TARIFFS_META = {
+  updated:  '2026-08-13',
+  effective:'July 22, 2026',
+  source:   'https://static-basket-02.wbbasket.ru/vol20/China/warehouse_and_tarrifs/0726.pdf',
 };
+const LOGISTICS = {
+  standard: { name: 'WB Standard — авто, 15–30 дн (большинство складов КНР)', light: { kg: 58, item: 2 }, heavy: { kg: 43, item: 8 }, limitSum: 200, limitSide: 120 },
+  plus:     { name: 'WB Plus — авиа+авто, 6–7 дн (Хуньчунь/Дунгуань/Дуннин)', light: { kg: 48, item: 9 }, heavy: { kg: 48, item: 9 }, limitSum: 200, limitSide: 120 },
+  hk:       { name: 'WB Express — Гонконг, авиа, 10 дн', light: { kg: 89, item: 17 }, heavy: { kg: 89, item: 17 }, limitSum: 90, limitSide: 60 },
+  express:  { name: 'WB Express — Дунгуань, авиа, 10 дн', light: { kg: 122, item: 19 }, heavy: { kg: 122, item: 19 }, limitSum: 200, limitSide: 100 },
+};
+// TARIFFS_AUTOGEN_END
 
 /* -------- Поля формы -------- */
 const FIELDS = [
@@ -374,15 +381,15 @@ const FIELDS = [
   { id: 'weight', group: 'Габариты и вес', label: 'Вес с упаковкой', unit: 'кг', type: 'num', def: 0.4, step: 0.05,
     tip: 'Вес одной единицы с упаковкой, кг. Именно от веса считается логистика (округляется вверх до 100 г). Тариф разный для заказов 0,1–0,3 кг и 0,4–20 кг. Максимум 20 кг.' },
 
-  // --- Логистика WB (доставка покупателю) ---
-  { id: 'logisticsProduct', group: 'Логистика WB (до покупателя)', label: 'Способ доставки / склад', type: 'logistics',
-    tip: 'Логистика WB — доставка от склада WB покупателю. Тариф = ставка за кг × вес + фикс за заказ. По оферте тариф УЖЕ включает обратную доставку возвратов на фулфилмент в РФ и хранение — поэтому отдельных строк «хранение» и «обратная логистика» нет. Это НЕ то же самое, что ваша доставка товара из Китая на ФФ (см. ниже).' },
+  // --- Доставка товара (способ + тариф селлера) ---
+  { id: 'logisticsProduct', group: 'Доставка товара', label: 'Способ доставки', type: 'logistics', def: 'standard',
+    tip: 'Как товар попадает к покупателю. «Доставка силами селлера» (DBS) — вы сами доставляете покупателю, WB логистику не берёт (укажите свой тариф $/кг ниже). Варианты WB — кросс-бордер силами WB (FBS) по официальному весовому тарифу (ставка за кг × вес + фикс за заказ, уже включает возврат на ФФ и хранение). Способ WB реально меняет стоимость в 2–3 раза.' },
+  { id: 'chinaFreightPerKg', group: 'Доставка товара', label: 'Тариф доставки селлера', unit: '$/кг', type: 'num', def: 2, step: 0.1,
+    tip: 'Только для варианта «Доставка силами селлера». Обычно в долларах за кг. На 1 штуку = тариф ($/кг) × вес. Пересчитывается в юани по кросс-курсу $/¥ и входит в «общую себестоимость до ВБ». При выборе доставки WB это поле не используется и скрывается.' },
 
-  // --- Первая миля и фулфилмент (ваши расходы до передачи в WB) ---
-  { id: 'chinaFreightPerKg', group: 'Доставка Китай→ФФ и фулфилмент', label: 'Доставка Китай→ФФ', unit: '$/кг', type: 'num', def: 2, step: 0.1,
-    tip: 'Ваша логистика: доставка товара из Китая на склад фулфилмента. Обычно считается в долларах за кг. На 1 штуку = тариф ($/кг) × вес 1 шт. Пересчитывается в юани по кросс-курсу $/¥ и прибавляется к закупке → «общая себестоимость до ВБ».' },
-  { id: 'ffFeeRub', group: 'Доставка Китай→ФФ и фулфилмент', label: 'Услуги фулфилмента', unit: '₽/заказ', type: 'num', def: 30, step: 5,
-    tip: 'Стоимость услуг фулфилмента за один ОБРАБОТАННЫЙ заказ: приёмка на склад ФФ с пересчётом, приёмка и обработка заказов от WB, наклейка QR-кодов, доставка и сдача в сортировочный центр WB. ФФ берёт плату за каждый заказ (включая невыкупленные) — поэтому масштабируется на 1/выкуп. В рублях, пересчёт в юани по курсу ЦБ.' },
+  // --- Фулфилмент ---
+  { id: 'ffFeeRub', group: 'Фулфилмент', label: 'Услуги фулфилмента', unit: '₽/заказ', type: 'num', def: 30, step: 5,
+    tip: 'Стоимость услуг фулфилмента за один ОБРАБОТАННЫЙ заказ: приёмка на склад ФФ с пересчётом, приёмка и обработка заказов от WB, наклейка QR-кодов, доставка и сдача в сортировочный центр WB. ФФ берёт плату за каждый заказ (включая невыкупленные) — масштабируется на 1/выкуп. В рублях, пересчёт в юани по курсу ЦБ.' },
 
   // --- Выкуп и возвраты ---
   { id: 'buyback', group: 'Выкуп и возвраты', label: 'Процент выкупа', unit: '%', type: 'pct', def: 65, step: 1,
@@ -421,9 +428,10 @@ function computeUnit(v) {
   const fin        = revenue * v.finRate;
 
   const weightKg = Math.ceil(v.weight * 10) / 10;
-  const lp = LOGISTICS[v.logisticsProduct] || LOGISTICS.standard;
-  const br = weightKg <= 0.3 ? lp.light : lp.heavy;
-  const logOrder = br.kg * weightKg + br.item;       // тариф за 1 заказ (вкл. возврат+хранение)
+  const isSeller = v.logisticsProduct === 'seller';
+  const lp = LOGISTICS[v.logisticsProduct] || null;
+  const br = lp ? (weightKg <= 0.3 ? lp.light : lp.heavy) : null;
+  const logOrder = br ? br.kg * weightKg + br.item : 0; // тариф WB за 1 заказ (вкл. возврат+хранение)
 
   const p = v.buyback;
   const ordersPerSale  = p > 0 ? 1 / p : 0;
@@ -432,18 +440,21 @@ function computeUnit(v) {
 
   const vat = v.vatPayer ? revenue - revenue / (1 + v.vatRate) : 0;
 
-  const usdToCny  = cbr > 0 ? v.usdRate / cbr : 0;   // кросс-курс $/¥
-  const firstMile = v.chinaFreightPerKg * v.weight * usdToCny; // Китай→ФФ, $/кг×вес → ¥ на 1 шт
+  const usdToCny   = cbr > 0 ? v.usdRate / cbr : 0;  // кросс-курс $/¥
+  // Доставка селлера (Китай→ФФ): только если выбран вариант «силами селлера», 1× на штуку
+  const firstMile  = isSeller ? v.chinaFreightPerKg * v.weight * usdToCny : 0;
+  // Логистика WB (кросс-бордер): только если выбран способ WB, за каждый заказ
+  const wbLogistics = isSeller ? 0 : logOrder * ordersPerSale;
   const ffPerOrder = cbr > 0 ? v.ffFeeRub / cbr : 0; // услуги ФФ за заказ, ₽→¥
-  const cogsTotal = v.cogs + firstMile;              // общая себестоимость до ВБ
+  const cogsTotal  = v.cogs + firstMile;             // общая себестоимость до ВБ
 
   const costs = {
     cogs:      v.cogs,
-    firstMile,                                       // доставка Китай→ФФ (1× на штуку)
+    firstMile,                                       // доставка селлера (Китай→ФФ), 1× на штуку
     ff:        ffPerOrder * ordersPerSale,           // услуги ФФ за каждый обработанный заказ
     commission,
     fin,
-    logistics: logOrder * ordersPerSale,             // логистика WB на все заказы (вкл. возвраты)
+    logistics: wbLogistics,                          // логистика WB на все заказы (вкл. возвраты)
     lossGoods: cogsTotal * returnsPerSale * brak,    // потеря общей себестоимости на брак-возвраты
     utilFee:   v.utilFee * returnsPerSale * brak,
     promo:     revenue * v.drr,
@@ -456,23 +467,24 @@ function computeUnit(v) {
   const sellerTaxAmt = Math.max(0, profitBeforeTax) * v.sellerTax;
   const profit = profitBeforeTax - sellerTaxAmt;
 
-  // Проверка лимитов габаритов
+  // Проверка лимитов габаритов (только для кросс-бордера WB)
   const dimSum = v.len + v.wid + v.hei;
   const maxSide = Math.max(v.len, v.wid, v.hei);
-  const overLimit = dimSum > lp.limitSum || maxSide > lp.limitSide;
+  const overLimit = lp ? (dimSum > lp.limitSum || maxSide > lp.limitSide) : false;
 
   return {
     wbRate, cbr,
     baseRub, priceRub, buyerRub, revenue, cogsRub: v.cogs * cbr,
     firstMile, ffPerOrder, cogsTotal, cogsTotalRub: cogsTotal * cbr,
-    kvvApplied, weightKg, logOrder, lpName: lp.name,
+    isSeller, kvvApplied, weightKg, logOrder, wbLogistics, usdToCny,
+    lpName: lp ? lp.name : 'Доставка силами селлера',
     ordersPerSale, returnsPerSale,
     costs, totalCost,
     profitBeforeTax, sellerTaxAmt, profit,
     margin: revenue > 0 ? profit / revenue : 0,
     markupOnCogs: v.cogs > 0 ? profit / v.cogs : 0,
     profitRub: profit * cbr,
-    dimSum, maxSide, overLimit, limitSum: lp.limitSum, limitSide: lp.limitSide,
+    dimSum, maxSide, overLimit, limitSum: lp ? lp.limitSum : 0, limitSide: lp ? lp.limitSide : 0,
   };
 }
 
@@ -483,11 +495,11 @@ function marginFor(v, buyback, drr) {
 /* ---------------- UI ---------------- */
 const COST_LABELS = {
   cogs:      'Себестоимость закупки',
-  firstMile: 'Логистика Китай→ФФ',
+  firstMile: 'Доставка селлера (Китай→ФФ)',
   ff:        'Услуги фулфилмента',
   commission:'Комиссия WB',
   fin:       'Эквайринг + конвертация',
-  logistics: 'Логистика (вкл. возвраты и хранение)',
+  logistics: 'Логистика WB (вкл. возвраты и хранение)',
   lossGoods: 'Потеря себестоимости (брак-возвраты)',
   utilFee:   'Утилизация брака',
   promo:     'Реклама (ДРР)',
@@ -551,7 +563,10 @@ function buildField(f) {
   if (f.type === 'category') {
     control = `<select id="${f.id}">` + CATEGORIES.map(c => `<option value="${c.name}">${c.name} · ${c.kvv}%</option>`).join('') + `</select>`;
   } else if (f.type === 'logistics') {
-    control = `<select id="${f.id}">` + Object.keys(LOGISTICS).map(k => `<option value="${k}">${LOGISTICS[k].name}</option>`).join('') + `</select>`;
+    const sel = (k) => (k === f.def ? ' selected' : '');
+    const opts = [`<option value="seller"${sel('seller')}>Доставка силами селлера (свой тариф $/кг)</option>`]
+      .concat(Object.keys(LOGISTICS).map(k => `<option value="${k}"${sel(k)}>${LOGISTICS[k].name}</option>`));
+    control = `<select id="${f.id}">` + opts.join('') + `</select>`;
   } else {
     control = `<div class="input-wrap"><input type="number" id="${f.id}" value="${f.def}" step="${f.step || 'any'}" inputmode="decimal"><span class="unit">${f.unit || ''}</span></div>`;
   }
@@ -566,6 +581,13 @@ function render() {
   const v = readInputs();
   const r = computeUnit(v);
   const cls = r.profit >= 0 ? 'pos' : 'neg';
+
+  // Поле тарифа селлера показываем только для «доставка силами селлера»
+  const freightEl = document.getElementById('chinaFreightPerKg');
+  if (freightEl) {
+    const wrap = freightEl.closest('.field');
+    if (wrap) wrap.style.display = r.isSeller ? '' : 'none';
+  }
 
   document.getElementById('kpi').innerHTML = `
     <div class="kpi-main ${cls}">
@@ -593,19 +615,25 @@ function render() {
   const maxCost = Math.max(r.revenue, ...Object.values(r.costs));
   const rows = Object.keys(COST_LABELS).map(k => {
     const val = r.costs[k];
+    // Скрываем нерелевантную строку логистики в зависимости от способа доставки
+    if (k === 'firstMile' && r.isSeller === false) return '';
+    if (k === 'logistics' && r.isSeller === true) return '';
     const w = maxCost > 0 ? (val / maxCost) * 100 : 0;
     const share = r.revenue > 0 ? val / r.revenue : 0;
     return `<div class="bar-row"><div class="bar-name">${COST_LABELS[k]}</div><div class="bar-track"><div class="bar-fill" style="width:${w}%"></div></div><div class="bar-val">${fmt(val)} ¥<small>${pct(share)}</small></div></div>`;
   }).join('');
+
+  const logExplain = r.isSeller
+    ? `Доставка <b>силами селлера</b>: ${fmt(v.chinaFreightPerKg, 2)} $/кг × ${fmt(v.weight, 2)} кг × курс ${fmt(r.usdToCny, 2)} $/¥ = <b>${fmt(r.firstMile, 2)} ¥</b> на штуку (входит в себестоимость до ВБ). Логистику до покупателя WB здесь не берёт.`
+    : `Логистика WB: <b>${fmt(r.logOrder, 2)} ¥</b> за заказ (${r.lpName.split('—')[0].trim()}, вес ${fmt(r.weightKg, 1)} кг). На 1 продажу — <b>${fmt(r.ordersPerSale, 2)}</b> заказов (выкуп ${pct(v.buyback)}), итого ${fmt(r.costs.logistics, 2)} ¥. Тариф включает возврат на ФФ в РФ и хранение. <span class="muted">Тариф WB актуален на ${TARIFFS_META.updated} (обновление: tools/update-wb-tariffs.py).</span>`;
+
   document.getElementById('breakdown').innerHTML = `
     <div class="bar-row bar-head"><div class="bar-name">Статья затрат</div><div class="bar-track"></div><div class="bar-val">¥ · % от Рц</div></div>
     ${rows}
     <div class="bar-row bar-total"><div class="bar-name">ИТОГО затраты</div><div class="bar-track"></div><div class="bar-val">${fmt(r.totalCost)} ¥<small>${pct(r.revenue > 0 ? r.totalCost / r.revenue : 0)}</small></div></div>
     <div class="logistics-explain">
-      Логистика: <b>${fmt(r.logOrder, 2)} ¥</b> за заказ (${r.lpName.split('—')[0].trim()}, вес ${fmt(r.weightKg, 1)} кг).
-      На 1 продажу — <b>${fmt(r.ordersPerSale, 2)}</b> заказов (выкуп ${pct(v.buyback)}), поэтому логистика на единицу = ${fmt(r.costs.logistics, 2)} ¥.
-      Тариф уже включает возврат на ФФ в РФ и хранение.
-      ${r.overLimit ? `<div class="warn">⚠ Габариты превышают лимит склада (сумма сторон ${fmt(r.dimSum,0)}/${r.limitSum} см, макс. сторона ${fmt(r.maxSide,0)}/${r.limitSide} см) — товар могут не принять.</div>` : ''}
+      ${logExplain}
+      ${r.overLimit ? `<div class="warn">⚠ Габариты превышают лимит склада WB (сумма сторон ${fmt(r.dimSum,0)}/${r.limitSum} см, макс. сторона ${fmt(r.maxSide,0)}/${r.limitSide} см) — товар могут не принять.</div>` : ''}
     </div>`;
 
   renderSensitivity(v);
@@ -673,7 +701,8 @@ function resetDefaults() {
     const el = document.getElementById(f.id);
     if (!el) continue;
     if (f.type === 'check') el.checked = f.def;
-    else if (f.type === 'category' || f.type === 'logistics') el.selectedIndex = 0;
+    else if (f.type === 'logistics') el.value = f.def || 'standard';
+    else if (f.type === 'category') el.selectedIndex = 0;
     else el.value = f.def;
   }
   render();
