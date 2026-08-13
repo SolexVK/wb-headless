@@ -108,9 +108,11 @@ launchctl load   ~/Library/LaunchAgents/com.wbcalc.calculator.plist
 # логи сервера
 tail -f docs/china-fbs/calculator/serve.log
 
-# статус / выключить публикацию наружу
+# статус
 tailscale funnel status
-tailscale serve reset          # снять Funnel/Serve (перестать светить наружу)
+# выключить ТОЛЬКО калькулятор (порт 10000) — planner/getcourse на 443/8443 не трогает
+tailscale funnel --https=10000 off
+# ВНИМАНИЕ: не запускайте `tailscale serve reset` — он снимет ВСЕ Funnel, включая 443/8443
 
 # обновить калькулятор до свежей версии
 cd wb-headless && git pull origin claude/china-fbs-branch-fuhjhb
