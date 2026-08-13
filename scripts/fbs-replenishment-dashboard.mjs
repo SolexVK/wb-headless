@@ -45,6 +45,7 @@ const whSection = (w) => {
   const rows = w.rows.map((r) => `<tr class="row-${STATUS[r.status] || 'mute'}">
       <td class="art">${esc(r.articleNum || '—')}</td>
       <td class="a-name">${esc(r.variant)}</td>
+      <td class="sz">${esc(r.techSize)}</td>
       <td class="mono muted">${esc(r.nmID)}</td>
       <td class="ta-r num">${nf(r.stock)}</td>
       <td class="ta-r num">${r.perDay.toLocaleString('ru-RU')}</td>
@@ -58,7 +59,7 @@ const whSection = (w) => {
       <span class="wh-tot">остаток <b>${nf(w.stockUnits)}</b> · к подсорту <b class="accent">${nf(w.reorderUnits)}</b> шт · в риске <b class="crit">${nf(w.riskCount)}</b></span>
     </div>
     <div class="table-scroll"><table>
-      <thead><tr><th class="ta-r">Арт</th><th class="tl">Цвет / вариант</th><th class="tl">nmID</th><th class="ta-r">Остаток</th><th class="ta-r">Спрос/дн</th><th class="ta-r">Дни до 0</th><th class="ta-r">Подсорт</th><th class="tl">Статус</th></tr></thead>
+      <thead><tr><th class="ta-r">Арт</th><th class="tl">Цвет / вариант</th><th class="tl">Размер</th><th class="tl">nmID</th><th class="ta-r">Остаток</th><th class="ta-r">Спрос/дн</th><th class="ta-r">Дни до 0</th><th class="ta-r">Подсорт</th><th class="tl">Статус</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
   </section>`;
@@ -72,8 +73,8 @@ const newHeadWh = seedWh.map((n) => `<th class="ta-r">${esc(n)}</th>`).join('');
 const newRows = seedGrid.map((n) => `<tr>
     <td class="art">${esc(n.articleNum || '—')}</td>
     <td class="a-name">${esc(n.variant)}</td>
+    <td class="sz">${esc(n.techSize)}</td>
     <td class="mono muted">${esc(n.nmID)}</td>
-    <td class="ta-r num muted">${nf(n.sizeCount)}</td>
     <td><span class="pill pill-${n.kind === 'новинка' ? 'new' : 'refill'}">${esc(n.kind)}</span></td>
     ${seedWh.map((w) => (n.seedByWarehouse[w] != null ? `<td class="ta-r num">${nf(n.seedByWarehouse[w])}</td>` : '<td class="ta-r has">✓</td>')).join('')}
     <td class="ta-r num reorder">${nf(n.seedTotal)}</td>
@@ -82,9 +83,28 @@ const newSection = seedGrid.length ? `<section class="panel">
     <div class="panel-head"><h2>Пробный завоз — новинки и докладки по складам</h2><span class="wh-tot">артикулы ${esc((P.articles || []).join(', ') || 'все')} · ${nf(t.seedRows)} позиций (новинок ${nf(t.seedNovelty)} + докладок ${nf(t.seedRefill)}) · итого <b class="accent">${nf(t.seedUnits)}</b> шт</span></div>
     <p class="note">В расчёте только артикулы из списка: <b>${esc((P.articles || []).join(', ') || 'все')}</b>. Seed = <b>${nf(P.seedMin)} шт на каждый размер</b> (столбец «Разм.») на каждый склад, где товара ещё не было (нет остатка и нет заказов за ${P.historyDays} дн). «✓» — на складе уже есть, завоз не нужен. <b>новинка</b> — не была ни на одном FF; <b>докладка</b> — продаётся на других складах, но на этом не было. Цель — начать мерить скорость по каждому складу.</p>
     <div class="table-scroll"><table>
-      <thead><tr><th class="ta-r">Арт</th><th class="tl">Цвет / вариант</th><th class="tl">nmID</th><th class="ta-r">Разм.</th><th class="tl">Тип</th>${newHeadWh}<th class="ta-r">Итого</th></tr></thead>
+      <thead><tr><th class="ta-r">Арт</th><th class="tl">Цвет / вариант</th><th class="tl">Размер</th><th class="tl">nmID</th><th class="tl">Тип</th>${newHeadWh}<th class="ta-r">Итого</th></tr></thead>
       <tbody>${newRows}</tbody>
     </table></div>
+  </section>` : '';
+
+// Сводная: подсорт по (артикул × цвет × размер) × склад.
+const pivot = snap.pivot || [];
+const pvHeadWh = seedWh.map((n) => `<th class="ta-r">${esc(n)}</th>`).join('');
+const pvRows = pivot.map((r) => `<tr>
+    <td class="art">${esc(r.articleNum || '—')}</td>
+    <td class="a-name">${esc(r.variant)}</td>
+    <td class="sz">${esc(r.techSize)}</td>
+    ${seedWh.map((w) => `<td class="ta-r num">${r.byWarehouse[w] ? nf(r.byWarehouse[w]) : '·'}</td>`).join('')}
+    <td class="ta-r num reorder">${nf(r.total)}</td>
+  </tr>`).join('');
+const pivotSection = pivot.length ? `<section class="panel">
+    <div class="panel-head"><h2>Сводная: подсорт по размерам × склад</h2><span class="wh-tot">${nf(pivot.length)} строк (артикул × цвет × размер)</span></div>
+    <div class="table-scroll"><table>
+      <thead><tr><th class="ta-r">Арт</th><th class="tl">Цвет</th><th class="tl">Размер</th>${pvHeadWh}<th class="ta-r">Итого</th></tr></thead>
+      <tbody>${pvRows}</tbody>
+    </table></div>
+    <p class="note">Рекомендованный подсорт (шт) по каждому размеру и складу. «·» — подсорт не нужен.</p>
   </section>` : '';
 
 const body = `<div class="wrap">
@@ -112,6 +132,7 @@ const body = `<div class="wrap">
     <p class="note">«разрыв до поставки» = закончится раньше, чем за ${P.leadMin} дн — подсорт не успеет доехать; «риск разрыва» = может не дожить до ${P.leadMax} дн.</p>
   </section>
 
+  ${pivotSection}
   ${whSections}
   ${newSection}
 
@@ -184,6 +205,7 @@ thead th.ta-r{text-align:right;}
 tbody td{padding:6px 9px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle;}
 tbody tr:last-child td{border-bottom:none;}
 .art{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:var(--muted);}
+.sz{font-weight:600;white-space:nowrap;}
 .a-name{font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis;}
 .row-crit .art{box-shadow:inset 3px 0 0 var(--crit);}
 .row-warn .art{box-shadow:inset 3px 0 0 var(--warn);}

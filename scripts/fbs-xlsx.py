@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-# scripts/fbs-xlsx.py — Excel-отчёт подсорта FBS из снимка расчёта.
+# scripts/fbs-xlsx.py — Excel-отчёт подсорта FBS (size-level) из снимка расчёта.
 #
 # Вход:  reports-output/fbs-replenishment.json (npm run fbs:replenish)
 # Выход: reports-output/fbs-podsort.xlsx
 #
 # Листы:
 #   «Сводка»        — параметры расчёта + итоги (KPI).
-#   «Подсорт»       — плоская таблица склад×артикул (остаток, спрос/дн, дни до 0,
+#   «Сводная»       — подсорт по (артикул № × цвет × размер) × склады (+ Итого).
+#   «Подсорт»       — детально склад×артикул×цвет×размер (остаток, спрос/дн, дни до 0,
 #                     подсорт, статус). Автофильтр + подсветка статусов.
-#   «Пробный завоз» — матрица артикул×склад (seed = размеры × seedMin; «✓» — уже есть).
+#   «Пробный завоз» — по (артикул × цвет × размер) × склады: seed=seedMin на размер;
+#                     «✓» — на складе уже есть; тип новинка/докладка.
 #
-# Значения — это результат согласованного расчёта (движок scripts/fbs-replenishment.mjs).
-# Формулы не используются намеренно: файл открывается с готовыми числами без пересчёта.
+# Значения — результат согласованного движка (scripts/fbs-replenishment.mjs).
+# Формулы не используются: файл открывается с готовыми числами без пересчёта.
 
 import json
 import os
@@ -56,15 +58,24 @@ def base(c, val, bold=False, align='left', numfmt=None, color=INK):
         c.number_format = numfmt
 
 
+def add_status_cf(sheet, col_letter, first, last):
+    red = PatternFill('solid', fgColor='FBE7EA'); redF = Font(name=FONT, color='C43A50', bold=True)
+    amb = PatternFill('solid', fgColor='FAF0DA'); ambF = Font(name=FONT, color='B7791F', bold=True)
+    grn = PatternFill('solid', fgColor='E4F3EC'); grnF = Font(name=FONT, color='16875A')
+    rng = f'{col_letter}{first}:{col_letter}{last}'
+    for val, fill, fnt in [('нет остатка', red, redF), ('разрыв до поставки', red, redF),
+                           ('риск разрыва', amb, ambF), ('ок', grn, grnF)]:
+        sheet.conditional_formatting.add(rng, CellIsRule(operator='equal', formula=[f'"{val}"'], fill=fill, font=fnt))
+
+
 wb = Workbook()
 
 # ── Лист «Сводка» ───────────────────────────────────────────────────────────
 s = wb.active
 s.title = 'Сводка'
-s['A1'] = 'FBS · Подсорт по фулфилмент-складам'
+s['A1'] = 'FBS · Подсорт по фулфилмент-складам (по размерам)'
 s['A1'].font = Font(name=FONT, bold=True, size=15, color=ACCENT)
-s['A2'] = ('Расчёт по каждому складу отдельно (только FF/FBS). Значения — результат согласованного '
-           'расчёта; параметры — в блоке ниже.')
+s['A2'] = 'Расчёт по каждому складу и размеру (только FF/FBS). Значения — результат согласованного расчёта.'
 s['A2'].font = Font(name=FONT, size=9, color='54695D')
 s['A3'] = 'Снимок: ' + snap.get('generatedAt', '')[:16].replace('T', ' ') + ' UTC'
 s['A3'].font = Font(name=FONT, size=9, color='88998F')
@@ -84,9 +95,7 @@ s.cell(r0, 1).font = Font(name=FONT, bold=True, size=11, color=INK)
 for i, (lab, val) in enumerate(params):
     rr = r0 + 1 + i
     base(s.cell(rr, 1), lab, bold=True)
-    c = s.cell(rr, 2)
-    base(c, val)
-    c.fill = PARAM_FILL
+    c = s.cell(rr, 2); base(c, val); c.fill = PARAM_FILL
 
 k0 = r0 + len(params) + 2
 base(s.cell(k0, 1), 'Итоги', bold=True)
@@ -95,9 +104,10 @@ pos_podsort = sum(len(w['rows']) for w in snap['warehouses'])
 kpis = [
     ('Подсорт всего, шт', T['reorderUnits']),
     ('Строк в риске', T['riskRows']),
-    ('Позиций подсорта', pos_podsort),
+    ('Строк подсорта (склад×размер)', pos_podsort),
+    ('Строк сводной (арт×цвет×размер)', T.get('pivotRows', len(snap.get('pivot', [])))),
     ('Пробный завоз, шт', T['seedUnits']),
-    ('Позиций завоза (новинок+докладок)', f"{T['seedRows']} ({T['seedNovelty']}+{T['seedRefill']})"),
+    ('Строк завоза (новинок+докладок)', f"{T['seedRows']} ({T['seedNovelty']}+{T['seedRefill']})"),
     ('Складов (все зарегистр.)', T['registeredWarehouses']),
 ]
 for i, (lab, val) in enumerate(kpis):
@@ -109,9 +119,34 @@ for i, (lab, val) in enumerate(kpis):
 s.column_dimensions['A'].width = 34
 s.column_dimensions['B'].width = 26
 
-# ── Лист «Подсорт» ──────────────────────────────────────────────────────────
+# ── Лист «Сводная» (артикул № × цвет × размер) × склады ──────────────────────
+sv = wb.create_sheet('Сводная')
+head = ['Арт', 'Цвет', 'Размер'] + whList + ['Итого']
+for j, h in enumerate(head, 1):
+    hcell(sv.cell(1, j), h)
+row = 2
+first_wh = 4  # D
+for r in snap.get('pivot', []):
+    base(sv.cell(row, 1), r['articleNum'], align='center')
+    base(sv.cell(row, 2), r['variant'])
+    base(sv.cell(row, 3), r['techSize'], align='center')
+    for wi, wn in enumerate(whList):
+        v = r['byWarehouse'].get(wn, 0)
+        base(sv.cell(row, first_wh + wi), (v if v else None), align='right', numfmt='#,##0')
+    base(sv.cell(row, first_wh + len(whList)), r['total'], align='right', bold=True, numfmt='#,##0')
+    row += 1
+sv_last = row - 1
+sv.freeze_panes = 'D2'
+sv.auto_filter.ref = f'A1:{get_column_letter(first_wh + len(whList))}{sv_last}'
+for col, wdt in [('A', 6), ('B', 22), ('C', 9)]:
+    sv.column_dimensions[col].width = wdt
+for wi in range(len(whList)):
+    sv.column_dimensions[get_column_letter(first_wh + wi)].width = 13
+sv.column_dimensions[get_column_letter(first_wh + len(whList))].width = 9
+
+# ── Лист «Подсорт» (детально) ───────────────────────────────────────────────
 p = wb.create_sheet('Подсорт')
-cols = ['Склад', 'Арт', 'Цвет / вариант', 'nmID', 'Остаток', 'Спрос/дн', 'Дни до 0', 'Подсорт', 'Статус']
+cols = ['Склад', 'Арт', 'Цвет', 'Размер', 'nmID', 'Остаток', 'Спрос/дн', 'Дни до 0', 'Подсорт', 'Статус']
 for j, h in enumerate(cols, 1):
     hcell(p.cell(1, j), h)
 row = 2
@@ -120,62 +155,56 @@ for w in snap['warehouses']:
         base(p.cell(row, 1), w['name'])
         base(p.cell(row, 2), r['articleNum'], align='center')
         base(p.cell(row, 3), r['variant'])
-        base(p.cell(row, 4), r['nmID'], numfmt='0')
-        base(p.cell(row, 5), r['stock'], align='right', numfmt='#,##0')
-        base(p.cell(row, 6), r['perDay'], align='right', numfmt='0.00')
-        base(p.cell(row, 7), ('∞' if r['daysToZero'] is None else r['daysToZero']), align='right', numfmt='0.0')
-        base(p.cell(row, 8), r['reorderQty'], align='right', bold=True, numfmt='#,##0')
-        base(p.cell(row, 9), r['status'], align='left')
+        base(p.cell(row, 4), r['techSize'], align='center')
+        base(p.cell(row, 5), r['nmID'], numfmt='0')
+        base(p.cell(row, 6), r['stock'], align='right', numfmt='#,##0')
+        base(p.cell(row, 7), r['perDay'], align='right', numfmt='0.00')
+        base(p.cell(row, 8), ('∞' if r['daysToZero'] is None else r['daysToZero']), align='right', numfmt='0.0')
+        base(p.cell(row, 9), r['reorderQty'], align='right', bold=True, numfmt='#,##0')
+        base(p.cell(row, 10), r['status'])
         row += 1
-last = row - 1
+p_last = row - 1
 p.freeze_panes = 'A2'
-p.auto_filter.ref = f'A1:I{last}'
-for j, wdt in enumerate([18, 6, 30, 12, 10, 10, 9, 10, 20], 1):
+p.auto_filter.ref = f'A1:J{p_last}'
+for j, wdt in enumerate([18, 6, 22, 8, 12, 9, 9, 8, 9, 20], 1):
     p.column_dimensions[get_column_letter(j)].width = wdt
+add_status_cf(p, 'J', 2, p_last)
 
-red = PatternFill('solid', fgColor='FBE7EA'); redF = Font(name=FONT, color='C43A50', bold=True)
-amb = PatternFill('solid', fgColor='FAF0DA'); ambF = Font(name=FONT, color='B7791F', bold=True)
-grn = PatternFill('solid', fgColor='E4F3EC'); grnF = Font(name=FONT, color='16875A')
-rng = f'I2:I{last}'
-for val, fill, fnt in [('нет остатка', red, redF), ('разрыв до поставки', red, redF),
-                       ('риск разрыва', amb, ambF), ('ок', grn, grnF)]:
-    p.conditional_formatting.add(rng, CellIsRule(operator='equal', formula=[f'"{val}"'], fill=fill, font=fnt))
-
-# ── Лист «Пробный завоз» ────────────────────────────────────────────────────
+# ── Лист «Пробный завоз» (по размерам) ──────────────────────────────────────
 z = wb.create_sheet('Пробный завоз')
-head = ['Арт', 'Цвет / вариант', 'nmID', 'Размеров', 'Тип'] + whList + ['Итого']
+head = ['Арт', 'Цвет', 'Размер', 'nmID', 'Тип'] + whList + ['Итого']
 for j, h in enumerate(head, 1):
     hcell(z.cell(1, j), h)
 zrow = 2
-first_wh = 6
+zfirst = 6
 for it in snap['seedGrid']:
     base(z.cell(zrow, 1), it['articleNum'], align='center')
     base(z.cell(zrow, 2), it['variant'])
-    base(z.cell(zrow, 3), it['nmID'], numfmt='0')
-    base(z.cell(zrow, 4), it['sizeCount'], align='center', numfmt='0')
+    base(z.cell(zrow, 3), it['techSize'], align='center')
+    base(z.cell(zrow, 4), it['nmID'], numfmt='0')
     base(z.cell(zrow, 5), it['kind'], align='center')
     sby = it['seedByWarehouse']
-    for wi, wname in enumerate(whList):
-        c = z.cell(zrow, first_wh + wi)
-        if wname in sby:
-            base(c, sby[wname], align='right', numfmt='#,##0')
+    for wi, wn in enumerate(whList):
+        c = z.cell(zrow, zfirst + wi)
+        if wn in sby:
+            base(c, sby[wn], align='right', numfmt='#,##0')
         else:
             base(c, '✓', align='center', color='16875A')
-    base(z.cell(zrow, first_wh + len(whList)), it['seedTotal'], align='right', bold=True, numfmt='#,##0')
+    base(z.cell(zrow, zfirst + len(whList)), it['seedTotal'], align='right', bold=True, numfmt='#,##0')
     zrow += 1
-zlast = zrow - 1
-total_col = first_wh + len(whList)
-z.freeze_panes = 'C2'
-z.auto_filter.ref = f'A1:{get_column_letter(total_col)}{zlast}'
-for col, wdt in [('A', 6), ('B', 26), ('C', 12), ('D', 9), ('E', 10)]:
+z_last = zrow - 1
+z.freeze_panes = 'D2'
+z.auto_filter.ref = f'A1:{get_column_letter(zfirst + len(whList))}{z_last}'
+for col, wdt in [('A', 6), ('B', 22), ('C', 9), ('D', 12), ('E', 10)]:
     z.column_dimensions[col].width = wdt
 for wi in range(len(whList)):
-    z.column_dimensions[get_column_letter(first_wh + wi)].width = 13
-z.column_dimensions[get_column_letter(total_col)].width = 9
+    z.column_dimensions[get_column_letter(zfirst + wi)].width = 13
+z.column_dimensions[get_column_letter(zfirst + len(whList))].width = 9
 newF = PatternFill('solid', fgColor='E1F3E9'); refF = PatternFill('solid', fgColor='FAF0DA')
-tr = f'E2:E{zlast}'
+tr = f'E2:E{z_last}'
 z.conditional_formatting.add(tr, CellIsRule(operator='equal', formula=['"новинка"'], fill=newF))
 z.conditional_formatting.add(tr, CellIsRule(operator='equal', formula=['"докладка"'], fill=refF))
 
 wb.save(OUT)
-print('saved', os.path.relpath(OUT, os.getcwd()), '| подсорт-строк', last - 1, '| завоз-строк', zlast - 1)
+print('saved', os.path.relpath(OUT, os.getcwd()),
+      '| подсорт', p_last - 1, '| сводная', sv_last - 1, '| завоз', z_last - 1)

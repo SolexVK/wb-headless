@@ -1,30 +1,28 @@
-// scripts/fbs-replenishment.mjs — подсорт FBS по КАЖДОМУ складу отдельно.
+// scripts/fbs-replenishment.mjs — подсорт FBS по КАЖДОМУ складу и РАЗМЕРУ.
 //
 // ФИНАЛЬНАЯ ЛОГИКА (согласовано; основа будущего HTML-сервиса):
 //   • только FF-склады (FBS); FBO не учитываем (распродаём).
-//   • расчёт ДЛЯ КАЖДОГО склада отдельно: скорость и остаток берутся по этому
-//     складу (velWN по warehouseId|nmID), не суммарно по сети.
+//   • расчёт ДЛЯ КАЖДОГО склада отдельно И ПО КАЖДОМУ РАЗМЕРУ: скорость и остаток
+//     берутся по (склад × штрихкод), где штрихкод = конкретный размер карточки.
 //   • лид-тайм подсорта = сборка + доставка на FF (мин–макс, дн). Заказ покрывает
-//     горизонт = leadMax + cover, чтобы не уйти в ноль до прихода; статус
-//     «разрыв до поставки» = закончится раньше leadMin (подсорт не успеет доехать).
-//   • сортировка строк: артикул № → цвет → количество.
-//   • ассортимент в работе — белый список номеров артикулов (articles). ВЕСЬ
-//     отчёт (подсорт и завоз) считается только по ним; сезонные вне списка — нет.
-//   • пробный завоз (seed): для (склад × артикул), где товара на складе ещё НЕ
-//     было (нет остатка и нет заказов за history-days), — seedMin шт НА КАЖДЫЙ
-//     размер. kind: «новинка» (не была ни на одном FF) / «докладка» (продаётся
-//     на других складах, но на этом не было).
+//     горизонт = leadMax + cover; статус «разрыв до поставки» = закончится раньше
+//     leadMin (подсорт не успеет доехать), «риск разрыва» = может не дожить до leadMax.
+//   • сортировка: артикул № → цвет → размер.
+//   • ассортимент в работе — белый список номеров артикулов (articles). Весь отчёт
+//     (и подсорт, и завоз) считается только по ним; сезонные вне списка — нет.
+//   • пробный завоз (seed): для (склад × артикул × цвет × размер), где на складе
+//     этого размера ещё не было, — seedMin шт на КАЖДЫЙ размер. kind: «новинка»
+//     (карточка не была ни на одном FF) / «докладка» (есть на других складах).
 //
 // Настройки — config/replenishment.json (articles, seedMin, velocityDays,
-// leadMax, leadMin, cover). CLI-аргументы переопределяют конфиг. Это же — бэкенд
-// будущей формы веб-инструмента.
+// leadMax, leadMin, cover). CLI переопределяет конфиг.
 //
 //   npm run fbs:podsort   # весь конвейер: stock → replenish → dashboard → xlsx
 //   npm run fbs:replenish -- --articles 002,003 --cover 28 --seed-min 10 --json
 //
-// Данные: GET /api/v3/orders (спрос по складу×nmID; история до 90 дн для «был на
-//   FF»), снимок остатков reports-output/fbs-stock.json (npm run fbs:stock),
-//   content/v2/get/cards/list (номенклатура + число размеров).
+// Данные: GET /api/v3/orders (спрос по складу×штрихкоду; история 90 дн),
+//   снимок остатков reports-output/fbs-stock.json (остаток по штрихкоду),
+//   content/v2/get/cards/list (размеры: штрихкод → techSize, все размеры карточки).
 
 import fs from 'fs';
 import path from 'path';
@@ -35,18 +33,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
 const R = (p) => path.join(REPO, 'reports-output', p);
 const arg = (n, d) => { const i = process.argv.indexOf('--' + n); return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : d; };
-// Настройки: config/replenishment.json (дефолты) ← CLI-аргументы (приоритет).
 let CFG = {};
-try { CFG = JSON.parse(fs.readFileSync(path.join(REPO, 'config/replenishment.json'), 'utf8')); } catch { /* нет конфига — берём дефолты */ }
+try { CFG = JSON.parse(fs.readFileSync(path.join(REPO, 'config/replenishment.json'), 'utf8')); } catch { /* дефолты */ }
 const numOr = (name, cfgKey, def) => { const v = arg(name, null); return Number(v != null ? v : (CFG[cfgKey] != null ? CFG[cfgKey] : def)); };
 const VEL_DAYS = numOr('velocity-days', 'velocityDays', 28);
-const LEAD = numOr('lead', 'leadMax', 18);          // лид-тайм (макс), дн — на приход подсорта
-const LEAD_MIN = numOr('lead-min', 'leadMin', 12);  // лид-тайм (мин), дн — для срочности
-const COVER = numOr('cover', 'cover', 28);          // запас после прихода, дн (форс-мажоры в пути)
-const SEED_MIN = numOr('seed-min', 'seedMin', 10);  // мин. завоз, шт на каждый размер
-const HISTORY_DAYS = numOr('history-days', 'historyDays', 90); // окно «когда-либо на FF»
-// Ассортимент в работе: номера артикулов (первые цифры vendorCode). Отчёт —
-// и подсорт, и пробный завоз — считается ТОЛЬКО по этим артикулам. Пусто = все.
+const LEAD = numOr('lead', 'leadMax', 18);
+const LEAD_MIN = numOr('lead-min', 'leadMin', 12);
+const COVER = numOr('cover', 'cover', 28);
+const SEED_MIN = numOr('seed-min', 'seedMin', 10);
+const HISTORY_DAYS = numOr('history-days', 'historyDays', 90);
 const artArg = arg('articles', arg('seed-articles', null));
 const articles = artArg ? artArg.split(',').map((s) => s.trim()).filter(Boolean) : (CFG.articles || CFG.seedArticles || []);
 const scopeInts = new Set(articles.map((x) => parseInt(x, 10)).filter((n) => !Number.isNaN(n)));
@@ -56,9 +51,9 @@ const log = (...a) => process.stderr.write(a.join(' ') + '\n');
 
 const wb = new WbClient({ tokenType: process.env.WB_TOKEN_TYPE || 'personal' });
 const MP = { limit: 300, periodSec: 60, burst: 20 };
-const HORIZON = LEAD + COVER; // «заказать до» покрытия, дн
+const HORIZON = LEAD + COVER;
 
-// Разбор артикула: ведущий номер + вариант (цвет). Для сортировки арт→цвет.
+// Артикул: ведущий номер + вариант (цвет).
 function parseArt(vc) {
   const s = String(vc || '');
   const m = s.match(/^\s*(\d+)/);
@@ -68,23 +63,30 @@ function parseArt(vc) {
   if (!variant) variant = s;
   return { num, numInt, variant };
 }
+// Порядок размеров для сортировки.
+const SZ = { XXS: -4, XS: -3, S: -2, M: -1, L: 0, XL: 1, XXL: 2, '2XL': 2, '3XL': 3, '4XL': 4, '5XL': 5, '6XL': 6, '7XL': 7 };
+function sizeRank(ts) {
+  const t = String(ts || '').trim().toUpperCase();
+  if (t in SZ) return SZ[t];
+  const m = t.match(/^\d+/);
+  if (m) return 100 + parseInt(m[0], 10);
+  return 900;
+}
 
-// ── Остатки по складу×nmID из снимка ────────────────────────────────────────
+// ── Остатки по (склад × штрихкод=размер) ────────────────────────────────────
 if (!fs.existsSync(R('fbs-stock.json'))) { log('Нет reports-output/fbs-stock.json — сначала: npm run fbs:stock'); process.exit(1); }
 const stock = JSON.parse(fs.readFileSync(R('fbs-stock.json'), 'utf8'));
 const warehouses = (stock.warehouses || []).map((w) => ({ id: w.id, name: w.name }));
-const stockWN = new Map();   // "wid|nm" → qty
-const nmVendor = new Map();  // nm → vendorCode
-const stockNmIds = new Set();
+const stockWB = new Map();       // "wid|barcode" → amount
+const bcMeta = new Map();         // barcode → { nmID, vendorCode }
 for (const w of stock.warehouses || []) {
   for (const p of w.positions || []) {
-    stockWN.set(`${w.id}|${p.nmID}`, (stockWN.get(`${w.id}|${p.nmID}`) || 0) + p.amount);
-    if (!nmVendor.has(p.nmID)) nmVendor.set(p.nmID, p.vendorCode);
-    stockNmIds.add(p.nmID);
+    stockWB.set(`${w.id}|${p.sku}`, (stockWB.get(`${w.id}|${p.sku}`) || 0) + p.amount);
+    if (!bcMeta.has(p.sku)) bcMeta.set(p.sku, { nmID: p.nmID, vendorCode: p.vendorCode });
   }
 }
 
-// ── Заказы: история до 90 дн (chunks ≤30 дн) для «когда-либо на FF» + скорость ─
+// ── Заказы: история 90 дн (chunks ≤30) — присутствие и скорость по штрихкоду ──
 async function fetchRange(fromSec, toSec) {
   const out = []; let next = 0;
   for (;;) {
@@ -96,29 +98,32 @@ async function fetchRange(fromSec, toSec) {
 }
 const nowSec = Math.floor(Date.now() / 1000);
 const histStart = nowSec - HISTORY_DAYS * 86400;
-const CHUNK = 30 * 86400;
 let allOrders = [];
 for (let end = nowSec; end > histStart;) {
-  const from = Math.max(histStart, end - CHUNK);
+  const from = Math.max(histStart, end - 30 * 86400);
   const part = await fetchRange(from, end);
   allOrders.push(...part);
   log(`  orders ${new Date(from * 1000).toISOString().slice(0, 10)}..${new Date(end * 1000).toISOString().slice(0, 10)}: +${part.length} (${allOrders.length})`);
   end = from;
 }
 const velCut = nowSec - VEL_DAYS * 86400;
-const everPlacedNm = new Set(stockNmIds);              // заводился хоть на один FF (есть остаток…)
-const velWN = new Map();                                // "wid|nm" → заказы за окно скорости
-const placedWN = new Set();                             // "wid|nm" → был на ЭТОМ складе (история 90 дн или остаток)
-for (const k of stockWN.keys()) placedWN.add(k);        // есть остаток сейчас = присутствует
+const everPlacedNm = new Set();          // nmID был хоть на одном FF
+const velWB = new Map();                  // "wid|barcode" → заказы за окно скорости
+const placedWB = new Set();               // "wid|barcode" → был на этом складе (история/остаток)
+for (const bc of bcMeta.keys()) { /* остаток учтём ниже */ }
+for (const k of stockWB.keys()) if (stockWB.get(k) > 0) placedWB.add(k);
+for (const p of stock.warehouses || []) for (const q of p.positions || []) everPlacedNm.add(q.nmID);
 for (const o of allOrders) {
-  everPlacedNm.add(o.nmId);                             // …или был заказ (значит был на FF)
-  placedWN.add(`${o.warehouseId}|${o.nmId}`);           // был заказ с этого склада = был на нём
-  if (!nmVendor.has(o.nmId)) nmVendor.set(o.nmId, o.article);
+  everPlacedNm.add(o.nmId);
   const created = Math.floor(new Date(o.createdAt).getTime() / 1000);
-  if (created >= velCut) velWN.set(`${o.warehouseId}|${o.nmId}`, (velWN.get(`${o.warehouseId}|${o.nmId}`) || 0) + 1);
+  for (const bc of (o.skus || [])) {
+    if (!bcMeta.has(bc)) bcMeta.set(bc, { nmID: o.nmId, vendorCode: o.article });
+    placedWB.add(`${o.warehouseId}|${bc}`);
+    if (created >= velCut) velWB.set(`${o.warehouseId}|${bc}`, (velWB.get(`${o.warehouseId}|${bc}`) || 0) + 1);
+  }
 }
 
-// ── Полная номенклатура (карточки) — для «новинок» ──────────────────────────
+// ── Карточки: штрихкод → размер; все размеры карточки ───────────────────────
 async function fetchCards() {
   const cards = []; let cursor = { limit: 100 };
   for (;;) {
@@ -131,86 +136,98 @@ async function fetchCards() {
   return cards;
 }
 const cards = await fetchCards();
-const nmSize = new Map(); // nm → число размеров (для seed на каждый размер)
+const bcSize = new Map();     // barcode → { techSize, nmID, vendorCode }
+const cardSizes = new Map();  // nmID → [{ barcode, techSize }]
 for (const c of cards) {
-  if (!nmVendor.has(c.nmID)) nmVendor.set(c.nmID, c.vendorCode);
-  const n = (c.sizes || []).filter((s) => (s.skus || []).length > 0).length || (c.sizes || []).length || 1;
-  nmSize.set(c.nmID, n);
+  const list = [];
+  for (const s of c.sizes || []) {
+    for (const bc of (s.skus || [])) {
+      bcSize.set(bc, { techSize: s.techSize || '', nmID: c.nmID, vendorCode: c.vendorCode });
+      if (!bcMeta.has(bc)) bcMeta.set(bc, { nmID: c.nmID, vendorCode: c.vendorCode });
+      list.push({ barcode: bc, techSize: s.techSize || '' });
+    }
+  }
+  cardSizes.set(c.nmID, list);
 }
+const sizeOf = (bc) => (bcSize.get(bc)?.techSize) || '—';
+const vendorOf = (bc) => (bcMeta.get(bc)?.vendorCode) || (bcSize.get(bc)?.vendorCode) || '';
+const nmOf = (bc) => (bcMeta.get(bc)?.nmID) ?? (bcSize.get(bc)?.nmID);
 
-// ── Подсорт по каждому складу ───────────────────────────────────────────────
-const perDayOf = (wid, nm) => (velWN.get(`${wid}|${nm}`) || 0) / VEL_DAYS;
+// ── Подсорт по складу × размеру ─────────────────────────────────────────────
 const statusOf = (perDay, stk, dtz) => {
   if (perDay === 0) return stk > 0 ? 'неликвид' : 'нет данных';
   if (stk === 0) return 'нет остатка';
-  if (dtz < LEAD_MIN) return 'разрыв до поставки';     // не доживёт даже до мин. срока
-  if (dtz < LEAD) return 'риск разрыва';               // может не дожить до макс. срока
+  if (dtz < LEAD_MIN) return 'разрыв до поставки';
+  if (dtz < LEAD) return 'риск разрыва';
   return 'ок';
 };
-
 const whReports = [];
 for (const w of warehouses) {
-  // ключи: всё, что есть на складе ИЛИ продавалось со склада
-  const keys = new Set();
-  for (const k of stockWN.keys()) if (k.startsWith(w.id + '|')) keys.add(Number(k.split('|')[1]));
-  for (const k of velWN.keys()) if (k.startsWith(w.id + '|')) keys.add(Number(k.split('|')[1]));
+  const bcs = new Set();
+  for (const k of stockWB.keys()) if (k.startsWith(w.id + '|')) bcs.add(k.slice(String(w.id).length + 1));
+  for (const k of velWB.keys()) if (k.startsWith(w.id + '|')) bcs.add(k.slice(String(w.id).length + 1));
   const rows = [];
-  for (const nm of keys) {
-    const stk = stockWN.get(`${w.id}|${nm}`) || 0;
-    const perDay = perDayOf(w.id, nm);
-    if (stk === 0 && perDay === 0) continue;           // нечего показывать
-    const vc = nmVendor.get(nm) || String(nm);
+  for (const bc of bcs) {
+    const stk = stockWB.get(`${w.id}|${bc}`) || 0;
+    const perDay = (velWB.get(`${w.id}|${bc}`) || 0) / VEL_DAYS;
+    if (stk === 0 && perDay === 0) continue;
+    const vc = vendorOf(bc);
     const { num, numInt, variant } = parseArt(vc);
-    if (!inScope(numInt)) continue;                    // вне ассортимента в работе (напр. летнее)
+    if (!inScope(numInt)) continue;
     const dtz = perDay > 0 ? stk / perDay : (stk > 0 ? Infinity : 0);
     const reorder = Math.max(0, Math.ceil(perDay * HORIZON - stk));
+    const techSize = sizeOf(bc);
     rows.push({
-      nmID: nm, vendorCode: vc, articleNum: num, articleNumInt: numInt, variant,
-      stock: stk, perDay: +perDay.toFixed(2),
-      daysToZero: dtz === Infinity ? null : +dtz.toFixed(1),
-      reorderQty: reorder, status: statusOf(perDay, stk, dtz),
+      nmID: nmOf(bc), barcode: bc, articleNum: num, articleNumInt: numInt, variant, techSize, sizeRank: sizeRank(techSize),
+      stock: stk, perDay: +perDay.toFixed(2), daysToZero: dtz === Infinity ? null : +dtz.toFixed(1), reorderQty: reorder, status: statusOf(perDay, stk, dtz),
     });
   }
-  // Сортировка: артикул № → цвет → количество (подсорт) убыв.
-  rows.sort((a, b) => (a.articleNumInt - b.articleNumInt) || a.articleNum.localeCompare(b.articleNum, 'ru')
-    || a.variant.localeCompare(b.variant, 'ru') || (b.reorderQty - a.reorderQty));
+  rows.sort((a, b) => (a.articleNumInt - b.articleNumInt) || a.variant.localeCompare(b.variant, 'ru') || (a.sizeRank - b.sizeRank) || String(a.techSize).localeCompare(String(b.techSize), 'ru'));
   whReports.push({
     warehouseId: w.id, name: w.name,
     stockUnits: rows.reduce((s, r) => s + r.stock, 0),
     reorderUnits: rows.reduce((s, r) => s + r.reorderQty, 0),
-    riskCount: rows.filter((r) => r.status === 'разрыв до поставки' || r.status === 'нет остатка' || r.status === 'риск разрыва').length,
+    riskCount: rows.filter((r) => ['разрыв до поставки', 'нет остатка', 'риск разрыва'].includes(r.status)).length,
     rows,
   });
 }
 whReports.sort((a, b) => b.reorderUnits - a.reorderUnits || b.stockUnits - a.stockUnits);
 
-// ── Пробный завоз (seed): вся номенклатура × ВСЕ зарегистрированные склады ───
-// Для каждого (склад × артикул), где товара на складе ещё НЕ было (нет остатка
-// и не было заказов за историю) — рекомендуем пробную партию seed-min на КАЖДЫЙ
-// размер, чтобы начать мерить скорость продаж отдельно по складу.
-//   kind = 'новинка'  — артикул не заводился НИ на один FF-склад;
-//   kind = 'докладка' — артикул продаётся на других складах, но на этом не было.
-const regWarehouses = warehouses; // все зарегистрированные склады (из /api/v3/warehouses)
+// ── Пробный завоз по складу × размеру (белый список) ────────────────────────
+const regWarehouses = warehouses;
 const seedGrid = [];
 for (const c of cards) {
-  const nm = c.nmID; const vc = c.vendorCode || String(nm);
-  const { num, numInt, variant } = parseArt(vc);
-  if (!inScope(numInt)) continue; // вне белого списка завоза
-  const sizeCount = nmSize.get(nm) || 1;
-  const perWh = SEED_MIN * sizeCount;            // seed на склад = seedMin × размеры
-  const seedByWarehouse = {}; const presentOn = []; let seedTotal = 0;
-  for (const w of regWarehouses) {
-    if (placedWN.has(`${w.id}|${nm}`)) presentOn.push(w.name);
-    else { seedByWarehouse[w.name] = perWh; seedTotal += perWh; }
+  const { num, numInt, variant } = parseArt(c.vendorCode);
+  if (!inScope(numInt)) continue;
+  const kind = everPlacedNm.has(c.nmID) ? 'докладка' : 'новинка';
+  for (const s of (cardSizes.get(c.nmID) || [])) {
+    const seedByWarehouse = {}; let seedTotal = 0;
+    for (const w of regWarehouses) {
+      if (placedWB.has(`${w.id}|${s.barcode}`)) continue; // уже есть на складе (этот размер)
+      seedByWarehouse[w.name] = SEED_MIN; seedTotal += SEED_MIN;
+    }
+    if (seedTotal === 0) continue;
+    seedGrid.push({
+      nmID: c.nmID, barcode: s.barcode, articleNum: num, articleNumInt: numInt, variant,
+      techSize: s.techSize || '—', sizeRank: sizeRank(s.techSize), kind, seedByWarehouse, seedTotal,
+    });
   }
-  if (seedTotal === 0) continue;                 // уже есть на всех складах — завоз не нужен
-  seedGrid.push({
-    nmID: nm, vendorCode: vc, articleNum: num, articleNumInt: numInt, variant,
-    sizeCount, seedPerWh: perWh, seedByWarehouse, seedTotal,
-    kind: everPlacedNm.has(nm) ? 'докладка' : 'новинка', presentCount: presentOn.length,
-  });
 }
-seedGrid.sort((a, b) => (a.articleNumInt - b.articleNumInt) || a.variant.localeCompare(b.variant, 'ru'));
+seedGrid.sort((a, b) => (a.articleNumInt - b.articleNumInt) || a.variant.localeCompare(b.variant, 'ru') || (a.sizeRank - b.sizeRank));
+
+// ── Сводная: подсорт по (артикул × цвет × размер) × склад ────────────────────
+const pivotMap = new Map(); // key → { articleNum, articleNumInt, variant, techSize, sizeRank, byWarehouse:{}, total }
+for (const w of whReports) {
+  for (const r of w.rows) {
+    if (!r.reorderQty) continue;
+    const key = `${r.articleNum}|${r.variant}|${r.techSize}`;
+    if (!pivotMap.has(key)) pivotMap.set(key, { articleNum: r.articleNum, articleNumInt: r.articleNumInt, variant: r.variant, techSize: r.techSize, sizeRank: r.sizeRank, byWarehouse: {}, total: 0 });
+    const e = pivotMap.get(key);
+    e.byWarehouse[w.name] = (e.byWarehouse[w.name] || 0) + r.reorderQty;
+    e.total += r.reorderQty;
+  }
+}
+const pivot = [...pivotMap.values()].sort((a, b) => (a.articleNumInt - b.articleNumInt) || a.variant.localeCompare(b.variant, 'ru') || (a.sizeRank - b.sizeRank));
 
 const snapshot = {
   generatedAt: new Date().toISOString(),
@@ -224,29 +241,24 @@ const snapshot = {
     seedNovelty: seedGrid.filter((r) => r.kind === 'новинка').length,
     seedRefill: seedGrid.filter((r) => r.kind === 'докладка').length,
     seedUnits: seedGrid.reduce((s, r) => s + r.seedTotal, 0),
+    pivotRows: pivot.length,
     nomenclature: cards.length,
   },
   warehouseList: regWarehouses.map((w) => w.name),
   warehouses: whReports,
   seedGrid,
+  pivot,
 };
 
-log(`\nЛид-тайм: ${LEAD_MIN}–${LEAD} дн · запас: ${COVER} дн · горизонт заказа: ${HORIZON} дн · окно скорости: ${VEL_DAYS} дн`);
-log(`Подсорт всего: ${snapshot.totals.reorderUnits} шт · строк в риске: ${snapshot.totals.riskRows} · пробный завоз: ${snapshot.totals.seedRows} строк (${snapshot.totals.seedUnits} шт)`);
-for (const w of whReports) {
-  log(`\n=== ${w.name} === остаток ${w.stockUnits} · к подсорту ${w.reorderUnits} шт · позиций ${w.rows.length}`);
-  log('Арт'.padEnd(6) + 'Цвет/вариант'.padEnd(26) + 'Ост'.padStart(5) + '/дн'.padStart(7) + 'ДоНуля'.padStart(8) + 'Подсорт'.padStart(9) + '  Статус');
-  for (const r of w.rows.slice(0, 12)) {
-    log(r.articleNum.padEnd(6) + r.variant.slice(0, 25).padEnd(26) + String(r.stock).padStart(5) + String(r.perDay).padStart(7) + (r.daysToZero == null ? '∞' : String(r.daysToZero)).padStart(8) + String(r.reorderQty).padStart(9) + '  ' + r.status);
-  }
-  if (w.rows.length > 12) log(`  … ещё ${w.rows.length - 12} строк`);
-}
-if (articles.length) log(`\nАссортимент в расчёте (номера артикулов): ${articles.join(", ")}`);
-if (seedGrid.length) {
-  log(`\n=== ПРОБНЫЙ ЗАВОЗ — ${SEED_MIN} шт на КАЖДЫЙ размер, на склады без этого товара (из ${regWarehouses.length} зарегистрированных) ===`);
-  log(`  строк: ${seedGrid.length} (новинок ${snapshot.totals.seedNovelty}, докладок ${snapshot.totals.seedRefill}) · всего к завозу: ${snapshot.totals.seedUnits} шт`);
-  for (const n of seedGrid.slice(0, 20)) log('  ' + n.articleNum.padEnd(6) + n.variant.slice(0, 26).padEnd(27) + `разм.${String(n.sizeCount).padEnd(2)} → ${String(n.seedTotal).padStart(5)} шт на ${Object.keys(n.seedByWarehouse).length} скл.  [${n.kind}]`);
-  if (seedGrid.length > 20) log(`  … ещё ${seedGrid.length - 20}`);
+log(`\nЛид-тайм ${LEAD_MIN}–${LEAD} дн · запас ${COVER} · горизонт ${HORIZON} · окно скорости ${VEL_DAYS} дн`);
+if (articles.length) log(`Ассортимент: ${articles.join(', ')}`);
+log(`Подсорт всего ${snapshot.totals.reorderUnits} шт · строк в риске ${snapshot.totals.riskRows} · сводная строк (арт×цвет×размер) ${pivot.length}`);
+log(`Пробный завоз ${seedGrid.length} строк (новинок ${snapshot.totals.seedNovelty} + докладок ${snapshot.totals.seedRefill}) = ${snapshot.totals.seedUnits} шт`);
+for (const w of whReports.slice(0, 3)) {
+  log(`\n=== ${w.name} === остаток ${w.stockUnits} · подсорт ${w.reorderUnits} шт · строк ${w.rows.length}`);
+  log('Арт'.padEnd(5) + 'Цвет'.padEnd(20) + 'Разм'.padEnd(6) + 'Ост'.padStart(5) + '/дн'.padStart(7) + 'Подсорт'.padStart(9) + '  Статус');
+  for (const r of w.rows.slice(0, 10)) log(r.articleNum.padEnd(5) + r.variant.slice(0, 19).padEnd(20) + String(r.techSize).padEnd(6) + String(r.stock).padStart(5) + String(r.perDay).padStart(7) + String(r.reorderQty).padStart(9) + '  ' + r.status);
+  if (w.rows.length > 10) log(`  … ещё ${w.rows.length - 10}`);
 }
 
 if (!jsonOnly) {
