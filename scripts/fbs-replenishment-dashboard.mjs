@@ -79,8 +79,8 @@ const newRows = seedGrid.map((n) => `<tr>
     <td class="ta-r num reorder">${nf(n.seedTotal)}</td>
   </tr>`).join('');
 const newSection = seedGrid.length ? `<section class="panel">
-    <div class="panel-head"><h2>Пробный завоз — новинки и докладки по складам</h2><span class="wh-tot">${nf(t.seedRows)} позиций (новинок ${nf(t.seedNovelty)} + докладок ${nf(t.seedRefill)}) · итого <b class="accent">${nf(t.seedUnits)}</b> шт</span></div>
-    <p class="note">Seed = <b>${nf(P.seedMin)} шт на каждый размер</b> (столбец «Разм.») на каждый склад, где товара ещё не было (нет остатка и нет заказов за ${P.historyDays} дн). «✓» — на складе уже есть, завоз не нужен. <b>новинка</b> — не была ни на одном FF; <b>докладка</b> — продаётся на других складах, но на этом не было. Цель — начать мерить скорость по каждому складу.</p>
+    <div class="panel-head"><h2>Пробный завоз — новинки и докладки по складам</h2><span class="wh-tot">артикулы ${esc((P.seedArticles || []).join(', ') || 'все')} · ${nf(t.seedRows)} позиций (новинок ${nf(t.seedNovelty)} + докладок ${nf(t.seedRefill)}) · итого <b class="accent">${nf(t.seedUnits)}</b> шт</span></div>
+    <p class="note">В расчёте только артикулы из списка: <b>${esc((P.seedArticles || []).join(', ') || 'все')}</b>. Seed = <b>${nf(P.seedMin)} шт на каждый размер</b> (столбец «Разм.») на каждый склад, где товара ещё не было (нет остатка и нет заказов за ${P.historyDays} дн). «✓» — на складе уже есть, завоз не нужен. <b>новинка</b> — не была ни на одном FF; <b>докладка</b> — продаётся на других складах, но на этом не было. Цель — начать мерить скорость по каждому складу.</p>
     <div class="table-scroll"><table>
       <thead><tr><th class="ta-r">Арт</th><th class="tl">Цвет / вариант</th><th class="tl">nmID</th><th class="ta-r">Разм.</th><th class="tl">Тип</th>${newHeadWh}<th class="ta-r">Итого</th></tr></thead>
       <tbody>${newRows}</tbody>

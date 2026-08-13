@@ -25,12 +25,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
 const R = (p) => path.join(REPO, 'reports-output', p);
 const arg = (n, d) => { const i = process.argv.indexOf('--' + n); return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : d; };
-const VEL_DAYS = Number(arg('velocity-days', 28));
-const LEAD = Number(arg('lead', 18));          // лид-тайм (макс), дн — на приход подсорта
-const LEAD_MIN = Number(arg('lead-min', 12));  // лид-тайм (мин), дн — для срочности
-const COVER = Number(arg('cover', 28));        // запас после прихода, дн (учёт форс-мажоров в пути)
-const SEED_MIN = Number(arg('seed-min', 10));  // минимальный завоз новинки, шт
-const HISTORY_DAYS = Number(arg('history-days', 90)); // окно «когда-либо заводился на FF»
+// Настройки: config/replenishment.json (дефолты) ← CLI-аргументы (приоритет).
+let CFG = {};
+try { CFG = JSON.parse(fs.readFileSync(path.join(REPO, 'config/replenishment.json'), 'utf8')); } catch { /* нет конфига — берём дефолты */ }
+const numOr = (name, cfgKey, def) => { const v = arg(name, null); return Number(v != null ? v : (CFG[cfgKey] != null ? CFG[cfgKey] : def)); };
+const VEL_DAYS = numOr('velocity-days', 'velocityDays', 28);
+const LEAD = numOr('lead', 'leadMax', 18);          // лид-тайм (макс), дн — на приход подсорта
+const LEAD_MIN = numOr('lead-min', 'leadMin', 12);  // лид-тайм (мин), дн — для срочности
+const COVER = numOr('cover', 'cover', 28);          // запас после прихода, дн (форс-мажоры в пути)
+const SEED_MIN = numOr('seed-min', 'seedMin', 10);  // мин. завоз, шт на каждый размер
+const HISTORY_DAYS = numOr('history-days', 'historyDays', 90); // окно «когда-либо на FF»
+// Белый список артикулов для пробного завоза (номера — первые цифры vendorCode).
+const seedArtArg = arg('seed-articles', null);
+const seedArticles = seedArtArg ? seedArtArg.split(',').map((s) => s.trim()).filter(Boolean) : (CFG.seedArticles || []);
+const seedArticleInts = new Set(seedArticles.map((x) => parseInt(x, 10)).filter((n) => !Number.isNaN(n)));
 const jsonOnly = process.argv.includes('--json');
 const log = (...a) => process.stderr.write(a.join(' ') + '\n');
 
@@ -173,15 +181,16 @@ const regWarehouses = warehouses; // все зарегистрированные
 const seedGrid = [];
 for (const c of cards) {
   const nm = c.nmID; const vc = c.vendorCode || String(nm);
+  const { num, numInt, variant } = parseArt(vc);
+  if (seedArticleInts.size && !seedArticleInts.has(numInt)) continue; // вне белого списка завоза
   const sizeCount = nmSize.get(nm) || 1;
-  const perWh = SEED_MIN * sizeCount;            // seed на склад = 10 × размеры
+  const perWh = SEED_MIN * sizeCount;            // seed на склад = seedMin × размеры
   const seedByWarehouse = {}; const presentOn = []; let seedTotal = 0;
   for (const w of regWarehouses) {
     if (placedWN.has(`${w.id}|${nm}`)) presentOn.push(w.name);
     else { seedByWarehouse[w.name] = perWh; seedTotal += perWh; }
   }
   if (seedTotal === 0) continue;                 // уже есть на всех складах — завоз не нужен
-  const { num, numInt, variant } = parseArt(vc);
   seedGrid.push({
     nmID: nm, vendorCode: vc, articleNum: num, articleNumInt: numInt, variant,
     sizeCount, seedPerWh: perWh, seedByWarehouse, seedTotal,
@@ -192,7 +201,7 @@ seedGrid.sort((a, b) => (a.articleNumInt - b.articleNumInt) || a.variant.localeC
 
 const snapshot = {
   generatedAt: new Date().toISOString(),
-  params: { velocityDays: VEL_DAYS, leadMin: LEAD_MIN, leadMax: LEAD, coverDays: COVER, horizonDays: HORIZON, seedMin: SEED_MIN, historyDays: HISTORY_DAYS },
+  params: { velocityDays: VEL_DAYS, leadMin: LEAD_MIN, leadMax: LEAD, coverDays: COVER, horizonDays: HORIZON, seedMin: SEED_MIN, historyDays: HISTORY_DAYS, seedArticles },
   totals: {
     warehouses: whReports.length,
     registeredWarehouses: regWarehouses.length,
@@ -219,6 +228,7 @@ for (const w of whReports) {
   }
   if (w.rows.length > 12) log(`  … ещё ${w.rows.length - 12} строк`);
 }
+if (seedArticles.length) log(`\nБелый список завоза (номера артикулов): ${seedArticles.join(', ')}`);
 if (seedGrid.length) {
   log(`\n=== ПРОБНЫЙ ЗАВОЗ — ${SEED_MIN} шт на КАЖДЫЙ размер, на склады без этого товара (из ${regWarehouses.length} зарегистрированных) ===`);
   log(`  строк: ${seedGrid.length} (новинок ${snapshot.totals.seedNovelty}, докладок ${snapshot.totals.seedRefill}) · всего к завозу: ${snapshot.totals.seedUnits} шт`);
