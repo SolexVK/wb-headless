@@ -216,6 +216,26 @@ const COST_LABELS = {
 const fmt = (x, d = 2) => (isFinite(x) ? x : 0).toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d });
 const pct = (x) => (isFinite(x) ? x * 100 : 0).toLocaleString('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
 
+const LS_KEY = 'wbcalc_inputs_v1';
+function saveInputs() {
+  try {
+    const data = {};
+    for (const f of FIELDS) { const el = document.getElementById(f.id); if (!el) continue; data[f.id] = f.type === 'check' ? el.checked : el.value; }
+    localStorage.setItem(LS_KEY, JSON.stringify(data));
+  } catch (e) {}
+}
+function restoreInputs() {
+  try {
+    const data = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+    if (!data) return;
+    for (const f of FIELDS) {
+      const el = document.getElementById(f.id);
+      if (!el || !(f.id in data)) continue;
+      if (f.type === 'check') el.checked = !!data[f.id]; else el.value = data[f.id];
+    }
+  } catch (e) {}
+}
+
 function readInputs() {
   const v = {};
   for (const f of FIELDS) {
@@ -348,6 +368,7 @@ function render() {
     </div>`;
 
   renderSensitivity(v);
+  saveInputs();
 }
 
 function renderSensitivity(v) {
@@ -422,6 +443,8 @@ function resetDefaults() {
 document.addEventListener('DOMContentLoaded', async () => {
   await loadConfig();
   buildForm();
+  restoreInputs();                       // восстановить ранее введённые данные
+  try { const th = localStorage.getItem('wbcalc_theme'); if (th) document.documentElement.setAttribute('data-theme', th); } catch (e) {}
   document.getElementById('form').addEventListener('input', render);
   document.getElementById('form').addEventListener('change', render);
   document.getElementById('category').addEventListener('change', applyCategory);
@@ -429,7 +452,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('reset').addEventListener('click', resetDefaults);
   document.getElementById('theme').addEventListener('click', () => {
     const root = document.documentElement;
-    root.setAttribute('data-theme', root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('wbcalc_theme', next); } catch (e) {}
   });
   render();
   fetchRate();
