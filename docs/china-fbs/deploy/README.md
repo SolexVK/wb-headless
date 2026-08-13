@@ -143,10 +143,16 @@ launchctl load   ~/Library/LaunchAgents/com.wbcalc.calculator.plist
 ```
 
 ## Обновление тарифов WB (при желании)
+Тарифы логистики вынесены в `calculator/tariffs.json`. Обновление НЕ трогает код:
+скрипт пишет `calculator/tariffs.override.json` (он в .gitignore), который калькулятор
+читает поверх базового при загрузке страницы.
 ```bash
-cd docs/china-fbs/tools && python3 update-wb-tariffs.py
-# затем перезапустить сервер (см. выше)
+cd docs/china-fbs/tools
+pip3 install pdfplumber            # один раз, если не стоит
+python3 update-wb-tariffs.py       # или ... update-wb-tariffs.py <новый_URL_PDF>
 ```
+Перезапуск сервера не нужен — достаточно обновить страницу в браузере. Код и git не затрагиваются,
+`git pull` не конфликтует. Комиссии по категориям правьте прямо в `tariffs.json` (поле `categories`).
 
 ## Безопасность
 - Пароль — только в переменных окружения / в plist с правами `600`. В git не коммитится.
