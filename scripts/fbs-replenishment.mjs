@@ -35,10 +35,12 @@ const LEAD_MIN = numOr('lead-min', 'leadMin', 12);  // лид-тайм (мин),
 const COVER = numOr('cover', 'cover', 28);          // запас после прихода, дн (форс-мажоры в пути)
 const SEED_MIN = numOr('seed-min', 'seedMin', 10);  // мин. завоз, шт на каждый размер
 const HISTORY_DAYS = numOr('history-days', 'historyDays', 90); // окно «когда-либо на FF»
-// Белый список артикулов для пробного завоза (номера — первые цифры vendorCode).
-const seedArtArg = arg('seed-articles', null);
-const seedArticles = seedArtArg ? seedArtArg.split(',').map((s) => s.trim()).filter(Boolean) : (CFG.seedArticles || []);
-const seedArticleInts = new Set(seedArticles.map((x) => parseInt(x, 10)).filter((n) => !Number.isNaN(n)));
+// Ассортимент в работе: номера артикулов (первые цифры vendorCode). Отчёт —
+// и подсорт, и пробный завоз — считается ТОЛЬКО по этим артикулам. Пусто = все.
+const artArg = arg('articles', arg('seed-articles', null));
+const articles = artArg ? artArg.split(',').map((s) => s.trim()).filter(Boolean) : (CFG.articles || CFG.seedArticles || []);
+const scopeInts = new Set(articles.map((x) => parseInt(x, 10)).filter((n) => !Number.isNaN(n)));
+const inScope = (numInt) => !scopeInts.size || scopeInts.has(numInt);
 const jsonOnly = process.argv.includes('--json');
 const log = (...a) => process.stderr.write(a.join(' ') + '\n');
 
@@ -147,10 +149,11 @@ for (const w of warehouses) {
     const stk = stockWN.get(`${w.id}|${nm}`) || 0;
     const perDay = perDayOf(w.id, nm);
     if (stk === 0 && perDay === 0) continue;           // нечего показывать
-    const dtz = perDay > 0 ? stk / perDay : (stk > 0 ? Infinity : 0);
-    const reorder = Math.max(0, Math.ceil(perDay * HORIZON - stk));
     const vc = nmVendor.get(nm) || String(nm);
     const { num, numInt, variant } = parseArt(vc);
+    if (!inScope(numInt)) continue;                    // вне ассортимента в работе (напр. летнее)
+    const dtz = perDay > 0 ? stk / perDay : (stk > 0 ? Infinity : 0);
+    const reorder = Math.max(0, Math.ceil(perDay * HORIZON - stk));
     rows.push({
       nmID: nm, vendorCode: vc, articleNum: num, articleNumInt: numInt, variant,
       stock: stk, perDay: +perDay.toFixed(2),
@@ -182,7 +185,7 @@ const seedGrid = [];
 for (const c of cards) {
   const nm = c.nmID; const vc = c.vendorCode || String(nm);
   const { num, numInt, variant } = parseArt(vc);
-  if (seedArticleInts.size && !seedArticleInts.has(numInt)) continue; // вне белого списка завоза
+  if (!inScope(numInt)) continue; // вне белого списка завоза
   const sizeCount = nmSize.get(nm) || 1;
   const perWh = SEED_MIN * sizeCount;            // seed на склад = seedMin × размеры
   const seedByWarehouse = {}; const presentOn = []; let seedTotal = 0;
@@ -201,7 +204,7 @@ seedGrid.sort((a, b) => (a.articleNumInt - b.articleNumInt) || a.variant.localeC
 
 const snapshot = {
   generatedAt: new Date().toISOString(),
-  params: { velocityDays: VEL_DAYS, leadMin: LEAD_MIN, leadMax: LEAD, coverDays: COVER, horizonDays: HORIZON, seedMin: SEED_MIN, historyDays: HISTORY_DAYS, seedArticles },
+  params: { velocityDays: VEL_DAYS, leadMin: LEAD_MIN, leadMax: LEAD, coverDays: COVER, horizonDays: HORIZON, seedMin: SEED_MIN, historyDays: HISTORY_DAYS, articles },
   totals: {
     warehouses: whReports.length,
     registeredWarehouses: regWarehouses.length,
@@ -228,7 +231,7 @@ for (const w of whReports) {
   }
   if (w.rows.length > 12) log(`  … ещё ${w.rows.length - 12} строк`);
 }
-if (seedArticles.length) log(`\nБелый список завоза (номера артикулов): ${seedArticles.join(', ')}`);
+if (articles.length) log(`\nАссортимент в расчёте (номера артикулов): ${articles.join(", ")}`);
 if (seedGrid.length) {
   log(`\n=== ПРОБНЫЙ ЗАВОЗ — ${SEED_MIN} шт на КАЖДЫЙ размер, на склады без этого товара (из ${regWarehouses.length} зарегистрированных) ===`);
   log(`  строк: ${seedGrid.length} (новинок ${snapshot.totals.seedNovelty}, докладок ${snapshot.totals.seedRefill}) · всего к завозу: ${snapshot.totals.seedUnits} шт`);
