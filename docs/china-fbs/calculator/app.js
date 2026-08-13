@@ -46,6 +46,8 @@ const FIELDS = [
   // --- Курс валют ---
   { id: 'cbrRate',  group: 'Курс валют', label: 'Курс ЦБ, ₽ за 1 ¥', unit: '₽/¥', type: 'num', def: 12.0, step: 0.01,
     tip: 'Курс Центробанка РФ: сколько рублей стоит 1 юань. Обновите онлайн кнопкой ↻ или введите вручную. По нему считается реальная рублёвая стоимость прибыли и себестоимости.' },
+  { id: 'usdRate',  group: 'Курс валют', label: 'Курс ЦБ, ₽ за 1 $', unit: '₽/$', type: 'num', def: 90.0, step: 0.01,
+    tip: 'Курс доллара ЦБ РФ. Нужен, потому что логистику из Китая обычно считают в долларах за кг. Обновляется онлайн вместе с курсом юаня. Стоимость доставки в долларах пересчитывается в юани (валюту расчёта) по кросс-курсу $/¥.' },
   { id: 'wbMarkup', group: 'Курс валют', label: 'Надбавка «Курс ВБ»', unit: '%', type: 'pct', def: 0, step: 0.5,
     tip: 'Надбавка WB к курсу ЦБ, по которой считается рублёвая цена на витрине. WB ставит свой курс сам, до +10% к ЦБ. Точное значение видно в кабинете (рублёвая цена ÷ юаневую) — впишите фактическое. По умолчанию 0 = курс ЦБ.' },
 
@@ -79,10 +81,10 @@ const FIELDS = [
     tip: 'Логистика WB — доставка от склада WB покупателю. Тариф = ставка за кг × вес + фикс за заказ. По оферте тариф УЖЕ включает обратную доставку возвратов на фулфилмент в РФ и хранение — поэтому отдельных строк «хранение» и «обратная логистика» нет. Это НЕ то же самое, что ваша доставка товара из Китая на ФФ (см. ниже).' },
 
   // --- Первая миля и фулфилмент (ваши расходы до передачи в WB) ---
-  { id: 'chinaFreightPerKg', group: 'Доставка Китай→ФФ и фулфилмент', label: 'Доставка Китай→ФФ', unit: 'CNY/кг', type: 'num', def: 15, step: 0.5,
-    tip: 'Ваша логистика: доставка товара из Китая на склад фулфилмента. Считается по весу: тариф за кг × вес 1 шт. Прибавляется к закупке и даёт «общую себестоимость до ВБ».' },
-  { id: 'ffFeeRub', group: 'Доставка Китай→ФФ и фулфилмент', label: 'Услуги фулфилмента', unit: '₽/шт', type: 'num', def: 30, step: 5,
-    tip: 'Стоимость услуг фулфилмента за 1 штуку: приёмка на склад ФФ с пересчётом, приёмка и обработка заказов от WB, наклейка QR-кодов, доставка и сдача в сортировочный центр WB. В рублях — пересчитывается в юани по курсу ЦБ.' },
+  { id: 'chinaFreightPerKg', group: 'Доставка Китай→ФФ и фулфилмент', label: 'Доставка Китай→ФФ', unit: '$/кг', type: 'num', def: 2, step: 0.1,
+    tip: 'Ваша логистика: доставка товара из Китая на склад фулфилмента. Обычно считается в долларах за кг. На 1 штуку = тариф ($/кг) × вес 1 шт. Пересчитывается в юани по кросс-курсу $/¥ и прибавляется к закупке → «общая себестоимость до ВБ».' },
+  { id: 'ffFeeRub', group: 'Доставка Китай→ФФ и фулфилмент', label: 'Услуги фулфилмента', unit: '₽/заказ', type: 'num', def: 30, step: 5,
+    tip: 'Стоимость услуг фулфилмента за один ОБРАБОТАННЫЙ заказ: приёмка на склад ФФ с пересчётом, приёмка и обработка заказов от WB, наклейка QR-кодов, доставка и сдача в сортировочный центр WB. ФФ берёт плату за каждый заказ (включая невыкупленные) — поэтому масштабируется на 1/выкуп. В рублях, пересчёт в юани по курсу ЦБ.' },
 
   // --- Выкуп и возвраты ---
   { id: 'buyback', group: 'Выкуп и возвраты', label: 'Процент выкупа', unit: '%', type: 'pct', def: 65, step: 1,
@@ -132,14 +134,15 @@ function computeUnit(v) {
 
   const vat = v.vatPayer ? revenue - revenue / (1 + v.vatRate) : 0;
 
-  const firstMile = v.chinaFreightPerKg * v.weight;  // Китай→ФФ, ¥ на 1 шт (по весу)
-  const ffCost    = cbr > 0 ? v.ffFeeRub / cbr : 0;  // услуги ФФ, ₽→¥
+  const usdToCny  = cbr > 0 ? v.usdRate / cbr : 0;   // кросс-курс $/¥
+  const firstMile = v.chinaFreightPerKg * v.weight * usdToCny; // Китай→ФФ, $/кг×вес → ¥ на 1 шт
+  const ffPerOrder = cbr > 0 ? v.ffFeeRub / cbr : 0; // услуги ФФ за заказ, ₽→¥
   const cogsTotal = v.cogs + firstMile;              // общая себестоимость до ВБ
 
   const costs = {
     cogs:      v.cogs,
-    firstMile,                                       // доставка Китай→ФФ
-    ff:        ffCost,                               // услуги фулфилмента
+    firstMile,                                       // доставка Китай→ФФ (1× на штуку)
+    ff:        ffPerOrder * ordersPerSale,           // услуги ФФ за каждый обработанный заказ
     commission,
     fin,
     logistics: logOrder * ordersPerSale,             // логистика WB на все заказы (вкл. возвраты)
@@ -163,7 +166,7 @@ function computeUnit(v) {
   return {
     wbRate, cbr,
     baseRub, priceRub, buyerRub, revenue, cogsRub: v.cogs * cbr,
-    firstMile, ffCost, cogsTotal, cogsTotalRub: cogsTotal * cbr,
+    firstMile, ffPerOrder, cogsTotal, cogsTotalRub: cogsTotal * cbr,
     kvvApplied, weightKg, logOrder, lpName: lp.name,
     ordersPerSale, returnsPerSale,
     costs, totalCost,
@@ -287,7 +290,7 @@ function render() {
     <div class="price-row"><span>Цена продажи Рц (без скидки WB)</span><b>${fmt(r.priceRub, 0)} ₽</b><small>${fmt(r.revenue, 2)} ¥ — от неё считается комиссия и выплата</small></div>
     <div class="price-row hl"><span>Цена для покупателя (со скидкой WB)</span><b>${fmt(r.buyerRub, 0)} ₽</b></div>
     <div class="price-row"><span>Общая себестоимость до ВБ (закупка + Китай→ФФ)</span><b>${fmt(r.cogsTotal, 2)} ¥</b><small>≈ ${fmt(r.cogsTotalRub, 0)} ₽ · закупка ${fmt(v.cogs, 0)} ¥ + доставка ${fmt(r.firstMile, 2)} ¥</small></div>
-    <div class="price-note">Витрина — по Курсу ВБ ${fmt(r.wbRate, 2)} ₽/¥ (ЦБ ${fmt(r.cbr, 2)} + надбавка). Прибыль в ₽ — по курсу ЦБ (реальная стоимость юаней). Услуги ФФ ${fmt(v.ffFeeRub, 0)} ₽ ≈ ${fmt(r.ffCost, 2)} ¥.</div>`;
+    <div class="price-note">Витрина — по Курсу ВБ ${fmt(r.wbRate, 2)} ₽/¥ (ЦБ ${fmt(r.cbr, 2)} + надбавка). Прибыль в ₽ — по курсу ЦБ. Доставка Китай→ФФ ${fmt(v.chinaFreightPerKg, 2)} $/кг → ${fmt(r.firstMile, 2)} ¥/шт. Услуги ФФ ${fmt(v.ffFeeRub, 0)} ₽/заказ ≈ ${fmt(r.ffPerOrder, 2)} ¥.</div>`;
 
   const maxCost = Math.max(r.revenue, ...Object.values(r.costs));
   const rows = Object.keys(COST_LABELS).map(k => {
@@ -353,10 +356,12 @@ async function fetchRate() {
     clearTimeout(t);
     const data = await res.json();
     const cny = data.Valute.CNY;
+    const usd = data.Valute.USD;
     const rate = cny.Value / cny.Nominal;
     document.getElementById('cbrRate').value = rate.toFixed(2);
+    if (usd) document.getElementById('usdRate').value = (usd.Value / usd.Nominal).toFixed(2);
     const d = data.Date ? new Date(data.Date).toLocaleDateString('ru-RU') : '';
-    status.textContent = `курс ЦБ на ${d}: ${rate.toFixed(2)} ₽/¥`;
+    status.textContent = `курс ЦБ на ${d}: ¥ ${rate.toFixed(2)}${usd ? ', $ ' + (usd.Value / usd.Nominal).toFixed(2) : ''} ₽`;
     status.className = 'rate-status ok';
     render();
   } catch (e) {
