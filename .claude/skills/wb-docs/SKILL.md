@@ -50,6 +50,8 @@ node scripts/refresh-wb-docs.mjs
 - `docs/wb-api/limits.md` — снимок «Введение / Авторизация / статус-коды /
   лимиты» (первоисточник правил).
 - `docs/wb-api/analytics.md`, `docs/wb-api/reports-statistics.md` — снимки методов.
+- `docs/wb-api/losses-burned-warehouse.md` — как получить данные о потерях на
+  складах FBW и компенсациях ущерба (метод `reportDetailByPeriod`, лимиты).
 - `docs/wb-api/pages.json` — список страниц для регулярного обновления.
 - `lib/wbClient.js` — клиент WB API, который **соблюдает лимиты** (token-bucket на
   категорию, чтение `X-Ratelimit-*`, ожидание по `X-Ratelimit-Retry` на 429,
