@@ -67,19 +67,26 @@ Funnel даёт всего 3 публичных порта (443/8443/10000) — 
 
 ---
 
-## 3. Учётные данные
+## 3. Аккаунты и вход
 
-- Логин: **`SolexVK`**.
-- Пароль: хранится в `EnvironmentVariables:CALC_PASS` внутри
-  `/Library/LaunchDaemons/com.wbcalc.calculator.plist` (права `600`, только root). В git не попадает.
-- Прочитать текущий логин/пароль (для проверки):
+Вход — **система аккаунтов** (форма входа + cookie-сессия), НЕ Basic Auth. Пользователи хранятся
+в `calculator/users.json` (scrypt-хэши, в `.gitignore`). Секрет подписи сессий — в
+`calculator/.auth-secret` (в `.gitignore`).
+
+- **Админ** создаётся автоматически при первом запуске из `CALC_USER`/`CALC_PASS` (env службы):
+  логин **`SolexVK`**, пароль = `CALC_PASS` из plist. При создании в `serve.log` печатается
+  **код восстановления админа — сохраните его** (`grep "Код восстановления" serve.log`).
+- **Регистрация** новых пользователей — на `/register`, но вход разрешается только после
+  **одобрения админом** в панели `/admin`.
+- **Восстановление пароля** — на `/forgot` по логину + коду восстановления (email не нужен).
+- **Выход** — кнопка в шапке калькулятора.
+- Прочитать сид-логин/пароль админа из plist:
   ```bash
   sudo /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:CALC_USER" /Library/LaunchDaemons/com.wbcalc.calculator.plist
   sudo /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:CALC_PASS" /Library/LaunchDaemons/com.wbcalc.calculator.plist
   ```
-- Сменить пароль: отредактировать значение в plist (или переустановить службу через
-  `deploy/install-launchd.sh` с новым `CALC_PASS`, затем повторить перенос в LaunchDaemon) и
-  перезапустить: `sudo launchctl kickstart -k system/com.wbcalc.calculator`.
+- Сменить пароль админа — через `/forgot` (по коду восстановления) ИЛИ удалить `users.json`
+  и перезапустить службу (пересоздастся из env). `users.json`/`.auth-secret` в git не попадают.
 
 ---
 
@@ -92,7 +99,9 @@ Funnel даёт всего 3 публичных порта (443/8443/10000) — 
 |---|---|
 | `index.html` / `styles.css` / `app.js` | само приложение (форма из конфига, расчёт `computeUnit`, рендер) |
 | `standalone.html` | автосборка «всё в одном файле» (для пересылки/офлайна) |
-| `serve.cjs` | Node-сервер: раздаёт папку, HTTP Basic Auth, слушает `127.0.0.1` |
+| `serve.cjs` | Node-сервер: аккаунты (вход/регистрация/восстановление/выход, cookie-сессии), раздаёт папку, слушает `127.0.0.1` |
+| `users.json` | пользователи (scrypt-хэши), **в `.gitignore`** — важно бэкапить |
+| `.auth-secret` | секрет подписи сессий, **в `.gitignore`** |
 | `tariffs.json` | базовые тарифы логистики + комиссии по категориям + дата (в git) |
 | `tariffs.override.json` | runtime-переопределение тарифов (в `.gitignore`), пишет апдейтер |
 | `../tools/update-wb-tariffs.py` | скачивает офиц. PDF WB, пишет `tariffs.override.json` |
@@ -138,7 +147,8 @@ tailscale funnel --https=10000 off        # НЕ использовать `tails
 ## 6. Что важно сохранить при переносе/бэкапе
 
 1. **Репозиторий** (всё приложение и скрипты) — уже в GitHub, ветка `claude/china-fbs-branch-fuhjhb`.
-2. **Логин/пароль** (из plist) — записать в надёжное место (менеджер паролей).
+2. **`users.json`** (аккаунты) — бэкапить (в git его нет). Плюс логин/пароль админа и его код
+   восстановления — в менеджер паролей.
 3. **`tariffs.override.json`** — если запускали апдейтер и хотите сохранить актуальные ставки
    (иначе просто перегенерируется скриптом на новом сервере).
 4. Знание, что публичный порт Funnel у нас — **10000** (443/8443 заняты planner/getcourse).

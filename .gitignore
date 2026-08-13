@@ -6,3 +6,5 @@ reports-output/
 
 # Runtime tariff override (written by update-wb-tariffs.py) — not tracked
 docs/china-fbs/calculator/tariffs.override.json
+docs/china-fbs/calculator/users.json
+docs/china-fbs/calculator/.auth-secret
