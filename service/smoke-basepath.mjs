@@ -66,10 +66,10 @@ try {
   // Логаут-форма шлёт на /fbs/logout.
   ok(r.text.includes('action="/fbs/logout"'), 'BP: форма выхода → /fbs/logout');
 
-  // Неавторизованный заход на приглашение под префиксом → редирект на /fbs/login.
+  // Неавторизованный заход на приглашение под префиксом → на регистрацию (с префиксом).
   cookie = '';
   r = await req('GET', '/fbs/invite/doesnotexist');
-  ok(r.status === 302 && r.location === '/fbs/login', 'BP: /fbs/invite/... без входа → 302 /fbs/login');
+  ok(r.status === 302 && r.location === '/fbs/register', 'BP: /fbs/invite/... без входа → 302 /fbs/register');
 } catch (e) {
   console.error('Ошибка теста:', e); failed++;
 } finally {

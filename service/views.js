@@ -70,6 +70,11 @@ summary{cursor:pointer;font-weight:600;font-size:14px;padding:6px 0}
 @media(prefers-color-scheme:dark){.running{background:#12203f;border-color:#243a63;color:#9DB4F5}}
 .num{text-align:right;font-variant-numeric:tabular-nums}
 .scroll{overflow-x:auto}
+.note{background:#E8EEFF;border:1px solid #C7D6FF;color:#2A46A8;border-radius:9px;padding:10px 12px;margin-bottom:12px;font-size:13.5px}
+@media(prefers-color-scheme:dark){.note{background:#12203f;border-color:#243a63;color:#9DB4F5}}
+.gloss{margin:2px 0 0}.gloss dt{font-weight:700;font-size:13px;margin-top:9px}.gloss dd{margin:1px 0 0;color:var(--muted);font-size:12.5px}
+th[title],label[title],.hashelp{cursor:help;border-bottom:1px dotted transparent}
+th[title]{text-decoration:underline dotted 1px;text-underline-offset:3px}
 `;
 
 function layout({ title, body, user, csrf, base = '', head = '' }) {
@@ -88,14 +93,17 @@ function layout({ title, body, user, csrf, base = '', head = '' }) {
 
 const csrfField = (csrf) => `<input type="hidden" name="_csrf" value="${esc(csrf)}">`;
 const errBox = (e) => (e ? `<div class="err">${esc(e)}</div>` : '');
+const noteBox = (m) => (m ? `<div class="note">${esc(m)}</div>` : ''); // текст экранируется
+// Заголовок таблицы с всплывающей подсказкой (title). cls — доп. класс (напр. num).
+const thT = (label, title, cls = '') => `<th${cls ? ` class="${cls}"` : ''}${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</th>`;
 
-export function loginPage({ csrf, error, email, base = '' }) {
+export function loginPage({ csrf, error, email, notice, base = '' }) {
   const u = (p) => base + p;
   return layout({
     title: 'Вход — FBS-сервис', base,
     body: `<div class="center"><div class="card auth">
       <h1>Вход</h1><p class="sub">FBS-сервис отчётов и подсорта</p>
-      ${errBox(error)}
+      ${errBox(error)}${noteBox(notice)}
       <form method="post" action="${u('/login')}">${csrfField(csrf)}
         <label for="email">Email</label>
         <input id="email" name="email" type="email" autocomplete="username" value="${esc(email || '')}" required>
@@ -108,13 +116,13 @@ export function loginPage({ csrf, error, email, base = '' }) {
   });
 }
 
-export function registerPage({ csrf, error, email, name, base = '' }) {
+export function registerPage({ csrf, error, email, name, notice, base = '' }) {
   const u = (p) => base + p;
   return layout({
     title: 'Регистрация — FBS-сервис', base,
     body: `<div class="center"><div class="card auth">
       <h1>Регистрация</h1><p class="sub">Создаётся аккаунт и ваша организация — потом подключите кабинет WB</p>
-      ${errBox(error)}
+      ${errBox(error)}${noteBox(notice)}
       <form method="post" action="${u('/register')}">${csrfField(csrf)}
         <label for="name">Имя</label>
         <input id="name" name="name" type="text" autocomplete="name" value="${esc(name || '')}">
@@ -152,6 +160,20 @@ export function homePage({ user, orgs, csrf, base = '' }) {
 }
 
 const roleRu = (r) => ({ owner: 'владелец', admin: 'админ', member: 'участник' }[r] || r);
+
+// Глоссарий ролей/кабинета для страницы организации.
+function rolesGlossary() {
+  const dt = (t, d) => `<dt>${esc(t)}</dt><dd>${esc(d)}</dd>`;
+  return `<details style="margin-top:12px"><summary>❓ Пояснения: роли и кабинеты</summary>
+    <div style="padding:4px 2px 8px"><dl class="gloss">
+      ${dt('владелец', 'Создатель организации. Полный доступ, роль нельзя изменить/убрать.')}
+      ${dt('админ', 'Управляет кабинетами WB и участниками, приглашает людей.')}
+      ${dt('участник', 'Видит организацию, открывает и запускает отчёты. Не меняет кабинеты и людей.')}
+      ${dt('Активный кабинет', 'Кабинет, на токене которого считаются отчёты. Активный — один; переключается кнопкой.')}
+      ${dt('Токен WB API', 'Ключ доступа к API магазина. Нужны категории Контент + Маркетплейс + Статистика. Хранится в зашифрованном виде, на экран не выводится.')}
+    </dl></div>
+  </details>`;
+}
 
 function tokenMetaLine(meta) {
   if (!meta || !meta.checkedAt) return '<span class="muted">токен не привязан</span>';
@@ -226,14 +248,15 @@ export function orgPage(p) {
     <div class="section">
       <h2>Приглашения</h2>
       ${p.invError ? errBox(p.invError) : ''}${p.invOk ? okBox(p.invOk) : ''}
+      <p class="kv" style="margin:0 0 10px">Пока приглашение — это <b>ссылка</b>: вы создаёте её и отправляете человеку сами (почта/мессенджер). Он откроет ссылку, зарегистрируется своим паролем (или войдёт) и подтвердит вступление. Автоотправка на email появится позже.</p>
       <form method="post" action="${u(`/org/${org.id}/invite`)}" class="row-form">
         ${csrfField(csrf)}
-        <div><label for="invemail">Email</label><input id="invemail" name="email" type="email" placeholder="user@example.com" required></div>
-        <div><label for="invrole">Роль</label>
+        <div><label for="invemail" title="Email приглашаемого. Пока используется как пометка и подставляется в его регистрацию.">Email</label><input id="invemail" name="email" type="email" placeholder="user@example.com" required></div>
+        <div><label for="invrole" title="админ — управляет кабинетами и участниками; участник — смотрит и запускает отчёты">Роль</label>
           <select id="invrole" name="role"><option value="member">участник</option><option value="admin">админ</option></select></div>
-        <button class="btn mini" type="submit" style="height:38px">Пригласить</button>
+        <button class="btn mini" type="submit" style="height:38px">Создать ссылку</button>
       </form>
-      ${inviteRows ? `<table style="margin-top:12px"><thead><tr><th>Email</th><th>Роль</th><th>До</th><th></th></tr></thead><tbody>${inviteRows}</tbody></table>` : ''}
+      ${inviteRows ? `<table style="margin-top:12px"><thead><tr>${thT('Email', 'Кому выписано приглашение')}${thT('Роль', 'Роль, которую получит участник')}${thT('До', 'Дата, до которой действует ссылка (7 дней)')}<th></th></tr></thead><tbody>${inviteRows}</tbody></table>` : ''}
     </div>` : '';
 
   return layout({
@@ -246,14 +269,15 @@ export function orgPage(p) {
       <div class="section">
         <h2>Кабинеты WB</h2>
         ${p.cabError ? errBox(p.cabError) : ''}${(p.cabWarn || []).map(okOrWarn).join('')}${p.cabOk ? okBox(p.cabOk) : ''}
-        <table><thead><tr><th>Кабинет</th><th>Токен</th><th></th></tr></thead><tbody>${cabRows}</tbody></table>
+        <table><thead><tr>${thT('Кабинет', 'Название кабинета WB (магазина/продавца)')}${thT('Токен', 'Тип токена, продавец, срок действия и доступные категории API')}<th></th></tr></thead><tbody>${cabRows}</tbody></table>
         ${connectForm}
       </div>
 
       <div class="section">
-        <h2>Участники</h2>
+        <h2 title="Люди с доступом к организации и их роли">Участники</h2>
         ${p.memError ? errBox(p.memError) : ''}${p.memOk ? okBox(p.memOk) : ''}
-        <table><thead><tr><th>Пользователь</th><th>Роль</th><th></th></tr></thead><tbody>${memRows}</tbody></table>
+        <table><thead><tr>${thT('Пользователь', 'Имя и email участника')}${thT('Роль', 'владелец — полный доступ; админ — управляет кабинетами и участниками; участник — смотрит и запускает отчёты')}<th></th></tr></thead><tbody>${memRows}</tbody></table>
+        ${rolesGlossary()}
       </div>
 
       ${inviteSection}
@@ -268,7 +292,10 @@ export function inviteAcceptPage({ csrf, user, org, invite, already, token, inva
     : already
       ? `<h1>Вы уже участник</h1><p class="sub">${esc(org.name)} — вы уже состоите в этой организации.</p><div class="alt"><a href="${u(`/org/${org.id}`)}">Открыть организацию</a></div>`
       : `<h1>Приглашение</h1>
-         <p class="sub">Вас приглашают в организацию <b>${esc(org.name)}</b> как <span class="badge ${esc(invite.role)}">${esc(roleRu(invite.role))}</span></p>
+         <p class="sub">Приглашение для <b>${esc(invite.email)}</b> в организацию <b>${esc(org.name)}</b> как <span class="badge ${esc(invite.role)}">${esc(roleRu(invite.role))}</span></p>
+         ${user.email && invite.email && user.email.toLowerCase() !== String(invite.email).toLowerCase()
+    ? `<div class="warn">Вы вошли как <b>${esc(user.email)}</b> — это не тот email, на который выписано приглашение. Можно вступить этим аккаунтом или выйти и войти под нужным.</div>`
+    : `<p class="kv">Вы вошли как <b>${esc(user.email)}</b>. Нажмите кнопку, чтобы вступить.</p>`}
          <form method="post" action="${u(`/invite/${esc(token)}/accept`)}">${csrfField(csrf)}
            <button class="btn" type="submit">Принять приглашение</button>
          </form>
@@ -288,6 +315,45 @@ const okOrWarn = (m) => `<div class="warn">${esc(m)}</div>`;
 const nf = (n) => (n == null ? '' : Number(n).toLocaleString('ru-RU'));
 const ST = { 'разрыв до поставки': 'st-gap', 'нет остатка': 'st-gap', 'риск разрыва': 'st-risk', 'ок': 'st-ok', 'неликвид': 'st-dead', 'нет данных': 'st-dead' };
 const statusBadge = (s) => `<span class="badge ${ST[s] || 'st-dead'}">${esc(s)}</span>`;
+
+// Глоссарий подсорта — работает и на телефоне (в отличие от hover-подсказок).
+function podsortGlossary() {
+  const dt = (t, d) => `<dt>${esc(t)}</dt><dd>${esc(d)}</dd>`;
+  return `<details style="margin-top:14px"><summary>❓ Пояснения к параметрам, колонкам и статусам</summary>
+    <div style="padding:4px 2px 8px">
+      <h3 style="margin:8px 0 2px;font-size:14px">Параметры</h3>
+      <dl class="gloss">
+        ${dt('Артикулы в работе', 'Номера моделей (первые цифры артикула WB), по которым считаем. Пусто — значения по умолчанию сервиса.')}
+        ${dt('Окно скорости, дн', 'За сколько последних дней берём среднюю скорость продаж (шт/день) по каждому размеру на каждом складе.')}
+        ${dt('Лид мин / макс, дн', 'Срок «заказ → товар на FF-складе» (сборка + доставка), минимум и максимум. Горизонт заказа = Лид макс + Запас.')}
+        ${dt('Запас, дн', 'Страховой запас в днях сверх лид-тайма — на сколько дней продаж хотим покрыть.')}
+        ${dt('Завоз/размер', 'Сколько штук завозить «на пробу» на склад, где этого размера ещё не было, — на каждый размер.')}
+        ${dt('История, дн', 'За сколько последних дней берём заказы для анализа присутствия товара и скорости.')}
+      </dl>
+      <h3 style="margin:12px 0 2px;font-size:14px">Колонки</h3>
+      <dl class="gloss">
+        ${dt('Арт / Цвет / Разм', 'Артикул (модель), вариант/цвет, размер (techSize).')}
+        ${dt('Остаток', 'Текущий остаток этого размера на этом складе (FBS).')}
+        ${dt('/дн', 'Средняя скорость продаж, шт/день, за окно скорости.')}
+        ${dt('Дней до 0', 'На сколько дней хватит остатка при текущей скорости (∞ — продаж нет).')}
+        ${dt('Подсорт', 'Рекомендация к заказу = скорость × (Лид макс + Запас) − остаток. Округление вверх, минимум 0.')}
+      </dl>
+      <h3 style="margin:12px 0 2px;font-size:14px">Статусы</h3>
+      <dl class="gloss">
+        ${dt('разрыв до поставки', 'Остаток кончится раньше минимального лид-тайма — подсорт может не успеть доехать.')}
+        ${dt('риск разрыва', 'Может кончиться до максимального лид-тайма.')}
+        ${dt('нет остатка', 'На складе 0, но продажи есть.')}
+        ${dt('неликвид', 'Остаток есть, продаж нет.')}
+        ${dt('ок', 'Запаса хватает.')}
+      </dl>
+      <h3 style="margin:12px 0 2px;font-size:14px">Таблицы</h3>
+      <dl class="gloss">
+        ${dt('Сводная', 'Строка = артикул × цвет × размер; столбцы = склады; значение = сколько заказать на этот склад; Итого — сумма по строке.')}
+        ${dt('Пробный завоз', 'Новинка — карточки ещё не было ни на одном FF-складе; докладка — есть на других складах, но не на этом.')}
+      </dl>
+    </div>
+  </details>`;
+}
 
 export function reportsPage(p) {
   const { user, csrf, base = '', org, role, active } = p;
@@ -332,27 +398,28 @@ export function podsortPage(p) {
   else if (job && job.state === 'error') statusBox = `<div class="err" style="white-space:pre-wrap">Ошибка пересчёта: ${esc(job.error || '')}</div>`;
   else if (job && job.state === 'done') statusBox = okBox('Пересчёт завершён.');
 
-  // Форма параметров.
+  // Форма параметров (у каждого поля — всплывающая подсказка title + краткий хинт).
   const f = form;
-  const field = (name, label, val, hint) => `<div><label for="${name}">${esc(label)}${hint ? ` <span class="muted">${esc(hint)}</span>` : ''}</label>
-    <input id="${name}" name="${name}" type="number" min="1" value="${esc(String(val))}" style="width:110px"></div>`;
+  const field = (name, label, val, hint, title) => `<div><label for="${name}" title="${esc(title)}">${esc(label)}${hint ? ` <span class="muted">${esc(hint)}</span>` : ''}</label>
+    <input id="${name}" name="${name}" type="number" min="1" value="${esc(String(val))}" title="${esc(title)}" style="width:120px"></div>`;
   const formSection = `
     <div class="section">
       <h2>Параметры расчёта</h2>
+      <label for="articles" title="Номера моделей (первые цифры артикула WB), которые сейчас в работе. Отчёт и пробный завоз считаются только по ним. Пусто — берутся значения по умолчанию сервиса.">Артикулы в работе <span class="muted">(номера через запятую; пусто — по умолчанию)</span></label>
       <form method="post" action="${u(`/org/${org.id}/reports/podsort/refresh`)}">
         ${csrfField(csrf)}
-        <label for="articles">Артикулы в работе <span class="muted">(номера через запятую; пусто — по умолчанию)</span></label>
-        <input id="articles" name="articles" type="text" value="${esc(f.articles)}" placeholder="002, 003, 023 …">
+        <input id="articles" name="articles" type="text" value="${esc(f.articles)}" placeholder="002, 003, 023 …" title="Номера моделей через запятую. Только по ним считается подсорт и завоз.">
         <div class="row-form" style="margin-top:12px;gap:14px">
-          ${field('velocityDays', 'Окно скорости, дн', f.velocityDays)}
-          ${field('leadMin', 'Лид мин, дн', f.leadMin)}
-          ${field('leadMax', 'Лид макс, дн', f.leadMax)}
-          ${field('cover', 'Запас, дн', f.cover)}
-          ${field('seedMin', 'Завоз/размер', f.seedMin)}
-          ${field('historyDays', 'История, дн', f.historyDays)}
+          ${field('velocityDays', 'Окно скорости, дн', f.velocityDays, '', 'За сколько последних дней считаем среднюю скорость продаж (шт/день) по каждому размеру на каждом складе.')}
+          ${field('leadMin', 'Лид мин, дн', f.leadMin, '', 'Минимальный срок «заказ → товар на FF-складе» (сборка + доставка). Если запас кончится раньше — статус «разрыв до поставки».')}
+          ${field('leadMax', 'Лид макс, дн', f.leadMax, '', 'Максимальный срок поставки на FF-склад. Горизонт заказа = Лид макс + Запас.')}
+          ${field('cover', 'Запас, дн', f.cover, '', 'Страховой запас в днях сверх лид-тайма — на сколько дней продаж хотим покрыть. Горизонт заказа = Лид макс + Запас.')}
+          ${field('seedMin', 'Завоз/размер', f.seedMin, '', 'Сколько штук завозить «на пробу» на склад, где этого размера ещё не было (новинка/докладка), — на каждый размер.')}
+          ${field('historyDays', 'История, дн', f.historyDays, '', 'За сколько последних дней берём заказы для анализа присутствия товара и скорости.')}
         </div>
         <button class="btn" type="submit" style="max-width:280px;margin-top:18px"${running ? ' disabled' : ''}>${running ? 'Идёт пересчёт…' : 'Обновить данные'}</button>
       </form>
+      ${podsortGlossary()}
     </div>`;
 
   // Результаты последнего снимка.
@@ -368,7 +435,7 @@ export function podsortPage(p) {
 
     // Сводная: артикул×цвет×размер × склад.
     const cols = s.warehouseList || [];
-    const pivotHead = `<tr><th>Арт</th><th>Цвет</th><th>Разм</th>${cols.map((c) => `<th class="num">${esc(c)}</th>`).join('')}<th class="num">Итого</th></tr>`;
+    const pivotHead = `<tr>${thT('Арт', 'Номер артикула (модель)')}${thT('Цвет', 'Вариант/цвет исполнения')}${thT('Разм', 'Размер (techSize карточки)')}${cols.map((c) => thT(c, `Сколько заказать на склад «${c}»`, 'num')).join('')}${thT('Итого', 'Сумма подсорта по строке (все склады)', 'num')}</tr>`;
     const pivotRows = (s.pivot || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td>${esc(r.variant)}</td><td>${esc(r.techSize)}</td>${cols.map((c) => `<td class="num">${r.byWarehouse?.[c] ? nf(r.byWarehouse[c]) : ''}</td>`).join('')}<td class="num"><b>${nf(r.total)}</b></td></tr>`).join('');
     const pivotTable = pivotRows
       ? `<div class="scroll"><table><thead>${pivotHead}</thead><tbody>${pivotRows}</tbody></table></div>`
@@ -378,7 +445,7 @@ export function podsortPage(p) {
     const whBlocks = (s.warehouses || []).filter((w) => w.rows?.length).map((w) => `
       <details><summary>${esc(w.name)} — остаток ${nf(w.stockUnits)} · подсорт ${nf(w.reorderUnits)} шт · строк ${w.rows.length}</summary>
         <div class="scroll"><table>
-          <thead><tr><th>Арт</th><th>Цвет</th><th>Разм</th><th class="num">Остаток</th><th class="num">/дн</th><th class="num">Дней до 0</th><th class="num">Подсорт</th><th>Статус</th></tr></thead>
+          <thead><tr>${thT('Арт', 'Номер артикула (модель)')}${thT('Цвет', 'Вариант/цвет')}${thT('Разм', 'Размер')}${thT('Остаток', 'Текущий остаток этого размера на этом складе (FBS)', 'num')}${thT('/дн', 'Средняя скорость продаж, шт/день, за окно скорости', 'num')}${thT('Дней до 0', 'На сколько дней хватит остатка при текущей скорости (∞ — продаж нет)', 'num')}${thT('Подсорт', 'Рекомендация к заказу = скорость × горизонт − остаток (округление вверх, минимум 0)', 'num')}${thT('Статус', 'Оценка риска нехватки — см. «Пояснения» выше')}</tr></thead>
           <tbody>${w.rows.map((r) => `<tr><td>${esc(r.articleNum)}</td><td>${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td class="num">${nf(r.stock)}</td><td class="num">${esc(String(r.perDay))}</td><td class="num">${r.daysToZero == null ? '∞' : esc(String(r.daysToZero))}</td><td class="num"><b>${nf(r.reorderQty)}</b></td><td>${statusBadge(r.status)}</td></tr>`).join('')}</tbody>
         </table></div>
       </details>`).join('');
@@ -387,7 +454,7 @@ export function podsortPage(p) {
     const seedRows = (s.seedGrid || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td>${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td><span class="badge ${r.kind === 'новинка' ? 'st-ok' : 'st-risk'}">${esc(r.kind)}</span></td><td class="num"><b>${nf(r.seedTotal)}</b></td></tr>`).join('');
     const seedBlock = seedRows
       ? `<details><summary>Пробный завоз — ${nf(t.seedRows)} строк (${nf(t.seedNovelty)} новинок + ${nf(t.seedRefill)} докладок) = ${nf(t.seedUnits)} шт</summary>
-          <div class="scroll"><table><thead><tr><th>Арт</th><th>Цвет</th><th>Разм</th><th>Тип</th><th class="num">Кол-во</th></tr></thead><tbody>${seedRows}</tbody></table></div></details>`
+          <div class="scroll"><table><thead><tr>${thT('Арт', 'Номер артикула')}${thT('Цвет', 'Вариант/цвет')}${thT('Разм', 'Размер')}${thT('Тип', 'Новинка — карточки ещё не было ни на одном FF-складе; докладка — есть на других складах, но не на этом')}${thT('Кол-во', 'Всего штук к пробному завозу по всем складам (по seedMin на размер)', 'num')}</tr></thead><tbody>${seedRows}</tbody></table></div></details>`
       : '';
 
     results = `<div class="section">

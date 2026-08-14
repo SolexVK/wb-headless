@@ -8,7 +8,13 @@ import { logger } from './logger.js';
 export const authRouter = express.Router();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const setSession = (req, u) => { req.session.user = { id: u.id, email: u.email, name: u.name }; };
+const setSession = (req, u) => { req.session.user = { id: u.id, email: u.email, name: u.name }; req.session.inviteHint = undefined; };
+// Подсказка при заходе по ссылке-приглашению (email + название организации).
+const inviteNotice = (req) => {
+  const h = req.session.inviteHint;
+  if (!h) return {};
+  return { email: h.email, notice: `Вас пригласили в организацию «${h.orgName}». Зарегистрируйтесь или войдите — затем подтвердите вступление.` };
+};
 // Куда вернуть после входа: сохранённый returnTo (напр. ссылка-приглашение), иначе '/'.
 // Разрешаем только локальные пути (без //) — защита от open redirect.
 const popReturnTo = (req) => {
@@ -20,7 +26,7 @@ const popReturnTo = (req) => {
 // ── Регистрация ─────────────────────────────────────────────────────────────
 authRouter.get('/register', (req, res) => {
   if (req.session.user) return res.redirect('/');
-  res.send(registerPage({ csrf: res.locals.csrf, base: res.locals.base }));
+  res.send(registerPage({ csrf: res.locals.csrf, base: res.locals.base, ...inviteNotice(req) }));
 });
 
 authRouter.post('/register', authLimiter, (req, res) => {
@@ -48,7 +54,7 @@ authRouter.post('/register', authLimiter, (req, res) => {
 // ── Вход ────────────────────────────────────────────────────────────────────
 authRouter.get('/login', (req, res) => {
   if (req.session.user) return res.redirect('/');
-  res.send(loginPage({ csrf: res.locals.csrf, base: res.locals.base }));
+  res.send(loginPage({ csrf: res.locals.csrf, base: res.locals.base, ...inviteNotice(req) }));
 });
 
 authRouter.post('/login', authLimiter, (req, res) => {

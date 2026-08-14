@@ -7,6 +7,7 @@ import os from 'os';
 import path from 'path';
 
 process.env.NODE_ENV = 'test';
+process.env.BASE_PATH = ''; // тест в корне: не даём .env (BASE_PATH=/fbs) сбить пути
 process.env.SESSION_SECRET = 'test-secret-please-change';
 process.env.TOKEN_ENC_KEY = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'; // 32 байта hex (тест)
 process.env.WB_PING_ONLINE = '0'; // офлайн: проверяем токен только по маске (без сети)

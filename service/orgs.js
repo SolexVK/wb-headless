@@ -100,7 +100,7 @@ orgRouter.post('/org/:id/invite', requireAuth, loadOrg, requireManage, (req, res
   const token = Invitations.create(req.org.id, email, role);
   logger.info({ orgId: req.org.id, email, role }, 'приглашение создано');
   const link = `${req.protocol}://${req.get('host')}${res.locals.base || ''}/invite/${token}`;
-  renderOrg(req, res, { invOk: `Приглашение создано. Ссылка (действует 7 дней): ${link}` });
+  renderOrg(req, res, { invOk: `Ссылка-приглашение для ${email} создана (действует 7 дней). Отправьте её человеку любым способом — почта/мессенджер. Он откроет её, зарегистрируется своим паролем (или войдёт) и подтвердит вступление:\n${link}` });
 });
 
 orgRouter.post('/org/:id/invite/:inviteId/revoke', requireAuth, loadOrg, requireManage, (req, res) => {
@@ -125,7 +125,15 @@ orgRouter.post('/org/:id/member/:userId/remove', requireAuth, loadOrg, requireMa
 orgRouter.get('/invite/:token', (req, res) => {
   const invite = Invitations.byToken(req.params.token);
   // req.url — путь без префикса base (его срезает mount); redirect-обёртка вернёт base сама.
-  if (!req.session.user) { req.session.returnTo = req.url; return res.redirect('/login'); }
+  if (!req.session.user) {
+    req.session.returnTo = req.url;
+    // Подсказка для формы регистрации/входа: по какому email и в какую орг зовут.
+    if (Invitations.isValid(invite)) {
+      const o = Orgs.byId(invite.org_id);
+      req.session.inviteHint = { email: invite.email, orgName: o?.name || '' };
+    }
+    return res.redirect('/register'); // приглашённые обычно новые; на странице есть ссылка «Войти»
+  }
   if (!Invitations.isValid(invite)) return res.status(410).send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, invalid: true, base: res.locals.base }));
   const org = Orgs.byId(invite.org_id);
   const already = Orgs.isMember(req.session.user.id, invite.org_id);
