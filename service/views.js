@@ -2,12 +2,18 @@
 // Утилитарные страницы авторизации + заглушка кабинета. Экранируем весь ввод.
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// Палитра как токены. Тёмная тема применяется двумя способами: по системной
+// настройке (когда явная тема НЕ выбрана) и при явном выборе data-theme="dark".
+// Явный светлый выбор (data-theme="light") оставляет светлые токены :root.
+const LIGHT = '--ground:#EDF0F6;--surface:#fff;--ink:#141A24;--muted:#57617A;--line:#E1E7F1;--accent:#4B57C6;--accent-d:#3A45AE;--danger:#C43A50;--ok:#1C8A5B;--radius:12px;--chip-bg:#E9EAFB;--err-bg:#FBE7EA;--err-bd:#F0C4CD;--ok-bg:#E6F5EE;--ok-bd:#BFE6D3;--warn-bg:#FCF3E2;--warn-bd:#F0DCB0;--warn-tx:#8A5A12;--info-bg:#E8EEFF;--info-bd:#C7D6FF;--info-tx:#2A46A8;--b-owner-bg:#E7ECFF;--b-owner-tx:#3A45AE;--b-admin-bg:#E6F0FF;--b-admin-tx:#2563B0;--b-neutral-bg:#EEF1F6;--b-neutral-tx:#57617A;--b-ok-bg:#E6F5EE;--b-ok-tx:#1C8A5B;--b-bad-bg:#F1E7EA;--b-bad-tx:#C43A50';
+const DARK = '--ground:#0C0F16;--surface:#141926;--ink:#E7ECF5;--muted:#9AA4B8;--line:#232B3C;--accent:#8E97F5;--accent-d:#A7AEFB;--chip-bg:#1E2340;--err-bg:#2E1620;--err-bd:#5a2733;--ok-bg:#122a20;--ok-bd:#1f4736;--warn-bg:#2c2413;--warn-bd:#514023;--warn-tx:#E3B778;--info-bg:#12203f;--info-bd:#243a63;--info-tx:#9DB4F5;--b-owner-bg:#262c52;--b-owner-tx:#A7AEFB;--b-admin-bg:#1c2c46;--b-admin-tx:#8FB6F0;--b-neutral-bg:#232B3C;--b-neutral-tx:#9AA4B8;--b-ok-bg:#123021;--b-ok-tx:#5FD39C;--b-bad-bg:#3a2029;--b-bad-tx:#E98AA0';
 const CSS = `
-:root{--ground:#EDF0F6;--surface:#fff;--ink:#141A24;--muted:#57617A;--line:#E1E7F1;--accent:#4B57C6;--accent-d:#3A45AE;--danger:#C43A50;--ok:#1C8A5B;--radius:12px}
-@media(prefers-color-scheme:dark){:root{--ground:#0C0F16;--surface:#141926;--ink:#E7ECF5;--muted:#9AA4B8;--line:#232B3C;--accent:#8E97F5;--accent-d:#A7AEFB}}
+:root{${LIGHT}}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){${DARK}}}
+:root[data-theme="dark"]{${DARK}}
 *{box-sizing:border-box}body{margin:0;background:var(--ground);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.55}
 a{color:var(--accent-d);text-decoration:none}a:hover{text-decoration:underline}
-.top{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--surface)}
+.top{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--surface);flex-wrap:wrap;gap:8px}
 .top .brand{font-weight:750;letter-spacing:-.01em;color:var(--ink)}.top .brand:hover{text-decoration:none}.top .brand span{color:var(--accent-d)}
 .top form{margin:0}
 .wrap{max-width:960px;margin:0 auto;padding:28px 22px}
@@ -23,17 +29,14 @@ input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(
 .btn:hover{background:var(--accent-d)}
 .btn-sm{width:auto;padding:7px 13px;margin:0;font-size:13px;background:transparent;color:var(--accent-d);border:1px solid var(--line)}
 .alt{margin-top:16px;font-size:13.5px;color:var(--muted);text-align:center}
-.err{background:#FBE7EA;color:var(--danger);border:1px solid #F0C4CD;border-radius:9px;padding:10px 12px;font-size:13.5px;margin-bottom:6px}
-@media(prefers-color-scheme:dark){.err{background:#2E1620;border-color:#5a2733}}
+.err{background:var(--err-bg);color:var(--danger);border:1px solid var(--err-bd);border-radius:9px;padding:10px 12px;font-size:13.5px;margin-bottom:6px}
 .grid{display:grid;gap:14px;grid-template-columns:1fr 1fr}
 .tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
 .tile h3{margin:0 0 4px;font-size:15px}.tile p{margin:0;color:var(--muted);font-size:13px}
-.pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;background:#E9EAFB;color:var(--accent-d)}
-@media(prefers-color-scheme:dark){.pill{background:#1E2340}}
+.pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;background:var(--chip-bg);color:var(--accent-d)}
 .muted{color:var(--muted)} .soon{opacity:.6}
-.ok{background:#E6F5EE;color:var(--ok);border:1px solid #BFE6D3;border-radius:9px;padding:10px 12px;font-size:13.5px;margin-bottom:12px;word-break:break-word}
-.warn{background:#FCF3E2;color:#8A5A12;border:1px solid #F0DCB0;border-radius:9px;padding:9px 12px;font-size:13px;margin-bottom:10px}
-@media(prefers-color-scheme:dark){.ok{background:#122a20;border-color:#1f4736}.warn{background:#2c2413;border-color:#514023;color:#E3B778}}
+.ok{background:var(--ok-bg);color:var(--ok);border:1px solid var(--ok-bd);border-radius:9px;padding:10px 12px;font-size:13.5px;margin-bottom:12px;word-break:break-word}
+.warn{background:var(--warn-bg);color:var(--warn-tx);border:1px solid var(--warn-bd);border-radius:9px;padding:9px 12px;font-size:13px;margin-bottom:10px}
 h2{font-size:17px;letter-spacing:-.01em;margin:26px 0 10px}
 .section{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;margin-bottom:16px}
 .section h2{margin-top:0}
@@ -41,18 +44,17 @@ table{width:100%;border-collapse:collapse;font-size:13.5px}
 th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
 th{font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:700}
 tr:last-child td{border-bottom:0}
-.badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:#E9EAFB;color:var(--accent-d)}
-.badge.owner{background:#E7ECFF;color:#3A45AE}.badge.admin{background:#E6F0FF;color:#2563B0}.badge.member{background:#EEF1F6;color:#57617A}
-.badge.on{background:#E6F5EE;color:var(--ok)}.badge.off{background:#F1E7EA;color:var(--danger)}
-@media(prefers-color-scheme:dark){.badge{background:#1E2340}.badge.on{background:#123021;color:#5FD39C}.badge.off{background:#3a2029;color:#E98AA0}}
+.badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--chip-bg);color:var(--accent-d)}
+.badge.owner{background:var(--b-owner-bg);color:var(--b-owner-tx)}.badge.admin{background:var(--b-admin-bg);color:var(--b-admin-tx)}.badge.member{background:var(--b-neutral-bg);color:var(--b-neutral-tx)}
+.badge.on{background:var(--b-ok-bg);color:var(--b-ok-tx)}.badge.off{background:var(--b-bad-bg);color:var(--b-bad-tx)}
 .kv{font-size:12.5px;color:var(--muted)}.kv b{color:var(--ink);font-weight:600}
 .row-form{display:flex;gap:8px;align-items:end;flex-wrap:wrap}
 .row-form label{margin:0}.row-form input,.row-form select{width:auto}
 .row-form input[type=text],.row-form input[type=email]{min-width:220px}
 textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--ground);color:var(--ink);font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;min-height:74px;resize:vertical}
 select{padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--ground);color:var(--ink);font-size:14px}
-.btn-danger{background:transparent;color:var(--danger);border:1px solid #F0C4CD}
-.btn-danger:hover{background:#FBE7EA}
+.btn-danger{background:transparent;color:var(--danger);border:1px solid var(--err-bd)}
+.btn-danger:hover{background:var(--err-bg)}
 .mini{font-size:12px;padding:5px 10px;margin:0;width:auto;display:inline-block}
 .linkbox{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--ground);border:1px solid var(--line);border-radius:8px;padding:8px 10px;word-break:break-all;margin-top:6px}
 .crumbs{font-size:13px;margin-bottom:4px}
@@ -62,35 +64,43 @@ select{padding:9px 12px;border:1px solid var(--line);border-radius:9px;backgroun
 .tilek .n{font-size:22px;font-weight:750;letter-spacing:-.02em}.tilek .l{font-size:12px;color:var(--muted)}
 details{margin:10px 0;border:1px solid var(--line);border-radius:10px;padding:6px 14px;background:var(--surface)}
 summary{cursor:pointer;font-weight:600;font-size:14px;padding:6px 0}
-.badge.st-gap{background:#F1E7EA;color:var(--danger)}.badge.st-risk{background:#FCF3E2;color:#8A5A12}.badge.st-ok{background:#E6F5EE;color:var(--ok)}.badge.st-dead{background:#EEF1F6;color:#57617A}
-@media(prefers-color-scheme:dark){.badge.st-gap{background:#3a2029;color:#E98AA0}.badge.st-risk{background:#2c2413;color:#E3B778}.badge.st-ok{background:#123021;color:#5FD39C}.badge.st-dead{background:#1E2340;color:#9AA4B8}}
+.badge.st-gap{background:var(--b-bad-bg);color:var(--b-bad-tx)}.badge.st-risk{background:var(--warn-bg);color:var(--warn-tx)}.badge.st-ok{background:var(--b-ok-bg);color:var(--b-ok-tx)}.badge.st-dead{background:var(--b-neutral-bg);color:var(--b-neutral-tx)}
 .dl{display:inline-block;margin:0 8px 8px 0;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-weight:600;background:var(--surface);color:var(--accent-d)}
 .dl:hover{text-decoration:none;border-color:var(--accent)}
-.running{background:#E8EEFF;border:1px solid #C7D6FF;color:#2A46A8;border-radius:9px;padding:11px 13px;margin-bottom:12px;font-size:13.5px}
-@media(prefers-color-scheme:dark){.running{background:#12203f;border-color:#243a63;color:#9DB4F5}}
+.running{background:var(--info-bg);border:1px solid var(--info-bd);color:var(--info-tx);border-radius:9px;padding:11px 13px;margin-bottom:12px;font-size:13.5px}
 .num{text-align:right;font-variant-numeric:tabular-nums}
 /* Таблицы отчётов: заголовки по центру (гориз.+верт.), данные по центру, кроме .tl (Цвет/Статус — слева). */
 .rt th,.rt td{text-align:center;vertical-align:middle}
 .rt td.tl{text-align:left}
 .rt .num{text-align:center;font-variant-numeric:tabular-nums}
 .scroll{overflow-x:auto}
-.note{background:#E8EEFF;border:1px solid #C7D6FF;color:#2A46A8;border-radius:9px;padding:10px 12px;margin-bottom:12px;font-size:13.5px}
-@media(prefers-color-scheme:dark){.note{background:#12203f;border-color:#243a63;color:#9DB4F5}}
+.note{background:var(--info-bg);border:1px solid var(--info-bd);color:var(--info-tx);border-radius:9px;padding:10px 12px;margin-bottom:12px;font-size:13.5px}
 .gloss{margin:2px 0 0}.gloss dt{font-weight:700;font-size:13px;margin-top:9px}.gloss dd{margin:1px 0 0;color:var(--muted);font-size:12.5px}
+.theme-sel{padding:6px 8px;font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
 th[title],label[title],.hashelp{cursor:help;border-bottom:1px dotted transparent}
 th[title]{text-decoration:underline dotted 1px;text-underline-offset:3px}
 `;
 
 function layout({ title, body, user, csrf, base = '', head = '' }) {
   const u = (p) => base + p;
+  const theme = (user && ['light', 'dark', 'system'].includes(user.theme)) ? user.theme : 'system';
+  const themeAttr = theme === 'light' || theme === 'dark' ? ` data-theme="${theme}"` : '';
+  const opt = (v, label) => `<option value="${v}"${theme === v ? ' selected' : ''}>${label}</option>`;
+  const themeCtl = user
+    ? `<form method="post" action="${u('/theme')}" style="margin:0">${csrfField(csrf)}
+        <select name="theme" class="theme-sel" title="Тема оформления" onchange="this.form.submit()" aria-label="Тема">
+          ${opt('system', 'Тема: системная')}${opt('light', 'Тема: светлая')}${opt('dark', 'Тема: тёмная')}
+        </select></form>`
+    : '';
   const nav = user
     ? `<div class="top"><a class="brand" href="${u('/')}">FBS<span>·</span>сервис</a>
-        <div style="display:flex;gap:12px;align-items:center">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
           <span class="muted" style="font-size:13px">${esc(user.email)}</span>
+          ${themeCtl}
           <form method="post" action="${u('/logout')}">${csrfField(csrf)}<button class="btn btn-sm" type="submit">Выйти</button></form>
         </div></div>`
     : '';
-  return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
+  return `<!doctype html><html lang="ru"${themeAttr}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">${head}<title>${esc(title)}</title>
 <style>${CSS}</style></head><body>${nav}${body}</body></html>`;
 }

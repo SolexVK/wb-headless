@@ -9,9 +9,10 @@ import { encryptToken, decryptToken } from './tokens.js';
 
 const q = {
   userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
-  userById: db.prepare('SELECT id, email, name, created_at, last_login_at FROM users WHERE id = ?'),
+  userById: db.prepare('SELECT id, email, name, theme, created_at, last_login_at FROM users WHERE id = ?'),
   insertUser: db.prepare('INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'),
   deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
+  setTheme: db.prepare('UPDATE users SET theme = ? WHERE id = ?'),
   allUsers: db.prepare(`
     SELECT u.id, u.email, u.name, u.created_at, u.last_login_at,
       (SELECT COUNT(*) FROM memberships m WHERE m.user_id = u.id) AS memberships,
@@ -84,6 +85,7 @@ export const Users = {
   byEmail: (email) => q.userByEmail.get(String(email).trim()),
   byId: (id) => q.userById.get(id),
   touchLogin: (id) => q.touchLogin.run(id),
+  setTheme: (id, theme) => q.setTheme.run(['system', 'light', 'dark'].includes(theme) ? theme : 'system', id),
 
   // Регистрация. По умолчанию создаётся личная компания (владелец, лицензия по
   // умолчанию). При регистрации по приглашению (createOrg=false) компания НЕ

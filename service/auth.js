@@ -9,7 +9,7 @@ import { isSuperAdmin } from './config.js';
 export const authRouter = express.Router();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const setSession = (req, u) => { req.session.user = { id: u.id, email: u.email, name: u.name }; req.session.inviteHint = undefined; };
+const setSession = (req, u) => { req.session.user = { id: u.id, email: u.email, name: u.name, theme: u.theme || 'system' }; req.session.inviteHint = undefined; };
 // Подсказка при заходе по ссылке-приглашению (email + название организации).
 const inviteNotice = (req) => {
   const h = req.session.inviteHint;
@@ -79,6 +79,17 @@ authRouter.post('/login', authLimiter, (req, res) => {
 // ── Выход ───────────────────────────────────────────────────────────────────
 authRouter.post('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/login'));
+});
+
+// ── Тема оформления (system|light|dark), на пользователя ─────────────────────
+authRouter.post('/theme', requireAuth, (req, res) => {
+  const theme = ['system', 'light', 'dark'].includes(req.body.theme) ? req.body.theme : 'system';
+  Users.setTheme(req.session.user.id, theme);
+  req.session.user.theme = theme;
+  // Вернуться на ту же страницу (referer того же origin), иначе на главную.
+  const origin = `${req.protocol}://${req.get('host')}`;
+  const ref = req.get('referer');
+  res.redirect(ref && ref.startsWith(origin) ? ref : '/');
 });
 
 // ── Восстановление пароля ────────────────────────────────────────────────────

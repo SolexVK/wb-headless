@@ -66,7 +66,21 @@ try {
   const csrfLogout = csrfOf(r.text);
   ok(!!csrfLogout, 'форма «Выйти» содержит CSRF-поле');
 
-  r = await req('POST', '/logout', form({ _csrf: csrfLogout }));
+  // Тема оформления: по умолчанию системная (нет data-theme), переключается.
+  ok(!/<html[^>]*data-theme/.test(r.text), 'Тема: по умолчанию системная (без data-theme)');
+  r = await req('POST', '/theme', form({ _csrf: csrfLogout, theme: 'dark' }));
+  ok(r.status === 302, 'Тема: смена принята (302)');
+  r = await req('GET', '/');
+  ok(/<html[^>]*data-theme="dark"/.test(r.text), 'Тема: тёмная применена');
+  r = await req('POST', '/theme', form({ _csrf: csrfOf(r.text), theme: 'light' }));
+  r = await req('GET', '/');
+  ok(/<html[^>]*data-theme="light"/.test(r.text), 'Тема: светлая применена');
+  r = await req('POST', '/theme', form({ _csrf: csrfOf(r.text), theme: 'system' }));
+  r = await req('GET', '/');
+  ok(!/<html[^>]*data-theme/.test(r.text), 'Тема: возврат к системной (без data-theme на <html>)');
+
+  const csrfLogout2 = csrfOf(r.text);
+  r = await req('POST', '/logout', form({ _csrf: csrfLogout2 }));
   ok(r.status === 302 && r.location === '/login', 'POST /logout → 302 /login');
 
   r = await req('GET', '/');

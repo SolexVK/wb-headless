@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL,
   name          TEXT,
+  theme         TEXT NOT NULL DEFAULT 'system',   -- тема: system | light | dark
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   last_login_at TEXT
 );
@@ -109,6 +110,7 @@ function ensureColumn(table, column, ddl) {
   }
 }
 ensureColumn('organizations', 'license_seats', 'license_seats INTEGER NOT NULL DEFAULT 1');
+ensureColumn('users', 'theme', "theme TEXT NOT NULL DEFAULT 'system'");
 
 logger.info({ db: config.dbPath }, 'SQLite готова, схема применена');
 
