@@ -43,21 +43,30 @@ thin = Side(style='thin', color='DDE7E0')
 BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
 
 
-def hcell(c, text):
+def hcell(c, text, fill=None, tcolor='FFFFFF'):
     c.value = text
-    c.font = Font(name=FONT, bold=True, color='FFFFFF', size=10)
-    c.fill = HEAD_FILL
+    c.font = Font(name=FONT, bold=True, color=tcolor, size=10)
+    c.fill = fill or HEAD_FILL
     c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
     c.border = BORDER
 
 
-def base(c, val, bold=False, align='left', numfmt=None, color=INK):
+def base(c, val, bold=False, align='left', numfmt=None, color=INK, fill=None):
     c.value = val
     c.font = Font(name=FONT, bold=bold, color=color, size=10)
     c.alignment = Alignment(horizontal=align, vertical='center')
     c.border = BORDER
+    if fill:
+        c.fill = fill
     if numfmt:
         c.number_format = numfmt
+
+
+# Заливки блоков «Сводной»: Остаток — нейтральный серо-синий, Подсорт — зелёный.
+STOCK_HEAD = PatternFill('solid', fgColor='5B6B7E')
+STOCK_CELL = PatternFill('solid', fgColor='EEF2F6')
+POD_HEAD = PatternFill('solid', fgColor='127045')
+POD_CELL = PatternFill('solid', fgColor='E4F3EC')
 
 
 def add_status_cf(sheet, col_letter, first, last):
@@ -132,12 +141,18 @@ for w in snap['warehouses']:
 
 sv = wb.create_sheet('Сводная')
 nw = len(whList)
-head = ['Арт', 'Цвет', 'Размер'] + [f'Ост. {n}' for n in whList] + ['Ост.Итого'] + whList + ['Итого']
-for j, h in enumerate(head, 1):
-    hcell(sv.cell(1, j), h)
-row = 2
 first_stock = 4                    # D — начало блока «Остаток»
 first_pod = first_stock + nw + 1   # начало блока «Подсорт» (после Ост.Итого)
+# Шапка: ключевые столбцы — зелёные; блок «Остаток» — серый; блок «Подсорт» — зелёный.
+for j, h in enumerate(['Арт', 'Цвет', 'Размер'], 1):
+    hcell(sv.cell(1, j), h)
+for wi, wn in enumerate(whList):
+    hcell(sv.cell(1, first_stock + wi), f'Ост. {wn}', STOCK_HEAD)
+hcell(sv.cell(1, first_stock + nw), 'Ост.Итого', STOCK_HEAD)
+for wi, wn in enumerate(whList):
+    hcell(sv.cell(1, first_pod + wi), wn, POD_HEAD)
+hcell(sv.cell(1, first_pod + nw), 'Итого', POD_HEAD)
+row = 2
 for r in snap.get('pivot', []):
     base(sv.cell(row, 1), r['articleNum'], align='center')
     base(sv.cell(row, 2), r['variant'])
@@ -147,12 +162,12 @@ for r in snap.get('pivot', []):
     for wi, wn in enumerate(whList):
         v = st.get(wn, 0)
         st_total += v
-        base(sv.cell(row, first_stock + wi), (v if v else None), align='right', numfmt='#,##0')
-    base(sv.cell(row, first_stock + nw), (st_total if st_total else None), align='right', bold=True, numfmt='#,##0')
+        base(sv.cell(row, first_stock + wi), (v if v else None), align='right', numfmt='#,##0', fill=STOCK_CELL)
+    base(sv.cell(row, first_stock + nw), (st_total if st_total else None), align='right', bold=True, numfmt='#,##0', fill=STOCK_CELL)
     for wi, wn in enumerate(whList):
         v = r['byWarehouse'].get(wn, 0)
-        base(sv.cell(row, first_pod + wi), (v if v else None), align='right', numfmt='#,##0')
-    base(sv.cell(row, first_pod + nw), r['total'], align='right', bold=True, numfmt='#,##0')
+        base(sv.cell(row, first_pod + wi), (v if v else None), align='right', numfmt='#,##0', color=ACCENT, fill=POD_CELL)
+    base(sv.cell(row, first_pod + nw), r['total'], align='right', bold=True, numfmt='#,##0', color=ACCENT, fill=POD_CELL)
     row += 1
 sv_last = row - 1
 sv.freeze_panes = 'D2'
