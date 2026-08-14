@@ -91,6 +91,22 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at INTEGER NOT NULL
 );
 
+-- Архив запусков отчётов компании: история со СЖАТЫМ (gzip) снимком.
+-- summary_json — крошечная сводка для списка; data_gz — полный снимок (gzip).
+CREATE TABLE IF NOT EXISTS report_runs (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  cabinet_id   INTEGER NOT NULL REFERENCES cabinets(id) ON DELETE CASCADE,
+  report       TEXT NOT NULL,
+  params_hash  TEXT NOT NULL,
+  params_json  TEXT,
+  user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  summary_json TEXT,
+  data_gz      BLOB NOT NULL,
+  generated_at TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_report_runs_cab ON report_runs(cabinet_id, report, created_at);
+
 CREATE TABLE IF NOT EXISTS password_resets (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

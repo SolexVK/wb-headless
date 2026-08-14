@@ -9,7 +9,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import { logger } from './logger.js';
-import { Snapshots } from './models.js';
+import { ReportRuns } from './models.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -126,7 +126,7 @@ const jobs = new Map(); // cabinetId → { state, startedAt, finishedAt, error, 
 
 export function getJob(cabinetId) { return jobs.get(Number(cabinetId)) || null; }
 
-export function startPodsort(cabinet, token, meta, params) {
+export function startPodsort(cabinet, token, meta, params, userId) {
   const id = Number(cabinet.id);
   const cur = jobs.get(id);
   if (cur && cur.state === 'running') return { already: true, job: cur };
@@ -139,9 +139,15 @@ export function startPodsort(cabinet, token, meta, params) {
   (async () => {
     try {
       const snap = await runPodsortPipeline(cabinet, token, meta, params, (m) => { job.log = m; });
-      Snapshots.put(id, 'podsort', ph, snap);
+      const t = snap?.totals || {};
+      const summary = {
+        reorderUnits: t.reorderUnits, riskRows: t.riskRows, seedUnits: t.seedUnits,
+        warehouses: t.warehouses, nomenclature: t.nomenclature, pivotRows: t.pivotRows,
+        articles: params.articles, leadMin: params.leadMin, leadMax: params.leadMax, cover: params.cover,
+      };
+      ReportRuns.add({ cabinetId: id, report: 'podsort', paramsHash: ph, params, userId, summary, snapshot: snap });
       job.state = 'done'; job.finishedAt = Date.now(); job.log = 'готово';
-      logger.info({ cabinetId: id, reorderUnits: snap?.totals?.reorderUnits }, 'подсорт: готово');
+      logger.info({ cabinetId: id, reorderUnits: t.reorderUnits }, 'подсорт: готово, сохранено в архив');
     } catch (e) {
       job.state = 'error'; job.finishedAt = Date.now(); job.error = e.message; job.log = 'ошибка';
       logger.error({ cabinetId: id, err: e.message }, 'подсорт: ошибка');

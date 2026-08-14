@@ -76,6 +76,24 @@ try {
   let parsed = null; try { parsed = JSON.parse(j.text); } catch { /* */ }
   ok(j.status === 200 && parsed?.totals?.reorderUnits === 42, 'Ф2: выгрузка JSON корректна');
 
+  // Второй запуск → в архиве два запуска.
+  r = await req('GET', `/org/${orgId}/reports/podsort`);
+  r = await req('POST', `/org/${orgId}/reports/podsort/refresh`, form({ _csrf: csrfOf(r.text), articles: '002', velocityDays: 28, leadMin: 12, leadMax: 18, cover: 28, seedMin: 10, historyDays: 90 }));
+  for (let i = 0; i < 30; i++) { await sleep(80); r = await req('GET', `/org/${orgId}/reports/archive`); if ((r.text.match(/\/archive\/\d+"/g) || []).length >= 2) break; }
+  const runIds = [...new Set((r.text.match(/\/reports\/archive\/(\d+)"/g) || []).map((m) => m.match(/\d+/)[0]))];
+  ok(r.status === 200 && r.text.includes('Архив отчётов') && runIds.length >= 2, 'Ф2: архив содержит запуски (≥2)');
+
+  // Открыть архивный запуск — регенерируется вывод из снимка.
+  r = await req('GET', `/org/${orgId}/reports/archive/${runIds[0]}`);
+  ok(r.status === 200 && r.text.includes('Результат') && r.text.includes('42'), 'Ф2: просмотр архивного запуска');
+  const aj = await req('GET', `/org/${orgId}/reports/archive/${runIds[0]}/download/json`);
+  let ap = null; try { ap = JSON.parse(aj.text); } catch { /* */ }
+  ok(aj.status === 200 && ap?.totals?.reorderUnits === 42, 'Ф2: выгрузка архивного запуска (JSON)');
+
+  // Изоляция: чужой архивный запуск недоступен.
+  r = await req('GET', `/org/${orgId}/reports/archive/999999`);
+  ok(r.status === 404, 'Ф2: несуществующий запуск → 404');
+
   // Доступ: аноним не видит отчёты.
   cookie = '';
   r = await req('GET', `/org/${orgId}/reports/podsort`);

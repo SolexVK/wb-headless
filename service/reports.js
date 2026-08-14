@@ -1,21 +1,21 @@
-// service/reports.js — оболочка отчётов организации. Работают на токене АКТИВНОГО
-// кабинета. Первый отчёт — Подсорт (движок scripts/fbs-*.mjs) с формой параметров,
-// фоновым пересчётом (single-flight) и выгрузками Excel/HTML/JSON.
+// service/reports.js — оболочка отчётов компании (на токене активного кабинета).
+// Подсорт с формой + фоновый пересчёт (single-flight). Каждый запуск попадает в
+// АРХИВ (report_runs, сжатый снимок). Архив общий для участников компании: можно
+// открыть прошлый запуск и скачать его выгрузки (регенерируются из снимка).
 import express from 'express';
-import { Orgs, Cabinets, Snapshots } from './models.js';
+import { Orgs, Cabinets, ReportRuns } from './models.js';
 import { requireAuth } from './security.js';
-import { reportsPage, podsortPage } from './views.js';
+import { reportsPage, podsortPage, archivePage, archiveViewPage } from './views.js';
 import { podsortDefaults, normalizePodsort, startPodsort, getJob, buildXlsx, buildDashboardHtml } from './reports-runner.js';
 import { logger } from './logger.js';
 
 export const reportsRouter = express.Router();
 
-// Загрузить организацию и роль; 404 если не участник (как в orgs.js).
 function loadOrg(req, res, next) {
   const orgId = Number(req.params.id);
   const org = Orgs.byId(orgId);
   const role = org && Orgs.roleOf(req.session.user.id, orgId);
-  if (!org || !role) return res.status(404).send('Организация не найдена');
+  if (!org || !role) return res.status(404).send('Компания не найдена');
   req.org = org; req.role = role;
   next();
 }
@@ -36,6 +36,18 @@ function formFrom(latest) {
   };
 }
 
+// Выгрузка снимка в нужном формате (используется и для последнего, и для архивного).
+async function sendDownload(res, kind, cabId, snapshot, stem) {
+  if (kind === 'json') {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${stem}.json"`);
+    return res.send(JSON.stringify(snapshot, null, 2));
+  }
+  if (kind === 'xlsx') return res.download(await buildXlsx({ id: cabId }, snapshot), `${stem}.xlsx`);
+  if (kind === 'html') return res.download(await buildDashboardHtml({ id: cabId }, snapshot), `${stem}-dashboard.html`);
+  return res.status(404).send('Неизвестный формат');
+}
+
 // ── Список отчётов ───────────────────────────────────────────────────────────
 reportsRouter.get('/org/:id/reports', requireAuth, loadOrg, (req, res) => {
   const cab = Cabinets.activeOf(req.org.id);
@@ -49,7 +61,7 @@ reportsRouter.get('/org/:id/reports', requireAuth, loadOrg, (req, res) => {
 // ── Подсорт: страница (форма + статус + последний результат) ─────────────────
 reportsRouter.get('/org/:id/reports/podsort', requireAuth, loadOrg, (req, res) => {
   const cab = Cabinets.activeOf(req.org.id);
-  const latest = cab ? Snapshots.latest(cab.id, 'podsort') : null;
+  const latest = cab ? ReportRuns.latest(cab.id, 'podsort') : null;
   res.send(podsortPage({
     user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
     org: req.org, role: req.role,
@@ -65,34 +77,47 @@ reportsRouter.post('/org/:id/reports/podsort/refresh', requireAuth, loadOrg, (re
   const token = Cabinets.decryptedToken(cab);
   if (!token) return res.redirect(`/org/${req.org.id}/reports/podsort`);
   const params = normalizePodsort(req.body);
-  const { already } = startPodsort({ id: cab.id }, token, Cabinets.meta(cab), params);
+  const { already } = startPodsort({ id: cab.id }, token, Cabinets.meta(cab), params, req.session.user.id);
   if (already) logger.info({ cabinetId: cab.id }, 'подсорт: пересчёт уже идёт — пропускаю');
   res.redirect(`/org/${req.org.id}/reports/podsort`);
 });
 
-// ── Подсорт: выгрузки ────────────────────────────────────────────────────────
+// ── Подсорт: выгрузки последнего запуска ─────────────────────────────────────
 reportsRouter.get('/org/:id/reports/podsort/download/:kind', requireAuth, loadOrg, async (req, res) => {
   const cab = Cabinets.activeOf(req.org.id);
-  const latest = cab ? Snapshots.latest(cab.id, 'podsort') : null;
+  const latest = cab ? ReportRuns.latest(cab.id, 'podsort') : null;
   if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
-  const kind = req.params.kind;
-  try {
-    if (kind === 'json') {
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.setHeader('Content-Disposition', 'attachment; filename="fbs-podsort.json"');
-      return res.send(JSON.stringify(latest.data, null, 2));
-    }
-    if (kind === 'xlsx') {
-      const file = await buildXlsx({ id: cab.id }, latest.data);
-      return res.download(file, 'fbs-podsort.xlsx');
-    }
-    if (kind === 'html') {
-      const file = await buildDashboardHtml({ id: cab.id }, latest.data);
-      return res.download(file, 'fbs-podsort-dashboard.html');
-    }
-  } catch (e) {
-    logger.error({ err: e.message }, 'подсорт: ошибка выгрузки');
-    return res.status(500).send('Ошибка сборки файла: ' + e.message);
-  }
-  res.status(404).send('Неизвестный формат');
+  try { await sendDownload(res, req.params.kind, cab.id, latest.data, 'fbs-podsort'); }
+  catch (e) { logger.error({ err: e.message }, 'подсорт: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
+});
+
+// ── Архив отчётов компании (общий): список запусков ──────────────────────────
+reportsRouter.get('/org/:id/reports/archive', requireAuth, loadOrg, (req, res) => {
+  const cab = Cabinets.firstOf(req.org.id);
+  const runs = cab ? ReportRuns.list(cab.id) : [];
+  res.send(archivePage({
+    user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
+    org: req.org, role: req.role, runs,
+  }));
+});
+
+// Открыть конкретный архивный запуск (регенерируем вывод из снимка).
+reportsRouter.get('/org/:id/reports/archive/:runId', requireAuth, loadOrg, (req, res) => {
+  const cab = Cabinets.firstOf(req.org.id);
+  const run = ReportRuns.byId(Number(req.params.runId));
+  if (!run || !cab || run.cabinetId !== cab.id) return res.status(404).send('Запуск не найден');
+  res.send(archiveViewPage({
+    user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
+    org: req.org, role: req.role, run,
+  }));
+});
+
+// Выгрузки конкретного архивного запуска.
+reportsRouter.get('/org/:id/reports/archive/:runId/download/:kind', requireAuth, loadOrg, async (req, res) => {
+  const cab = Cabinets.firstOf(req.org.id);
+  const run = ReportRuns.byId(Number(req.params.runId));
+  if (!run || !cab || run.cabinetId !== cab.id || !run.data) return res.status(404).send('Запуск не найден');
+  const stem = `fbs-${run.report}-${String(run.created_at || run.createdAt || '').slice(0, 10)}`;
+  try { await sendDownload(res, req.params.kind, cab.id, run.data, stem); }
+  catch (e) { logger.error({ err: e.message }, 'архив: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
 });

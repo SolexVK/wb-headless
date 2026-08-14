@@ -2,6 +2,7 @@
 // cabinets / invitations). Тонкий слой поверх db; при переезде на Postgres
 // переписываем только его. WB-токены хранятся в cabinets в шифрованном виде.
 import crypto from 'crypto';
+import zlib from 'zlib';
 import bcrypt from 'bcryptjs';
 import { db, tx } from './db.js';
 import { config } from './config.js';
@@ -66,11 +67,15 @@ const q = {
   setActive: db.prepare('UPDATE cabinets SET is_active = 1 WHERE id = ?'),
   deleteCabinet: db.prepare('DELETE FROM cabinets WHERE id = ?'),
 
-  putSnap: db.prepare(`INSERT INTO snapshot_cache (cabinet_id, report, params_hash, json)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(cabinet_id, report, params_hash) DO UPDATE SET json = excluded.json, refreshed_at = datetime('now')`),
-  latestSnap: db.prepare(`SELECT json, params_hash, refreshed_at FROM snapshot_cache
-    WHERE cabinet_id = ? AND report = ? ORDER BY refreshed_at DESC LIMIT 1`),
+  insertRun: db.prepare(`INSERT INTO report_runs (cabinet_id, report, params_hash, params_json, user_id, summary_json, data_gz, generated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+  latestRun: db.prepare('SELECT * FROM report_runs WHERE cabinet_id = ? AND report = ? ORDER BY created_at DESC, id DESC LIMIT 1'),
+  runById: db.prepare('SELECT * FROM report_runs WHERE id = ?'),
+  runsList: db.prepare(`
+    SELECT r.id, r.report, r.params_json, r.summary_json, r.generated_at, r.created_at, u.email AS user_email
+    FROM report_runs r LEFT JOIN users u ON u.id = r.user_id
+    WHERE r.cabinet_id = ? ORDER BY r.created_at DESC, r.id DESC LIMIT 200`),
+  purgeRuns: db.prepare("DELETE FROM report_runs WHERE created_at < datetime('now', ?)"),
 
   insertInvite: db.prepare('INSERT INTO invitations (org_id, email, role, token, expires_at) VALUES (?, ?, ?, ?, ?)'),
   inviteByToken: db.prepare('SELECT * FROM invitations WHERE token = ?'),
@@ -225,15 +230,41 @@ export const Cabinets = {
   remove: (id) => q.deleteCabinet.run(id).changes > 0,
 };
 
-export const Snapshots = {
-  put: (cabinetId, report, paramsHash, obj) => q.putSnap.run(cabinetId, report, paramsHash, JSON.stringify(obj)),
-  latest: (cabinetId, report) => {
-    const row = q.latestSnap.get(cabinetId, report);
-    if (!row) return null;
-    try { return { data: JSON.parse(row.json), paramsHash: row.params_hash, refreshedAt: row.refreshed_at }; }
-    catch { return null; }
+const RETENTION_DAYS = 90;
+const gz = (obj) => zlib.gzipSync(Buffer.from(JSON.stringify(obj), 'utf8'));
+const gunz = (buf) => { try { return JSON.parse(zlib.gunzipSync(Buffer.from(buf)).toString('utf8')); } catch { return null; } };
+
+// Архив запусков отчётов компании (сжатый снимок + сводка), общий для участников.
+export const ReportRuns = {
+  // Сохранить запуск: сжимаем снимок в gzip, кладём сводку для списка. Чистим старьё (90 дн).
+  add: ({ cabinetId, report, paramsHash, params, userId, summary, snapshot }) => {
+    const id = q.insertRun.run(cabinetId, report, paramsHash, JSON.stringify(params || {}),
+      userId || null, JSON.stringify(summary || {}), gz(snapshot), snapshot?.generatedAt || null).lastInsertRowid;
+    try { q.purgeRuns.run(`-${RETENTION_DAYS} days`); } catch { /* */ }
+    return Number(id);
   },
+  // Последний запуск отчёта в компании (для страницы отчёта) — с распакованным снимком.
+  latest: (cabinetId, report) => {
+    const row = q.latestRun.get(cabinetId, report);
+    if (!row) return null;
+    return { id: row.id, data: gunz(row.data_gz), createdAt: row.created_at, generatedAt: row.generated_at };
+  },
+  // Список запусков компании (без тяжёлых снимков) — для каталога/архива.
+  list: (cabinetId) => q.runsList.all(cabinetId).map((r) => ({
+    id: r.id, report: r.report, userEmail: r.user_email, createdAt: r.created_at, generatedAt: r.generated_at,
+    params: safeJson(r.params_json), summary: safeJson(r.summary_json),
+  })),
+  // Один запуск с распакованным снимком (для просмотра/выгрузки). Проверка компании — снаружи.
+  byId: (id) => {
+    const row = q.runById.get(id);
+    if (!row) return null;
+    return { id: row.id, cabinetId: row.cabinet_id, report: row.report, createdAt: row.created_at,
+      generatedAt: row.generated_at, params: safeJson(row.params_json), summary: safeJson(row.summary_json),
+      data: gunz(row.data_gz) };
+  },
+  purge: () => q.purgeRuns.run(`-${RETENTION_DAYS} days`),
 };
+const safeJson = (s) => { try { return JSON.parse(s || '{}'); } catch { return {}; } };
 
 const INVITE_TTL_DAYS = 7;
 

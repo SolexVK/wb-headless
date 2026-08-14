@@ -610,6 +610,7 @@ export function reportsPage(p) {
         ${card(`/org/${org.id}/reports/podsort`, 'Подсорт', 'Рекомендации к заказу по складам и размерам + пробный завоз', !!active)}
         ${card(`/org/${org.id}/reports/podsort`, 'Остатки', 'Остатки FBS по артикулам и цветам', false)}
       </div>
+      <p style="margin-top:16px"><a class="dl" href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив отчётов</a></p>
     </div>`,
   });
 }
@@ -658,65 +659,123 @@ export function podsortPage(p) {
       ${podsortGlossary()}
     </div>`;
 
-  // Результаты последнего снимка.
-  let results = `<div class="section"><p class="muted">Данных пока нет — нажмите «Обновить данные», чтобы рассчитать подсорт на токене активного кабинета.</p></div>`;
-  if (latest?.data) {
-    const s = latest.data;
-    const t = s.totals || {};
-    const when = latest.refreshedAt ? esc(String(latest.refreshedAt)) + ' UTC' : '';
-    const tiles = [
-      ['Подсорт, шт', t.reorderUnits], ['Строк в риске', t.riskRows],
-      ['Пробный завоз, шт', t.seedUnits], ['Складов', t.warehouses], ['Номенклатура', t.nomenclature],
-    ].map(([l, n]) => `<div class="tilek"><div class="n">${nf(n)}</div><div class="l">${esc(l)}</div></div>`).join('');
-
-    // Сводная: артикул×цвет×размер × склад.
-    const cols = s.warehouseList || [];
-    const pivotHead = `<tr>${thT('Арт', 'Номер артикула (модель)')}${thT('Цвет', 'Вариант/цвет исполнения')}${thT('Разм', 'Размер (techSize карточки)')}${cols.map((c) => thT(c, `Сколько заказать на склад «${c}»`, 'num')).join('')}${thT('Итого', 'Сумма подсорта по строке (все склады)', 'num')}</tr>`;
-    const pivotRows = (s.pivot || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td class="tl">${esc(r.variant)}</td><td>${esc(r.techSize)}</td>${cols.map((c) => `<td class="num">${r.byWarehouse?.[c] ? nf(r.byWarehouse[c]) : ''}</td>`).join('')}<td class="num"><b>${nf(r.total)}</b></td></tr>`).join('');
-    const pivotTable = pivotRows
-      ? `<div class="scroll"><table class="rt"><thead>${pivotHead}</thead><tbody>${pivotRows}</tbody></table></div>`
-      : '<p class="muted">Подсорт не требуется (0 строк).</p>';
-
-    // Детально по складам.
-    const whBlocks = (s.warehouses || []).filter((w) => w.rows?.length).map((w) => `
-      <details><summary>${esc(w.name)} — остаток ${nf(w.stockUnits)} · подсорт ${nf(w.reorderUnits)} шт · строк ${w.rows.length}</summary>
-        <div class="scroll"><table class="rt">
-          <thead><tr>${thT('Арт', 'Номер артикула (модель)')}${thT('Цвет', 'Вариант/цвет')}${thT('Разм', 'Размер')}${thT('Остаток', 'Текущий остаток этого размера на этом складе (FBS)', 'num')}${thT('/дн', 'Средняя скорость продаж, шт/день, за окно скорости', 'num')}${thT('Дней до 0', 'На сколько дней хватит остатка при текущей скорости (∞ — продаж нет)', 'num')}${thT('Подсорт', 'Рекомендация к заказу = скорость × горизонт − остаток (округление вверх, минимум 0)', 'num')}${thT('Статус', 'Оценка риска нехватки — см. «Пояснения» выше')}</tr></thead>
-          <tbody>${w.rows.map((r) => `<tr><td>${esc(r.articleNum)}</td><td class="tl">${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td class="num">${nf(r.stock)}</td><td class="num">${esc(String(r.perDay))}</td><td class="num">${r.daysToZero == null ? '∞' : esc(String(r.daysToZero))}</td><td class="num"><b>${nf(r.reorderQty)}</b></td><td class="tl">${statusBadge(r.status)}</td></tr>`).join('')}</tbody>
-        </table></div>
-      </details>`).join('');
-
-    // Пробный завоз.
-    const seedRows = (s.seedGrid || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td class="tl">${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td><span class="badge ${r.kind === 'новинка' ? 'st-ok' : 'st-risk'}">${esc(r.kind)}</span></td><td class="num"><b>${nf(r.seedTotal)}</b></td></tr>`).join('');
-    const seedBlock = seedRows
-      ? `<details><summary>Пробный завоз — ${nf(t.seedRows)} строк (${nf(t.seedNovelty)} новинок + ${nf(t.seedRefill)} докладок) = ${nf(t.seedUnits)} шт</summary>
-          <div class="scroll"><table class="rt"><thead><tr>${thT('Арт', 'Номер артикула')}${thT('Цвет', 'Вариант/цвет')}${thT('Разм', 'Размер')}${thT('Тип', 'Новинка — карточки ещё не было ни на одном FF-складе; докладка — есть на других складах, но не на этом')}${thT('Кол-во', 'Всего штук к пробному завозу по всем складам (по seedMin на размер)', 'num')}</tr></thead><tbody>${seedRows}</tbody></table></div></details>`
-      : '';
-
-    results = `<div class="section">
-        <h2>Результат <span class="muted" style="font-size:13px;font-weight:400">обновлено ${when}</span></h2>
-        <div class="tiles">${tiles}</div>
-        <div style="margin-bottom:6px">
-          <a class="dl" href="${u(`/org/${org.id}/reports/podsort/download/xlsx`)}">⬇ Excel</a>
-          <a class="dl" href="${u(`/org/${org.id}/reports/podsort/download/html`)}">⬇ HTML-дашборд</a>
-          <a class="dl" href="${u(`/org/${org.id}/reports/podsort/download/json`)}">⬇ JSON</a>
-        </div>
-        <h2>Сводная: подсорт по размерам × склад</h2>
-        ${pivotTable}
-        <h2 style="margin-top:20px">Детально по складам</h2>
-        ${whBlocks || '<p class="muted">Нет строк.</p>'}
-        ${seedBlock}
-      </div>`;
-  }
+  // Результаты последнего снимка (общий рендер, переиспользуется в архиве).
+  const results = latest?.data
+    ? podsortResults(latest.data, {
+      downloadHref: (k) => u(`/org/${org.id}/reports/podsort/download/${k}`),
+      whenLabel: latest.createdAt ? String(latest.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '',
+    })
+    : `<div class="section"><p class="muted">Данных пока нет — нажмите «Обновить данные», чтобы рассчитать подсорт на токене активного кабинета.</p></div>`;
 
   return layout({
     title: `Подсорт — ${org.name}`, user, csrf, base, head: meta,
     body: `<div class="wrap">${back}
       <h1>Подсорт <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
-      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Расчёт по FF-складам и размерам; лид-тайм и запас задаются ниже.</p>
+      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Расчёт по FF-складам и размерам; лид-тайм и запас задаются ниже. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
       ${statusBox}
       ${formSection}
       ${results}
+    </div>`,
+  });
+}
+
+const reportRu = (r) => ({ podsort: 'Подсорт', stock: 'Остатки' }[r] || r);
+
+// Рендер результатов подсорта из снимка (переиспользуется на странице отчёта и в архиве).
+// downloadHref(kind) → URL выгрузки; whenLabel — подпись «обновлено …».
+function podsortResults(s, { downloadHref, whenLabel }) {
+  const t = s.totals || {};
+  const tiles = [
+    ['Подсорт, шт', t.reorderUnits], ['Строк в риске', t.riskRows],
+    ['Пробный завоз, шт', t.seedUnits], ['Складов', t.warehouses], ['Номенклатура', t.nomenclature],
+  ].map(([l, n]) => `<div class="tilek"><div class="n">${nf(n)}</div><div class="l">${esc(l)}</div></div>`).join('');
+
+  const cols = s.warehouseList || [];
+  const pivotHead = `<tr>${thT('Арт', 'Номер артикула (модель)')}${thT('Цвет', 'Вариант/цвет исполнения')}${thT('Разм', 'Размер (techSize карточки)')}${cols.map((c) => thT(c, `Сколько заказать на склад «${c}»`, 'num')).join('')}${thT('Итого', 'Сумма подсорта по строке (все склады)', 'num')}</tr>`;
+  const pivotRows = (s.pivot || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td class="tl">${esc(r.variant)}</td><td>${esc(r.techSize)}</td>${cols.map((c) => `<td class="num">${r.byWarehouse?.[c] ? nf(r.byWarehouse[c]) : ''}</td>`).join('')}<td class="num"><b>${nf(r.total)}</b></td></tr>`).join('');
+  const pivotTable = pivotRows
+    ? `<div class="scroll"><table class="rt"><thead>${pivotHead}</thead><tbody>${pivotRows}</tbody></table></div>`
+    : '<p class="muted">Подсорт не требуется (0 строк).</p>';
+
+  const whBlocks = (s.warehouses || []).filter((w) => w.rows?.length).map((w) => `
+    <details><summary>${esc(w.name)} — остаток ${nf(w.stockUnits)} · подсорт ${nf(w.reorderUnits)} шт · строк ${w.rows.length}</summary>
+      <div class="scroll"><table class="rt">
+        <thead><tr>${thT('Арт', 'Номер артикула (модель)')}${thT('Цвет', 'Вариант/цвет')}${thT('Разм', 'Размер')}${thT('Остаток', 'Текущий остаток этого размера на этом складе (FBS)', 'num')}${thT('/дн', 'Средняя скорость продаж, шт/день, за окно скорости', 'num')}${thT('Дней до 0', 'На сколько дней хватит остатка при текущей скорости (∞ — продаж нет)', 'num')}${thT('Подсорт', 'Рекомендация к заказу = скорость × горизонт − остаток (округление вверх, минимум 0)', 'num')}${thT('Статус', 'Оценка риска нехватки')}</tr></thead>
+        <tbody>${w.rows.map((r) => `<tr><td>${esc(r.articleNum)}</td><td class="tl">${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td class="num">${nf(r.stock)}</td><td class="num">${esc(String(r.perDay))}</td><td class="num">${r.daysToZero == null ? '∞' : esc(String(r.daysToZero))}</td><td class="num"><b>${nf(r.reorderQty)}</b></td><td class="tl">${statusBadge(r.status)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </details>`).join('');
+
+  const seedRows = (s.seedGrid || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td class="tl">${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td><span class="badge ${r.kind === 'новинка' ? 'st-ok' : 'st-risk'}">${esc(r.kind)}</span></td><td class="num"><b>${nf(r.seedTotal)}</b></td></tr>`).join('');
+  const seedBlock = seedRows
+    ? `<details><summary>Пробный завоз — ${nf(t.seedRows)} строк (${nf(t.seedNovelty)} новинок + ${nf(t.seedRefill)} докладок) = ${nf(t.seedUnits)} шт</summary>
+        <div class="scroll"><table class="rt"><thead><tr>${thT('Арт', 'Номер артикула')}${thT('Цвет', 'Вариант/цвет')}${thT('Разм', 'Размер')}${thT('Тип', 'Новинка — карточки ещё не было ни на одном FF-складе; докладка — есть на других складах, но не на этом')}${thT('Кол-во', 'Всего штук к пробному завозу по всем складам', 'num')}</tr></thead><tbody>${seedRows}</tbody></table></div></details>`
+    : '';
+
+  return `<div class="section">
+      <h2>Результат ${whenLabel ? `<span class="muted" style="font-size:13px;font-weight:400">${esc(whenLabel)}</span>` : ''}</h2>
+      <div class="tiles">${tiles}</div>
+      <div style="margin-bottom:6px">
+        <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a>
+        <a class="dl" href="${downloadHref('html')}">⬇ HTML-дашборд</a>
+        <a class="dl" href="${downloadHref('json')}">⬇ JSON</a>
+      </div>
+      <h2>Сводная: подсорт по размерам × склад</h2>
+      ${pivotTable}
+      <h2 style="margin-top:20px">Детально по складам</h2>
+      ${whBlocks || '<p class="muted">Нет строк.</p>'}
+      ${seedBlock}
+    </div>`;
+}
+
+// ── Архив отчётов компании: список запусков ─────────────────────────────────
+export function archivePage({ user, csrf, base = '', org, role, runs }) {
+  const u = (p) => base + p;
+  const dt = (v) => esc(String(v || '').slice(0, 16).replace('T', ' ')) + ' UTC';
+  const rows = (runs || []).map((r) => {
+    const sm = r.summary || {};
+    return `<tr>
+      <td class="tl"><a href="${u(`/org/${org.id}/reports/archive/${r.id}`)}">${dt(r.createdAt)}</a></td>
+      <td>${esc(reportRu(r.report))}</td>
+      <td class="tl kv">${esc(r.userEmail || '—')}</td>
+      <td class="num">${nf(sm.reorderUnits)}</td>
+      <td class="num">${nf(sm.riskRows)}</td>
+      <td class="num">${nf(sm.seedUnits)}</td>
+      <td class="tl kv">${esc((sm.articles || []).join(', '))}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <a class="dl" style="padding:5px 9px;font-size:12px;margin:0 4px 0 0" href="${u(`/org/${org.id}/reports/archive/${r.id}/download/xlsx`)}">Excel</a>
+        <a class="dl" style="padding:5px 9px;font-size:12px;margin:0" href="${u(`/org/${org.id}/reports/archive/${r.id}/download/json`)}">JSON</a>
+      </td>
+    </tr>`;
+  }).join('');
+  return layout({
+    title: `Архив отчётов — ${org.name}`, user, csrf, base,
+    body: `<div class="wrap">
+      <div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>
+      <h1>Архив отчётов</h1>
+      <p class="sub">История запусков компании (хранится 90 дней). Откройте запуск, чтобы посмотреть содержимое или скачать. Каждый запуск сохраняется автоматически.</p>
+      <div class="section"><div class="scroll"><table class="rt">
+        <thead><tr>${thT('Дата', 'Когда запущен (UTC) — ссылка на просмотр')}${thT('Отчёт', 'Тип отчёта')}${thT('Кто', 'Кто запустил')}${thT('Подсорт', 'Итого к заказу, шт')}${thT('Риск', 'Строк в риске')}${thT('Завоз', 'Пробный завоз, шт')}${thT('Артикулы', 'Артикулы в работе')}${thT('Выгрузки', 'Скачать этот запуск')}</tr></thead>
+        <tbody>${rows || '<tr><td colspan="8" class="muted">Пока нет запусков. Соберите отчёт на странице подсорта.</td></tr>'}</tbody>
+      </table></div></div>
+    </div>`,
+  });
+}
+
+// Просмотр одного архивного запуска (регенерируем вывод из снимка).
+export function archiveViewPage({ user, csrf, base = '', org, role, run }) {
+  const u = (p) => base + p;
+  const when = esc(String(run.createdAt || '').slice(0, 16).replace('T', ' ')) + ' UTC';
+  const body = run.data
+    ? podsortResults(run.data, { downloadHref: (k) => u(`/org/${org.id}/reports/archive/${run.id}/download/${k}`), whenLabel: '' })
+    : '<div class="section"><p class="muted">Не удалось прочитать снимок этого запуска.</p></div>';
+  const p = run.params || {};
+  return layout({
+    title: `Архив: ${reportRu(run.report)} — ${org.name}`, user, csrf, base,
+    body: `<div class="wrap">
+      <div class="crumbs"><a href="${u(`/org/${org.id}/reports/archive`)}">← Архив отчётов</a></div>
+      <h1>${esc(reportRu(run.report))} <span class="muted" style="font-size:14px;font-weight:400">от ${when}</span></h1>
+      <p class="kv">Запуск №${esc(String(run.id))}${(p.articles && p.articles.length) ? ` · артикулы: ${esc(p.articles.join(', '))}` : ''}${p.leadMin ? ` · лид ${esc(String(p.leadMin))}–${esc(String(p.leadMax))} дн · запас ${esc(String(p.cover))} дн` : ''}</p>
+      ${body}
     </div>`,
   });
 }
