@@ -49,8 +49,8 @@ try {
   r = await req('GET', '/');
   const orgId = (r.text.match(/href="\/org\/(\d+)"/) || [])[1];
   r = await req('GET', `/org/${orgId}`);
-  r = await req('POST', `/org/${orgId}/cabinet`, form({ _csrf: csrfOf(r.text), name: 'Осн', token: goodToken }));
-  ok(r.status === 200 && r.text.includes('проверен и сохранён'), 'Ф2: кабинет с токеном подключён');
+  r = await req('POST', `/org/${orgId}/cabinet`, form({ _csrf: csrfOf(r.text), company: 'Осн', token: goodToken }));
+  ok(r.status === 200 && r.text.includes('сохранён'), 'Ф2: кабинет с токеном подключён (настройка компании)');
 
   r = await req('GET', `/org/${orgId}/reports`);
   ok(r.status === 200 && r.text.includes('Подсорт') && r.text.includes('Активный кабинет'), 'Ф2: список отчётов + активный кабинет');

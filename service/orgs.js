@@ -1,40 +1,47 @@
-// service/orgs.js — организации: участники, роли, приглашения, кабинеты WB.
-// Доступ: видеть организацию может только её участник; управлять (кабинеты,
-// приглашения, роли) — owner/admin. WB-токен проверяется (validateToken) перед
-// привязкой и хранится только в шифрованном виде.
+// service/orgs.js — компании: настройка кабинета WB, участники, приглашения, лицензия.
+// Модель доступа: компанию видит только её участник; управлять (кабинет/токен,
+// приглашения, участники) может ТОЛЬКО владелец. Число мест (лицензия) ограничивает
+// приглашения; менять его может только супер-админ. Приглашённый — участник без
+// права приглашать и без доступа к токену. Одна компания = один кабинет.
 import express from 'express';
 import { Orgs, Members, Cabinets, Invitations } from './models.js';
 import { requireAuth } from './security.js';
 import { validateToken } from './wb.js';
-import { orgPage, inviteAcceptPage } from './views.js';
+import { orgPage, inviteAcceptPage, adminPage } from './views.js';
 import { logger } from './logger.js';
-import { config } from './config.js';
+import { config, isSuperAdmin } from './config.js';
 
 export const orgRouter = express.Router();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Загрузить организацию и роль текущего пользователя; 404 если не участник.
+// Загрузить компанию и роль текущего пользователя; 404 если не участник.
 function loadOrg(req, res, next) {
   const orgId = Number(req.params.id);
   const org = Orgs.byId(orgId);
   const role = org && Orgs.roleOf(req.session.user.id, orgId);
-  if (!org || !role) return res.status(404).send('Организация не найдена');
+  if (!org || !role) return res.status(404).send('Компания не найдена');
   req.org = org; req.role = role;
   next();
 }
-const requireManage = (req, res, next) =>
-  Orgs.canManage(req.role) ? next() : res.status(403).send('Недостаточно прав (нужна роль owner или admin).');
+// Управлять компанией может только владелец.
+const requireOwner = (req, res, next) =>
+  Orgs.canManage(req.role) ? next() : res.status(403).send('Только владелец компании может это делать.');
+const requireSuperAdmin = (req, res, next) =>
+  isSuperAdmin(req.session.user?.email) ? next() : res.status(403).send('Доступно только супер-администратору сервиса.');
 
-// Собрать данные и отрендерить страницу организации (используется и при ошибках форм).
+// Собрать данные и отрендерить страницу компании (используется и при ошибках форм).
 function renderOrg(req, res, extra = {}) {
-  const cabinets = Cabinets.ofOrg(req.org.id).map((c) => ({ ...c, meta: safeMeta(c.token_meta) }));
+  const org = Orgs.byId(req.org.id); // свежие данные (имя/лицензия могли измениться)
+  const cabinet = Cabinets.firstOf(org.id);
   res.status(extra.status || 200).send(orgPage({
     user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
-    org: req.org, role: req.role,
-    members: Members.ofOrg(req.org.id),
-    invites: Orgs.canManage(req.role) ? Invitations.pending(req.org.id) : [],
-    cabinets,
+    org, role: req.role,
+    members: Members.ofOrg(org.id),
+    invites: Orgs.canManage(req.role) ? Invitations.pending(org.id) : [],
+    cabinet: cabinet ? { ...cabinet, meta: safeMeta(cabinet.token_meta) } : null,
+    seats: { total: Orgs.seats(org), used: Orgs.usedSeats(org.id), canInvite: Orgs.canInviteMore(org) },
+    superAdmin: isSuperAdmin(req.session.user.email),
     ...extra,
   }));
 }
@@ -47,85 +54,71 @@ orgRouter.get('/org/:id', requireAuth, loadOrg, (req, res) => {
   renderOrg(req, res, flash && flash.orgId === req.org.id ? flash.data : {});
 });
 
-// ── Кабинеты: привязка/обновление токена WB ─────────────────────────────────
-orgRouter.post('/org/:id/cabinet', requireAuth, loadOrg, requireManage, async (req, res) => {
-  const name = String(req.body.name || '').trim() || 'Кабинет WB';
+// ── Кабинет WB: одноразовая настройка компании и обновление токена ───────────
+// Настройка (кабинета ещё нет): имя компании + токен → создаём единственный кабинет.
+// Обновление токена (кабинет есть): только новый токен.
+orgRouter.post('/org/:id/cabinet', requireAuth, loadOrg, requireOwner, async (req, res) => {
+  const existing = Cabinets.firstOf(req.org.id);
+  const company = String(req.body.company || '').trim();
   const token = String(req.body.token || '').trim();
-  const cabinetId = req.body.cabinet_id ? Number(req.body.cabinet_id) : null;
 
-  if (!token) return renderOrg(req, res, { status: 400, cabError: 'Вставьте токен WB API.', cabForm: { name, cabinetId } });
+  if (!token) return renderOrg(req, res, { status: 400, cabError: 'Вставьте токен WB API.', setupForm: { company } });
 
   let v;
   try { v = await validateToken(token, { online: config.wbPingOnline }); }
-  catch (e) { logger.error(e, 'validateToken'); return renderOrg(req, res, { status: 500, cabError: 'Ошибка проверки токена.', cabForm: { name, cabinetId } }); }
+  catch (e) { logger.error(e, 'validateToken'); return renderOrg(req, res, { status: 500, cabError: 'Ошибка проверки токена.', setupForm: { company } }); }
 
-  if (!v.ok) {
-    return renderOrg(req, res, { status: 400, cabError: v.errors.join(' '), cabWarn: v.warnings, cabForm: { name, cabinetId } });
-  }
+  if (!v.ok) return renderOrg(req, res, { status: 400, cabError: v.errors.join(' '), cabWarn: v.warnings, setupForm: { company } });
 
   try {
-    if (cabinetId) {
-      const cab = Cabinets.byId(cabinetId);
-      if (!cab || cab.org_id !== req.org.id) return res.status(404).send('Кабинет не найден');
-      Cabinets.setToken(cabinetId, token, v.meta);
-      logger.info({ orgId: req.org.id, cabinetId, sid: v.meta.sid }, 'токен кабинета обновлён');
+    if (existing) {
+      Cabinets.setToken(existing.id, token, v.meta);
+      logger.info({ orgId: req.org.id, cabinetId: existing.id, sid: v.meta.sid }, 'токен кабинета обновлён');
     } else {
-      const id = Cabinets.create(req.org.id, name, token, v.meta);
-      logger.info({ orgId: req.org.id, cabinetId: id, sid: v.meta.sid }, 'кабинет создан + токен привязан');
+      if (company) Orgs.rename(req.org.id, company);
+      const id = Cabinets.create(req.org.id, company || 'Кабинет WB', token, v.meta);
+      logger.info({ orgId: req.org.id, cabinetId: id, sid: v.meta.sid }, 'компания настроена, кабинет создан');
     }
   } catch (e) {
     logger.error(e, 'cabinet save');
-    return renderOrg(req, res, { status: 500, cabError: 'Не удалось сохранить кабинет.', cabForm: { name, cabinetId } });
+    return renderOrg(req, res, { status: 500, cabError: 'Не удалось сохранить кабинет.', setupForm: { company } });
   }
-  renderOrg(req, res, { cabOk: 'Токен проверен и сохранён.' + (v.warnings.length ? ' ' + v.warnings.join(' ') : '') });
+  renderOrg(req, res, { cabOk: (existing ? 'Токен обновлён.' : 'Компания настроена, токен сохранён.') + (v.warnings.length ? ' ' + v.warnings.join(' ') : '') });
 });
 
-orgRouter.post('/org/:id/cabinet/:cid/activate', requireAuth, loadOrg, requireManage, (req, res) => {
-  const cab = Cabinets.byId(Number(req.params.cid));
-  if (!cab || cab.org_id !== req.org.id) return res.status(404).send('Кабинет не найден');
-  Cabinets.setActive(req.org.id, cab.id);
-  renderOrg(req, res, { cabOk: `Активный кабинет: ${cab.name}.` });
-});
-
-orgRouter.post('/org/:id/cabinet/:cid/remove', requireAuth, loadOrg, requireManage, (req, res) => {
-  const cab = Cabinets.byId(Number(req.params.cid));
-  if (!cab || cab.org_id !== req.org.id) return res.status(404).send('Кабинет не найден');
-  Cabinets.remove(cab.id);
-  logger.info({ orgId: req.org.id, cabinetId: cab.id }, 'кабинет удалён');
-  renderOrg(req, res, { cabOk: `Кабинет «${cab.name}» удалён.` });
-});
-
-// ── Приглашения ──────────────────────────────────────────────────────────────
-orgRouter.post('/org/:id/invite', requireAuth, loadOrg, requireManage, (req, res) => {
+// ── Приглашения (только владелец, строго в пределах лицензии) ─────────────────
+orgRouter.post('/org/:id/invite', requireAuth, loadOrg, requireOwner, (req, res) => {
   const email = String(req.body.email || '').trim();
-  const role = String(req.body.role || 'member');
   if (!EMAIL_RE.test(email)) return renderOrg(req, res, { status: 400, invError: 'Введите корректный email.' });
-  if (!['admin', 'member'].includes(role)) return renderOrg(req, res, { status: 400, invError: 'Некорректная роль.' });
-  const token = Invitations.create(req.org.id, email, role);
-  logger.info({ orgId: req.org.id, email, role }, 'приглашение создано');
+  if (!Orgs.canInviteMore(req.org)) {
+    return renderOrg(req, res, { status: 403, invError: `Лимит мест по лицензии исчерпан (${Orgs.seats(req.org)}). Расширить может только администратор сервиса.` });
+  }
+  const token = Invitations.create(req.org.id, email, 'member'); // приглашённые всегда участники
+  logger.info({ orgId: req.org.id, email }, 'приглашение создано');
   const link = `${req.protocol}://${req.get('host')}${res.locals.base || ''}/invite/${token}`;
-  // PRG: кладём результат во flash и редиректим на чистый URL организации,
-  // чтобы ссылка отображалась кликабельной, а адресная строка не путала.
   req.session.flash = { orgId: req.org.id, data: { inviteCreated: { email, url: link } } };
   res.redirect(`/org/${req.org.id}`);
 });
 
-orgRouter.post('/org/:id/invite/:inviteId/revoke', requireAuth, loadOrg, requireManage, (req, res) => {
+orgRouter.post('/org/:id/invite/:inviteId/revoke', requireAuth, loadOrg, requireOwner, (req, res) => {
   Invitations.revoke(req.org.id, Number(req.params.inviteId));
   renderOrg(req, res, { invOk: 'Приглашение отозвано.' });
 });
 
-// ── Роли и удаление участников ──────────────────────────────────────────────
-orgRouter.post('/org/:id/member/:userId/role', requireAuth, loadOrg, requireManage, (req, res) => {
-  const role = String(req.body.role || '');
-  if (!['admin', 'member'].includes(role)) return renderOrg(req, res, { status: 400, memError: 'Некорректная роль.' });
-  Members.setRole(req.org.id, Number(req.params.userId), role);
-  renderOrg(req, res, { memOk: 'Роль обновлена.' });
+orgRouter.post('/org/:id/member/:userId/remove', requireAuth, loadOrg, requireOwner, (req, res) => {
+  Members.remove(req.org.id, Number(req.params.userId)); // владельца убрать нельзя (защита в SQL)
+  renderOrg(req, res, { memOk: 'Участник удалён.' });
 });
 
-orgRouter.post('/org/:id/member/:userId/remove', requireAuth, loadOrg, requireManage, (req, res) => {
-  Members.remove(req.org.id, Number(req.params.userId));
-  renderOrg(req, res, { memOk: 'Участник удалён.' });
+// ── Супер-админ: лицензии (число мест компаний) ─────────────────────────────
+orgRouter.get('/admin', requireAuth, requireSuperAdmin, (req, res) => {
+  res.send(adminPage({ user: req.session.user, csrf: res.locals.csrf, base: res.locals.base, orgs: Orgs.all(), ok: req.query.ok }));
+});
+orgRouter.post('/admin/org/:id/seats', requireAuth, requireSuperAdmin, (req, res) => {
+  const seats = Math.max(1, Math.round(Number(req.body.seats) || 1));
+  Orgs.setSeats(Number(req.params.id), seats);
+  logger.info({ orgId: Number(req.params.id), seats, by: req.session.user.email }, 'супер-админ: изменил число мест');
+  res.redirect('/admin?ok=1');
 });
 
 // ── Приём приглашения ────────────────────────────────────────────────────────
@@ -155,6 +148,11 @@ orgRouter.post('/invite/:token/accept', requireAuth, (req, res) => {
   if (String(req.session.user.email).toLowerCase() !== String(invite.email).toLowerCase()) {
     const org = Orgs.byId(invite.org_id);
     return res.status(403).send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, org, invite, token: req.params.token, mismatch: true, base: res.locals.base }));
+  }
+  // Лицензия: не превышаем число мест (на случай, если лимит уменьшили после выдачи).
+  const org = Orgs.byId(invite.org_id);
+  if (!Orgs.isMember(req.session.user.id, invite.org_id) && Orgs.membersCount(invite.org_id) >= Orgs.seats(org)) {
+    return res.status(403).send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, org, invite, token: req.params.token, full: true, base: res.locals.base }));
   }
   Invitations.accept(invite, req.session.user.id);
   logger.info({ orgId: invite.org_id, userId: req.session.user.id }, 'приглашение принято');

@@ -39,4 +39,12 @@ export const config = {
   // Онлайн-проверка токена через /ping WB при привязке кабинета.
   // По умолчанию включена; тесты/офлайн-среда выключают через WB_PING_ONLINE=0.
   wbPingOnline: !['0', 'false', 'no'].includes(String(process.env.WB_PING_ONLINE || '').toLowerCase()),
+  // Лицензия: сколько мест (человек, включая владельца) у новой компании.
+  // Строго ограничивает приглашения; менять число мест может только супер-админ.
+  defaultLicenseSeats: Math.max(1, Number(process.env.DEFAULT_LICENSE_SEATS || 1)),
+  // Супер-админы (могут менять число мест у любой компании). Список email через запятую.
+  superAdminEmails: String(process.env.SUPER_ADMIN_EMAILS || 'solexvk@gmail.com')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
 };
+
+export const isSuperAdmin = (email) => !!email && config.superAdminEmails.includes(String(email).toLowerCase());

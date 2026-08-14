@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS organizations (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT NOT NULL,
   owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  license_seats INTEGER NOT NULL DEFAULT 1,   -- лицензия: мест всего (владелец + приглашённые)
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -89,6 +90,17 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at INTEGER NOT NULL
 );
 `);
+
+// Миграции для уже существующих БД (idempotent): добавляем недостающие столбцы.
+function ensureColumn(table, column, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+    logger.info({ table, column }, 'миграция: добавлен столбец');
+  }
+}
+ensureColumn('organizations', 'license_seats', 'license_seats INTEGER NOT NULL DEFAULT 1');
+
 logger.info({ db: config.dbPath }, 'SQLite готова, схема применена');
 
 // ── Минимальный сессионный стор на SQLite (persistent, переживает рестарт) ───

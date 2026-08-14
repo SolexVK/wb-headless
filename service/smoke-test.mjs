@@ -11,6 +11,8 @@ process.env.BASE_PATH = ''; // тест в корне: не даём .env (BASE_
 process.env.SESSION_SECRET = 'test-secret-please-change';
 process.env.TOKEN_ENC_KEY = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'; // 32 байта hex (тест)
 process.env.WB_PING_ONLINE = '0'; // офлайн: проверяем токен только по маске (без сети)
+process.env.DEFAULT_LICENSE_SEATS = '3'; // тест приглашений: 3 места
+process.env.SUPER_ADMIN_EMAILS = 'super@example.com'; // супер-админ для теста панели
 process.env.DB_PATH = path.join(os.tmpdir(), `fbs-smoke-${process.pid}.sqlite`);
 
 // Собрать фейковый WB-JWT (подпись не проверяется — важен только payload).
@@ -98,21 +100,24 @@ try {
 
   r = await req('GET', `/org/${orgId}`);
   const csrfOrg = csrfOf(r.text);
-  ok(r.status === 200 && r.text.includes('Кабинеты WB') && r.text.includes('Участники'), 'Ф1: страница организации (кабинеты + участники)');
+  ok(r.status === 200 && r.text.includes('Настройка компании') && r.text.includes('Участники'), 'Ф1: страница компании (настройка + участники)');
 
   // Плохой токен (без Статистики) → 400 с упоминанием категории.
-  r = await req('POST', `/org/${orgId}/cabinet`, form({ _csrf: csrfOrg, name: 'Тест', token: BAD_TOKEN }));
+  r = await req('POST', `/org/${orgId}/cabinet`, form({ _csrf: csrfOrg, company: 'Тест', token: BAD_TOKEN }));
   ok(r.status === 400 && r.text.includes('Статистика'), 'Ф1: токен без Статистики отклонён (400)');
 
-  // Хороший токен → 200, кабинет сохранён, показан тип токена.
-  r = await req('POST', `/org/${orgId}/cabinet`, form({ _csrf: csrfOrg, name: 'Основной', token: GOOD_TOKEN }));
-  ok(r.status === 200 && r.text.includes('проверен и сохранён'), 'Ф1: валидный токен принят и сохранён');
-  ok(r.text.includes('Основной') && r.text.includes('активный'), 'Ф1: кабинет показан как активный');
+  // Настройка компании: имя + валидный токен → создаётся единственный кабинет.
+  r = await req('POST', `/org/${orgId}/cabinet`, form({ _csrf: csrfOrg, company: 'Тест-компания', token: GOOD_TOKEN }));
+  ok(r.status === 200 && r.text.includes('сохранён'), 'Ф1: валидный токен принят, компания настроена');
+  ok(r.text.includes('Тест-компания') && r.text.includes('подключён'), 'Ф1: кабинет подключён, имя компании применено');
   ok(!r.text.includes(GOOD_TOKEN), 'Ф1: токен НЕ отображается на странице');
+
+  // Настройка одноразовая: форма настройки исчезла, есть «Обновить токен».
+  ok(!r.text.includes('Настройка компании') && r.text.includes('Обновить токен'), 'Ф1: форма настройки скрыта, есть обновление токена');
 
   // Приглашение конкретного email → PRG-редирект, ссылка на странице организации.
   const inviteeEmail = `invitee_${Date.now()}@example.com`;
-  r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfOrg, email: inviteeEmail, role: 'member' }));
+  r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfOrg, email: inviteeEmail }));
   ok(r.status === 302 && r.location === `/org/${orgId}`, 'Ф1: приглашение → 302 на организацию (PRG)');
   r = await req('GET', `/org/${orgId}`);
   const inviteTok = (r.text.match(/\/invite\/([A-Za-z0-9_-]{10,})/) || [])[1];
@@ -137,11 +142,40 @@ try {
   r = await req('POST', `/invite/${inviteTok}/accept`, form({ _csrf: csrfOf(r.text) }));
   ok(r.status === 302 && r.location === `/org/${orgId}`, 'Ф1: приглашение принято → организация');
   r = await req('GET', `/org/${orgId}`);
-  ok(r.status === 200 && r.text.includes('Гость'), 'Ф1: приглашённый видит организацию как участник');
+  ok(r.status === 200 && r.text.includes('Гость'), 'Ф1: приглашённый видит компанию как участник');
+  // Участник НЕ видит поля токена и формы приглашений (проверяем сами контролы).
+  ok(!r.text.includes('name="token"') && !r.text.includes('id="invemail"'), 'Ф1: участник не видит токен/приглашения');
+  // Участник НЕ может приглашать (owner-only) → 403.
+  const csrfMember = csrfOf(r.text);
+  r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfMember, email: `nope_${Date.now()}@example.com` }));
+  ok(r.status === 403, 'Ф1: участник не может приглашать (403)');
 
-  // Доступ: чужая/несуществующая организация → 404.
+  // Лицензия: у владельца 3 места, занято 2 → одно ещё можно, следующее — нет.
+  cookie = '';
+  r = await req('GET', '/login');
+  r = await req('POST', '/login', form({ _csrf: csrfOf(r.text), email: email2, password: 'supersecret1' }));
+  r = await req('GET', `/org/${orgId}`);
+  const csrfOwner = csrfOf(r.text);
+  r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfOwner, email: `seat3_${Date.now()}@example.com` }));
+  ok(r.status === 302, 'Ф1: 3-е место — приглашение проходит');
+  r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfOwner, email: `seat4_${Date.now()}@example.com` }));
+  ok(r.status === 403 && r.text.includes('Лимит мест'), 'Ф1: сверх лицензии — приглашение отклонено (403)');
+
+  // Доступ: чужая/несуществующая компания → 404.
   r = await req('GET', `/org/${Number(orgId) + 99999}`);
-  ok(r.status === 404, 'Ф1: чужая организация недоступна (404)');
+  ok(r.status === 404, 'Ф1: чужая компания недоступна (404)');
+
+  // Супер-админ: панель лицензий доступна только ему.
+  r = await req('GET', '/admin');
+  ok(r.status === 403, 'Ф1: обычный пользователь не входит в /admin (403)');
+  cookie = '';
+  r = await req('GET', '/register');
+  r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email: 'super@example.com', password: 'supersecret1', name: 'Админ' }));
+  r = await req('GET', '/admin');
+  const csrfAdmin = csrfOf(r.text);
+  ok(r.status === 200 && r.text.includes('Лицензии компаний'), 'Ф1: супер-админ видит панель лицензий');
+  r = await req('POST', `/admin/org/${orgId}/seats`, form({ _csrf: csrfAdmin, seats: '5' }));
+  ok(r.status === 302 && /\/admin/.test(r.location || ''), 'Ф1: супер-админ меняет число мест');
 } catch (e) {
   console.error('Ошибка теста:', e); failed++;
 } finally {

@@ -141,24 +141,20 @@ export function registerPage({ csrf, error, email, name, notice, base = '' }) {
   });
 }
 
-export function homePage({ user, orgs, csrf, base = '' }) {
+export function homePage({ user, orgs, csrf, base = '', superAdmin }) {
   const u = (p) => base + p;
   const orgList = orgs.length
     ? orgs.map((o) => `<a class="tile" href="${u(`/org/${o.id}`)}" style="display:block">
         <h3>${esc(o.name)} <span class="badge ${esc(o.role)}">${esc(roleRu(o.role))}</span></h3>
-        <p>Кабинеты, участники и отчёты →</p></a>`).join('')
-    : `<div class="tile"><p class="muted">Организаций пока нет.</p></div>`;
+        <p>${o.role === 'owner' ? 'Кабинет, участники и отчёты' : 'Отчёты компании'} →</p></a>`).join('')
+    : `<div class="tile"><p class="muted">Вы пока не состоите ни в одной компании. Если вас пригласили — откройте ссылку-приглашение снова.</p></div>`;
   return layout({
     title: 'FBS-сервис',
     user, csrf, base,
     body: `<div class="wrap">
       <h1>Здравствуйте, ${esc(user.name || user.email)}</h1>
-      <p class="sub">Ваши организации. Откройте организацию, чтобы подключить кабинет WB и участников.</p>
+      <p class="sub">Ваши компании. Откройте компанию, чтобы настроить кабинет WB и работать с отчётами.${superAdmin ? ` <a href="${u('/admin')}">Панель супер-админа →</a>` : ''}</p>
       <div class="grid">${orgList}</div>
-      <div class="tile soon" style="margin-top:16px">
-        <h3>Отчёты <span class="pill">скоро</span></h3>
-        <p>Подсорт (с формой), Остатки, Передано/Принято, Ретроспектива — Фаза 2.</p>
-      </div>
     </div>`,
   });
 }
@@ -168,13 +164,13 @@ const roleRu = (r) => ({ owner: 'владелец', admin: 'админ', member:
 // Глоссарий ролей/кабинета для страницы организации.
 function rolesGlossary() {
   const dt = (t, d) => `<dt>${esc(t)}</dt><dd>${esc(d)}</dd>`;
-  return `<details style="margin-top:12px"><summary>❓ Пояснения: роли и кабинеты</summary>
+  return `<details style="margin-top:12px"><summary>❓ Пояснения: роли и лицензия</summary>
     <div style="padding:4px 2px 8px"><dl class="gloss">
-      ${dt('владелец', 'Создатель организации. Полный доступ, роль нельзя изменить/убрать.')}
-      ${dt('админ', 'Управляет кабинетами WB и участниками, приглашает людей.')}
-      ${dt('участник', 'Видит организацию, открывает и запускает отчёты. Не меняет кабинеты и людей.')}
-      ${dt('Активный кабинет', 'Кабинет, на токене которого считаются отчёты. Активный — один; переключается кнопкой.')}
-      ${dt('Токен WB API', 'Ключ доступа к API магазина. Нужны категории Контент + Маркетплейс + Статистика. Хранится в зашифрованном виде, на экран не выводится.')}
+      ${dt('владелец', 'Держатель лицензии — первый человек компании. Настраивает кабинет и токен, приглашает участников в пределах лицензии. Роль нельзя убрать.')}
+      ${dt('участник', 'Приглашённый. Смотрит и запускает отчёты. НЕ видит токен, НЕ настраивает кабинет и НЕ может приглашать других.')}
+      ${dt('Места по лицензии', 'Сколько человек всего может быть в компании (включая владельца). Владелец приглашает в пределах этого числа. Меняет лимит только администратор сервиса.')}
+      ${dt('Кабинет WB', 'Одна компания = один кабинет WB (один токен). Настраивается один раз владельцем; потом доступно только «Обновить токен».')}
+      ${dt('Токен WB API', 'Ключ доступа к API магазина. Нужны категории Контент + Маркетплейс + Статистика, достаточно «только чтение». Хранится зашифрованным, на экран не выводится.')}
     </dl></div>
   </details>`;
 }
@@ -193,95 +189,113 @@ function tokenMetaLine(meta) {
   return `<div class="kv">${parts.join(' · ')}</div>${scopes ? `<div class="scopes" style="margin-top:5px">${scopes}</div>` : ''}`;
 }
 
+const TOKEN_HELP = `<div class="note">Нужен токен WB API категорий <b>Контент + Маркетплейс + Статистика</b>. Тип токена — <b>персональный</b> или <b>сервисный</b>. Достаточно доступа «<b>Только на чтение</b>» (запись не требуется). Токен хранится в зашифрованном виде (AES-256-GCM), на экран не выводится и в логи не пишется.</div>`;
+
 export function orgPage(p) {
-  const { user, csrf, org, role, members, invites, cabinets, base = '' } = p;
+  const { user, csrf, org, role, members, cabinet, seats, base = '' } = p;
   const u = (path) => base + path;
-  const manage = role === 'owner' || role === 'admin';
+  const owner = role === 'owner';
+  const invites = p.invites || [];
+  const tokenExpired = cabinet?.meta?.expiresAt ? new Date(cabinet.meta.expiresAt).getTime() < Date.now() : false;
 
-  // Кабинеты.
-  const cabRows = cabinets.length ? cabinets.map((c) => `
-    <tr>
-      <td><b>${esc(c.name)}</b>${c.is_active ? ' <span class="badge on">активный</span>' : ''}</td>
-      <td>${c.has_token ? tokenMetaLine(c.meta) : '<span class="badge off">нет токена</span>'}</td>
-      <td style="white-space:nowrap;text-align:right">
-        ${manage && !c.is_active && c.has_token ? formBtn(csrf, u(`/org/${org.id}/cabinet/${c.id}/activate`), 'Сделать активным', 'mini btn-sm') : ''}
-        ${manage ? formBtn(csrf, u(`/org/${org.id}/cabinet/${c.id}/remove`), 'Удалить', 'mini btn-danger', 'Удалить кабинет и его токен?') : ''}
-      </td>
-    </tr>`).join('') : `<tr><td colspan="3" class="muted">Кабинетов пока нет — подключите первый ниже.</td></tr>`;
+  // ── Кабинет компании (одна компания = один кабинет) ──
+  let cabinetSection;
+  if (!cabinet) {
+    cabinetSection = owner ? `
+      <div class="section">
+        <h2>Настройка компании</h2>
+        ${p.cabError ? errBox(p.cabError) : ''}${(p.cabWarn || []).map(okOrWarn).join('')}
+        <p class="kv" style="margin:0 0 10px">Разовая настройка: задайте название компании и подключите токен кабинета WB. После этого форма скроется — останется только кнопка «Обновить токен».</p>
+        <form method="post" action="${u(`/org/${org.id}/cabinet`)}">
+          ${csrfField(csrf)}
+          <label for="company" title="Название вашей компании — как она будет называться в сервисе">Название компании</label>
+          <input id="company" name="company" type="text" value="${esc(p.setupForm?.company ?? org.name)}" placeholder="Напр. ИП Иванов">
+          <label for="cabtoken" style="margin-top:12px" title="JWT-токен WB API с категориями Контент+Маркетплейс+Статистика">Токен WB API</label>
+          <textarea id="cabtoken" name="token" placeholder="eyJhbGciOi..." autocomplete="off" spellcheck="false" required></textarea>
+          ${TOKEN_HELP}
+          <button class="btn" type="submit" style="max-width:280px">Проверить и сохранить</button>
+        </form>
+      </div>`
+      : `<div class="section"><h2>Кабинет WB</h2><p class="muted">Компания ещё не настроена владельцем. Как только владелец подключит кабинет — отчёты станут доступны.</p></div>`;
+  } else {
+    // Кабинет есть.
+    const refreshForm = owner ? `
+      <details ${tokenExpired ? 'open' : ''} style="margin-top:12px">
+        <summary>Обновить токен${tokenExpired ? ' — требуется (истёк)' : ''}</summary>
+        <form method="post" action="${u(`/org/${org.id}/cabinet`)}" style="padding:6px 2px">
+          ${csrfField(csrf)}
+          <label for="cabtoken" title="Вставьте новый токен WB API">Новый токен WB API</label>
+          <textarea id="cabtoken" name="token" placeholder="eyJhbGciOi..." autocomplete="off" spellcheck="false" required></textarea>
+          ${TOKEN_HELP}
+          <button class="btn" type="submit" style="max-width:260px">Проверить и обновить</button>
+        </form>
+      </details>` : '';
+    cabinetSection = `
+      <div class="section">
+        <h2>Кабинет WB</h2>
+        ${p.cabError ? errBox(p.cabError) : ''}${(p.cabWarn || []).map(okOrWarn).join('')}${p.cabOk ? okBox(p.cabOk) : ''}
+        ${tokenExpired ? `<div class="warn">Токен истёк — обновите его, иначе отчёты не будут считаться.</div>` : ''}
+        <p><b>${esc(cabinet.name)}</b> <span class="badge on">подключён</span></p>
+        ${owner ? tokenMetaLine(cabinet.meta) : '<p class="kv">Токен подключён владельцем. Детали доступны только владельцу.</p>'}
+        ${refreshForm}
+      </div>`;
+  }
 
-  const connectForm = manage ? `
-    <form method="post" action="${u(`/org/${org.id}/cabinet`)}" style="margin-top:14px">
-      ${csrfField(csrf)}
-      <label for="cabname">Название кабинета</label>
-      <input id="cabname" name="name" type="text" placeholder="Напр. Основной магазин" value="${esc(p.cabForm?.name || '')}">
-      ${p.cabForm?.cabinetId ? `<input type="hidden" name="cabinet_id" value="${esc(String(p.cabForm.cabinetId))}">` : ''}
-      <label for="cabtoken" style="margin-top:12px">Токен WB API <span class="muted">(Контент + Маркетплейс + Статистика)</span></label>
-      <textarea id="cabtoken" name="token" placeholder="eyJhbGciOi..." autocomplete="off" spellcheck="false" required></textarea>
-      <p class="kv" style="margin:6px 0 0">Токен проверяется и хранится в зашифрованном виде (AES-256-GCM). Он никогда не отображается и не логируется.</p>
-      <button class="btn" type="submit" style="max-width:260px">Проверить и подключить</button>
-    </form>` : '<p class="muted">Подключать кабинеты может владелец или админ.</p>';
-
-  // Участники.
+  // ── Участники ──
   const memRows = members.map((m) => {
     const isMe = m.user_id === user.id;
-    const canEdit = manage && m.role !== 'owner' && !isMe;
-    const roleCell = canEdit ? `
-      <form method="post" action="${u(`/org/${org.id}/member/${m.user_id}/role`)}" class="row-form" style="gap:6px">
-        ${csrfField(csrf)}
-        <select name="role" onchange="this.form.submit()">
-          <option value="member" ${m.role === 'member' ? 'selected' : ''}>участник</option>
-          <option value="admin" ${m.role === 'admin' ? 'selected' : ''}>админ</option>
-        </select>
-      </form>` : `<span class="badge ${esc(m.role)}">${esc(roleRu(m.role))}</span>`;
+    const canRemove = owner && m.role !== 'owner' && !isMe;
     return `<tr>
-      <td><b>${esc(m.name || m.email)}</b>${isMe ? ' <span class="muted">(вы)</span>' : ''}<div class="kv">${esc(m.email)}</div></td>
-      <td>${roleCell}</td>
-      <td style="text-align:right">${canEdit ? formBtn(csrf, u(`/org/${org.id}/member/${m.user_id}/remove`), 'Убрать', 'mini btn-danger', 'Убрать участника из организации?') : ''}</td>
+      <td class="tl"><b>${esc(m.name || m.email)}</b>${isMe ? ' <span class="muted">(вы)</span>' : ''}<div class="kv">${esc(m.email)}</div></td>
+      <td><span class="badge ${esc(m.role)}">${esc(roleRu(m.role))}</span></td>
+      <td style="text-align:right">${canRemove ? formBtn(csrf, u(`/org/${org.id}/member/${m.user_id}/remove`), 'Убрать', 'mini btn-danger', 'Убрать участника из компании?') : ''}</td>
     </tr>`;
   }).join('');
 
-  const inviteRows = (invites || []).map((i) => `
+  const seatLine = `<p class="kv" style="margin:0 0 8px">Места по лицензии: <b>${esc(String(seats.used))}</b> из <b>${esc(String(seats.total))}</b>${owner && !seats.canInvite ? ' — лимит исчерпан' : ''}</p>`;
+
+  // ── Приглашения (только владелец) ──
+  const inviteRows = invites.map((i) => `
     <tr>
-      <td>${esc(i.email)}</td>
-      <td><span class="badge ${esc(i.role)}">${esc(roleRu(i.role))}</span></td>
+      <td class="tl">${esc(i.email)}</td>
       <td class="kv">${esc(String(i.expires_at).slice(0, 10))}</td>
       <td style="text-align:right">${formBtn(csrf, u(`/org/${org.id}/invite/${i.id}/revoke`), 'Отозвать', 'mini btn-sm')}</td>
     </tr>`).join('');
 
-  const inviteSection = manage ? `
-    <div class="section">
-      <h2>Приглашения</h2>
-      ${p.invError ? errBox(p.invError) : ''}${p.invOk ? okBox(p.invOk) : ''}
-      ${p.inviteCreated ? inviteCreatedBox(p.inviteCreated) : ''}
-      <p class="kv" style="margin:0 0 10px">Пока приглашение — это <b>ссылка</b>: вы создаёте её и отправляете человеку сами (почта/мессенджер). Принять сможет <b>только тот email</b>, который вы укажете. Он откроет ссылку, зарегистрируется этим email (или войдёт) и подтвердит вступление. Автоотправка на email появится позже.</p>
+  const inviteForm = seats.canInvite ? `
       <form method="post" action="${u(`/org/${org.id}/invite`)}" class="row-form">
         ${csrfField(csrf)}
-        <div><label for="invemail" title="Email приглашаемого. Пока используется как пометка и подставляется в его регистрацию.">Email</label><input id="invemail" name="email" type="email" placeholder="user@example.com" required></div>
-        <div><label for="invrole" title="админ — управляет кабинетами и участниками; участник — смотрит и запускает отчёты">Роль</label>
-          <select id="invrole" name="role"><option value="member">участник</option><option value="admin">админ</option></select></div>
+        <div><label for="invemail" title="Email приглашаемого. Принять приглашение сможет только этот адрес.">Email участника</label><input id="invemail" name="email" type="email" placeholder="manager@example.com" required></div>
         <button class="btn mini" type="submit" style="height:38px">Создать ссылку</button>
-      </form>
-      ${inviteRows ? `<table style="margin-top:12px"><thead><tr>${thT('Email', 'Кому выписано приглашение')}${thT('Роль', 'Роль, которую получит участник')}${thT('До', 'Дата, до которой действует ссылка (7 дней)')}<th></th></tr></thead><tbody>${inviteRows}</tbody></table>` : ''}
+      </form>`
+    : `<div class="warn">Все места по лицензии заняты (${esc(String(seats.total))}). Чтобы добавить ещё участников, напишите администратору сервиса для расширения лицензии.</div>`;
+
+  const inviteSection = owner ? `
+    <div class="section">
+      <h2>Приглашения <span class="muted" style="font-size:13px;font-weight:400">участники — только просмотр и запуск отчётов</span></h2>
+      ${p.invError ? errBox(p.invError) : ''}${p.invOk ? okBox(p.invOk) : ''}
+      ${p.inviteCreated ? inviteCreatedBox(p.inviteCreated) : ''}
+      <p class="kv" style="margin:0 0 10px">Приглашение — это <b>ссылка</b>: вы создаёте её и отправляете человеку сами (почта/мессенджер). Принять сможет <b>только указанный email</b>. Приглашённый регистрируется этим email и подтверждает вступление; приглашать других он не может.</p>
+      ${inviteForm}
+      ${inviteRows ? `<table class="rt" style="margin-top:12px"><thead><tr>${thT('Email', 'Кому выписано приглашение')}${thT('До', 'Ссылка действует 7 дней')}<th></th></tr></thead><tbody>${inviteRows}</tbody></table>` : ''}
     </div>` : '';
+
+  const adminLink = p.superAdmin ? ` · <a href="${u('/admin')}">Панель супер-админа</a>` : '';
 
   return layout({
     title: `${org.name} — FBS-сервис`, user, csrf, base,
     body: `<div class="wrap">
-      <div class="crumbs"><a href="${u('/')}">← Организации</a></div>
+      <div class="crumbs"><a href="${u('/')}">← Компании</a>${adminLink}</div>
       <h1>${esc(org.name)} <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
       <p><a class="dl" href="${u(`/org/${org.id}/reports`)}">📊 Открыть отчёты</a></p>
 
-      <div class="section">
-        <h2>Кабинеты WB</h2>
-        ${p.cabError ? errBox(p.cabError) : ''}${(p.cabWarn || []).map(okOrWarn).join('')}${p.cabOk ? okBox(p.cabOk) : ''}
-        <table><thead><tr>${thT('Кабинет', 'Название кабинета WB (магазина/продавца)')}${thT('Токен', 'Тип токена, продавец, срок действия и доступные категории API')}<th></th></tr></thead><tbody>${cabRows}</tbody></table>
-        ${connectForm}
-      </div>
+      ${cabinetSection}
 
       <div class="section">
-        <h2 title="Люди с доступом к организации и их роли">Участники</h2>
+        <h2 title="Люди с доступом к компании и их роли">Участники</h2>
         ${p.memError ? errBox(p.memError) : ''}${p.memOk ? okBox(p.memOk) : ''}
-        <table><thead><tr>${thT('Пользователь', 'Имя и email участника')}${thT('Роль', 'владелец — полный доступ; админ — управляет кабинетами и участниками; участник — смотрит и запускает отчёты')}<th></th></tr></thead><tbody>${memRows}</tbody></table>
+        ${seatLine}
+        <table class="rt"><thead><tr>${thT('Пользователь', 'Имя и email участника')}${thT('Роль', 'владелец — держатель лицензии: настраивает кабинет и приглашает; участник — смотрит и запускает отчёты')}<th></th></tr></thead><tbody>${memRows}</tbody></table>
         ${rolesGlossary()}
       </div>
 
@@ -290,13 +304,15 @@ export function orgPage(p) {
   });
 }
 
-export function inviteAcceptPage({ csrf, user, org, invite, already, mismatch, token, invalid, base = '' }) {
+export function inviteAcceptPage({ csrf, user, org, invite, already, mismatch, full, token, invalid, base = '' }) {
   const u = (p) => base + p;
   let body;
   if (invalid) {
     body = `<h1>Приглашение недействительно</h1><p class="sub">Ссылка истекла или уже использована.</p><div class="alt"><a href="${u('/')}">На главную</a></div>`;
   } else if (already) {
-    body = `<h1>Вы уже участник</h1><p class="sub">${esc(org.name)} — вы уже состоите в этой организации.</p><div class="alt"><a href="${u(`/org/${org.id}`)}">Открыть организацию</a></div>`;
+    body = `<h1>Вы уже участник</h1><p class="sub">${esc(org.name)} — вы уже состоите в этой компании.</p><div class="alt"><a href="${u(`/org/${org.id}`)}">Открыть компанию</a></div>`;
+  } else if (full) {
+    body = `<h1>Мест нет</h1><p class="sub">В компании <b>${esc(org.name)}</b> закончились места по лицензии.</p><div class="warn">Попросите владельца компании расширить лицензию, затем откройте ссылку снова.</div><div class="alt"><a href="${u('/')}">На главную</a></div>`;
   } else if (mismatch) {
     // Строгая привязка: аккаунт не совпадает с email приглашения — принять нельзя.
     body = `<h1>Другой аккаунт</h1>
@@ -314,6 +330,35 @@ export function inviteAcceptPage({ csrf, user, org, invite, already, mismatch, t
        <div class="alt"><a href="${u('/')}">Отказаться</a></div>`;
   }
   return layout({ title: 'Приглашение — FBS-сервис', user, csrf, base, body: `<div class="center"><div class="card auth">${body}</div></div>` });
+}
+
+// ── Панель супер-админа: лицензии (число мест компаний) ─────────────────────
+export function adminPage({ user, csrf, base = '', orgs, ok }) {
+  const u = (p) => base + p;
+  const rows = orgs.map((o) => `<tr>
+    <td class="tl"><b>${esc(o.name)}</b><div class="kv">${esc(o.owner_email)}</div></td>
+    <td>${esc(String(o.members))}${o.pending ? ` <span class="muted">(+${esc(String(o.pending))} приглаш.)</span>` : ''}</td>
+    <td>
+      <form method="post" action="${u(`/admin/org/${o.id}/seats`)}" class="row-form" style="gap:6px;justify-content:center">
+        ${csrfField(csrf)}
+        <input name="seats" type="number" min="1" value="${esc(String(o.license_seats))}" style="width:80px" aria-label="Мест">
+        <button class="btn mini" type="submit" style="height:36px">Сохранить</button>
+      </form>
+    </td>
+  </tr>`).join('');
+  return layout({
+    title: 'Супер-админ — лицензии', user, csrf, base,
+    body: `<div class="wrap">
+      <div class="crumbs"><a href="${u('/')}">← Компании</a></div>
+      <h1>Лицензии компаний</h1>
+      <p class="sub">Задайте число мест (человек, включая владельца) для каждой компании.</p>
+      ${ok ? okBox('Сохранено.') : ''}
+      <div class="section"><div class="scroll"><table class="rt">
+        <thead><tr>${thT('Компания', 'Название и email владельца')}${thT('Участников', 'Сейчас в компании + непринятые приглашения')}${thT('Мест по лицензии', 'Всего мест; владелец приглашает в пределах этого числа')}</tr></thead>
+        <tbody>${rows || '<tr><td colspan="3" class="muted">Компаний пока нет.</td></tr>'}</tbody>
+      </table></div></div>
+    </div>`,
+  });
 }
 
 // Кнопка-форма (POST + CSRF) для одиночных действий. action уже с префиксом base.

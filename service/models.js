@@ -4,6 +4,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { db, tx } from './db.js';
+import { config } from './config.js';
 import { encryptToken, decryptToken } from './tokens.js';
 
 const q = {
@@ -12,12 +13,21 @@ const q = {
   insertUser: db.prepare('INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'),
   touchLogin: db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?"),
 
-  insertOrg: db.prepare('INSERT INTO organizations (name, owner_user_id) VALUES (?, ?)'),
+  insertOrg: db.prepare('INSERT INTO organizations (name, owner_user_id, license_seats) VALUES (?, ?, ?)'),
   orgById: db.prepare('SELECT * FROM organizations WHERE id = ?'),
+  renameOrg: db.prepare('UPDATE organizations SET name = ? WHERE id = ?'),
+  setSeats: db.prepare('UPDATE organizations SET license_seats = ? WHERE id = ?'),
   orgsOfUser: db.prepare(`
-    SELECT o.id, o.name, m.role
+    SELECT o.id, o.name, o.license_seats, m.role
     FROM memberships m JOIN organizations o ON o.id = m.org_id
     WHERE m.user_id = ? ORDER BY o.created_at`),
+  membersCount: db.prepare('SELECT COUNT(*) AS n FROM memberships WHERE org_id = ?'),
+  pendingCount: db.prepare("SELECT COUNT(*) AS n FROM invitations WHERE org_id = ? AND accepted_at IS NULL AND expires_at > datetime('now')"),
+  allOrgs: db.prepare(`
+    SELECT o.id, o.name, o.license_seats, o.created_at, u.email AS owner_email,
+      (SELECT COUNT(*) FROM memberships m WHERE m.org_id = o.id) AS members,
+      (SELECT COUNT(*) FROM invitations i WHERE i.org_id = o.id AND i.accepted_at IS NULL AND i.expires_at > datetime('now')) AS pending
+    FROM organizations o JOIN users u ON u.id = o.owner_user_id ORDER BY o.created_at DESC`),
 
   insertMembership: db.prepare('INSERT INTO memberships (user_id, org_id, role) VALUES (?, ?, ?)'),
   membership: db.prepare('SELECT * FROM memberships WHERE user_id = ? AND org_id = ?'),
@@ -32,6 +42,7 @@ const q = {
     VALUES (?, ?, ?, ?, ?, ?, ?)`),
   cabinetsOfOrg: db.prepare('SELECT id, org_id, name, token_meta, is_active, created_at, (wb_token_enc IS NOT NULL) AS has_token FROM cabinets WHERE org_id = ? ORDER BY created_at'),
   cabinetById: db.prepare('SELECT * FROM cabinets WHERE id = ?'),
+  firstCabinet: db.prepare('SELECT * FROM cabinets WHERE org_id = ? ORDER BY created_at LIMIT 1'),
   activeCabinet: db.prepare('SELECT * FROM cabinets WHERE org_id = ? AND is_active = 1 AND wb_token_enc IS NOT NULL ORDER BY created_at LIMIT 1'),
   updateCabinetToken: db.prepare('UPDATE cabinets SET wb_token_enc = ?, token_iv = ?, token_tag = ?, token_meta = ? WHERE id = ?'),
   clearActive: db.prepare('UPDATE cabinets SET is_active = 0 WHERE org_id = ?'),
@@ -58,14 +69,19 @@ export const Users = {
   byId: (id) => q.userById.get(id),
   touchLogin: (id) => q.touchLogin.run(id),
 
-  // Регистрация: пользователь + личная организация + membership owner (в транзакции).
-  register: (email, password, name) => tx(() => {
+  // Регистрация. По умолчанию создаётся личная компания (владелец, лицензия по
+  // умолчанию). При регистрации по приглашению (createOrg=false) компания НЕ
+  // создаётся — человек станет участником приглашающей компании (закрываем
+  // «лазейку» бесконечных приглашений).
+  register: (email, password, name, { createOrg = true } = {}) => tx(() => {
     const hash = bcrypt.hashSync(password, 12);
     const u = q.insertUser.run(String(email).trim(), hash, name || null);
     const userId = Number(u.lastInsertRowid);
-    const orgName = (name && name.trim()) ? `${name.trim()} — организация` : `${String(email).split('@')[0]} — организация`;
-    const o = q.insertOrg.run(orgName, userId);
-    q.insertMembership.run(userId, Number(o.lastInsertRowid), 'owner');
+    if (createOrg) {
+      const orgName = (name && name.trim()) ? `${name.trim()} — компания` : `${String(email).split('@')[0]} — компания`;
+      const o = q.insertOrg.run(orgName, userId, config.defaultLicenseSeats);
+      q.insertMembership.run(userId, Number(o.lastInsertRowid), 'owner');
+    }
     return userId;
   }),
 
@@ -75,12 +91,22 @@ export const Users = {
 export const Orgs = {
   ofUser: (userId) => q.orgsOfUser.all(userId),
   byId: (id) => q.orgById.get(id),
+  rename: (id, name) => q.renameOrg.run(String(name).trim() || 'Компания', id),
 
   // Роль пользователя в организации или null, если не участник.
   roleOf: (userId, orgId) => q.membership.get(userId, orgId)?.role || null,
   isMember: (userId, orgId) => !!q.membership.get(userId, orgId),
-  // Может ли роль управлять (кабинеты/участники): owner|admin.
-  canManage: (role) => role === 'owner' || role === 'admin',
+  // Управлять компанией (кабинет/токен/участники/приглашения) может только владелец.
+  canManage: (role) => role === 'owner',
+
+  // Лицензия/места.
+  seats: (org) => Number(org?.license_seats || 1),
+  setSeats: (id, n) => q.setSeats.run(Math.max(1, Math.round(Number(n) || 1)), id),
+  usedSeats: (orgId) => q.membersCount.get(orgId).n + q.pendingCount.get(orgId).n, // участники + непринятые приглашения
+  canInviteMore: (org) => (q.membersCount.get(org.id).n + q.pendingCount.get(org.id).n) < Number(org.license_seats || 1),
+  membersCount: (orgId) => q.membersCount.get(orgId).n,
+
+  all: () => q.allOrgs.all(),
 };
 
 export const Members = {
@@ -99,6 +125,7 @@ export const Cabinets = {
   ofOrg: (orgId) => q.cabinetsOfOrg.all(orgId),
   byId: (id) => q.cabinetById.get(id),
   activeOf: (orgId) => q.activeCabinet.get(orgId),
+  firstOf: (orgId) => q.firstCabinet.get(orgId), // одна компания = один кабинет
 
   // Создать кабинет и (опц.) сразу привязать зашифрованный токен.
   create: (orgId, name, token, meta) => tx(() => {

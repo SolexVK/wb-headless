@@ -4,6 +4,7 @@ import { Users, Orgs } from './models.js';
 import { authLimiter, requireAuth } from './security.js';
 import { loginPage, registerPage, homePage } from './views.js';
 import { logger } from './logger.js';
+import { isSuperAdmin } from './config.js';
 
 export const authRouter = express.Router();
 
@@ -40,10 +41,14 @@ authRouter.post('/register', authLimiter, (req, res) => {
   if (Users.byEmail(email)) return fail('Аккаунт с таким email уже существует.');
 
   try {
-    const userId = Users.register(email, password, name);
+    // Регистрация по приглашению (email совпал с приглашением) НЕ создаёт свою
+    // компанию — человек станет участником приглашающей. Иначе создаём компанию.
+    const h = req.session.inviteHint;
+    const viaInvite = h && String(h.email).toLowerCase() === email.toLowerCase();
+    const userId = Users.register(email, password, name, { createOrg: !viaInvite });
     const u = Users.byId(userId);
     setSession(req, u);
-    logger.info({ userId }, 'зарегистрирован пользователь + организация');
+    logger.info({ userId, viaInvite: !!viaInvite }, 'зарегистрирован пользователь');
     res.redirect(popReturnTo(req));
   } catch (e) {
     logger.error(e, 'ошибка регистрации');
@@ -78,5 +83,5 @@ authRouter.post('/logout', (req, res) => {
 // ── Домашняя (требует входа) ─────────────────────────────────────────────────
 authRouter.get('/', requireAuth, (req, res) => {
   const orgs = Orgs.ofUser(req.session.user.id);
-  res.send(homePage({ user: req.session.user, orgs, csrf: res.locals.csrf, base: res.locals.base }));
+  res.send(homePage({ user: req.session.user, orgs, csrf: res.locals.csrf, base: res.locals.base, superAdmin: isSuperAdmin(req.session.user.email) }));
 });
