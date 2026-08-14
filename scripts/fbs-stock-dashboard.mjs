@@ -35,10 +35,11 @@ const kpis = [
 // Выводы/инсайты.
 const topShare = topWh && grand ? (topWh.totalQuantity / grand * 100) : 0;
 const topArt = articles[0];
+const top3 = warehouses.slice(0, 3).reduce((a, w) => a + w.totalQuantity, 0);
 const insightRow = insights([
   topWh ? { icon: '🏆', accent: AC.green, text: `Больше всего остатков: <b>${esc(topWh.name)}</b> — ${nf(topWh.totalQuantity)} шт (${topShare.toFixed(1)}%)` } : null,
   topArt ? { icon: '🎨', accent: AC.violet, text: `Топ-артикул: <b>${esc(topArt.articleNum)} ${esc(topArt.variant)}</b> — ${nf(topArt.total)} шт` } : null,
-  { icon: '🏭', accent: AC.blue, text: `Остаток распределён по <b>${nf(activeN)}</b> складам, ${nf(articles.length)} позиций` },
+  { icon: '🏭', accent: AC.blue, text: `Топ-3 склада держат <b>${(top3 / (grand || 1) * 100).toFixed(0)}%</b> остатка` },
 ].filter(Boolean));
 
 // Бары по складам (магнитуда) + пончик (доля).

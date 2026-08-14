@@ -11,6 +11,10 @@ import { logger } from './logger.js';
 
 export const reportsRouter = express.Router();
 
+// Имя файла выгрузки: «Название отчёта дата» (напр. «Подсорт 2026-08-14»).
+const RU_REPORT = { podsort: 'Подсорт', stock: 'Остатки', movement: 'Движение заказов' };
+const fileStem = (report, date) => `${RU_REPORT[report] || report} ${(date && String(date).slice(0, 10)) || new Date().toISOString().slice(0, 10)}`;
+
 function loadOrg(req, res, next) {
   const orgId = Number(req.params.id);
   const org = Orgs.byId(orgId);
@@ -40,7 +44,7 @@ function formFrom(latest) {
 async function sendDownload(res, kind, cabId, snapshot, stem, report = 'podsort', opts = {}) {
   if (kind === 'json') {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${stem}.json"`);
+    res.attachment(`${stem}.json`); // корректно кодирует кириллицу (filename*)
     return res.send(JSON.stringify(snapshot, null, 2));
   }
   if (kind === 'xlsx') {
@@ -53,8 +57,8 @@ async function sendDownload(res, kind, cabId, snapshot, stem, report = 'podsort'
     const html = report === 'stock' ? await buildStockDashboardHtml({ id: cabId }, snapshot)
       : report === 'movement' ? await buildMovementDashboardHtml({ id: cabId }, snapshot, opts.cost || 620)
         : await buildDashboardHtml({ id: cabId }, snapshot);
-    if (kind === 'html') return res.download(html, `${stem}-dashboard.html`);
-    return res.download(await dashboardToPdf(html), `${stem}-dashboard.pdf`);
+    if (kind === 'html') return res.download(html, `${stem}.html`);
+    return res.download(await dashboardToPdf(html), `${stem}.pdf`);
   }
   return res.status(404).send('Для этого отчёта такой формат недоступен.');
 }
@@ -98,7 +102,7 @@ reportsRouter.get('/org/:id/reports/podsort/download/:kind', requireAuth, loadOr
   const cab = Cabinets.activeOf(req.org.id);
   const latest = cab ? ReportRuns.latest(cab.id, 'podsort') : null;
   if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
-  try { await sendDownload(res, req.params.kind, cab.id, latest.data, 'fbs-podsort'); }
+  try { await sendDownload(res, req.params.kind, cab.id, latest.data, fileStem('podsort'), 'podsort'); }
   catch (e) { logger.error({ err: e.message }, 'подсорт: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
 });
 
@@ -136,7 +140,7 @@ reportsRouter.get('/org/:id/reports/stock/download/:kind', requireAuth, loadOrg,
   const cab = Cabinets.activeOf(req.org.id);
   const latest = cab ? ReportRuns.latest(cab.id, 'stock') : null;
   if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
-  try { await sendDownload(res, req.params.kind, cab.id, latest.data, 'fbs-stock', 'stock'); }
+  try { await sendDownload(res, req.params.kind, cab.id, latest.data, fileStem('stock'), 'stock'); }
   catch (e) { logger.error({ err: e.message }, 'остатки: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
 });
 
@@ -172,7 +176,7 @@ reportsRouter.get('/org/:id/reports/movement/download/:kind', requireAuth, loadO
   const latest = cab ? ReportRuns.latest(cab.id, 'movement') : null;
   if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
   const cost = Math.min(100000, Math.max(0, Math.round(Number(req.query.cost)) || 620));
-  try { await sendDownload(res, req.params.kind, cab.id, latest.data, 'fbs-movement', 'movement', { cost }); }
+  try { await sendDownload(res, req.params.kind, cab.id, latest.data, fileStem('movement'), 'movement', { cost }); }
   catch (e) { logger.error({ err: e.message }, 'движение: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
 });
 
@@ -218,7 +222,7 @@ reportsRouter.get('/org/:id/reports/archive/:runId/download/:kind', requireAuth,
   const cab = Cabinets.firstOf(req.org.id);
   const run = ReportRuns.byId(Number(req.params.runId));
   if (!run || !cab || run.cabinetId !== cab.id || !run.data) return res.status(404).send('Запуск не найден');
-  const stem = `fbs-${run.report}-${String(run.created_at || run.createdAt || '').slice(0, 10)}`;
+  const stem = fileStem(run.report, run.created_at || run.createdAt);
   const cost = Math.min(100000, Math.max(0, Math.round(Number(req.query.cost)) || 620));
   try { await sendDownload(res, req.params.kind, cab.id, run.data, stem, run.report, { cost }); }
   catch (e) { logger.error({ err: e.message }, 'архив: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }

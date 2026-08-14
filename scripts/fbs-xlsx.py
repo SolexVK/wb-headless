@@ -121,30 +121,46 @@ for i, (lab, val) in enumerate(kpis):
 s.column_dimensions['A'].width = 34
 s.column_dimensions['B'].width = 26
 
-# ── Лист «Сводная» (артикул № × цвет × размер) × склады ──────────────────────
+# ── Лист «Сводная»: слева Остаток по складам, справа Подсорт по складам ───────
+# Остаток по (артикул|цвет|размер) × склад — из детальных строк складов.
+stock_map = {}
+for w in snap['warehouses']:
+    for r in w.get('rows', []):
+        k = (r['articleNum'], r['variant'], r['techSize'])
+        stock_map.setdefault(k, {})
+        stock_map[k][w['name']] = stock_map[k].get(w['name'], 0) + (r.get('stock') or 0)
+
 sv = wb.create_sheet('Сводная')
-head = ['Арт', 'Цвет', 'Размер'] + whList + ['Итого']
+nw = len(whList)
+head = ['Арт', 'Цвет', 'Размер'] + [f'Ост. {n}' for n in whList] + ['Ост.Итого'] + whList + ['Итого']
 for j, h in enumerate(head, 1):
     hcell(sv.cell(1, j), h)
 row = 2
-first_wh = 4  # D
+first_stock = 4                    # D — начало блока «Остаток»
+first_pod = first_stock + nw + 1   # начало блока «Подсорт» (после Ост.Итого)
 for r in snap.get('pivot', []):
     base(sv.cell(row, 1), r['articleNum'], align='center')
     base(sv.cell(row, 2), r['variant'])
     base(sv.cell(row, 3), r['techSize'], align='center')
+    st = stock_map.get((r['articleNum'], r['variant'], r['techSize']), {})
+    st_total = 0
+    for wi, wn in enumerate(whList):
+        v = st.get(wn, 0)
+        st_total += v
+        base(sv.cell(row, first_stock + wi), (v if v else None), align='right', numfmt='#,##0')
+    base(sv.cell(row, first_stock + nw), (st_total if st_total else None), align='right', bold=True, numfmt='#,##0')
     for wi, wn in enumerate(whList):
         v = r['byWarehouse'].get(wn, 0)
-        base(sv.cell(row, first_wh + wi), (v if v else None), align='right', numfmt='#,##0')
-    base(sv.cell(row, first_wh + len(whList)), r['total'], align='right', bold=True, numfmt='#,##0')
+        base(sv.cell(row, first_pod + wi), (v if v else None), align='right', numfmt='#,##0')
+    base(sv.cell(row, first_pod + nw), r['total'], align='right', bold=True, numfmt='#,##0')
     row += 1
 sv_last = row - 1
 sv.freeze_panes = 'D2'
-sv.auto_filter.ref = f'A1:{get_column_letter(first_wh + len(whList))}{sv_last}'
+sv.auto_filter.ref = f'A1:{get_column_letter(first_pod + nw)}{sv_last}'
 for col, wdt in [('A', 6), ('B', 22), ('C', 9)]:
     sv.column_dimensions[col].width = wdt
-for wi in range(len(whList)):
-    sv.column_dimensions[get_column_letter(first_wh + wi)].width = 13
-sv.column_dimensions[get_column_letter(first_wh + len(whList))].width = 9
+for j in range(first_stock, first_pod + nw + 1):
+    sv.column_dimensions[get_column_letter(j)].width = 12
 
 # ── Лист «Подсорт» (детально) ───────────────────────────────────────────────
 p = wb.create_sheet('Подсорт')

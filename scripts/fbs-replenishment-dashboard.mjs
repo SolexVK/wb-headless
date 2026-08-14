@@ -37,10 +37,11 @@ const kpis = [
   kpi(nf(t.registeredWarehouses), 'складов (все зарегистр.)', { icon: '🏭', accent: AC.blue }),
 ].join('');
 const topWh = [...(snap.warehouses || [])].sort((a, b) => (b.reorderUnits || 0) - (a.reorderUnits || 0))[0];
+const critCount = (agg['нет остатка']?.count || 0) + (agg['разрыв до поставки']?.count || 0);
 const insightRow = insights([
-  { icon: '🛒', accent: AC.green, text: `К подсорту всего: <b>${nf(t.reorderUnits)} шт</b> по ${artList} арт.` },
   topWh && topWh.reorderUnits ? { icon: '🏭', accent: AC.blue, text: `Больше всего дозаказа: <b>${esc(topWh.name)}</b> — ${nf(topWh.reorderUnits)} шт` } : null,
-  t.riskRows ? { icon: '⚠️', accent: AC.red, text: `В риске разрыва: <b>${nf(t.riskRows)}</b> строк — успеть дозаказать` } : { icon: '✅', accent: AC.green, text: 'Строк в риске разрыва нет' },
+  critCount ? { icon: '🚨', accent: AC.red, text: `Критично (нет остатка): <b>${nf(critCount)}</b> позиций` } : { icon: '✅', accent: AC.green, text: 'Критичных позиций (нет остатка) нет' },
+  { icon: '🌱', accent: AC.violet, text: `Завоз: <b>${nf(t.seedNovelty)}</b> новинок + <b>${nf(t.seedRefill)}</b> докладок · ${nf(t.seedUnits)} шт` },
 ].filter(Boolean));
 
 // Панель статусов.

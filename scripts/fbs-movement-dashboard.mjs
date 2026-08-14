@@ -41,9 +41,10 @@ const ffByDel = ff.map((n) => ({ n, v: display.reduce((a, d) => a + ((d.delivere
 const leader = ffByDel[0];
 const last3 = display.slice(-3);
 const l3acc = last3.reduce((a, d) => a + (d.accepted?.count || 0), 0), l3del = last3.reduce((a, d) => a + (d.delivered?.count || 0), 0);
+const peak = display.reduce((m, d) => { const v = d.delivered?.count || 0; return v > m.v ? { v, date: d.date } : m; }, { v: 0, date: '' });
 const insightRow = insights([
   leader && leader.v ? { icon: '🏆', accent: AC.green, text: `Лидер по отгрузкам: <b>${esc(leader.n)}</b> — ${nf(leader.v)} шт` } : null,
-  { icon: diff >= 0 ? '📈' : '📉', accent: diff >= 0 ? AC.teal : AC.red, text: `За ${N} дн ${diff >= 0 ? 'передано больше, чем принято' : 'принято больше, чем передано'}: <b>${diff >= 0 ? '+' : ''}${nf(diff)} шт</b>` },
+  peak.v ? { icon: '⚡', accent: AC.amber, text: `Пик отгрузки: <b>${esc(peak.date.slice(5))}</b> — ${nf(peak.v)} шт` } : null,
   { icon: l3del >= l3acc ? '✅' : '⏳', accent: l3del >= l3acc ? AC.green : AC.amber, text: `Последние 3 дня: принято ${nf(l3acc)} · передано <b>${nf(l3del)}</b> шт` },
 ].filter(Boolean));
 

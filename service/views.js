@@ -6,13 +6,13 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 // Палитра как токены. Тёмная тема применяется двумя способами: по системной
 // настройке (когда явная тема НЕ выбрана) и при явном выборе data-theme="dark".
 // Явный светлый выбор (data-theme="light") оставляет светлые токены :root.
-const LIGHT = '--ground:#EDF0F6;--surface:#fff;--surface-2:#F3F7FB;--ink:#141A24;--muted:#57617A;--faint:#8695A6;--line:#E1E7F1;--accent:#4B57C6;--accent-d:#3A45AE;--danger:#C43A50;--ok:#1C8A5B;--radius:12px;--chip-bg:#E9EAFB;--err-bg:#FBE7EA;--err-bd:#F0C4CD;--ok-bg:#E6F5EE;--ok-bd:#BFE6D3;--warn-bg:#FCF3E2;--warn-bd:#F0DCB0;--warn-tx:#8A5A12;--info-bg:#E8EEFF;--info-bd:#C7D6FF;--info-tx:#2A46A8;--b-owner-bg:#E7ECFF;--b-owner-tx:#3A45AE;--b-admin-bg:#E6F0FF;--b-admin-tx:#2563B0;--b-neutral-bg:#EEF1F6;--b-neutral-tx:#57617A;--b-ok-bg:#E6F5EE;--b-ok-tx:#1C8A5B;--b-bad-bg:#F1E7EA;--b-bad-tx:#C43A50;--total:#4338ca;--c-green:#127045;--c-blue:#1d4ed8;--c-violet:#6d28d9;--c-amber:#b45309;--c-teal:#0f766e;--c-red:#be2b41;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--s7:#4a3aa7;--s8:#e34948';
-const DARK = '--ground:#0C0F16;--surface:#141926;--surface-2:#1B2130;--ink:#E7ECF5;--muted:#9AA4B8;--faint:#6B7688;--line:#232B3C;--accent:#8E97F5;--accent-d:#A7AEFB;--danger:#F0708A;--ok:#3FBE86;--chip-bg:#1E2340;--err-bg:#2E1620;--err-bd:#5a2733;--ok-bg:#122a20;--ok-bd:#1f4736;--warn-bg:#2c2413;--warn-bd:#514023;--warn-tx:#E3B778;--info-bg:#12203f;--info-bd:#243a63;--info-tx:#9DB4F5;--b-owner-bg:#262c52;--b-owner-tx:#A7AEFB;--b-admin-bg:#1c2c46;--b-admin-tx:#8FB6F0;--b-neutral-bg:#232B3C;--b-neutral-tx:#9AA4B8;--b-ok-bg:#123021;--b-ok-tx:#5FD39C;--b-bad-bg:#3a2029;--b-bad-tx:#E98AA0;--total:#a5b4fc;--c-green:#3FBE86;--c-blue:#6ea8fe;--c-violet:#b79cf6;--c-amber:#e3b778;--c-teal:#4bc3b6;--c-red:#f0708a;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#2f9e2f;--s7:#9085e9;--s8:#e66767';
+const LIGHT = '--ground:#EDF0F6;--surface:#fff;--surface-2:#F3F7FB;--ink:#141A24;--muted:#57617A;--faint:#8695A6;--line:#E1E7F1;--accent:#4B57C6;--accent-d:#3A45AE;--danger:#C43A50;--ok:#1C8A5B;--radius:12px;--chip-bg:#E9EAFB;--err-bg:#FBE7EA;--err-bd:#F0C4CD;--ok-bg:#E6F5EE;--ok-bd:#BFE6D3;--warn-bg:#FCF3E2;--warn-bd:#F0DCB0;--warn-tx:#8A5A12;--info-bg:#E8EEFF;--info-bd:#C7D6FF;--info-tx:#2A46A8;--b-owner-bg:#E7ECFF;--b-owner-tx:#3A45AE;--b-admin-bg:#E6F0FF;--b-admin-tx:#2563B0;--b-neutral-bg:#EEF1F6;--b-neutral-tx:#57617A;--b-ok-bg:#E6F5EE;--b-ok-tx:#1C8A5B;--b-bad-bg:#F1E7EA;--b-bad-tx:#C43A50;--total:#4338ca;--c-green:#127045;--c-blue:#1d4ed8;--c-violet:#6d28d9;--c-amber:#b45309;--c-teal:#0f766e;--c-red:#be2b41;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--s7:#4a3aa7;--s8:#e34948;--ground-2:#E6EBF3;--bg-grad:radial-gradient(1000px 520px at 12% -12%,color-mix(in srgb,var(--accent) 8%,transparent),transparent 62%),radial-gradient(880px 460px at 100% -6%,color-mix(in srgb,#12A67A 6%,transparent),transparent 56%),linear-gradient(180deg,#EFF2F9,#E6EBF3)';
+const DARK = '--ground:#0C0F16;--surface:#141926;--surface-2:#1B2130;--ink:#E7ECF5;--muted:#9AA4B8;--faint:#6B7688;--line:#232B3C;--accent:#8E97F5;--accent-d:#A7AEFB;--danger:#F0708A;--ok:#3FBE86;--chip-bg:#1E2340;--err-bg:#2E1620;--err-bd:#5a2733;--ok-bg:#122a20;--ok-bd:#1f4736;--warn-bg:#2c2413;--warn-bd:#514023;--warn-tx:#E3B778;--info-bg:#12203f;--info-bd:#243a63;--info-tx:#9DB4F5;--b-owner-bg:#262c52;--b-owner-tx:#A7AEFB;--b-admin-bg:#1c2c46;--b-admin-tx:#8FB6F0;--b-neutral-bg:#232B3C;--b-neutral-tx:#9AA4B8;--b-ok-bg:#123021;--b-ok-tx:#5FD39C;--b-bad-bg:#3a2029;--b-bad-tx:#E98AA0;--total:#a5b4fc;--c-green:#3FBE86;--c-blue:#6ea8fe;--c-violet:#b79cf6;--c-amber:#e3b778;--c-teal:#4bc3b6;--c-red:#f0708a;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#2f9e2f;--s7:#9085e9;--s8:#e66767;--ground-2:#0A0D14;--bg-grad:radial-gradient(1000px 520px at 12% -12%,color-mix(in srgb,var(--accent) 16%,transparent),transparent 62%),radial-gradient(880px 460px at 100% -6%,color-mix(in srgb,#35C77E 10%,transparent),transparent 56%),linear-gradient(180deg,#0E1220,#0A0D14)';
 const CSS = `
 :root{${LIGHT}}
 @media(prefers-color-scheme:dark){:root:not([data-theme]){${DARK}}}
 :root[data-theme="dark"]{${DARK}}
-*{box-sizing:border-box}body{margin:0;background:var(--ground);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.55}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--bg-grad),var(--ground);background-attachment:fixed;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.55}
 a{color:var(--accent-d);text-decoration:none}a:hover{text-decoration:underline}
 .top{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--surface);flex-wrap:wrap;gap:8px}
 .top .brand{font-weight:750;letter-spacing:-.01em;color:var(--ink)}.top .brand:hover{text-decoration:none}.top .brand span{color:var(--accent-d)}
@@ -722,10 +722,11 @@ function podsortResults(s, { downloadHref, whenLabel }) {
     dkKpi(nf(t.nomenclature), 'номенклатура', { icon: '🎨', accent: DKAC.teal }),
   ].join('');
   const topWh = [...(s.warehouses || [])].sort((a, b) => (b.reorderUnits || 0) - (a.reorderUnits || 0))[0];
+  const critCount = (s.warehouses || []).reduce((a, w) => a + (w.rows || []).filter((r) => r.status === 'нет остатка' || r.status === 'разрыв до поставки').length, 0);
   const insightRow = dkInsights([
-    { icon: '🛒', accent: DKAC.green, text: `К подсорту всего: <b>${nf(t.reorderUnits)} шт</b>` },
     topWh && topWh.reorderUnits ? { icon: '🏭', accent: DKAC.blue, text: `Больше всего дозаказа: <b>${esc(topWh.name)}</b> — ${nf(topWh.reorderUnits)} шт` } : null,
-    t.riskRows ? { icon: '⚠️', accent: DKAC.red, text: `В риске разрыва: <b>${nf(t.riskRows)}</b> строк` } : { icon: '✅', accent: DKAC.green, text: 'Строк в риске нет' },
+    critCount ? { icon: '🚨', accent: DKAC.red, text: `Критично (нет остатка): <b>${nf(critCount)}</b> позиций` } : { icon: '✅', accent: DKAC.green, text: 'Критичных позиций (нет остатка) нет' },
+    { icon: '🌱', accent: DKAC.violet, text: `Завоз: <b>${nf(t.seedNovelty)}</b> новинок + <b>${nf(t.seedRefill)}</b> докладок` },
   ]);
 
   const cols = s.warehouseList || [];
@@ -794,10 +795,11 @@ function stockResults(s, { downloadHref, whenLabel }) {
     dkKpi(nf(activeN ? Math.round(grand / activeN) : 0), 'в среднем на склад, шт', { icon: '⚖️', accent: DKAC.teal }),
   ].join('');
   const topArt = (s.articles || [])[0];
+  const top3 = whs.slice(0, 3).reduce((a, w) => a + w.totalQuantity, 0);
   const insightRow = dkInsights([
     top ? { icon: '🏆', accent: DKAC.green, text: `Больше всего: <b>${esc(top.name)}</b> — ${nf(top.totalQuantity)} шт (${(top.totalQuantity / (grand || 1) * 100).toFixed(1)}%)` } : null,
     topArt ? { icon: '🎨', accent: DKAC.violet, text: `Топ-артикул: <b>${esc(topArt.articleNum)} ${esc(topArt.variant)}</b> — ${nf(topArt.total)} шт` } : null,
-    { icon: '🏭', accent: DKAC.blue, text: `Распределён по <b>${nf(t.activeWarehouses ?? whs.length)}</b> складам` },
+    { icon: '🏭', accent: DKAC.blue, text: `Топ-3 склада держат <b>${(top3 / (grand || 1) * 100).toFixed(0)}%</b> остатка` },
   ]);
 
   const whMax = Math.max(1, ...whs.map((w) => w.totalQuantity));
@@ -1020,9 +1022,10 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   const ffRank = ffShown.map((n) => ({ n, v: display.reduce((a, d) => a + ((d.delivered?.byFulfillment?.[n] || {}).count || 0), 0) })).sort((a, b) => b.v - a.v);
   const l3 = display.slice(-3);
   const l3a = l3.reduce((a, d) => a + fldShown(d.accepted, 'count'), 0), l3d = l3.reduce((a, d) => a + fldShown(d.delivered, 'count'), 0);
+  const peak = display.reduce((m, d) => { const v = fldShown(d.delivered, 'count'); return v > m.v ? { v, date: d.date } : m; }, { v: 0, date: '' });
   const insightRow = dkInsights([
     ffRank[0] && ffRank[0].v ? { icon: '🏆', accent: DKAC.green, text: `Лидер по отгрузкам: <b>${esc(ffRank[0].n)}</b> — ${nf(ffRank[0].v)} шт` } : null,
-    { icon: diffC >= 0 ? '📈' : '📉', accent: diffC >= 0 ? DKAC.teal : DKAC.red, text: `Разница за ${N} дн: <b>${diffC >= 0 ? '+' : ''}${nf(diffC)} шт</b>` },
+    peak.v ? { icon: '⚡', accent: DKAC.amber, text: `Пик отгрузки: <b>${esc(peak.date.slice(5))}</b> — ${nf(peak.v)} шт` } : null,
     { icon: l3d >= l3a ? '✅' : '⏳', accent: l3d >= l3a ? DKAC.green : DKAC.amber, text: `Последние 3 дня: принято ${nf(l3a)} · передано <b>${nf(l3d)}</b>` },
   ]);
 
