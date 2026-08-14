@@ -4,13 +4,17 @@ import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 
 // CSP: свой origin; наши страницы используют небольшой inline-CSS/JS форм → 'unsafe-inline'
-// на style/script. По мере роста заменим на nonce. Внешние источники запрещены.
+// на style/script. Важно: script-src-attr по умолчанию в helmet = 'none', и это
+// блокирует инлайновые обработчики (onchange/onsubmit/onclick — переключатель темы,
+// confirm при удалении). Разрешаем их явно (консистентно с inline-script). Внешние
+// источники запрещены. По мере роста заменим inline на nonce.
 export const helmetMw = helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrcAttr: ["'unsafe-inline'"],
       imgSrc: ["'self'", 'data:'],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],

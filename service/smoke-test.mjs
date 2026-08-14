@@ -53,6 +53,10 @@ try {
 
   ok((await req('GET', '/healthz')).status === 200, 'GET /healthz → 200');
 
+  // CSP должен разрешать инлайновые обработчики (иначе переключатель темы/confirm не работают в браузере).
+  const csp = (await fetch(base + '/healthz')).headers.get('content-security-policy') || '';
+  ok(/script-src-attr[^;]*'unsafe-inline'/.test(csp), 'CSP: инлайновые обработчики разрешены (script-src-attr)');
+
   let r = await req('GET', '/register');
   const csrf1 = csrfOf(r.text);
   ok(r.status === 200 && !!csrf1, 'GET /register → 200 + CSRF-токен');
