@@ -7,6 +7,8 @@ import puppeteer from 'puppeteer';
 import { v4 as uuidv4 } from 'uuid';
 import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
 import { defaultPeriod, loadItems, selectItems, selectByGroup, writeOutputs } from './report-stock.js';
+import { buildTopStripedReport, reportToCSV as topStripedToCSV } from './lib/categoryReport.js';
+import { autumnPeriod, resolveCategories } from './report-category.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -201,6 +203,38 @@ app.get('/reports/stock-availability', requireKey, async (req, res) => {
         `attachment; filename="stock-${d1}_${d2}.csv"`
       );
       return res.send(reportToCSV(report));
+    }
+    return res.json(report);
+  } catch (err) {
+    return res.status(500).json({ error: 'report_failed', detail: String(err?.message || err) });
+  }
+});
+
+// ---------- REPORT: топ рубашек в полоску за сезон ----------
+// GET /reports/top-striped?d1=YYYY-MM-DD&d2=YYYY-MM-DD&categories=Рубашки&topN=10&format=json|csv
+// Без d1/d2 берётся период последнего завершившегося осеннего сезона (1 сен … 30 ноя).
+// categories — метка(и) из config/categories.json или явный путь WB; пусто = дефолт.
+app.get('/reports/top-striped', requireKey, async (req, res) => {
+  try {
+    if (!process.env.MPSTATS_TOKEN) {
+      return res.status(500).json({ error: 'mpstats_token_missing' });
+    }
+    let { d1, d2, categories, topN, format } = req.query;
+    if (!d1 || !d2) ({ d1, d2 } = autumnPeriod());
+    const cats = resolveCategories(categories);
+    const report = await buildTopStripedReport({
+      categories: cats,
+      d1,
+      d2,
+      topN: Number(topN) || 10,
+      pageSize: Number(process.env.CATEGORY_PAGE_SIZE) || 500,
+      maxRows: Number(process.env.CATEGORY_MAX_ROWS) || 3000,
+    });
+
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="top-striped-${d1}_${d2}.csv"`);
+      return res.send(topStripedToCSV(report));
     }
     return res.json(report);
   } catch (err) {
