@@ -1,0 +1,240 @@
+<title>FBS-сервис: архитектура и план</title>
+<style>
+:root{
+  --ground:#EDF0F6; --surface:#FFFFFF; --surface-2:#F5F8FD; --code:#F2F5FB;
+  --ink:#141A24; --muted:#57617A; --faint:#8992A6;
+  --line:#E1E7F1; --line-2:#CDD6E5;
+  --accent:#4B57C6; --accent-d:#3A45AE; --accent-soft:#E9EAFB;
+  --done:#1C8A5B; --done-soft:#E2F3EB; --now:#B5770F; --now-soft:#FaF0DA; --later:#6B7488; --later-soft:#EEF1F6;
+  --danger:#C43A50; --danger-soft:#FBE7EA; --ok:#1C8A5B;
+  --shadow:0 1px 2px rgba(20,26,36,.05),0 6px 20px rgba(20,26,36,.06);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0C0F16; --surface:#141926; --surface-2:#1A2130; --code:#10151F;
+  --ink:#E7ECF5; --muted:#9AA4B8; --faint:#67718A;
+  --line:#232B3C; --line-2:#323C50;
+  --accent:#8E97F5; --accent-d:#A7AEFB; --accent-soft:#1E2340;
+  --done:#3CBE86; --done-soft:#10271D; --now:#E7B24C; --now-soft:#2C2410; --later:#7B8598; --later-soft:#1A2130;
+  --danger:#F0708A; --danger-soft:#2E1620; --ok:#3CBE86;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 26px rgba(0,0,0,.42);
+}}
+:root[data-theme="dark"]{
+  --ground:#0C0F16; --surface:#141926; --surface-2:#1A2130; --code:#10151F;
+  --ink:#E7ECF5; --muted:#9AA4B8; --faint:#67718A;
+  --line:#232B3C; --line-2:#323C50;
+  --accent:#8E97F5; --accent-d:#A7AEFB; --accent-soft:#1E2340;
+  --done:#3CBE86; --done-soft:#10271D; --now:#E7B24C; --now-soft:#2C2410; --later:#7B8598; --later-soft:#1A2130;
+  --danger:#F0708A; --danger-soft:#2E1620; --ok:#3CBE86;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 26px rgba(0,0,0,.42);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  line-height:1.6;-webkit-font-smoothing:antialiased;}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;}
+.wrap{max-width:920px;margin:0 auto;padding:44px 24px 72px;}
+a{color:var(--accent-d);}
+
+.head{border-bottom:2px solid var(--accent);padding-bottom:18px;margin-bottom:8px;}
+.eyebrow{margin:0 0 8px;font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--accent-d);font-weight:700;}
+h1{margin:0;font-size:30px;line-height:1.12;letter-spacing:-.02em;font-weight:760;text-wrap:balance;}
+.lede{margin:12px 0 0;color:var(--muted);font-size:15px;max-width:70ch;}
+
+section{margin-top:34px;}
+h2{font-size:19px;font-weight:720;letter-spacing:-.01em;margin:0 0 6px;padding-left:12px;border-left:3px solid var(--accent);}
+h2 .n{color:var(--faint);font-weight:700;margin-right:8px;font-variant-numeric:tabular-nums;}
+.sub{color:var(--muted);font-size:14px;margin:0 0 16px;padding-left:12px;}
+p{margin:0 0 12px;}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:18px 20px;}
+.grid{display:grid;gap:12px;}
+.g2{grid-template-columns:1fr 1fr;} .g3{grid-template-columns:1fr 1fr 1fr;}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px;}
+.chip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;padding:5px 11px;border-radius:999px;background:var(--surface);border:1px solid var(--line-2);color:var(--ink);}
+.chip b{color:var(--muted);font-weight:600;}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;}
+.d-done{background:var(--done);} .d-now{background:var(--now);} .d-later{background:var(--later);}
+
+/* Модель доступа — поток */
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;}
+.node{flex:1;min-width:150px;background:var(--surface-2);border:1px solid var(--line);border-radius:11px;padding:13px 14px;}
+.node h4{margin:0 0 4px;font-size:14px;font-weight:700;}
+.node p{margin:0;font-size:12.5px;color:var(--muted);}
+.node .tag{display:inline-block;margin-top:8px;font-size:11px;font-weight:700;color:var(--accent-d);background:var(--accent-soft);padding:2px 8px;border-radius:6px;}
+.arrow{display:flex;align-items:center;color:var(--faint);font-weight:700;font-size:18px;}
+@media (max-width:760px){ .arrow{display:none;} }
+
+.ent{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:14px 16px;box-shadow:var(--shadow);}
+.ent h4{margin:0 0 8px;font-size:14.5px;font-weight:720;display:flex;align-items:center;gap:8px;}
+.ent h4 .k{font-size:11px;font-weight:700;color:var(--accent-d);background:var(--accent-soft);padding:1px 7px;border-radius:6px;}
+.ent ul{margin:0;padding-left:16px;} .ent li{font-size:13px;color:var(--muted);margin:3px 0;}
+.ent li b{color:var(--ink);font-weight:600;} .ent .mono{font-size:12px;}
+
+.list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:9px;}
+.list li{display:flex;gap:10px;font-size:14px;align-items:flex-start;}
+.list .mk{flex:none;width:18px;height:18px;border-radius:5px;display:grid;place-items:center;font-size:11px;font-weight:800;margin-top:2px;}
+.mk-ok{background:var(--done-soft);color:var(--done);} .mk-no{background:var(--danger-soft);color:var(--danger);}
+.list li b{font-weight:650;}
+
+/* Дорожная карта */
+.road{display:flex;flex-direction:column;gap:0;}
+.phase{display:grid;grid-template-columns:auto 1fr;gap:16px;position:relative;padding-bottom:18px;}
+.phase:not(:last-child)::before{content:"";position:absolute;left:15px;top:34px;bottom:0;width:2px;background:var(--line-2);}
+.pnum{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-weight:800;font-size:13px;z-index:1;}
+.p-now{background:var(--accent);color:#fff;} .p-next{background:var(--accent-soft);color:var(--accent-d);border:1px solid var(--line-2);}
+.p-later{background:var(--later-soft);color:var(--later);border:1px solid var(--line);}
+.pbody h4{margin:0 0 3px;font-size:15px;font-weight:700;}
+.pbody p{margin:0;font-size:13.5px;color:var(--muted);}
+.pbody .st{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-left:8px;}
+.st-now{color:var(--accent-d);} .st-next{color:var(--now);} .st-later{color:var(--later);}
+
+.note{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--muted);}
+.note b{color:var(--ink);}
+code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.9em;background:var(--code);border:1px solid var(--line);border-radius:5px;padding:1px 5px;}
+.deploy{border:1px solid var(--line-2);border-radius:12px;overflow:hidden;}
+.deploy .row{display:grid;grid-template-columns:1fr 1fr;}
+.deploy .col{padding:14px 16px;}
+.deploy .col.no{background:var(--danger-soft);} .deploy .col.ok{background:var(--done-soft);}
+.deploy h4{margin:0 0 8px;font-size:13.5px;font-weight:800;}
+.deploy .col.no h4{color:var(--danger);} .deploy .col.ok h4{color:var(--done);}
+.deploy ul{margin:0;padding-left:16px;} .deploy li{font-size:12.5px;margin:4px 0;}
+@media (max-width:680px){ .g2,.g3,.deploy .row{grid-template-columns:1fr;} }
+
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);font-size:12.5px;color:var(--faint);}
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <p class="eyebrow">Wildberries · FBS · веб-сервис</p>
+    <h1>FBS-сервис: архитектура и план</h1>
+    <p class="lede">Мульти-тенант веб-сервис вокруг готовых движков подсорта и дашбордов: регистрация, организации и кабинеты со своими WB-токенами, выбор отчётов, обновление по кнопке. Хостинг — Mac Mini (Tailscale), затем VPS.</p>
+  </header>
+
+  <section>
+    <h2>Согласованные решения</h2>
+    <div class="chips">
+      <span class="chip"><span class="dot d-done"></span>БД: <b>SQLite → Postgres</b> (позже)</span>
+      <span class="chip"><span class="dot d-done"></span>Восстановление: <b>админ-сброс</b>, email — Фаза 4</span>
+      <span class="chip"><span class="dot d-done"></span>Код: папка <b class="mono">service/</b> в этом репо</span>
+      <span class="chip"><span class="dot d-done"></span>Обновление данных: <b>по кнопке</b></span>
+      <span class="chip"><span class="dot d-done"></span>Доступ: <b>Организация / Кабинет</b> (ниже)</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Модель доступа — как заходят сотрудники</h2>
+    <p class="sub">Решает твой нюанс: несколько менеджеров работают с одним кабинетом, токен вводится один раз, параллельные сессии не мешают друг другу.</p>
+    <div class="card">
+      <div class="flow">
+        <div class="node"><h4>Пользователь</h4><p>Личный логин, пароль, сессия. У каждого сотрудника — свой.</p><span class="tag">своя сессия</span></div>
+        <div class="arrow">→</div>
+        <div class="node"><h4>Организация</h4><p>Компания/команда. В ней — участники с ролями (owner / admin / менеджер).</p><span class="tag">роли</span></div>
+        <div class="arrow">→</div>
+        <div class="node"><h4>Кабинет</h4><p>Личный кабинет WB + токен (шифрован). Принадлежит организации, а не человеку.</p><span class="tag">токен 1 раз</span></div>
+        <div class="arrow">→</div>
+        <div class="node"><h4>Отчёты</h4><p>Подсорт, остатки, движение. Данные строго по выбранному кабинету.</p><span class="tag">кэш на кабинет</span></div>
+      </div>
+      <div style="margin-top:14px" class="grid g2">
+        <div class="note"><b>Токен — один раз.</b> Admin организации подключает кабинет и вводит WB-токен. Все участники видят кабинеты организации <b>без повторного ввода токена</b>.</div>
+        <div class="note"><b>Параллельная работа — без накладок.</b> У каждого свой аккаунт и сессия, поэтому «общий аккаунт» не нужен. Снимок кэшируется <b>на кабинет</b>; одновременный «Обновить» схлопывается одним расчётом (single-flight-замок), отчёты — только чтение.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Модель данных <span class="sub" style="padding:0;font-weight:400;display:inline">(SQLite → Postgres, тонкий слой доступа)</span></h2>
+    <div class="grid g2">
+      <div class="ent"><h4>users <span class="k">пользователь</span></h4><ul>
+        <li><b>id</b>, <b>email</b> (уникальный), <b>password_hash</b> (bcrypt)</li>
+        <li>name, created_at, last_login</li>
+      </ul></div>
+      <div class="ent"><h4>organizations <span class="k">организация</span></h4><ul>
+        <li><b>id</b>, name, owner_user_id, created_at</li>
+      </ul></div>
+      <div class="ent"><h4>memberships <span class="k">участие</span></h4><ul>
+        <li><b>user_id × org_id</b>, <b>role</b>: owner / admin / member</li>
+        <li>роль решает: управлять кабинетами/участниками или только смотреть отчёты</li>
+      </ul></div>
+      <div class="ent"><h4>cabinets <span class="k">кабинет WB</span></h4><ul>
+        <li><b>id</b>, org_id, name</li>
+        <li><b>wb_token_enc</b> (AES-256-GCM), token_meta (категории/срок), is_active</li>
+      </ul></div>
+      <div class="ent"><h4>invitations <span class="k">приглашения</span></h4><ul>
+        <li>org_id, email/код, role, expires_at — admin зовёт менеджеров в организацию</li>
+      </ul></div>
+      <div class="ent"><h4>snapshot_cache <span class="k">кэш отчётов</span></h4><ul>
+        <li><b>cabinet_id × report × params_hash</b> → json, refreshed_at</li>
+        <li>общий на кабинет; чистится при «Обновить»</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Архитектура</h2>
+    <div class="grid g3">
+      <div class="card"><h4 style="margin:0 0 6px;font-size:14px">Бэкенд</h4><p style="font-size:13px;color:var(--muted);margin:0">Node + Express (уже в репо). Сессии в httpOnly-cookie, bcrypt. Логи — pino (ротация + отдельный лог ошибок).</p></div>
+      <div class="card"><h4 style="margin:0 0 6px;font-size:14px">Движки как бэкенд</h4><p style="font-size:13px;color:var(--muted);margin:0">Готовые <span class="mono">scripts/fbs-*.mjs</span> отдают JSON (<code>--json</code>). Сервис запускает их с токеном кабинета и рендерит.</p></div>
+      <div class="card"><h4 style="margin:0 0 6px;font-size:14px">Данные по кнопке</h4><p style="font-size:13px;color:var(--muted);margin:0">«Обновить» → расчёт → кэш снимка per (кабинет, отчёт, параметры). Повторный заход — из кэша.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Безопасность</h2>
+    <ul class="list">
+      <li><span class="mk mk-ok">✓</span><span><b>WB-токены шифруются в БД</b> (AES-256-GCM, ключ в env/Keychain), никогда не в логах и не на фронте.</span></li>
+      <li><span class="mk mk-ok">✓</span><span><b>Пароли — bcrypt.</b> Сессии — httpOnly + Secure cookie, CSRF-защита, rate-limit на логин/регистрацию.</span></li>
+      <li><span class="mk mk-ok">✓</span><span><b>Правильный тип WB-токена.</b> Пользователь даёт <b>Базовый, «Только чтение»</b> с категориями <b>Контент + Статистика + Маркетплейс</b> (персональный в облаке WB запрещает).</span></li>
+      <li><span class="mk mk-ok">✓</span><span><b>Проверка прав до запроса.</b> Токен — JWT; читаем битовую маску <span class="mono">s</span> (Контент=1, Аналитика=2, Маркетплейс=4, Статистика=5, read-only=30) и <code>/ping</code> — форма подключения сразу скажет, чего не хватает.</span></li>
+      <li><span class="mk mk-ok">✓</span><span><b>Изоляция.</b> Каждый запрос к данным строго по <span class="mono">(user → org → cabinet)</span>; чужой кабинет недоступен.</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Отчёты в сервисе</h2>
+    <p class="sub">Реестр «имя → движок → рендер». Новый отчёт = одна строка. Готовые подключаем первыми, невстроенные — позже, тем же способом.</p>
+    <div class="chips">
+      <span class="chip"><span class="dot d-now"></span>Подсорт <b>(+форма настроек)</b></span>
+      <span class="chip"><span class="dot d-now"></span>Остатки по артикул+цвету</span>
+      <span class="chip"><span class="dot d-now"></span>Передано в доставку</span>
+      <span class="chip"><span class="dot d-now"></span>Принято на фулфилмент</span>
+      <span class="chip"><span class="dot d-now"></span>Ретроспектива заказов</span>
+      <span class="chip"><span class="dot d-later"></span>Выкупы/возвраты</span>
+      <span class="chip"><span class="dot d-later"></span>SLA / просрочки</span>
+      <span class="chip"><span class="dot d-later"></span>Баклог</span>
+      <span class="chip"><span class="dot d-later"></span>FBO отдельно</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Дорожная карта</h2>
+    <div class="road">
+      <div class="phase"><div class="pnum p-now">0</div><div class="pbody"><h4>Каркас + авторизация <span class="st st-now">старт</span></h4><p>Express-скелет в <span class="mono">service/</span>, схема БД (SQLite), регистрация/логин/логаут, сессии, bcrypt, логирование. Свободный loopback-порт под деплой.</p></div></div>
+      <div class="phase"><div class="pnum p-next">1</div><div class="pbody"><h4>Организации, кабинеты, токены <span class="st st-next">далее</span></h4><p>Организация + участники (роли), добавление кабинета и WB-токена, валидация <code>/ping</code> + разбор прав JWT, шифрованное хранение, выбор активного кабинета.</p></div></div>
+      <div class="phase"><div class="pnum p-next">2</div><div class="pbody"><h4>Оболочка отчётов <span class="st st-next">далее</span></h4><p>Реестр отчётов, кнопка «Обновить», кэш снимков. Первым — <b>Подсорт с формой</b> (артикулы, cover, seed, лид-тайм) + скачивание Excel; затем Остатки.</p></div></div>
+      <div class="phase"><div class="pnum p-later">3</div><div class="pbody"><h4>Остальные готовые отчёты <span class="st st-later">позже</span></h4><p>Передано/Принято/Ретроспектива + скачивание PDF/Excel по каждому.</p></div></div>
+      <div class="phase"><div class="pnum p-later">4</div><div class="pbody"><h4>Email-восстановление, невстроенные отчёты, VPS <span class="st st-later">позже</span></h4><p>Полноценный сброс пароля по ссылке; выкупы/SLA/баклог/FBO; переезд на VPS + PostgreSQL.</p></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Деплой на Mac Mini — правила безопасности</h2>
+    <p class="sub">По памятке <span class="mono">docs/china-fbs/deploy/MAC-MINI-RULES.md</span> (соседняя ветка, PR #13). Читаем её ПЕРЕД любым шагом деплоя — сервис не должен ломать соседей.</p>
+    <div class="deploy"><div class="row">
+      <div class="col no"><h4>🚫 Нельзя</h4><ul>
+        <li><span class="mono">tailscale serve reset</span> / голый <span class="mono">funnel &lt;порт&gt;</span></li>
+        <li>Трогать <b>443</b> руками (занят Caddy), включать <span class="mono">com.tandem.funnel</span></li>
+        <li>Занимать порты 8477/8787/8899/7837/8090/9000/8443/10000/2019</li>
+        <li>Править/рестартить чужие launchd, коммитить секреты</li>
+      </ul></div>
+      <div class="col ok"><h4>✅ Можно / как надо</h4><ul>
+        <li>Свой сервис на свободном loopback: <span class="mono">127.0.0.1:91xx</span></li>
+        <li>Свой LaunchAgent с уникальным label</li>
+        <li>Публикация только через <b>Caddy</b> (path-маршрут на 443 + <span class="mono">caddy reload</span>), Funnel не трогать</li>
+        <li>Тест локально, вкл. «внешний» кейс через <span class="mono">Host</span>-заголовок</li>
+      </ul></div>
+    </div></div>
+    <p class="note" style="margin-top:12px"><b>Дизайн-следствие:</b> сервис слушает настраиваемый <span class="mono">127.0.0.1:91xx</span> (env <span class="mono">PORT</span>), никаких привязок к 443/Funnel в коде — публикацию делаем на этапе деплоя через Caddy.</p>
+  </section>
+
+  <div class="foot">Опорный документ. Готовые движки (<span class="mono">scripts/fbs-*.mjs</span>, <span class="mono">config/replenishment.json</span>) переиспользуются как бэкенд через <span class="mono">--json</span>. Следующий шаг — Фаза 0.</div>
+</div>
