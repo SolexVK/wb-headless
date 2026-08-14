@@ -105,6 +105,14 @@ export const Orgs = {
   byId: (id) => q.orgById.get(id),
   rename: (id, name) => q.renameOrg.run(String(name).trim() || 'Компания', id),
 
+  // Создать компанию: организация + membership владельца (лицензия по умолчанию).
+  create: (ownerUserId, name) => tx(() => {
+    const o = q.insertOrg.run(String(name).trim() || 'Компания', ownerUserId, config.defaultLicenseSeats);
+    const orgId = Number(o.lastInsertRowid);
+    q.insertMembership.run(ownerUserId, orgId, 'owner');
+    return orgId;
+  }),
+
   // Роль пользователя в организации или null, если не участник.
   roleOf: (userId, orgId) => q.membership.get(userId, orgId)?.role || null,
   isMember: (userId, orgId) => !!q.membership.get(userId, orgId),

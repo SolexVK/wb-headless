@@ -97,6 +97,14 @@ try {
   r = await req('GET', '/');
   const orgId = (r.text.match(/href="\/org\/(\d+)"/) || [])[1];
   ok(!!orgId, 'Ф1: на главной есть ссылка на организацию');
+  ok(r.text.includes('Создать компанию'), 'Ф1: на главной есть форма создания компании');
+
+  // Создание доп. компании из интерфейса (на случай, если у пользователя её нет).
+  const csrfHome = csrfOf(r.text);
+  r = await req('POST', '/company', form({ _csrf: csrfHome, company: 'Вторая компания' }));
+  ok(r.status === 302 && /\/org\/\d+/.test(r.location || ''), 'Ф1: создание компании → редирект на её страницу');
+  r = await req('GET', r.location);
+  ok(r.status === 200 && r.text.includes('Вторая компания'), 'Ф1: новая компания открывается');
 
   r = await req('GET', `/org/${orgId}`);
   const csrfOrg = csrfOf(r.text);

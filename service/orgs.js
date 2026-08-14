@@ -47,6 +47,15 @@ function renderOrg(req, res, extra = {}) {
 }
 const safeMeta = (j) => { try { return JSON.parse(j || '{}'); } catch { return {}; } };
 
+// ── Создать компанию (любой вошедший; лицензия по умолчанию = 1 место) ───────
+orgRouter.post('/company', requireAuth, (req, res) => {
+  const name = String(req.body.company || '').trim()
+    || `${req.session.user.name || String(req.session.user.email).split('@')[0]} — компания`;
+  const id = Orgs.create(req.session.user.id, name);
+  logger.info({ orgId: id, userId: req.session.user.id }, 'создана компания');
+  res.redirect(`/org/${id}`);
+});
+
 // ── Страница организации ─────────────────────────────────────────────────────
 orgRouter.get('/org/:id', requireAuth, loadOrg, (req, res) => {
   // Flash после POST-Redirect-GET (напр. созданная ссылка-приглашение) — чистый URL.

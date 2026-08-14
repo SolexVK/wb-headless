@@ -147,7 +147,17 @@ export function homePage({ user, orgs, csrf, base = '', superAdmin }) {
     ? orgs.map((o) => `<a class="tile" href="${u(`/org/${o.id}`)}" style="display:block">
         <h3>${esc(o.name)} <span class="badge ${esc(o.role)}">${esc(roleRu(o.role))}</span></h3>
         <p>${o.role === 'owner' ? 'Кабинет, участники и отчёты' : 'Отчёты компании'} →</p></a>`).join('')
-    : `<div class="tile"><p class="muted">Вы пока не состоите ни в одной компании. Если вас пригласили — откройте ссылку-приглашение снова.</p></div>`;
+    : `<div class="tile"><p class="muted">Вы пока не состоите ни в одной компании. Создайте свою ниже или, если вас пригласили, откройте ссылку-приглашение снова.</p></div>`;
+  const createForm = `
+    <div class="section" style="margin-top:16px">
+      <h2>Создать компанию</h2>
+      <p class="kv" style="margin:0 0 10px">Новая компания начинается с 1 места (только вы). Расширить лицензию, чтобы приглашать участников, может администратор сервиса.</p>
+      <form method="post" action="${u('/company')}" class="row-form">
+        ${csrfField(csrf)}
+        <div><label for="company" title="Название вашей компании">Название компании</label><input id="company" name="company" type="text" placeholder="Напр. ИП Иванов" style="min-width:240px"></div>
+        <button class="btn mini" type="submit" style="height:38px">Создать</button>
+      </form>
+    </div>`;
   return layout({
     title: 'FBS-сервис',
     user, csrf, base,
@@ -155,6 +165,7 @@ export function homePage({ user, orgs, csrf, base = '', superAdmin }) {
       <h1>Здравствуйте, ${esc(user.name || user.email)}</h1>
       <p class="sub">Ваши компании. Откройте компанию, чтобы настроить кабинет WB и работать с отчётами.${superAdmin ? ` <a href="${u('/admin')}">Панель супер-админа →</a>` : ''}</p>
       <div class="grid">${orgList}</div>
+      ${createForm}
     </div>`,
   });
 }
