@@ -74,7 +74,7 @@ summary{cursor:pointer;font-weight:600;font-size:14px;padding:6px 0}
 .mv-seg .lab{font-size:11px;color:var(--muted);margin-right:3px}
 .mv-chip{padding:3px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px;text-decoration:none;color:var(--ink);background:var(--surface)}
 .mv-chip:hover{border-color:var(--accent);text-decoration:none}
-.mv-chip.on{background:var(--ink);color:var(--ground);border-color:transparent}
+.mv-chip.on{background:var(--accent);color:#fff;border-color:transparent}
 .mv-chart{width:100%;height:auto;display:block;margin:4px 0 6px}
 .mv-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:2px 0 6px;font-size:12px;color:var(--muted)}
 .mv-legend span{display:inline-flex;align-items:center;gap:5px}
@@ -918,7 +918,7 @@ function mvChart(buckets, lines) {
   for (const ln of lines) {
     if (n === 1) { paths += `<circle cx="${x(0).toFixed(1)}" cy="${y(ln.values[0]).toFixed(1)}" r="3" fill="${ln.color}"/>`; continue; }
     const pts = ln.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-    paths += `<polyline points="${pts}" fill="none" stroke="${ln.color}" stroke-width="${ln.bold ? 2.6 : 1.6}" stroke-linejoin="round" stroke-linecap="round"${ln.bold ? '' : ' opacity="0.92"'}/>`;
+    paths += `<polyline points="${pts}" fill="none" stroke="${ln.color}" stroke-width="${ln.bold ? 3.4 : 1.6}" stroke-linejoin="round" stroke-linecap="round"${ln.bold ? '' : ' opacity="0.92"'}/>`;
   }
   return `<svg viewBox="0 0 ${W} ${H}" class="mv-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="График движения заказов">${grid}${zero}${paths}${xlab}</svg>`;
 }
@@ -983,7 +983,7 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   const buckets = mvBuckets(display, view, ffShown);
   const win = view.gran === 'day' ? 7 : 3;
   const lines = ffShown.map((n, i) => ({ name: n, color: MV_PALETTE[ffAll.indexOf(n) % MV_PALETTE.length], bold: false, values: mvOverlay(buckets.map((b) => b.byFf[n] || 0), view.ov, win) }));
-  const totalLine = { name: 'Итого', color: 'var(--ink)', bold: true, values: mvOverlay(buckets.map((b) => b.total), view.ov, win) };
+  const totalLine = { name: 'Итого', color: 'var(--accent)', bold: true, values: mvOverlay(buckets.map((b) => b.total), view.ov, win) };
   const chartLines = ffShown.length > 1 ? [...lines, totalLine] : lines;
   const legend = `<div class="mv-legend">${chartLines.map((ln) => `<span><i style="background:${ln.color}"></i>${esc(ln.name)}</span>`).join('')}</div>`;
   const chart = buckets.length ? `${mvChart(buckets, chartLines)}${legend}` : '<p class="muted">Нет данных за период.</p>';

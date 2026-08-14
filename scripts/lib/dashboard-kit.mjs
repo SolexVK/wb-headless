@@ -12,9 +12,27 @@ export const nf1 = (n) => Number(n || 0).toLocaleString('ru-RU', { maximumFracti
 export const SERIES = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)', 'var(--s7)', 'var(--s8)'];
 export const seriesColor = (i) => SERIES[i % SERIES.length];
 
-// ── KPI-карточка ─────────────────────────────────────────────────────────────
-export function kpi(num, label, variant = '') {
-  return `<div class="kpi ${variant}"><div class="kpi-num">${esc(String(num))}</div><div class="kpi-lab">${label}</div></div>`;
+// Семантические акценты для KPI/инсайтов (тёмные, читаемые на светлом).
+export const AC = { green: '#127045', indigo: '#4338ca', amber: '#b45309', teal: '#0f766e', blue: '#1d4ed8', red: '#be2b41', violet: '#6d28d9' };
+
+// ── KPI-карточка (акцентная рамка, лёгкий градиент, иконка) ──────────────────
+export function kpi(num, label, { icon = '', accent = AC.green } = {}) {
+  return `<div class="kpi" style="--kc:${accent}">
+    ${icon ? `<span class="kpi-ic">${icon}</span>` : ''}
+    <div class="kpi-num">${esc(String(num))}</div>
+    <div class="kpi-lab">${label}</div>
+  </div>`;
+}
+
+// ── Шапка панели с иконкой ───────────────────────────────────────────────────
+export function panelHead(icon, title, sub = '', accent = 'var(--accent)') {
+  return `<div class="panel-head" style="--pc:${accent}"><div class="ph-l"><span class="ph-ic">${icon}</span><h2>${esc(title)}</h2></div>${sub ? `<span class="panel-sub">${sub}</span>` : ''}</div>`;
+}
+
+// ── Строка «инсайтов»/выводов (карточки с иконкой и акцентом) ────────────────
+export function insights(items) {
+  if (!items || !items.length) return '';
+  return `<section class="insights">${items.map((i) => `<div class="insight" style="--kc:${i.accent || AC.green}"><span class="ins-ic">${i.icon || '•'}</span><span class="ins-tx">${i.text}</span></div>`).join('')}</section>`;
 }
 
 // ── Легенда категорий ────────────────────────────────────────────────────────
@@ -77,7 +95,7 @@ export function lineChart(series, labels, { width = 900, height = 300, fmtY = nf
   for (const s of series) {
     if (n === 1) { paths += `<circle cx="${x(0).toFixed(1)}" cy="${y(s.values[0]).toFixed(1)}" r="3.5" fill="${s.color}"/>`; continue; }
     const pts = s.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-    paths += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="${s.bold ? 3 : 2}" stroke-linejoin="round" stroke-linecap="round"${s.bold ? '' : ' opacity="0.95"'}/>`;
+    paths += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="${s.bold ? 3.6 : 2}" stroke-linejoin="round" stroke-linecap="round"${s.bold ? '' : ' opacity="0.95"'}/>`;
   }
   return `<svg viewBox="0 0 ${width} ${height}" class="linechart" preserveAspectRatio="xMidYMid meet" role="img">${grid}${zero}${paths}${xlab}</svg>`;
 }
@@ -106,7 +124,8 @@ export function groupedBars(labels, groups, { width = 900, height = 260, fmtY = 
 
 // ── Обёртки страницы ─────────────────────────────────────────────────────────
 export function page(title, body) {
-  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><style>${CSS}</style></head><body>${body}</body></html>`;
+  // data-theme="light" — дашборд всегда в светлой теме (независимо от ОС).
+  return `<!doctype html><html lang="ru" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><style>${CSS}</style></head><body>${body}</body></html>`;
 }
 export function artifact(title, body) {
   return `<title>${esc(title)}</title>\n<style>${CSS}</style>\n${body}`;
@@ -114,16 +133,18 @@ export function artifact(title, body) {
 
 // ── Дизайн-система (CSS) ──────────────────────────────────────────────────────
 const LIGHT = `
-  --ground:#EEF3EF; --surface:#FFFFFF; --surface-2:#F5F9F6;
-  --ink:#12211A; --muted:#54695D; --faint:#88998F;
-  --line:#DDE7E0; --line-2:#C7D6CC;
+  --ground:#EBF0F5; --ground-2:#E3EAF2; --surface:#FFFFFF; --surface-2:#F3F7FB;
+  --ink:#101826; --muted:#5A6B7E; --faint:#8695A6;
+  --line:#E1E8F0; --line-2:#CDD9E6;
   --accent:#1B965A; --accent-d:#127045; --accent-soft:#E1F3E9;
+  --total:#4338ca;
   --crit:#C43A50; --crit-soft:#FBE7EA; --warn:#B7791F; --warn-soft:#FAF0DA; --ok:#16875A; --ok-soft:#E4F3EC;
   --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
-  --shadow:0 1px 2px rgba(18,33,26,.05),0 4px 16px rgba(18,33,26,.06);`;
+  --shadow:0 1px 2px rgba(16,24,38,.05),0 6px 20px rgba(16,24,38,.07);`;
 const DARK = `
-  --ground:#0A0F0C; --surface:#121A15; --surface-2:#16211B; --ink:#E7F0EA; --muted:#93A79B; --faint:#63776B;
+  --ground:#0A0F0C; --ground-2:#0A0F0C; --surface:#121A15; --surface-2:#16211B; --ink:#E7F0EA; --muted:#93A79B; --faint:#63776B;
   --line:#20302A; --line-2:#2C4038; --accent:#35C77E; --accent-d:#2AA268; --accent-soft:#12271C;
+  --total:#a5b4fc;
   --crit:#F0708A; --crit-soft:#2E1620; --warn:#E7B24C; --warn-soft:#2C2410; --ok:#3FBE86; --ok-soft:#12271C;
   --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#2f9e2f; --s7:#9085e9; --s8:#e66767;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 22px rgba(0,0,0,.42);`;
@@ -133,29 +154,35 @@ export const CSS = `
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){${DARK}}}
 :root[data-theme="dark"]{${DARK}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--ground);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased}
+body{margin:0;background:linear-gradient(180deg,var(--ground),var(--ground-2));min-height:100vh;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased}
 .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.86em}
 .num{font-variant-numeric:tabular-nums} .muted{color:var(--muted)} .accent{color:var(--accent-d)} .crit{color:var(--crit)} .ok{color:var(--ok)}
 .ta-r{text-align:right} .tl{text-align:left}
-.wrap{max-width:1180px;margin:0 auto;padding:36px 24px 56px}
+.wrap{max-width:1180px;margin:0 auto;padding:34px 24px 56px}
 
-.head{padding-bottom:18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.head{position:relative;padding:20px 22px 20px 26px;margin-bottom:20px;background:linear-gradient(120deg,var(--surface),color-mix(in srgb,var(--accent) 6%,var(--surface)));border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);display:flex;justify-content:space-between;gap:22px;flex-wrap:wrap;align-items:flex-start;overflow:hidden}
+.head::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:linear-gradient(180deg,var(--accent),var(--total))}
 .eyebrow{margin:0 0 6px;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent-d);font-weight:700}
-.head h1{margin:0;font-size:26px;font-weight:750;letter-spacing:-.02em}
+.head h1{margin:0;font-size:26px;font-weight:780;letter-spacing:-.02em}
 .sub{margin:8px 0 0;color:var(--muted);max-width:92ch;font-size:13.5px} .sub b{color:var(--ink)}
-.stamp{text-align:right;font-size:12.5px;color:var(--muted);white-space:nowrap;line-height:1.5} .stamp b{color:var(--ink);font-variant-numeric:tabular-nums}
+.stamp{text-align:right;font-size:12.5px;color:var(--muted);white-space:nowrap;line-height:1.5;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 12px} .stamp b{color:var(--ink);font-variant-numeric:tabular-nums}
 
-.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:22px 0}
-.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:15px 16px;box-shadow:var(--shadow)}
-.kpi-accent{background:linear-gradient(165deg,var(--accent-soft),var(--surface));border-color:var(--line-2)}
-.kpi-crit{background:linear-gradient(165deg,var(--crit-soft),var(--surface))}
-.kpi-num{font-size:24px;font-weight:750;letter-spacing:-.02em;line-height:1.05;font-variant-numeric:tabular-nums;word-break:break-word}
-.kpi-accent .kpi-num{color:var(--accent-d)} .kpi-crit .kpi-num{color:var(--crit)}
+.insights{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:0 0 18px}
+.insight{display:flex;align-items:center;gap:11px;background:linear-gradient(180deg,color-mix(in srgb,var(--kc) 9%,var(--surface)),var(--surface));border:1px solid var(--line);border-left:4px solid var(--kc);border-radius:12px;padding:12px 15px;font-size:13px;box-shadow:var(--shadow)}
+.ins-ic{font-size:20px;flex:none;line-height:1} .ins-tx{color:var(--muted)} .ins-tx b{color:var(--kc);font-weight:750}
+
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:13px;margin:0 0 20px}
+.kpi{position:relative;background:linear-gradient(180deg,color-mix(in srgb,var(--kc) 8%,var(--surface)),var(--surface));border:1px solid var(--line);border-top:3px solid var(--kc);border-radius:14px;padding:16px 16px 15px;box-shadow:var(--shadow);overflow:hidden}
+.kpi-ic{position:absolute;top:13px;right:13px;width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;line-height:1;background:color-mix(in srgb,var(--kc) 15%,var(--surface))}
+.kpi-num{font-size:25px;font-weight:780;letter-spacing:-.02em;line-height:1.05;font-variant-numeric:tabular-nums;word-break:break-word;color:var(--kc);padding-right:34px}
 .kpi-lab{margin-top:6px;font-size:11.5px;color:var(--muted)}
 
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-shadow:var(--shadow);margin-bottom:16px}
-.panel-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:14px;flex-wrap:wrap;border-left:3px solid var(--accent);padding-left:10px}
-.panel-head h2{margin:0;font-size:16px;font-weight:750} .panel-sub{font-size:12.5px;color:var(--muted)} .panel-sub b{color:var(--ink);font-variant-numeric:tabular-nums}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow);margin-bottom:16px}
+.panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:-2px 0 15px;padding-bottom:13px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.ph-l{display:flex;align-items:center;gap:11px;min-width:0}
+.ph-ic{width:32px;height:32px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;font-size:17px;line-height:1;background:color-mix(in srgb,var(--pc) 14%,var(--surface));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pc) 22%,transparent)}
+.panel-head h2{margin:0;font-size:16px;font-weight:750}
+.panel-sub{font-size:12.5px;color:var(--muted);white-space:nowrap} .panel-sub b{color:var(--ink);font-variant-numeric:tabular-nums}
 .cols{display:grid;grid-template-columns:1fr;gap:20px} .cols-2{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}
 .chart-wrap{width:100%;overflow:hidden}
 .linechart,.barchart{width:100%;height:auto;display:block} .ax{font-size:11px;fill:var(--muted)}
