@@ -186,7 +186,7 @@ try {
   r = await req('GET', `/org/${orgId}`);
   ok(r.status === 302 && r.location === `/org/${orgId}/reports`, 'Ф1: участник с /org/:id перенаправлен в отчёты');
   r = await req('GET', `/org/${orgId}/reports`);
-  ok(r.status === 200 && r.text.includes('отчёты') && r.text.includes('Покинуть компанию'), 'Ф1: участник видит только страницу отчётов (+ выход)');
+  ok(r.status === 200 && r.text.includes('отчёты') && !r.text.includes('Покинуть компанию'), 'Ф1: участник видит только отчёты (без кнопки выхода)');
   // Участник НЕ видит токен, приглашения, места и список участников (email владельца).
   ok(!r.text.includes('name="token"') && !r.text.includes('id="invemail"') && !r.text.includes('Места по лицензии') && !r.text.includes(email2),
     'Ф1: участник не видит токен/приглашения/места/список');
@@ -251,16 +251,21 @@ try {
   r = await req('POST', `/admin/user/${delUserId}/delete`, form({ _csrf: csrfAdmin }));
   ok(r.status === 302, 'Ф1: супер-админ полностью удалил пользователя');
 
-  // Участник покидает компанию → теряет к ней доступ.
+  // Владелец убирает приглашённого сотрудника и берёт другого на освободившееся место.
   cookie = '';
   r = await req('GET', '/login');
-  r = await req('POST', '/login', form({ _csrf: csrfOf(r.text), email: inviteeEmail, password: 'supersecret1' }));
-  r = await req('GET', `/org/${orgId}/reports`); // у участника кнопка выхода на странице отчётов
-  const csrfLeave = csrfOf(r.text);
-  r = await req('POST', `/org/${orgId}/leave`, form({ _csrf: csrfLeave }));
-  ok(r.status === 302 && r.location === '/', 'Ф1: участник покинул компанию → на главную');
-  r = await req('GET', `/org/${orgId}/reports`);
-  ok(r.status === 404, 'Ф1: после выхода компания недоступна (404)');
+  r = await req('POST', '/login', form({ _csrf: csrfOf(r.text), email: email2, password: 'supersecret1' }));
+  r = await req('GET', `/org/${orgId}`);
+  const csrfRm = csrfOf(r.text);
+  const memRemoveId = (r.text.match(/\/member\/(\d+)\/remove/) || [])[1];
+  ok(!!memRemoveId, 'Ф1: у владельца есть кнопка «Убрать» участника');
+  r = await req('POST', `/org/${orgId}/member/${memRemoveId}/remove`, form({ _csrf: csrfRm }));
+  ok(r.status === 200 && !r.text.includes(inviteeEmail), 'Ф1: владелец убрал сотрудника (место освободилось)');
+  r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfRm, email: `replace_${Date.now()}@example.com` }));
+  ok(r.status === 302, 'Ф1: на освободившееся место можно пригласить другого');
+  // Участник сам покинуть компанию не может — маршрута нет.
+  r = await req('POST', `/org/${orgId}/leave`, form({ _csrf: csrfRm }));
+  ok(r.status === 404, 'Ф1: самостоятельного выхода участника нет (404)');
 } catch (e) {
   console.error('Ошибка теста:', e); failed++;
 } finally {

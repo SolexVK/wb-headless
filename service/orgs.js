@@ -122,15 +122,8 @@ orgRouter.post('/org/:id/invite/:inviteId/revoke', requireAuth, loadOrg, require
 
 orgRouter.post('/org/:id/member/:userId/remove', requireAuth, loadOrg, requireOwner, (req, res) => {
   Members.remove(req.org.id, Number(req.params.userId)); // владельца убрать нельзя (защита в SQL)
-  renderOrg(req, res, { memOk: 'Участник удалён.' });
-});
-
-// Участник сам покидает компанию (владелец так не может — удаление через супер-админа).
-orgRouter.post('/org/:id/leave', requireAuth, loadOrg, (req, res) => {
-  if (req.role === 'owner') return res.status(403).send('Владелец не может покинуть свою компанию. Удаление компании — через администратора сервиса.');
-  Members.remove(req.org.id, req.session.user.id);
-  logger.info({ orgId: req.org.id, userId: req.session.user.id }, 'участник покинул компанию');
-  res.redirect('/');
+  logger.info({ orgId: req.org.id, removed: Number(req.params.userId), by: req.session.user.id }, 'владелец убрал участника');
+  renderOrg(req, res, { memOk: 'Участник удалён. Освободилось место — можно пригласить другого.' });
 });
 
 // ── Супер-админ: панель компаний, лицензий и пользователей ───────────────────

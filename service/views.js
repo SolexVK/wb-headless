@@ -285,9 +285,6 @@ export function orgPage(p) {
         ${status}
         ${ready ? `<p><a class="dl" href="${u(`/org/${org.id}/reports`)}">📊 Открыть отчёты</a></p>` : ''}
         <p class="kv" style="margin-top:14px">Вы участник этой компании. Вам доступны отчёты; управление кабинетом и участниками — у владельца.</p>
-        <form method="post" action="${u(`/org/${org.id}/leave`)}" style="margin-top:8px" onsubmit="return confirm('Покинуть компанию «${esc(org.name)}»? Доступ к её отчётам пропадёт.')">
-          ${csrfField(csrf)}<button class="btn btn-sm btn-danger" type="submit">Покинуть компанию</button>
-        </form>
       </div>`,
     });
   }
@@ -593,10 +590,6 @@ export function reportsPage(p) {
     ? `<a class="tile" href="${u(href)}" style="display:block"><h3>${esc(title)}</h3><p>${esc(desc)} →</p></a>`
     : `<div class="tile soon"><h3>${esc(title)} <span class="pill">скоро</span></h3><p>${esc(desc)}</p></div>`;
   const crumb = owner ? `<a href="${u(`/org/${org.id}`)}">← ${esc(org.name)}</a>` : `<a href="${u('/')}">← Компании</a>`;
-  const leave = owner ? '' : `
-    <form method="post" action="${u(`/org/${org.id}/leave`)}" style="margin-top:20px" onsubmit="return confirm('Покинуть компанию «${esc(org.name)}»? Доступ к её отчётам пропадёт.')">
-      ${csrfField(csrf)}<button class="btn btn-sm btn-danger" type="submit">Покинуть компанию</button>
-    </form>`;
   return layout({
     title: `Отчёты — ${org.name}`, user, csrf, base,
     body: `<div class="wrap">
@@ -607,7 +600,6 @@ export function reportsPage(p) {
         ${card(`/org/${org.id}/reports/podsort`, 'Подсорт', 'Рекомендации к заказу по складам и размерам + пробный завоз', !!active)}
         ${card(`/org/${org.id}/reports/podsort`, 'Остатки', 'Остатки FBS по артикулам и цветам', false)}
       </div>
-      ${leave}
     </div>`,
   });
 }
