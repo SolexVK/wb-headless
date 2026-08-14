@@ -112,6 +112,19 @@ reportsRouter.get('/org/:id/reports/archive/:runId', requireAuth, loadOrg, (req,
   }));
 });
 
+// Удалить архивный запуск — только автор (кто создал этот отчёт).
+reportsRouter.post('/org/:id/reports/archive/:runId/delete', requireAuth, loadOrg, (req, res) => {
+  const cab = Cabinets.firstOf(req.org.id);
+  const run = ReportRuns.byId(Number(req.params.runId));
+  if (!run || !cab || run.cabinetId !== cab.id) return res.status(404).send('Запуск не найден');
+  if (run.authorId !== req.session.user.id) {
+    return res.status(403).send('Удалить отчёт может только тот пользователь, который его создал.');
+  }
+  ReportRuns.deleteByAuthor(run.id, req.session.user.id);
+  logger.info({ runId: run.id, by: req.session.user.id }, 'архив: автор удалил свой запуск');
+  res.redirect(`/org/${req.org.id}/reports/archive`);
+});
+
 // Выгрузки конкретного архивного запуска.
 reportsRouter.get('/org/:id/reports/archive/:runId/download/:kind', requireAuth, loadOrg, async (req, res) => {
   const cab = Cabinets.firstOf(req.org.id);

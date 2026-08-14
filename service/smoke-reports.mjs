@@ -11,6 +11,7 @@ process.env.SESSION_SECRET = 'test-secret-please-change';
 process.env.TOKEN_ENC_KEY = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
 process.env.WB_PING_ONLINE = '0';
 process.env.PODSORT_FAKE = '1';
+process.env.DEFAULT_LICENSE_SEATS = '3'; // чтобы пригласить участника для теста прав удаления
 process.env.DB_PATH = path.join(os.tmpdir(), `fbs-reports-${process.pid}.sqlite`);
 
 const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -93,6 +94,31 @@ try {
   // Изоляция: чужой архивный запуск недоступен.
   r = await req('GET', `/org/${orgId}/reports/archive/999999`);
   ok(r.status === 404, 'Ф2: несуществующий запуск → 404');
+
+  // Автор удаляет СВОЙ запуск из архива.
+  r = await req('GET', `/org/${orgId}/reports/archive`);
+  ok(r.text.includes('Удалить'), 'Ф2: автор видит кнопку удаления своего запуска');
+  r = await req('POST', `/org/${orgId}/reports/archive/${runIds[0]}/delete`, form({ _csrf: csrfOf(r.text) }));
+  ok(r.status === 302, 'Ф2: автор удалил свой запуск (302)');
+  r = await req('GET', `/org/${orgId}/reports/archive/${runIds[0]}`);
+  ok(r.status === 404, 'Ф2: удалённый запуск недоступен (404)');
+
+  // Участник компании НЕ может удалить чужой запуск.
+  r = await req('GET', `/org/${orgId}`);
+  const memberEmail = `rep_member_${Date.now()}@example.com`;
+  r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfOf(r.text), email: memberEmail }));
+  r = await req('GET', `/org/${orgId}`);
+  const inviteTok = (r.text.match(/\/invite\/([A-Za-z0-9_-]{10,})/) || [])[1];
+  cookie = '';
+  r = await req('GET', `/invite/${inviteTok}`);
+  r = await req('GET', '/register');
+  r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email: memberEmail, password: 'supersecret1', name: 'Член' }));
+  r = await req('GET', `/invite/${inviteTok}`);
+  r = await req('POST', `/invite/${inviteTok}/accept`, form({ _csrf: csrfOf(r.text) }));
+  r = await req('GET', `/org/${orgId}/reports/archive`);
+  ok(r.status === 200 && !/\/reports\/archive\/\d+\/delete/.test(r.text), 'Ф2: участник не видит кнопку удаления чужих запусков');
+  r = await req('POST', `/org/${orgId}/reports/archive/${runIds[1]}/delete`, form({ _csrf: csrfOf(r.text) }));
+  ok(r.status === 403, 'Ф2: участник не может удалить чужой запуск (403)');
 
   // Доступ: аноним не видит отчёты.
   cookie = '';

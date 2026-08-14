@@ -744,6 +744,7 @@ export function archivePage({ user, csrf, base = '', org, role, runs }) {
       <td style="text-align:right;white-space:nowrap">
         <a class="dl" style="padding:5px 9px;font-size:12px;margin:0 4px 0 0" href="${u(`/org/${org.id}/reports/archive/${r.id}/download/xlsx`)}">Excel</a>
         <a class="dl" style="padding:5px 9px;font-size:12px;margin:0" href="${u(`/org/${org.id}/reports/archive/${r.id}/download/json`)}">JSON</a>
+        ${r.authorId === user.id ? formBtn(csrf, u(`/org/${org.id}/reports/archive/${r.id}/delete`), 'Удалить', 'mini btn-danger', 'Удалить этот отчёт из архива? Отменить нельзя.') : ''}
       </td>
     </tr>`;
   }).join('');
@@ -752,7 +753,7 @@ export function archivePage({ user, csrf, base = '', org, role, runs }) {
     body: `<div class="wrap">
       <div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>
       <h1>Архив отчётов</h1>
-      <p class="sub">История запусков компании (хранится 90 дней). Откройте запуск, чтобы посмотреть содержимое или скачать. Каждый запуск сохраняется автоматически.</p>
+      <p class="sub">История запусков компании (хранится 90 дней). Откройте запуск, чтобы посмотреть содержимое или скачать. Удалить запуск может только тот, кто его создал.</p>
       <div class="section"><div class="scroll"><table class="rt">
         <thead><tr>${thT('Дата', 'Когда запущен (UTC) — ссылка на просмотр')}${thT('Отчёт', 'Тип отчёта')}${thT('Кто', 'Кто запустил')}${thT('Подсорт', 'Итого к заказу, шт')}${thT('Риск', 'Строк в риске')}${thT('Завоз', 'Пробный завоз, шт')}${thT('Артикулы', 'Артикулы в работе')}${thT('Выгрузки', 'Скачать этот запуск')}</tr></thead>
         <tbody>${rows || '<tr><td colspan="8" class="muted">Пока нет запусков. Соберите отчёт на странице подсорта.</td></tr>'}</tbody>
@@ -775,6 +776,7 @@ export function archiveViewPage({ user, csrf, base = '', org, role, run }) {
       <div class="crumbs"><a href="${u(`/org/${org.id}/reports/archive`)}">← Архив отчётов</a></div>
       <h1>${esc(reportRu(run.report))} <span class="muted" style="font-size:14px;font-weight:400">от ${when}</span></h1>
       <p class="kv">Запуск №${esc(String(run.id))}${(p.articles && p.articles.length) ? ` · артикулы: ${esc(p.articles.join(', '))}` : ''}${p.leadMin ? ` · лид ${esc(String(p.leadMin))}–${esc(String(p.leadMax))} дн · запас ${esc(String(p.cover))} дн` : ''}</p>
+      ${run.authorId === user.id ? `<form method="post" action="${u(`/org/${org.id}/reports/archive/${run.id}/delete`)}" style="margin:0 0 10px" onsubmit="return confirm('Удалить этот отчёт из архива? Отменить нельзя.')">${csrfField(csrf)}<button class="btn btn-sm btn-danger" type="submit">Удалить из архива</button></form>` : ''}
       ${body}
     </div>`,
   });

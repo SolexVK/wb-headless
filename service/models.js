@@ -72,9 +72,10 @@ const q = {
   latestRun: db.prepare('SELECT * FROM report_runs WHERE cabinet_id = ? AND report = ? ORDER BY created_at DESC, id DESC LIMIT 1'),
   runById: db.prepare('SELECT * FROM report_runs WHERE id = ?'),
   runsList: db.prepare(`
-    SELECT r.id, r.report, r.params_json, r.summary_json, r.generated_at, r.created_at, u.email AS user_email
+    SELECT r.id, r.report, r.params_json, r.summary_json, r.generated_at, r.created_at, r.user_id, u.email AS user_email
     FROM report_runs r LEFT JOIN users u ON u.id = r.user_id
     WHERE r.cabinet_id = ? ORDER BY r.created_at DESC, r.id DESC LIMIT 200`),
+  deleteRunByAuthor: db.prepare('DELETE FROM report_runs WHERE id = ? AND user_id = ?'),
   purgeRuns: db.prepare("DELETE FROM report_runs WHERE created_at < datetime('now', ?)"),
 
   insertInvite: db.prepare('INSERT INTO invitations (org_id, email, role, token, expires_at) VALUES (?, ?, ?, ?, ?)'),
@@ -251,17 +252,20 @@ export const ReportRuns = {
   },
   // Список запусков компании (без тяжёлых снимков) — для каталога/архива.
   list: (cabinetId) => q.runsList.all(cabinetId).map((r) => ({
-    id: r.id, report: r.report, userEmail: r.user_email, createdAt: r.created_at, generatedAt: r.generated_at,
+    id: r.id, report: r.report, userEmail: r.user_email, authorId: r.user_id,
+    createdAt: r.created_at, generatedAt: r.generated_at,
     params: safeJson(r.params_json), summary: safeJson(r.summary_json),
   })),
   // Один запуск с распакованным снимком (для просмотра/выгрузки). Проверка компании — снаружи.
   byId: (id) => {
     const row = q.runById.get(id);
     if (!row) return null;
-    return { id: row.id, cabinetId: row.cabinet_id, report: row.report, createdAt: row.created_at,
-      generatedAt: row.generated_at, params: safeJson(row.params_json), summary: safeJson(row.summary_json),
-      data: gunz(row.data_gz) };
+    return { id: row.id, cabinetId: row.cabinet_id, report: row.report, authorId: row.user_id,
+      createdAt: row.created_at, generatedAt: row.generated_at,
+      params: safeJson(row.params_json), summary: safeJson(row.summary_json), data: gunz(row.data_gz) };
   },
+  // Удалить может только автор запуска (проверка через user_id в запросе).
+  deleteByAuthor: (id, userId) => q.deleteRunByAuthor.run(id, userId).changes > 0,
   purge: () => q.purgeRuns.run(`-${RETENTION_DAYS} days`),
 };
 const safeJson = (s) => { try { return JSON.parse(s || '{}'); } catch { return {}; } };
