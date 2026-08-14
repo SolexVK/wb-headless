@@ -35,14 +35,26 @@ NODE_ENV=production
 
 ## 2. Добавить path-маршрут в Caddy
 
-В `/opt/homebrew/etc/Caddyfile`, в блок сайта `:9000`, **перед** финальным
-`reverse_proxy` (catch-all) добавить (важно: `handle`, НЕ `handle_path` —
-префикс не срезаем, приложение ждёт полный путь `/fbs/...`):
+В `/opt/homebrew/etc/Caddyfile`, в блок сайта `:9000`, **перед** catch-all
+(`handle { reverse_proxy 127.0.0.1:8477 }`) добавить маршрут по образцу `/calc`
+(важно: `handle`, НЕ `handle_path` — префикс не срезаем, приложение ждёт полный
+путь `/fbs/...`). Итоговый блок сайта:
 
 ```
-	handle /fbs* {
+:9000 {
+	bind 127.0.0.1
+	@calc path /calc /calc/*
+	handle @calc {
+		reverse_proxy 127.0.0.1:8899
+	}
+	@fbs path /fbs /fbs/*
+	handle @fbs {
 		reverse_proxy 127.0.0.1:9110
 	}
+	handle {
+		reverse_proxy 127.0.0.1:8477
+	}
+}
 ```
 
 Проверить и применить без перезапуска (Funnel/443 не трогаются):
