@@ -144,6 +144,7 @@ tailscale funnel status
 # выключить ТОЛЬКО калькулятор (порт 10000) — planner/getcourse на 443/8443 не трогает
 tailscale funnel --https=10000 off
 # ВНИМАНИЕ: не запускайте `tailscale serve reset` — он снимет ВСЕ Funnel, включая 443/8443
+# Публичный вход 443 вынесен за единый обратный прокси Caddy — см. deploy/CADDY.md.
 
 # обновить калькулятор до свежей версии
 cd wb-headless && git pull origin claude/china-fbs-branch-fuhjhb
