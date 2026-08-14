@@ -170,10 +170,14 @@ try {
   r = await req('POST', `/invite/${inviteTok}/accept`, form({ _csrf: csrfOf(r.text) }));
   ok(r.status === 403, 'Ф1: чужой email не может принять (403)');
 
-  // Правильный email принимает и попадает в организацию.
+  // Правильный email принимает: реальный поток — сначала ссылка (аноним), потом
+  // регистрация по приглашению (СВОЯ компания не создаётся), затем приём.
   cookie = '';
+  r = await req('GET', `/invite/${inviteTok}`);
+  ok(r.status === 302 && /\/register$/.test(r.location || ''), 'Ф1: аноним по ссылке → регистрация');
   r = await req('GET', '/register');
   r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email: inviteeEmail, password: 'supersecret1', name: 'Гость' }));
+  ok(r.status === 302 && /\/invite\//.test(r.location || ''), 'Ф1: после регистрации возврат к приглашению');
   r = await req('GET', `/invite/${inviteTok}`);
   ok(r.status === 200 && r.text.includes('Принять приглашение'), 'Ф1: нужный email видит приём приглашения');
   r = await req('POST', `/invite/${inviteTok}/accept`, form({ _csrf: csrfOf(r.text) }));
@@ -190,6 +194,12 @@ try {
   const csrfMember = csrfOf(r.text);
   r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfMember, email: `nope_${Date.now()}@example.com` }));
   ok(r.status === 403, 'Ф1: участник не может приглашать (403)');
+
+  // Приглашённый участник НЕ может создавать свою компанию (ни в UI, ни на сервере).
+  r = await req('GET', '/');
+  ok(!r.text.includes('Создать компанию'), 'Ф1: приглашённый не видит форму создания компании');
+  r = await req('POST', '/company', form({ _csrf: csrfOf(r.text), company: 'Левая компания' }));
+  ok(r.status === 302 && /\/\?err=nocreate/.test(r.location || ''), 'Ф1: приглашённому запрещено создавать компанию (сервер)');
 
   // Лицензия: у владельца 3 места, занято 2 → одно ещё можно, следующее — нет.
   cookie = '';

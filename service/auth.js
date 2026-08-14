@@ -125,5 +125,10 @@ authRouter.post('/reset/:token', authLimiter, (req, res) => {
 // ── Домашняя (требует входа) ─────────────────────────────────────────────────
 authRouter.get('/', requireAuth, (req, res) => {
   const orgs = Orgs.ofUser(req.session.user.id);
-  res.send(homePage({ user: req.session.user, orgs, csrf: res.locals.csrf, base: res.locals.base, superAdmin: isSuperAdmin(req.session.user.email) }));
+  const superAdmin = isSuperAdmin(req.session.user.email);
+  res.send(homePage({
+    user: req.session.user, orgs, csrf: res.locals.csrf, base: res.locals.base, superAdmin,
+    canCreate: Orgs.canCreateCompany(req.session.user.id, superAdmin),
+    error: req.query.err === 'nocreate' ? 'Приглашённые участники не могут создавать свою компанию. Обратитесь к владельцу вашей компании или к администратору сервиса.' : undefined,
+  }));
 });

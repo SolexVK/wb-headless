@@ -47,8 +47,12 @@ function renderOrg(req, res, extra = {}) {
 }
 const safeMeta = (j) => { try { return JSON.parse(j || '{}'); } catch { return {}; } };
 
-// ── Создать компанию (любой вошедший; лицензия по умолчанию = 1 место) ───────
+// ── Создать компанию (нельзя приглашённому участнику; лицензия = 1 место) ─────
 orgRouter.post('/company', requireAuth, (req, res) => {
+  if (!Orgs.canCreateCompany(req.session.user.id, isSuperAdmin(req.session.user.email))) {
+    logger.info({ userId: req.session.user.id }, 'создание компании запрещено (приглашённый участник)');
+    return res.redirect('/?err=nocreate');
+  }
   const name = String(req.body.company || '').trim()
     || `${req.session.user.name || String(req.session.user.email).split('@')[0]} — компания`;
   const id = Orgs.create(req.session.user.id, name);

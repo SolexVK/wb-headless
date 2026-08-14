@@ -198,14 +198,15 @@ export function registerPage({ csrf, error, email, name, notice, base = '' }) {
   });
 }
 
-export function homePage({ user, orgs, csrf, base = '', superAdmin }) {
+export function homePage({ user, orgs, csrf, base = '', superAdmin, canCreate, error }) {
   const u = (p) => base + p;
   const orgList = orgs.length
     ? orgs.map((o) => `<a class="tile" href="${u(o.role === 'owner' ? `/org/${o.id}` : `/org/${o.id}/reports`)}" style="display:block">
         <h3>${esc(o.name)} <span class="badge ${esc(o.role)}">${esc(roleRu(o.role))}</span></h3>
         <p>${o.role === 'owner' ? 'Кабинет, участники и отчёты' : 'Отчёты компании'} →</p></a>`).join('')
     : `<div class="tile"><p class="muted">Вы пока не состоите ни в одной компании. Создайте свою ниже или, если вас пригласили, откройте ссылку-приглашение снова.</p></div>`;
-  const createForm = `
+  // Форму создания компании видит не всякий: приглашённый участник — не может.
+  const createForm = canCreate ? `
     <div class="section" style="margin-top:16px">
       <h2>Создать компанию</h2>
       <p class="kv" style="margin:0 0 10px">Новая компания начинается с 1 места (только вы). Расширить лицензию, чтобы приглашать участников, может администратор сервиса.</p>
@@ -214,13 +215,14 @@ export function homePage({ user, orgs, csrf, base = '', superAdmin }) {
         <div><label for="company" title="Название вашей компании">Название компании</label><input id="company" name="company" type="text" placeholder="Напр. ИП Иванов" style="min-width:240px"></div>
         <button class="btn mini" type="submit" style="height:38px">Создать</button>
       </form>
-    </div>`;
+    </div>` : '';
   return layout({
     title: 'FBS-сервис',
     user, csrf, base,
     body: `<div class="wrap">
       <h1>Здравствуйте, ${esc(user.name || user.email)}</h1>
       <p class="sub">Ваши компании. Откройте компанию, чтобы настроить кабинет WB и работать с отчётами.${superAdmin ? ` <a href="${u('/admin')}">Панель супер-админа →</a>` : ''}</p>
+      ${error ? errBox(error) : ''}
       <div class="grid">${orgList}</div>
       ${createForm}
     </div>`,

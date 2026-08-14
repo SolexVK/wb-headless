@@ -132,6 +132,17 @@ export const Orgs = {
   byId: (id) => q.orgById.get(id),
   rename: (id, name) => q.renameOrg.run(String(name).trim() || 'Компания', id),
 
+  // Может ли пользователь создать компанию. Приглашённый участник (есть членство
+  // «member» и нет своей компании) — НЕ может (закрываем лазейку расширения).
+  // Разрешено: супер-админу; тем, кто уже владелец; тем, кто ни в одной компании.
+  canCreateCompany: (userId, isSuper) => {
+    if (isSuper) return true;
+    const list = q.orgsOfUser.all(userId);
+    const owns = list.some((o) => o.role === 'owner');
+    const isMember = list.some((o) => o.role === 'member');
+    return owns || !isMember;
+  },
+
   // Создать компанию: организация + membership владельца (лицензия по умолчанию).
   create: (ownerUserId, name) => tx(() => {
     const o = q.insertOrg.run(String(name).trim() || 'Компания', ownerUserId, config.defaultLicenseSeats);
