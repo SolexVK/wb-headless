@@ -69,6 +69,16 @@ summary{cursor:pointer;font-weight:600;font-size:14px;padding:6px 0}
 .dl:hover{text-decoration:none;border-color:var(--accent)}
 .running{background:var(--info-bg);border:1px solid var(--info-bd);color:var(--info-tx);border-radius:9px;padding:11px 13px;margin-bottom:12px;font-size:13.5px}
 .num{text-align:right;font-variant-numeric:tabular-nums}
+.mv-bar{display:flex;flex-wrap:wrap;align-items:center;gap:0 4px;margin:2px 0 12px}
+.mv-seg{display:inline-flex;align-items:center;gap:5px;margin:0 16px 8px 0}
+.mv-seg .lab{font-size:11px;color:var(--muted);margin-right:3px}
+.mv-chip{padding:3px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px;text-decoration:none;color:var(--ink);background:var(--surface)}
+.mv-chip:hover{border-color:var(--accent);text-decoration:none}
+.mv-chip.on{background:var(--ink);color:var(--ground);border-color:transparent}
+.mv-chart{width:100%;height:auto;display:block;margin:4px 0 6px}
+.mv-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:2px 0 6px;font-size:12px;color:var(--muted)}
+.mv-legend span{display:inline-flex;align-items:center;gap:5px}
+.mv-legend i{width:11px;height:3px;border-radius:2px;display:inline-block}
 /* Таблицы отчётов: заголовки по центру (гориз.+верт.), данные по центру, кроме .tl (Цвет/Статус — слева). */
 .rt th,.rt td{text-align:center;vertical-align:middle}
 .rt td.tl{text-align:left}
@@ -609,6 +619,7 @@ export function reportsPage(p) {
       <div class="grid" style="margin-top:14px">
         ${card(`/org/${org.id}/reports/podsort`, 'Подсорт', 'Рекомендации к заказу по складам и размерам + пробный завоз', !!active)}
         ${card(`/org/${org.id}/reports/stock`, 'Остатки', 'Остатки FBS по складам и по артикулам/цветам', !!active)}
+        ${card(`/org/${org.id}/reports/movement`, 'Движение заказов', 'Принято на фулфилмент и передано в доставку — по дням и складам, шт и ₽', !!active)}
       </div>
       <p style="margin-top:16px"><a class="dl" href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив отчётов</a></p>
     </div>`,
@@ -679,7 +690,7 @@ export function podsortPage(p) {
   });
 }
 
-const reportRu = (r) => ({ podsort: 'Подсорт', stock: 'Остатки' }[r] || r);
+const reportRu = (r) => ({ podsort: 'Подсорт', stock: 'Остатки', movement: 'Движение заказов' }[r] || r);
 
 // Рендер результатов подсорта из снимка (переиспользуется на странице отчёта и в архиве).
 // downloadHref(kind) → URL выгрузки; whenLabel — подпись «обновлено …».
@@ -806,6 +817,224 @@ export function stockPage(p) {
   });
 }
 
+// ── Движение заказов (принято / передано / разница) ─────────────────────────
+const MV_PALETTE = ['#4e79a7', '#f28e2b', '#59a14f', '#e15759', '#b07aa1', '#76b7b2', '#edc948', '#9c755f', '#ff9da7', '#bab0ac'];
+const MV_FOCUS = { accepted: 'Принято', delivered: 'Передано', diff: 'Разница' };
+
+// Нормализация состояния просмотра (из query) с дефолтами.
+export function movementView(q = {}) {
+  const one = (v, allowed, def) => (allowed.includes(String(v)) ? String(v) : def);
+  return {
+    focus: one(q.focus, ['accepted', 'delivered', 'diff'], 'delivered'),
+    unit: one(q.unit, ['count', 'money'], 'count'),
+    gran: one(q.gran, ['day', 'week'], 'day'),
+    ov: one(q.ov, ['none', 'cum', 'ma'], 'none'),
+    cmp: String(q.cmp) === '1' ? '1' : '0',
+  };
+}
+
+// ISO-неделя из 'YYYY-MM-DD' → ключ 'YYYY-Wnn' + подпись.
+function isoWeek(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const day = (d.getUTCDay() + 6) % 7;            // Пн=0
+  d.setUTCDate(d.getUTCDate() - day + 3);         // четверг этой недели
+  const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((d - firstThu) / 86400000 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
+  return { key: `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`, label: `нед ${week}` };
+}
+
+// Компактная подпись оси.
+const mvAxis = (v) => {
+  const a = Math.abs(v);
+  if (a >= 1e6) return (v / 1e6).toFixed(a >= 1e7 ? 0 : 1).replace('.', ',') + 'м';
+  if (a >= 1e3) return (v / 1e3).toFixed(a >= 1e4 ? 0 : 1).replace('.', ',') + 'к';
+  return String(Math.round(v));
+};
+const mvVal = (v, money) => (money ? nf(Math.round(v)) + ' ₽' : nf(v));
+
+// Значение метрики для дня d и фулфилмента name (name=null → всего).
+function mvCell(d, view, name) {
+  const u = view.unit;
+  const pick = (blk) => (name ? ((blk?.byFulfillment?.[name] || {})[u] || 0) : (blk?.[u] || 0));
+  if (view.focus === 'accepted') return pick(d.accepted);
+  if (view.focus === 'delivered') return pick(d.delivered);
+  return pick(d.delivered) - pick(d.accepted);
+}
+
+// Свернуть дни в корзины (день/неделя) для набора фулфилментов.
+function mvBuckets(entries, view, ffShown) {
+  if (view.gran === 'day') {
+    return entries.map((d) => ({
+      label: d.date.slice(5), key: d.date,
+      byFf: Object.fromEntries(ffShown.map((n) => [n, mvCell(d, view, n)])),
+      total: mvCell(d, view, null),
+    }));
+  }
+  const map = new Map();
+  for (const d of entries) {
+    const w = isoWeek(d.date);
+    if (!map.has(w.key)) map.set(w.key, { label: w.label, key: w.key, byFf: Object.fromEntries(ffShown.map((n) => [n, 0])), total: 0 });
+    const b = map.get(w.key);
+    for (const n of ffShown) b.byFf[n] += mvCell(d, view, n);
+    b.total += mvCell(d, view, null);
+  }
+  return [...map.values()];
+}
+
+// Оверлей на серию значений (нарастающий итог / скользящее среднее).
+function mvOverlay(values, ov, win) {
+  if (ov === 'cum') { let s = 0; return values.map((v) => (s += v)); }
+  if (ov === 'ma') return values.map((_, i) => { const a = values.slice(Math.max(0, i - win + 1), i + 1); return a.reduce((x, y) => x + y, 0) / a.length; });
+  return values;
+}
+
+// Многолинейный SVG-график (тема через var()). lines: [{name,color,values,bold}].
+function mvChart(buckets, lines) {
+  const W = 760, H = 280, pl = 46, pr = 14, pt = 12, pb = 40;
+  const iw = W - pl - pr, ih = H - pt - pb, n = buckets.length;
+  let max = 0, min = 0;
+  for (const ln of lines) for (const v of ln.values) { if (v > max) max = v; if (v < min) min = v; }
+  if (max === min) max = min + 1;
+  const x = (i) => pl + (n <= 1 ? iw / 2 : iw * i / (n - 1));
+  const y = (v) => pt + ih * (1 - (v - min) / (max - min));
+  let grid = '';
+  for (let t = 0; t <= 4; t++) { const val = min + (max - min) * t / 4, yy = y(val); grid += `<line x1="${pl}" y1="${yy.toFixed(1)}" x2="${W - pr}" y2="${yy.toFixed(1)}" stroke="var(--line)" stroke-width="1"/><text x="${pl - 6}" y="${(yy + 3).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--muted)">${esc(mvAxis(val))}</text>`; }
+  const zero = min < 0 ? `<line x1="${pl}" y1="${y(0).toFixed(1)}" x2="${W - pr}" y2="${y(0).toFixed(1)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>` : '';
+  const step = Math.max(1, Math.ceil(n / 8)); let xlab = '';
+  buckets.forEach((b, i) => { if (i % step === 0 || i === n - 1) xlab += `<text x="${x(i).toFixed(1)}" y="${H - pb + 16}" text-anchor="middle" font-size="11" fill="var(--muted)">${esc(b.label)}</text>`; });
+  let paths = '';
+  for (const ln of lines) {
+    if (n === 1) { paths += `<circle cx="${x(0).toFixed(1)}" cy="${y(ln.values[0]).toFixed(1)}" r="3" fill="${ln.color}"/>`; continue; }
+    const pts = ln.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    paths += `<polyline points="${pts}" fill="none" stroke="${ln.color}" stroke-width="${ln.bold ? 2.6 : 1.6}" stroke-linejoin="round" stroke-linecap="round"${ln.bold ? '' : ' opacity="0.92"'}/>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" class="mv-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="График движения заказов">${grid}${zero}${paths}${xlab}</svg>`;
+}
+
+// Рендер результатов движения (страница отчёта и архив).
+// nav(patch)→URL строит тумблеры (если null — статичный вид, как в архиве).
+function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
+  const N = snap.days || 14;
+  const series = snap.series || [];
+  const display = series.slice(-N);
+  const prev = series.length > N ? series.slice(Math.max(0, series.length - 2 * N), series.length - N) : [];
+  const ffAll = snap.fulfillments || [];
+  const money = view.unit === 'money';
+
+  // Сводные плитки за период (всегда обе метрики — для контекста).
+  const sumC = (k) => display.reduce((s, d) => s + (d[k]?.count || 0), 0);
+  const sumM = (k) => display.reduce((s, d) => s + (d[k]?.money || 0), 0);
+  const accC = sumC('accepted'), delC = sumC('delivered');
+  const tiles = [
+    ['Принято, шт', accC], ['Передано, шт', delC], ['Разница, шт', delC - accC], ['Передано, ₽', Math.round(sumM('delivered'))],
+  ].map(([l, v]) => `<div class="tilek"><div class="n">${nf(v)}</div><div class="l">${esc(l)}</div></div>`).join('');
+
+  // Тумблеры.
+  const seg = (lab, key, opts) => (nav ? `<div class="mv-seg"><span class="lab">${esc(lab)}</span>${opts.map((o) => `<a class="mv-chip${view[key] === o.v ? ' on' : ''}" href="${nav({ [key]: o.v })}">${esc(o.label)}</a>`).join('')}</div>` : '');
+  const toolbar = nav ? `<div class="mv-bar">
+    ${seg('Показатель', 'focus', [{ v: 'accepted', label: 'Принято' }, { v: 'delivered', label: 'Передано' }, { v: 'diff', label: 'Разница' }])}
+    ${seg('Единица', 'unit', [{ v: 'count', label: 'шт' }, { v: 'money', label: '₽' }])}
+    ${seg('Разбивка', 'gran', [{ v: 'day', label: 'День' }, { v: 'week', label: 'Неделя' }])}
+    ${seg('График', 'ov', [{ v: 'none', label: '—' }, { v: 'cum', label: 'Нарастающий' }, { v: 'ma', label: 'Скользящее' }])}
+    ${seg('Сравнение', 'cmp', [{ v: '1', label: 'вкл' }, { v: '0', label: 'выкл' }])}
+  </div>` : '';
+
+  // Корзины + линии графика.
+  const buckets = mvBuckets(display, view, ffAll);
+  const win = view.gran === 'day' ? 7 : 3;
+  const lines = ffAll.map((n, i) => ({ name: n, color: MV_PALETTE[i % MV_PALETTE.length], bold: false, values: mvOverlay(buckets.map((b) => b.byFf[n] || 0), view.ov, win) }));
+  const totalLine = { name: 'Итого', color: 'var(--ink)', bold: true, values: mvOverlay(buckets.map((b) => b.total), view.ov, win) };
+  const chartLines = ffAll.length > 1 ? [...lines, totalLine] : lines;
+  const legend = `<div class="mv-legend">${chartLines.map((ln) => `<span><i style="background:${ln.color}"></i>${esc(ln.name)}</span>`).join('')}</div>`;
+  const chart = buckets.length ? `${mvChart(buckets, chartLines)}${legend}` : '<p class="muted">Нет данных за период.</p>';
+
+  // Таблица корзина × фулфилмент.
+  const head = `<tr>${thT(view.gran === 'day' ? 'День' : 'Неделя', 'Период')}${ffAll.map((n) => thT(n, `${MV_FOCUS[view.focus]} — ${n}`, 'num')).join('')}${thT('Итого', 'Сумма по строке', 'num')}</tr>`;
+  const rows = buckets.map((b) => `<tr><td class="tl">${esc(b.label)}</td>${ffAll.map((n) => `<td class="num">${b.byFf[n] ? mvVal(b.byFf[n], money) : ''}</td>`).join('')}<td class="num"><b>${mvVal(b.total, money)}</b></td></tr>`).join('');
+  const colTotals = ffAll.map((n) => buckets.reduce((s, b) => s + (b.byFf[n] || 0), 0));
+  const grand = buckets.reduce((s, b) => s + b.total, 0);
+  const footer = `<tr style="border-top:2px solid var(--line)"><td class="tl"><b>Итого</b></td>${colTotals.map((v) => `<td class="num"><b>${mvVal(v, money)}</b></td>`).join('')}<td class="num"><b>${mvVal(grand, money)}</b></td></tr>`;
+  const table = buckets.length ? `<div class="scroll"><table class="rt"><thead>${head}</thead><tbody>${rows}${footer}</tbody></table></div>` : '';
+
+  // Сравнение с прошлым периодом.
+  let compare = '';
+  if (view.cmp === '1') {
+    if (!prev.length) compare = '<p class="muted">Недостаточно истории для сравнения с прошлым периодом.</p>';
+    else {
+      const curBy = (n) => display.reduce((s, d) => s + mvCell(d, view, n), 0);
+      const prvBy = (n) => prev.reduce((s, d) => s + mvCell(d, view, n), 0);
+      const pct = (c, p) => (p ? `${c - p >= 0 ? '+' : ''}${Math.round((c - p) / Math.abs(p) * 100)}%` : (c ? '—' : '0%'));
+      const line = (label, c, p) => `<tr><td class="tl">${esc(label)}</td><td class="num">${mvVal(c, money)}</td><td class="num">${mvVal(p, money)}</td><td class="num">${c - p >= 0 ? '+' : ''}${mvVal(c - p, money)}</td><td class="num">${esc(pct(c, p))}</td></tr>`;
+      const body = ffAll.map((n) => line(n, curBy(n), prvBy(n))).join('') + `<tr style="border-top:2px solid var(--line)"><td class="tl"><b>Итого</b></td><td class="num"><b>${mvVal(curBy(null), money)}</b></td><td class="num"><b>${mvVal(prvBy(null), money)}</b></td><td class="num"><b>${curBy(null) - prvBy(null) >= 0 ? '+' : ''}${mvVal(curBy(null) - prvBy(null), money)}</b></td><td class="num"><b>${esc(pct(curBy(null), prvBy(null)))}</b></td></tr>`;
+      compare = `<h2 style="margin-top:20px">Сравнение с прошлым периодом</h2>
+        <p class="kv" style="margin:0 0 8px">Показатель «${esc(MV_FOCUS[view.focus])}» за ${N} дн против предыдущих ${N} дн.</p>
+        <div class="scroll"><table class="rt"><thead><tr>${thT('Фулфилмент', 'Склад')}${thT('Текущий', 'Текущий период', 'num')}${thT('Прошлый', 'Предыдущий период', 'num')}${thT('Δ', 'Разница', 'num')}${thT('%', 'Изменение', 'num')}</tr></thead><tbody>${body}</tbody></table></div>`;
+    }
+  }
+
+  const artLine = (snap.articles && snap.articles.length) ? ` · артикулы: ${esc(snap.articles.join(', '))}` : '';
+  return `<div class="section">
+      <h2>${esc(MV_FOCUS[view.focus])}${view.unit === 'money' ? ', ₽' : ', шт'} за ${N} дн ${whenLabel ? `<span class="muted" style="font-size:13px;font-weight:400">${esc(whenLabel)}</span>` : ''}</h2>
+      <p class="kv" style="margin:0 0 8px">Период по МСК (${esc(snap.tz || '+03:00')})${artLine}. «Принято» — по дате создания задания, «Передано» — по дате закрытия поставки.</p>
+      <div class="tiles">${tiles}</div>
+      ${toolbar}
+      <div style="margin-bottom:6px"><a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
+      ${chart}
+      ${table}
+      ${compare}
+    </div>`;
+}
+
+export function movementPage(p) {
+  const { user, csrf, base = '', org, role, active, latest, job, view, form } = p;
+  const u = (path) => base + path;
+  const back = `<div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>`;
+  if (!active) {
+    return layout({ title: `Движение заказов — ${org.name}`, user, csrf, base,
+      body: `<div class="wrap">${back}<h1>Движение заказов</h1><div class="warn">Нет активного кабинета с токеном. <a href="${u(`/org/${org.id}`)}">Настройте кабинет</a>.</div></div>` });
+  }
+  const running = job && job.state === 'running';
+  const head = running ? '<meta http-equiv="refresh" content="4">' : '';
+  let statusBox = '';
+  if (running) statusBox = `<div class="running">⏳ Считаю движение заказов на токене кабинета «${esc(active.name)}»… ${esc(job.log || '')}<br><span class="muted">Страница обновится сама. Может занять 1–3 минуты.</span></div>`;
+  else if (job && job.state === 'error') statusBox = `<div class="err" style="white-space:pre-wrap">Ошибка: ${esc(job.error || '')}</div>`;
+  else if (job && job.state === 'done') statusBox = okBox('Готово.');
+
+  // Форма периода/артикулов (перезапуск — новый снимок).
+  const f = form;
+  const formSection = `<div class="section">
+    <h2>Параметры</h2>
+    <form method="post" action="${u(`/org/${org.id}/reports/movement/refresh`)}">
+      ${csrfField(csrf)}
+      <div class="row-form" style="gap:14px;align-items:flex-end">
+        <div><label for="days" title="За сколько последних дней собрать движение. Для сравнения тянется вдвое больший период (в пределах 3 месяцев — лимит WB).">Период, дней</label>
+          <select id="days" name="days" style="width:130px">${[7, 14, 30, 45].map((n) => `<option value="${n}"${Number(f.days) === n ? ' selected' : ''}>${n} дней</option>`).join('')}</select></div>
+        <div style="flex:1;min-width:220px"><label for="mvart" title="Фильтр по номерам моделей (первые цифры артикула). Пусто — все артикулы.">Артикулы <span class="muted">(через запятую; пусто — все)</span></label>
+          <input id="mvart" name="articles" type="text" value="${esc(f.articles || '')}" placeholder="018, 020 …" style="width:100%"></div>
+      </div>
+      <button class="btn" type="submit" style="max-width:280px;margin-top:16px"${running ? ' disabled' : ''}>${running ? 'Идёт сбор…' : 'Обновить данные'}</button>
+    </form></div>`;
+
+  const nav = (patch) => {
+    const v = { ...view, ...patch };
+    return u(`/org/${org.id}/reports/movement?focus=${v.focus}&unit=${v.unit}&gran=${v.gran}&ov=${v.ov}&cmp=${v.cmp}`);
+  };
+  const results = latest?.data
+    ? movementResults(latest.data, { view, nav, downloadHref: (k) => u(`/org/${org.id}/reports/movement/download/${k}`), whenLabel: latest.createdAt ? String(latest.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '' })
+    : `<div class="section"><p class="muted">Данных пока нет — задайте период и нажмите «Обновить данные».</p></div>`;
+
+  return layout({
+    title: `Движение заказов — ${org.name}`, user, csrf, base, head,
+    body: `<div class="wrap">${back}
+      <h1>Движение заказов <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
+      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Принято на фулфилмент и передано в доставку — по дням и складам, в штуках и рублях. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
+      ${statusBox}
+      ${formSection}
+      ${results}
+    </div>`,
+  });
+}
+
 // ── Архив отчётов компании: список запусков ─────────────────────────────────
 export function archivePage({ user, csrf, base = '', org, role, runs }) {
   const u = (p) => base + p;
@@ -813,6 +1042,7 @@ export function archivePage({ user, csrf, base = '', org, role, runs }) {
   const summ = (r) => {
     const sm = r.summary || {};
     if (r.report === 'stock') return `остаток ${nf(sm.grandTotal)} шт · складов ${nf(sm.activeWarehouses)} · арт+цвет ${nf(sm.articleCount)}`;
+    if (r.report === 'movement') return `принято ${nf(sm.acceptedTotal)} · передано ${nf(sm.deliveredTotal)} · Δ ${sm.diffTotal >= 0 ? '+' : ''}${nf(sm.diffTotal)} · ${nf(sm.deliveredMoney)} ₽ (${nf(sm.days)} дн)`;
     return `подсорт ${nf(sm.reorderUnits)} · риск ${nf(sm.riskRows)} · завоз ${nf(sm.seedUnits)}${(sm.articles && sm.articles.length) ? ` · арт: ${esc(sm.articles.join(', '))}` : ''}`;
   };
   const rows = (runs || []).map((r) => {
@@ -851,7 +1081,9 @@ export function archiveViewPage({ user, csrf, base = '', org, role, run }) {
     ? '<div class="section"><p class="muted">Не удалось прочитать снимок этого запуска.</p></div>'
     : run.report === 'stock'
       ? stockResults(run.data, { downloadHref: dl, whenLabel: '' })
-      : podsortResults(run.data, { downloadHref: dl, whenLabel: '' });
+      : run.report === 'movement'
+        ? movementResults(run.data, { view: movementView({}), nav: null, downloadHref: dl, whenLabel: '' })
+        : podsortResults(run.data, { downloadHref: dl, whenLabel: '' });
   const p = run.params || {};
   return layout({
     title: `Архив: ${reportRu(run.report)} — ${org.name}`, user, csrf, base,

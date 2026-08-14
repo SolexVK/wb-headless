@@ -5,8 +5,8 @@
 import express from 'express';
 import { Orgs, Cabinets, ReportRuns } from './models.js';
 import { requireAuth } from './security.js';
-import { reportsPage, podsortPage, stockPage, archivePage, archiveViewPage } from './views.js';
-import { podsortDefaults, normalizePodsort, startPodsort, startStock, getJob, buildXlsx, buildStockXlsx, buildDashboardHtml } from './reports-runner.js';
+import { reportsPage, podsortPage, stockPage, movementPage, movementView, archivePage, archiveViewPage } from './views.js';
+import { podsortDefaults, normalizePodsort, movementDefaults, normalizeMovement, startPodsort, startStock, startMovement, getJob, buildXlsx, buildStockXlsx, buildMovementXlsx, buildDashboardHtml } from './reports-runner.js';
 import { logger } from './logger.js';
 
 export const reportsRouter = express.Router();
@@ -44,7 +44,9 @@ async function sendDownload(res, kind, cabId, snapshot, stem, report = 'podsort'
     return res.send(JSON.stringify(snapshot, null, 2));
   }
   if (kind === 'xlsx') {
-    const file = report === 'stock' ? await buildStockXlsx({ id: cabId }, snapshot) : await buildXlsx({ id: cabId }, snapshot);
+    const file = report === 'stock' ? await buildStockXlsx({ id: cabId }, snapshot)
+      : report === 'movement' ? await buildMovementXlsx({ id: cabId }, snapshot)
+        : await buildXlsx({ id: cabId }, snapshot);
     return res.download(file, `${stem}.xlsx`);
   }
   if (kind === 'html' && report === 'podsort') return res.download(await buildDashboardHtml({ id: cabId }, snapshot), `${stem}-dashboard.html`);
@@ -130,6 +132,41 @@ reportsRouter.get('/org/:id/reports/stock/download/:kind', requireAuth, loadOrg,
   if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
   try { await sendDownload(res, req.params.kind, cab.id, latest.data, 'fbs-stock', 'stock'); }
   catch (e) { logger.error({ err: e.message }, 'остатки: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
+});
+
+// ── Движение заказов: страница + пересчёт + выгрузка ─────────────────────────
+reportsRouter.get('/org/:id/reports/movement', requireAuth, loadOrg, (req, res) => {
+  const cab = Cabinets.activeOf(req.org.id);
+  const latest = cab ? ReportRuns.latest(cab.id, 'movement') : null;
+  const form = latest?.data
+    ? { days: latest.data.days || movementDefaults().days, articles: (latest.data.articles || []).join(', ') }
+    : movementDefaults();
+  res.send(movementPage({
+    user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
+    org: req.org, role: req.role,
+    active: cab ? { id: cab.id, name: cab.name } : null,
+    latest, job: cab ? getJob(cab.id, 'movement') : null,
+    view: movementView(req.query), form,
+  }));
+});
+
+reportsRouter.post('/org/:id/reports/movement/refresh', requireAuth, loadOrg, (req, res) => {
+  const cab = Cabinets.activeOf(req.org.id);
+  if (!cab) return res.redirect(`/org/${req.org.id}/reports/movement`);
+  const token = Cabinets.decryptedToken(cab);
+  if (!token) return res.redirect(`/org/${req.org.id}/reports/movement`);
+  const params = normalizeMovement(req.body);
+  const { already } = startMovement({ id: cab.id }, token, Cabinets.meta(cab), params, req.session.user.id);
+  if (already) logger.info({ cabinetId: cab.id }, 'движение: пересчёт уже идёт — пропускаю');
+  res.redirect(`/org/${req.org.id}/reports/movement`);
+});
+
+reportsRouter.get('/org/:id/reports/movement/download/:kind', requireAuth, loadOrg, async (req, res) => {
+  const cab = Cabinets.activeOf(req.org.id);
+  const latest = cab ? ReportRuns.latest(cab.id, 'movement') : null;
+  if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
+  try { await sendDownload(res, req.params.kind, cab.id, latest.data, 'fbs-movement', 'movement'); }
+  catch (e) { logger.error({ err: e.message }, 'движение: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
 });
 
 // ── Архив отчётов компании (общий): список запусков ──────────────────────────

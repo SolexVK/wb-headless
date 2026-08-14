@@ -134,6 +134,33 @@ try {
   r = await req('GET', `/org/${orgId}/reports/stock?run=${older}`);
   ok(r.status === 200 && r.text.includes('из архива') && r.text.includes('Снимок остатков на'), 'Ф2: остатки на выбранную дату (снимок из архива)');
 
+  // ── Отчёт «Движение заказов» ─────────────────────────────────────────────────
+  r = await req('GET', `/org/${orgId}/reports/movement`);
+  ok(r.status === 200 && r.text.includes('Движение заказов') && r.text.includes('Параметры'), 'Ф2: страница движения заказов');
+  r = await req('POST', `/org/${orgId}/reports/movement/refresh`, form({ _csrf: csrfOf(r.text), days: 14, articles: '' }));
+  ok(r.status === 302, 'Ф2: запуск движения → 302');
+  let mvDone = false;
+  for (let i = 0; i < 30 && !mvDone; i++) {
+    await sleep(80);
+    r = await req('GET', `/org/${orgId}/reports/movement`);
+    if (r.text.includes('Показатель') && r.text.includes('Тест-склад')) mvDone = true;
+  }
+  ok(mvDone, 'Ф2: движение собралось (тумблеры + фулфилмент)');
+  const mj = await req('GET', `/org/${orgId}/reports/movement/download/json`);
+  let mp = null; try { mp = JSON.parse(mj.text); } catch { /* */ }
+  ok(mj.status === 200 && Array.isArray(mp?.series) && mp.series.length === 28 && mp.fulfillments.includes('Тест-склад'), 'Ф2: выгрузка движения (JSON, серия 28 дн)');
+  const mx = await fetch(base + `/org/${orgId}/reports/movement/download/xlsx`, { headers: { cookie } });
+  const mxb = Buffer.from(await mx.arrayBuffer());
+  ok(mx.status === 200 && mxb.length > 500 && mxb[0] === 0x50 && mxb[1] === 0x4b, 'Ф2: выгрузка движения (Excel .xlsx)');
+  // Тумблер единицы (₽) и сравнение с прошлым периодом.
+  r = await req('GET', `/org/${orgId}/reports/movement?focus=delivered&unit=money`);
+  ok(r.status === 200 && r.text.includes('Передано, ₽'), 'Ф2: движение — переключение на ₽');
+  r = await req('GET', `/org/${orgId}/reports/movement?cmp=1`);
+  ok(r.status === 200 && r.text.includes('Сравнение с прошлым периодом'), 'Ф2: движение — сравнение с прошлым периодом');
+  // Движение попало в общий архив.
+  r = await req('GET', `/org/${orgId}/reports/archive`);
+  ok(r.text.includes('Движение заказов') && /принято\s+[\d\s ]+·\s*передано/.test(r.text), 'Ф2: движение видно в архиве');
+
   // Автор удаляет СВОЙ запуск из архива.
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Удалить'), 'Ф2: автор видит кнопку удаления своего запуска');

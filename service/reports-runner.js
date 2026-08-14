@@ -45,6 +45,15 @@ export function normalizePodsort(body = {}) {
   };
 }
 
+// ── Движение заказов (принято/передано) ─────────────────────────────────────
+export const movementDefaults = () => ({ days: 14, articles: '', tz: '+03:00' });
+export function normalizeMovement(body = {}) {
+  const days = Math.min(45, Math.max(1, Math.round(Number(body.days)) || 14));
+  const articles = String(body.articles ?? '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
+  const tz = /^[+-]\d{2}:\d{2}$/.test(String(body.tz || '')) ? String(body.tz) : '+03:00';
+  return { days, articles, tz };
+}
+
 export const paramsHash = (params) => crypto.createHash('sha1').update(JSON.stringify(params)).digest('hex').slice(0, 16);
 
 const cabinetDir = (cabinetId) => path.join(DATA, 'cabinets', String(cabinetId));
@@ -168,6 +177,40 @@ async function runStockPipeline(cabinet, token, meta, params, onLog) {
   return buildStockSnapshot(raw);
 }
 
+// ── Пайплайн «Движение заказов»: fbs-movement (заказы+поставки) ──────────────
+function fakeMovement(params) {
+  const N = params.days || 14;
+  const span = Math.min(88, 2 * N);
+  const today = new Date();
+  const days = [];
+  for (let i = span - 1; i >= 0; i--) days.push(new Date(today.getTime() - i * 86400000).toISOString().slice(0, 10));
+  const cell = (c, m) => ({ count: c, money: m, byFulfillment: c ? { 'Тест-склад': { count: c, money: m } } : {} });
+  const series = days.map((date, idx) => ({ date, accepted: cell((idx + 1) * 2, (idx + 1) * 200), delivered: cell(idx * 2, idx * 200) }));
+  return { generatedAt: new Date().toISOString(), tz: '+03:00', today: days[days.length - 1], days: N, span,
+    articles: params.articles || [], currency: '₽', fulfillments: ['Тест-склад'], series };
+}
+async function runMovementPipeline(cabinet, token, meta, params, onLog) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  if (process.env.PODSORT_FAKE) return fakeMovement(params);
+  const env = envFor(token, meta, dir);
+  onLog?.('Получаю заказы и поставки (fbs-movement)…');
+  const args = [path.join(SCRIPTS, 'fbs-movement.mjs'), '--days', String(params.days), '--tz', params.tz, '--json'];
+  if (params.articles?.length) args.push('--articles', params.articles.join(','));
+  const r = await spawnCapture(process.execPath, args, { env, cwd: REPO, timeoutMs: 12 * 60_000 });
+  if (r.code !== 0) throw new Error('Ошибка получения движения заказов (fbs-movement):\n' + tail(r.err));
+  let snap; try { snap = JSON.parse(r.out); } catch { throw new Error('Не удалось разобрать движение заказов.'); }
+  return snap;
+}
+function movementSummary(snap, p) {
+  const N = p.days || snap.days || 14;
+  const last = (snap.series || []).slice(-N);
+  const acc = last.reduce((s, d) => s + (d.accepted?.count || 0), 0);
+  const del = last.reduce((s, d) => s + (d.delivered?.count || 0), 0);
+  const delMoney = last.reduce((s, d) => s + (d.delivered?.money || 0), 0);
+  return { days: N, articles: p.articles || [], acceptedTotal: acc, deliveredTotal: del, diffTotal: del - acc, deliveredMoney: Math.round(delMoney) };
+}
+
 // ── Single-flight + фоновый статус (ключ = кабинет:отчёт) ────────────────────
 const jobs = new Map();
 const jobKey = (cabinetId, report) => `${Number(cabinetId)}:${report}`;
@@ -205,6 +248,9 @@ export function startStock(cabinet, token, meta, params, userId) {
   return startRun({ cabinet, token, meta, params, userId, report: 'stock', pipeline: runStockPipeline,
     summarize: (snap) => { const t = snap?.totals || {}; return { grandTotal: t.grandTotal, activeWarehouses: t.activeWarehouses, articleCount: t.articleCount }; } });
 }
+export function startMovement(cabinet, token, meta, params, userId) {
+  return startRun({ cabinet, token, meta, params, userId, report: 'movement', pipeline: runMovementPipeline, summarize: movementSummary });
+}
 
 // ── Артефакты для скачивания (по последнему снимку в каталоге кабинета) ──────
 // Гарантируем наличие fbs-replenishment.json в каталоге, затем запускаем генератор.
@@ -231,6 +277,17 @@ export async function buildStockXlsx(cabinet, snapshot) {
   const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-stock-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
   const out = path.join(dir, 'fbs-stock.xlsx');
   if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать Excel остатков:\n' + tail(r.err));
+  return out;
+}
+
+// Excel по движению заказов: пишем снимок и запускаем python-генератор.
+export async function buildMovementXlsx(cabinet, snapshot) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'fbs-movement-service.json'), JSON.stringify(snapshot, null, 2));
+  const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-movement-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
+  const out = path.join(dir, 'fbs-movement.xlsx');
+  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать Excel движения:\n' + tail(r.err));
   return out;
 }
 
