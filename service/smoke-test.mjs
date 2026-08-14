@@ -247,9 +247,12 @@ try {
   r = await req('POST', `/admin/org/${orgId}/rename`, form({ _csrf: csrfAdmin, name: 'Переимен-супером' }));
   r = await req('GET', '/admin');
   ok(r.text.includes('Переимен-супером'), 'Ф1: супер-админ переименовал компанию');
-  const delUserId = (r.text.match(/\/admin\/user\/(\d+)\/delete/) || [])[1];
-  r = await req('POST', `/admin/user/${delUserId}/delete`, form({ _csrf: csrfAdmin }));
+  // Удаляем КОНКРЕТНОГО «чужого» пользователя по id (не зависим от порядка строк).
+  const { Users: UA } = await import('./models.js');
+  const delId = UA.byEmail(wrongEmail).id;
+  r = await req('POST', `/admin/user/${delId}/delete`, form({ _csrf: csrfAdmin }));
   ok(r.status === 302, 'Ф1: супер-админ полностью удалил пользователя');
+  ok(!UA.byEmail(wrongEmail), 'Ф1: система забыла пользователя (email свободен)');
 
   // Владелец убирает приглашённого сотрудника и берёт другого на освободившееся место.
   cookie = '';

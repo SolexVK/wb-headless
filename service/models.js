@@ -16,7 +16,7 @@ const q = {
     SELECT u.id, u.email, u.name, u.created_at, u.last_login_at,
       (SELECT COUNT(*) FROM memberships m WHERE m.user_id = u.id) AS memberships,
       (SELECT COUNT(*) FROM organizations o WHERE o.owner_user_id = u.id) AS owns
-    FROM users u ORDER BY u.created_at DESC`),
+    FROM users u ORDER BY u.created_at DESC, u.id DESC`),
   touchLogin: db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?"),
   setPassword: db.prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
 
@@ -43,7 +43,7 @@ const q = {
     SELECT o.id, o.name, o.license_seats, o.created_at, u.email AS owner_email,
       (SELECT COUNT(*) FROM memberships m WHERE m.org_id = o.id) AS members,
       (SELECT COUNT(*) FROM invitations i WHERE i.org_id = o.id AND i.accepted_at IS NULL AND i.expires_at > datetime('now')) AS pending
-    FROM organizations o JOIN users u ON u.id = o.owner_user_id ORDER BY o.created_at DESC`),
+    FROM organizations o JOIN users u ON u.id = o.owner_user_id ORDER BY o.created_at DESC, o.id DESC`),
 
   insertMembership: db.prepare('INSERT INTO memberships (user_id, org_id, role) VALUES (?, ?, ?)'),
   membership: db.prepare('SELECT * FROM memberships WHERE user_id = ? AND org_id = ?'),
