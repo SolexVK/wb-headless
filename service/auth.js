@@ -9,6 +9,13 @@ export const authRouter = express.Router();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const setSession = (req, u) => { req.session.user = { id: u.id, email: u.email, name: u.name }; };
+// Куда вернуть после входа: сохранённый returnTo (напр. ссылка-приглашение), иначе '/'.
+// Разрешаем только локальные пути (без //) — защита от open redirect.
+const popReturnTo = (req) => {
+  const to = req.session.returnTo;
+  req.session.returnTo = undefined;
+  return (typeof to === 'string' && to.startsWith('/') && !to.startsWith('//')) ? to : '/';
+};
 
 // ── Регистрация ─────────────────────────────────────────────────────────────
 authRouter.get('/register', (req, res) => {
@@ -31,7 +38,7 @@ authRouter.post('/register', authLimiter, (req, res) => {
     const u = Users.byId(userId);
     setSession(req, u);
     logger.info({ userId }, 'зарегистрирован пользователь + организация');
-    res.redirect('/');
+    res.redirect(popReturnTo(req));
   } catch (e) {
     logger.error(e, 'ошибка регистрации');
     fail('Не удалось создать аккаунт. Попробуйте ещё раз.');
@@ -54,7 +61,7 @@ authRouter.post('/login', authLimiter, (req, res) => {
   Users.touchLogin(u.id);
   setSession(req, u);
   logger.info({ userId: u.id }, 'вход выполнен');
-  res.redirect('/');
+  res.redirect(popReturnTo(req));
 });
 
 // ── Выход ───────────────────────────────────────────────────────────────────

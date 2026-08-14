@@ -16,11 +16,20 @@ if (!sessionSecret) {
   process.stderr.write('[config] SESSION_SECRET не задан — использую эфемерный (сессии сбросятся при рестарте). Задайте .env для стабильности.\n');
 }
 
+// TOKEN_ENC_KEY нужен с Фазы 1 (шифрование WB-токенов). В проде — обязателен;
+// в dev без него сервис стартует, но привязка кабинета упадёт с понятной ошибкой.
+const tokenEncKey = process.env.TOKEN_ENC_KEY || null;
+if (!tokenEncKey && isProd) throw new Error('TOKEN_ENC_KEY обязателен в production (нужен для шифрования WB-токенов, см. .env.example)');
+if (!tokenEncKey) process.stderr.write('[config] TOKEN_ENC_KEY не задан — подключение кабинетов WB будет недоступно (Фаза 1). Задайте .env.\n');
+
 export const config = {
   host: process.env.HOST || '127.0.0.1',
   port: Number(process.env.PORT || 9110),
   isProd,
   sessionSecret,
-  tokenEncKey: process.env.TOKEN_ENC_KEY || null, // нужен с Фазы 1 (шифрование WB-токенов)
+  tokenEncKey, // нужен с Фазы 1 (шифрование WB-токенов)
   dbPath: path.resolve(__dirname, process.env.DB_PATH || './data/app.sqlite'),
+  // Онлайн-проверка токена через /ping WB при привязке кабинета.
+  // По умолчанию включена; тесты/офлайн-среда выключают через WB_PING_ONLINE=0.
+  wbPingOnline: !['0', 'false', 'no'].includes(String(process.env.WB_PING_ONLINE || '').toLowerCase()),
 };

@@ -1,20 +1,50 @@
-// service/models.js — доступ к данным (users / organizations / memberships).
-// Тонкий слой поверх db; при переезде на Postgres переписываем только его.
+// service/models.js — доступ к данным (users / organizations / memberships /
+// cabinets / invitations). Тонкий слой поверх db; при переезде на Postgres
+// переписываем только его. WB-токены хранятся в cabinets в шифрованном виде.
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { db, tx } from './db.js';
+import { encryptToken, decryptToken } from './tokens.js';
 
 const q = {
   userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
   userById: db.prepare('SELECT id, email, name, created_at, last_login_at FROM users WHERE id = ?'),
   insertUser: db.prepare('INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'),
   touchLogin: db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?"),
+
   insertOrg: db.prepare('INSERT INTO organizations (name, owner_user_id) VALUES (?, ?)'),
-  insertMembership: db.prepare('INSERT INTO memberships (user_id, org_id, role) VALUES (?, ?, ?)'),
+  orgById: db.prepare('SELECT * FROM organizations WHERE id = ?'),
   orgsOfUser: db.prepare(`
     SELECT o.id, o.name, m.role
     FROM memberships m JOIN organizations o ON o.id = m.org_id
     WHERE m.user_id = ? ORDER BY o.created_at`),
+
+  insertMembership: db.prepare('INSERT INTO memberships (user_id, org_id, role) VALUES (?, ?, ?)'),
+  membership: db.prepare('SELECT * FROM memberships WHERE user_id = ? AND org_id = ?'),
+  membersOfOrg: db.prepare(`
+    SELECT m.id, m.role, m.created_at, u.id AS user_id, u.email, u.name
+    FROM memberships m JOIN users u ON u.id = m.user_id
+    WHERE m.org_id = ? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.email`),
+  updateRole: db.prepare("UPDATE memberships SET role = ? WHERE org_id = ? AND user_id = ? AND role <> 'owner'"),
+  deleteMembership: db.prepare("DELETE FROM memberships WHERE org_id = ? AND user_id = ? AND role <> 'owner'"),
+
+  insertCabinet: db.prepare(`INSERT INTO cabinets (org_id, name, wb_token_enc, token_iv, token_tag, token_meta, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`),
+  cabinetsOfOrg: db.prepare('SELECT id, org_id, name, token_meta, is_active, created_at, (wb_token_enc IS NOT NULL) AS has_token FROM cabinets WHERE org_id = ? ORDER BY created_at'),
+  cabinetById: db.prepare('SELECT * FROM cabinets WHERE id = ?'),
+  updateCabinetToken: db.prepare('UPDATE cabinets SET wb_token_enc = ?, token_iv = ?, token_tag = ?, token_meta = ? WHERE id = ?'),
+  clearActive: db.prepare('UPDATE cabinets SET is_active = 0 WHERE org_id = ?'),
+  setActive: db.prepare('UPDATE cabinets SET is_active = 1 WHERE id = ?'),
+  deleteCabinet: db.prepare('DELETE FROM cabinets WHERE id = ?'),
+
+  insertInvite: db.prepare('INSERT INTO invitations (org_id, email, role, token, expires_at) VALUES (?, ?, ?, ?, ?)'),
+  inviteByToken: db.prepare('SELECT * FROM invitations WHERE token = ?'),
+  pendingInvites: db.prepare("SELECT id, email, role, token, expires_at, created_at FROM invitations WHERE org_id = ? AND accepted_at IS NULL ORDER BY created_at DESC"),
+  acceptInvite: db.prepare("UPDATE invitations SET accepted_at = datetime('now') WHERE id = ?"),
+  deleteInvite: db.prepare('DELETE FROM invitations WHERE id = ? AND org_id = ?'),
 };
+
+const ROLE_RANK = { owner: 3, admin: 2, member: 1 };
 
 export const Users = {
   byEmail: (email) => q.userByEmail.get(String(email).trim()),
@@ -37,4 +67,88 @@ export const Users = {
 
 export const Orgs = {
   ofUser: (userId) => q.orgsOfUser.all(userId),
+  byId: (id) => q.orgById.get(id),
+
+  // Роль пользователя в организации или null, если не участник.
+  roleOf: (userId, orgId) => q.membership.get(userId, orgId)?.role || null,
+  isMember: (userId, orgId) => !!q.membership.get(userId, orgId),
+  // Может ли роль управлять (кабинеты/участники): owner|admin.
+  canManage: (role) => role === 'owner' || role === 'admin',
+};
+
+export const Members = {
+  ofOrg: (orgId) => q.membersOfOrg.all(orgId),
+  // Смена роли (нельзя менять owner). Возвращает true, если строка затронута.
+  setRole: (orgId, userId, role) => {
+    if (!['admin', 'member'].includes(role)) throw new Error('bad role');
+    return q.updateRole.run(role, orgId, userId).changes > 0;
+  },
+  remove: (orgId, userId) => q.deleteMembership.run(orgId, userId).changes > 0,
+  add: (userId, orgId, role) => q.insertMembership.run(userId, orgId, role),
+  rank: (role) => ROLE_RANK[role] || 0,
+};
+
+export const Cabinets = {
+  ofOrg: (orgId) => q.cabinetsOfOrg.all(orgId),
+  byId: (id) => q.cabinetById.get(id),
+
+  // Создать кабинет и (опц.) сразу привязать зашифрованный токен.
+  create: (orgId, name, token, meta) => tx(() => {
+    let enc = null, iv = null, tag = null, metaJson = null;
+    if (token) {
+      const e = encryptToken(token);
+      enc = e.enc; iv = e.iv; tag = e.tag;
+      metaJson = JSON.stringify(meta || {});
+    }
+    const existing = q.cabinetsOfOrg.all(orgId).length;
+    const isActive = existing === 0 ? 1 : 0; // первый кабинет — активный
+    const r = q.insertCabinet.run(orgId, name, enc, iv, tag, metaJson, isActive);
+    return Number(r.lastInsertRowid);
+  }),
+
+  // Перепривязать/обновить токен.
+  setToken: (cabinetId, token, meta) => {
+    const e = encryptToken(token);
+    return q.updateCabinetToken.run(e.enc, e.iv, e.tag, JSON.stringify(meta || {}), cabinetId).changes > 0;
+  },
+
+  // Достать расшифрованный токен (для запуска отчётов). Возвращает null, если не привязан.
+  decryptedToken: (cabinet) => {
+    if (!cabinet?.wb_token_enc) return null;
+    return decryptToken({ enc: cabinet.wb_token_enc, iv: cabinet.token_iv, tag: cabinet.token_tag });
+  },
+
+  meta: (cabinet) => { try { return JSON.parse(cabinet?.token_meta || '{}'); } catch { return {}; } },
+
+  setActive: (orgId, cabinetId) => tx(() => {
+    q.clearActive.run(orgId);
+    q.setActive.run(cabinetId);
+  }),
+
+  remove: (id) => q.deleteCabinet.run(id).changes > 0,
+};
+
+const INVITE_TTL_DAYS = 7;
+
+export const Invitations = {
+  create: (orgId, email, role) => {
+    if (!['admin', 'member'].includes(role)) throw new Error('bad role');
+    const token = crypto.randomBytes(24).toString('base64url');
+    const expires = new Date(Date.now() + INVITE_TTL_DAYS * 86400_000).toISOString();
+    q.insertInvite.run(orgId, String(email).trim(), role, token, expires);
+    return token;
+  },
+  byToken: (token) => q.inviteByToken.get(token),
+  pending: (orgId) => q.pendingInvites.all(orgId),
+  revoke: (orgId, id) => q.deleteInvite.run(id, orgId).changes > 0,
+
+  // Принять приглашение вошедшим пользователем: создаёт membership и помечает принятым.
+  accept: (invite, userId) => tx(() => {
+    if (!q.membership.get(userId, invite.org_id)) {
+      q.insertMembership.run(userId, invite.org_id, invite.role);
+    }
+    q.acceptInvite.run(invite.id);
+  }),
+
+  isValid: (invite) => invite && !invite.accepted_at && new Date(invite.expires_at).getTime() > Date.now(),
 };

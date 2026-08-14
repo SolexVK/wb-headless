@@ -8,7 +8,20 @@ import path from 'path';
 
 process.env.NODE_ENV = 'test';
 process.env.SESSION_SECRET = 'test-secret-please-change';
+process.env.TOKEN_ENC_KEY = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'; // 32 байта hex (тест)
+process.env.WB_PING_ONLINE = '0'; // офлайн: проверяем токен только по маске (без сети)
 process.env.DB_PATH = path.join(os.tmpdir(), `fbs-smoke-${process.pid}.sqlite`);
+
+// Собрать фейковый WB-JWT (подпись не проверяется — важен только payload).
+const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+function fakeWbToken({ bits, acc = 1, days = 365 }) {
+  let s = 0; for (const b of bits) s += 2 ** b;
+  const exp = Math.floor(Date.now() / 1000) + days * 86400;
+  const payload = { s, acc, sid: '11111111-2222-3333-4444-555555555555', exp, t: false };
+  return `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url(payload)}.sig`;
+}
+const GOOD_TOKEN = fakeWbToken({ bits: [1, 4, 5] });        // Контент+Маркетплейс+Статистика
+const BAD_TOKEN = fakeWbToken({ bits: [1, 4] });            // без Статистики
 
 const { buildApp } = await import('./app.js');
 const app = buildApp();
@@ -70,6 +83,52 @@ try {
   // CSRF: POST без токена → 403
   r = await req('POST', '/login', form({ email, password: 'x' }));
   ok(r.status === 403, 'POST без CSRF → 403');
+
+  // ── Фаза 1: организация, кабинет+токен WB, права, приглашения ───────────────
+  cookie = '';
+  const email2 = `phase1_${Date.now()}@example.com`;
+  r = await req('GET', '/register');
+  r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email: email2, password: 'supersecret1', name: 'Фаза1' }));
+  ok(r.status === 302, 'Ф1: регистрация владельца');
+
+  r = await req('GET', '/');
+  const orgId = (r.text.match(/href="\/org\/(\d+)"/) || [])[1];
+  ok(!!orgId, 'Ф1: на главной есть ссылка на организацию');
+
+  r = await req('GET', `/org/${orgId}`);
+  const csrfOrg = csrfOf(r.text);
+  ok(r.status === 200 && r.text.includes('Кабинеты WB') && r.text.includes('Участники'), 'Ф1: страница организации (кабинеты + участники)');
+
+  // Плохой токен (без Статистики) → 400 с упоминанием категории.
+  r = await req('POST', `/org/${orgId}/cabinet`, form({ _csrf: csrfOrg, name: 'Тест', token: BAD_TOKEN }));
+  ok(r.status === 400 && r.text.includes('Статистика'), 'Ф1: токен без Статистики отклонён (400)');
+
+  // Хороший токен → 200, кабинет сохранён, показан тип токена.
+  r = await req('POST', `/org/${orgId}/cabinet`, form({ _csrf: csrfOrg, name: 'Основной', token: GOOD_TOKEN }));
+  ok(r.status === 200 && r.text.includes('проверен и сохранён'), 'Ф1: валидный токен принят и сохранён');
+  ok(r.text.includes('Основной') && r.text.includes('активный'), 'Ф1: кабинет показан как активный');
+  ok(!r.text.includes(GOOD_TOKEN), 'Ф1: токен НЕ отображается на странице');
+
+  // Приглашение участника → ссылка выдана.
+  r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfOrg, email: 'friend@example.com', role: 'member' }));
+  const inviteTok = (r.text.match(/\/invite\/([A-Za-z0-9_-]{10,})/) || [])[1];
+  ok(r.status === 200 && !!inviteTok, 'Ф1: приглашение создаёт ссылку');
+
+  // Второй пользователь принимает приглашение и попадает в организацию как участник.
+  cookie = '';
+  const email3 = `invitee_${Date.now()}@example.com`;
+  r = await req('GET', '/register');
+  r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email: email3, password: 'supersecret1', name: 'Гость' }));
+  r = await req('GET', `/invite/${inviteTok}`);
+  ok(r.status === 200 && r.text.includes('Принять приглашение'), 'Ф1: страница приёма приглашения');
+  r = await req('POST', `/invite/${inviteTok}/accept`, form({ _csrf: csrfOf(r.text) }));
+  ok(r.status === 302 && r.location === `/org/${orgId}`, 'Ф1: приглашение принято → редирект в организацию');
+  r = await req('GET', `/org/${orgId}`);
+  ok(r.status === 200 && r.text.includes('Гость'), 'Ф1: приглашённый видит организацию как участник');
+
+  // Доступ: чужая/несуществующая организация → 404.
+  r = await req('GET', `/org/${Number(orgId) + 99999}`);
+  ok(r.status === 404, 'Ф1: чужая организация недоступна (404)');
 } catch (e) {
   console.error('Ошибка теста:', e); failed++;
 } finally {

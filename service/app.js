@@ -7,6 +7,7 @@ import { logger, httpLogger } from './logger.js';
 import { SqliteSessionStore } from './db.js';
 import { helmetMw, csrf } from './security.js';
 import { authRouter } from './auth.js';
+import { orgRouter } from './orgs.js';
 
 export function buildApp() {
   const app = express();
@@ -27,8 +28,9 @@ export function buildApp() {
   }));
   app.use(csrf);
 
-  app.get('/healthz', (req, res) => res.json({ status: 'ok', phase: 0, ts: new Date().toISOString() }));
+  app.get('/healthz', (req, res) => res.json({ status: 'ok', phase: 1, ts: new Date().toISOString() }));
   app.use('/', authRouter);
+  app.use('/', orgRouter);
 
   app.use((req, res) => res.status(404).send('Не найдено'));
   app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
