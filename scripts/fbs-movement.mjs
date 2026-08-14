@@ -83,38 +83,73 @@ async function fetchSupplies(neededIds) {
   return map;
 }
 
+// Средняя цена продажи (finishedPrice) по nmID за последние 7 дней из статистики.
+// Лимит метода — 1 запрос/мин. Возврат: {map: nmID→avg, overall, available, rows}.
+async function fetchAvgSalePrices() {
+  const from = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const byNm = new Map(); let rows = 0, sum = 0;
+  const seen = new Set();
+  try {
+    let dateFrom = from;
+    for (let page = 1; page <= 6; page++) {
+      const { data } = await wb.get('statistics', '/api/v1/supplier/sales', { query: { dateFrom }, methodLimit: { limit: 1, periodSec: 60, burst: 1 } });
+      const b = Array.isArray(data) ? data : [];
+      let last = null;
+      for (const s of b) {
+        if (s.srid && seen.has(s.srid)) continue;
+        if (s.srid) seen.add(s.srid);
+        const fp = Number(s.finishedPrice) || 0;
+        if (fp <= 0) continue;
+        if (!byNm.has(s.nmId)) byNm.set(s.nmId, { c: 0, sum: 0 });
+        const e = byNm.get(s.nmId); e.c += 1; e.sum += fp;
+        rows += 1; sum += fp; last = s.lastChangeDate || last;
+      }
+      log(`  sales стр.${page}: +${b.length} (nmID ${byNm.size}, строк ${rows})`);
+      if (b.length < 80000 || !last) break; dateFrom = last;
+    }
+  } catch (e) {
+    log(`  ! статистика продаж недоступна: ${e.message}`);
+    return { map: new Map(), overall: 0, available: false, rows: 0 };
+  }
+  const map = new Map(); for (const [nm, e] of byNm) map.set(nm, e.sum / e.c);
+  return { map, overall: rows ? sum / rows : 0, available: rows > 0, rows };
+}
+
 const orders = (await fetchOrders()).filter(passArticle);
 const supplies = await fetchSupplies(new Set(orders.map((o) => o.supplyId).filter(Boolean)));
+const sales = await fetchAvgSalePrices();
 
 // ── Агрегация: день → { accepted, delivered } → { [wid]: {count, money} } ─────
 const byDay = new Map();
-const bump = (day, kind, wid, rub) => {
+const bump = (day, kind, wid, rub, avg) => {
   if (!day || !inWindow.has(day)) return;
   if (!byDay.has(day)) byDay.set(day, { accepted: {}, delivered: {} });
   const g = byDay.get(day)[kind];
-  if (!g[wid]) g[wid] = { count: 0, money: 0 };
-  g[wid].count += 1; g[wid].money += rub;
+  if (!g[wid]) g[wid] = { count: 0, money: 0, moneyAvg: 0 };
+  g[wid].count += 1; g[wid].money += rub; g[wid].moneyAvg += avg;
 };
 const whSeen = new Set();
 for (const o of orders) {
   whSeen.add(o.warehouseId);
-  const rub = Math.round((Number(o.price) || 0)) / 100; // price в копейках → ₽
-  bump(dayOf(o.createdAt), 'accepted', o.warehouseId, rub);
+  const rub = Math.round((Number(o.price) || 0)) / 100;              // price в копейках → ₽
+  const avg = sales.map.get(o.nmId) ?? sales.overall;               // ср. цена продажи 7д (фолбэк — общая средняя)
+  bump(dayOf(o.createdAt), 'accepted', o.warehouseId, rub, avg);
   const s = o.supplyId ? supplies.get(o.supplyId) : null;
   const closed = s && (s.done || s.closedAt) ? s.closedAt : null;
-  if (closed) bump(dayOf(closed), 'delivered', o.warehouseId, rub);
+  if (closed) bump(dayOf(closed), 'delivered', o.warehouseId, rub, avg);
 }
 
 const fulfillments = [...whSeen].map((id) => ({ id, name: WH_NAME[id] || String(id) })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 const nameById = Object.fromEntries(fulfillments.map((f) => [f.id, f.name]));
+const r2 = (x) => Math.round(x * 100) / 100;
 const roll = (src) => {
-  const byFulfillment = {}; let count = 0, money = 0;
+  const byFulfillment = {}; let count = 0, money = 0, moneyAvg = 0;
   for (const [wid, v] of Object.entries(src || {})) {
     const n = nameById[wid] || String(wid);
-    byFulfillment[n] = { count: v.count, money: Math.round(v.money * 100) / 100 };
-    count += v.count; money += v.money;
+    byFulfillment[n] = { count: v.count, money: r2(v.money), moneyAvg: r2(v.moneyAvg) };
+    count += v.count; money += v.money; moneyAvg += v.moneyAvg;
   }
-  return { count, money: Math.round(money * 100) / 100, byFulfillment };
+  return { count, money: r2(money), moneyAvg: r2(moneyAvg), byFulfillment };
 };
 
 const series = seriesDays.map((date) => ({
@@ -131,6 +166,8 @@ const snapshot = {
   span,
   articles: ARTICLES,
   currency: '₽',
+  avgSalePrice: Math.round(sales.overall),   // общая ср. цена продажи 7д (справочно)
+  salesAvailable: sales.available,           // была ли доступна статистика продаж
   fulfillments: fulfillments.map((f) => f.name),
   series,
 };

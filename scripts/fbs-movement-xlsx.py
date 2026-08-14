@@ -21,6 +21,7 @@ center = Alignment(horizontal='center')
 fulfillments = s.get('fulfillments', [])
 N = int(s.get('days', 14))
 series = s.get('series', [])[-N:]  # период отображения
+COST = float(os.environ.get('COST_PER_UNIT', 620) or 620)
 
 
 def autofit(ws):
@@ -29,21 +30,28 @@ def autofit(ws):
         ws.column_dimensions[col[0].column_letter].width = min(40, max(9, width + 2))
 
 
-def sheet(ws, kind, unit):
+# basis: 'count' | 'money' (цена заказа) | 'moneyAvg' (ср. цена продажи) | 'cost' (count×COST)
+def cellval(bf, name, basis):
+    o = bf.get(name, {}) or {}
+    if basis == 'cost':
+        return round((o.get('count', 0) or 0) * COST, 2)
+    return o.get(basis, 0) or 0
+
+
+def sheet(ws, kind, basis):
     ws.append(['Дата'] + list(fulfillments) + ['Итого'])
     for c in ws[1]:
         c.font = bold
         c.alignment = center
     for d in series:
-        blk = d.get(kind, {}) or {}
-        bf = blk.get('byFulfillment', {}) or {}
+        bf = (d.get(kind, {}) or {}).get('byFulfillment', {}) or {}
         row = [d.get('date')]
         total = 0
         for name in fulfillments:
-            v = (bf.get(name, {}) or {}).get(unit, 0)
+            v = cellval(bf, name, basis)
             row.append(v)
             total += v
-        row.append(round(total, 2) if unit == 'money' else total)
+        row.append(total if basis == 'count' else round(total, 2))
         ws.append(row)
     autofit(ws)
     ws.freeze_panes = 'B2'
@@ -54,8 +62,9 @@ ws = wb.active
 ws.title = 'Принято (шт)'
 sheet(ws, 'accepted', 'count')
 sheet(wb.create_sheet('Передано (шт)'), 'delivered', 'count')
-sheet(wb.create_sheet('Принято (руб)'), 'accepted', 'money')
-sheet(wb.create_sheet('Передано (руб)'), 'delivered', 'money')
+sheet(wb.create_sheet('Передано себест (руб)'), 'delivered', 'cost')
+sheet(wb.create_sheet('Передано продажа (руб)'), 'delivered', 'moneyAvg')
+sheet(wb.create_sheet('Передано заказ (руб)'), 'delivered', 'money')
 
 wb.save(OUT)
 print('OK', OUT)

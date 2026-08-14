@@ -37,7 +37,7 @@ function formFrom(latest) {
 }
 
 // Выгрузка снимка. JSON — для любого отчёта; Excel/HTML-дашборд — пока только подсорт.
-async function sendDownload(res, kind, cabId, snapshot, stem, report = 'podsort') {
+async function sendDownload(res, kind, cabId, snapshot, stem, report = 'podsort', opts = {}) {
   if (kind === 'json') {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${stem}.json"`);
@@ -45,7 +45,7 @@ async function sendDownload(res, kind, cabId, snapshot, stem, report = 'podsort'
   }
   if (kind === 'xlsx') {
     const file = report === 'stock' ? await buildStockXlsx({ id: cabId }, snapshot)
-      : report === 'movement' ? await buildMovementXlsx({ id: cabId }, snapshot)
+      : report === 'movement' ? await buildMovementXlsx({ id: cabId }, snapshot, opts.cost || 620)
         : await buildXlsx({ id: cabId }, snapshot);
     return res.download(file, `${stem}.xlsx`);
   }
@@ -165,7 +165,8 @@ reportsRouter.get('/org/:id/reports/movement/download/:kind', requireAuth, loadO
   const cab = Cabinets.activeOf(req.org.id);
   const latest = cab ? ReportRuns.latest(cab.id, 'movement') : null;
   if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
-  try { await sendDownload(res, req.params.kind, cab.id, latest.data, 'fbs-movement', 'movement'); }
+  const cost = Math.min(100000, Math.max(0, Math.round(Number(req.query.cost)) || 620));
+  try { await sendDownload(res, req.params.kind, cab.id, latest.data, 'fbs-movement', 'movement', { cost }); }
   catch (e) { logger.error({ err: e.message }, 'движение: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
 });
 

@@ -184,10 +184,10 @@ function fakeMovement(params) {
   const today = new Date();
   const days = [];
   for (let i = span - 1; i >= 0; i--) days.push(new Date(today.getTime() - i * 86400000).toISOString().slice(0, 10));
-  const cell = (c, m) => ({ count: c, money: m, byFulfillment: c ? { 'Тест-склад': { count: c, money: m } } : {} });
-  const series = days.map((date, idx) => ({ date, accepted: cell((idx + 1) * 2, (idx + 1) * 200), delivered: cell(idx * 2, idx * 200) }));
+  const cell = (c) => ({ count: c, money: c * 500, moneyAvg: c * 700, byFulfillment: c ? { 'Тест-склад': { count: c, money: c * 500, moneyAvg: c * 700 } } : {} });
+  const series = days.map((date, idx) => ({ date, accepted: cell((idx + 1) * 2), delivered: cell(idx * 2) }));
   return { generatedAt: new Date().toISOString(), tz: '+03:00', today: days[days.length - 1], days: N, span,
-    articles: params.articles || [], currency: '₽', fulfillments: ['Тест-склад'], series };
+    articles: params.articles || [], currency: '₽', avgSalePrice: 700, salesAvailable: true, fulfillments: ['Тест-склад'], series };
 }
 async function runMovementPipeline(cabinet, token, meta, params, onLog) {
   const dir = cabinetDir(cabinet.id);
@@ -281,11 +281,11 @@ export async function buildStockXlsx(cabinet, snapshot) {
 }
 
 // Excel по движению заказов: пишем снимок и запускаем python-генератор.
-export async function buildMovementXlsx(cabinet, snapshot) {
+export async function buildMovementXlsx(cabinet, snapshot, cost = 620) {
   const dir = cabinetDir(cabinet.id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'fbs-movement-service.json'), JSON.stringify(snapshot, null, 2));
-  const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-movement-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
+  const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-movement-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir, COST_PER_UNIT: String(cost) }, cwd: REPO });
   const out = path.join(dir, 'fbs-movement.xlsx');
   if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать Excel движения:\n' + tail(r.err));
   return out;

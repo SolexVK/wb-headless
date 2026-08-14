@@ -822,11 +822,14 @@ const MV_PALETTE = ['#4e79a7', '#f28e2b', '#59a14f', '#e15759', '#b07aa1', '#76b
 const MV_FOCUS = { accepted: 'Принято', delivered: 'Передано', diff: 'Разница' };
 
 // Нормализация состояния просмотра (из query) с дефолтами.
+const MV_BASIS = { cost: 'Себестоимость', sale: 'Ср. цена 7д', order: 'Цена заказа' };
 export function movementView(q = {}) {
   const one = (v, allowed, def) => (allowed.includes(String(v)) ? String(v) : def);
   return {
     focus: one(q.focus, ['accepted', 'delivered', 'diff'], 'delivered'),
     unit: one(q.unit, ['count', 'money'], 'count'),
+    basis: one(q.basis, ['cost', 'sale', 'order'], 'cost'),
+    cost: Math.min(100000, Math.max(0, Math.round(Number(q.cost)) || 620)),
     gran: one(q.gran, ['day', 'week'], 'day'),
     ov: one(q.ov, ['none', 'cum', 'ma'], 'none'),
     cmp: String(q.cmp) === '1' ? '1' : '0',
@@ -853,12 +856,19 @@ const mvAxis = (v) => {
 const mvVal = (v, money) => (money ? nf(Math.round(v)) + ' ₽' : nf(v));
 
 // Значение метрики для дня d и фулфилмента name (name=null → всего).
+// Единица «шт» → count; «₽» → по базе оценки: себестоимость (count×cost),
+// ср. цена продажи 7д (moneyAvg) или цена заказа (money).
 function mvCell(d, view, name) {
-  const u = view.unit;
-  const pick = (blk) => (name ? ((blk?.byFulfillment?.[name] || {})[u] || 0) : (blk?.[u] || 0));
-  if (view.focus === 'accepted') return pick(d.accepted);
-  if (view.focus === 'delivered') return pick(d.delivered);
-  return pick(d.delivered) - pick(d.accepted);
+  const fld = (blk, f) => (name ? ((blk?.byFulfillment?.[name] || {})[f] || 0) : (blk?.[f] || 0));
+  const value = (blk) => {
+    if (view.unit === 'count') return fld(blk, 'count');
+    if (view.basis === 'cost') return fld(blk, 'count') * (view.cost || 620);
+    if (view.basis === 'sale') return fld(blk, 'moneyAvg');
+    return fld(blk, 'money');
+  };
+  if (view.focus === 'accepted') return value(d.accepted);
+  if (view.focus === 'delivered') return value(d.delivered);
+  return value(d.delivered) - value(d.accepted);
 }
 
 // Свернуть дни в корзины (день/неделя) для набора фулфилментов.
@@ -921,23 +931,35 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   const ffAll = snap.fulfillments || [];
   const money = view.unit === 'money';
 
-  // Сводные плитки за период (всегда обе метрики — для контекста).
+  const cost = view.cost || 620;
+  // Сводные плитки: штуки + три базы денег (себестоимость / ср.продажа / заказ) по «передано».
   const sumC = (k) => display.reduce((s, d) => s + (d[k]?.count || 0), 0);
-  const sumM = (k) => display.reduce((s, d) => s + (d[k]?.money || 0), 0);
+  const sumF = (k, f) => display.reduce((s, d) => s + (d[k]?.[f] || 0), 0);
   const accC = sumC('accepted'), delC = sumC('delivered');
   const tiles = [
-    ['Принято, шт', accC], ['Передано, шт', delC], ['Разница, шт', delC - accC], ['Передано, ₽', Math.round(sumM('delivered'))],
+    ['Принято, шт', accC], ['Передано, шт', delC],
+    ['Себест., ₽', Math.round(delC * cost)], ['Ср.продажа, ₽', Math.round(sumF('delivered', 'moneyAvg'))], ['Цена заказа, ₽', Math.round(sumF('delivered', 'money'))],
   ].map(([l, v]) => `<div class="tilek"><div class="n">${nf(v)}</div><div class="l">${esc(l)}</div></div>`).join('');
 
   // Тумблеры.
   const seg = (lab, key, opts) => (nav ? `<div class="mv-seg"><span class="lab">${esc(lab)}</span>${opts.map((o) => `<a class="mv-chip${view[key] === o.v ? ' on' : ''}" href="${nav({ [key]: o.v })}">${esc(o.label)}</a>`).join('')}</div>` : '');
+  // База оценки — только когда единица ₽. Ввод себестоимости — только при базе «Себестоимость».
+  const basisSeg = (nav && money) ? seg('База ₽', 'basis', [{ v: 'cost', label: 'Себестоимость' }, { v: 'sale', label: 'Ср. цена 7д' }, { v: 'order', label: 'Цена заказа' }]) : '';
+  const hidden = ['focus', 'unit', 'basis', 'gran', 'ov', 'cmp'].map((k) => `<input type="hidden" name="${k}" value="${esc(view[k])}">`).join('');
+  const costInput = (nav && money && view.basis === 'cost')
+    ? `<form method="get" class="mv-seg" style="margin:0 16px 8px 0">${hidden}<span class="lab">Себест., ₽/шт</span><input name="cost" type="number" min="0" value="${esc(String(cost))}" style="width:92px" onchange="this.form.submit()"><noscript><button class="btn btn-sm" type="submit">OK</button></noscript></form>`
+    : '';
+  const salesWarn = (money && view.basis === 'sale' && snap.salesAvailable === false)
+    ? '<div class="warn" style="margin:0 0 8px">Статистика продаж недоступна на этом токене — «ср. цена 7д» замещена ценой заказа.</div>' : '';
   const toolbar = nav ? `<div class="mv-bar">
     ${seg('Показатель', 'focus', [{ v: 'accepted', label: 'Принято' }, { v: 'delivered', label: 'Передано' }, { v: 'diff', label: 'Разница' }])}
     ${seg('Единица', 'unit', [{ v: 'count', label: 'шт' }, { v: 'money', label: '₽' }])}
+    ${basisSeg}
+    ${costInput}
     ${seg('Разбивка', 'gran', [{ v: 'day', label: 'День' }, { v: 'week', label: 'Неделя' }])}
     ${seg('График', 'ov', [{ v: 'none', label: '—' }, { v: 'cum', label: 'Нарастающий' }, { v: 'ma', label: 'Скользящее' }])}
     ${seg('Сравнение', 'cmp', [{ v: '1', label: 'вкл' }, { v: '0', label: 'выкл' }])}
-  </div>` : '';
+  </div>${salesWarn}` : '';
 
   // Корзины + линии графика.
   const buckets = mvBuckets(display, view, ffAll);
@@ -974,8 +996,8 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
 
   const artLine = (snap.articles && snap.articles.length) ? ` · артикулы: ${esc(snap.articles.join(', '))}` : '';
   return `<div class="section">
-      <h2>${esc(MV_FOCUS[view.focus])}${view.unit === 'money' ? ', ₽' : ', шт'} за ${N} дн ${whenLabel ? `<span class="muted" style="font-size:13px;font-weight:400">${esc(whenLabel)}</span>` : ''}</h2>
-      <p class="kv" style="margin:0 0 8px">Период по МСК (${esc(snap.tz || '+03:00')})${artLine}. «Принято» — по дате создания задания, «Передано» — по дате закрытия поставки.</p>
+      <h2>${esc(MV_FOCUS[view.focus])}${money ? `, ₽ (${esc(MV_BASIS[view.basis])})` : ', шт'} за ${N} дн ${whenLabel ? `<span class="muted" style="font-size:13px;font-weight:400">${esc(whenLabel)}</span>` : ''}</h2>
+      <p class="kv" style="margin:0 0 8px">Период по МСК (${esc(snap.tz || '+03:00')})${artLine}. «Принято» — по дате создания задания, «Передано» — по дате закрытия поставки.${snap.avgSalePrice ? ` Ср. цена продажи 7д: ${nf(snap.avgSalePrice)} ₽.` : ''}</p>
       <div class="tiles">${tiles}</div>
       ${toolbar}
       <div style="margin-bottom:6px"><a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
@@ -1017,10 +1039,10 @@ export function movementPage(p) {
 
   const nav = (patch) => {
     const v = { ...view, ...patch };
-    return u(`/org/${org.id}/reports/movement?focus=${v.focus}&unit=${v.unit}&gran=${v.gran}&ov=${v.ov}&cmp=${v.cmp}`);
+    return u(`/org/${org.id}/reports/movement?focus=${v.focus}&unit=${v.unit}&basis=${v.basis}&cost=${v.cost}&gran=${v.gran}&ov=${v.ov}&cmp=${v.cmp}`);
   };
   const results = latest?.data
-    ? movementResults(latest.data, { view, nav, downloadHref: (k) => u(`/org/${org.id}/reports/movement/download/${k}`), whenLabel: latest.createdAt ? String(latest.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '' })
+    ? movementResults(latest.data, { view, nav, downloadHref: (k) => u(`/org/${org.id}/reports/movement/download/${k}?cost=${view.cost}`), whenLabel: latest.createdAt ? String(latest.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '' })
     : `<div class="section"><p class="muted">Данных пока нет — задайте период и нажмите «Обновить данные».</p></div>`;
 
   return layout({

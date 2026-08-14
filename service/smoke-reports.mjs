@@ -152,9 +152,11 @@ try {
   const mx = await fetch(base + `/org/${orgId}/reports/movement/download/xlsx`, { headers: { cookie } });
   const mxb = Buffer.from(await mx.arrayBuffer());
   ok(mx.status === 200 && mxb.length > 500 && mxb[0] === 0x50 && mxb[1] === 0x4b, 'Ф2: выгрузка движения (Excel .xlsx)');
-  // Тумблер единицы (₽) и сравнение с прошлым периодом.
-  r = await req('GET', `/org/${orgId}/reports/movement?focus=delivered&unit=money`);
-  ok(r.status === 200 && r.text.includes('Передано, ₽'), 'Ф2: движение — переключение на ₽');
+  // Тумблер единицы (₽) и базы оценки: себестоимость / ср.цена продажи / цена заказа.
+  r = await req('GET', `/org/${orgId}/reports/movement?focus=delivered&unit=money&basis=cost&cost=620`);
+  ok(r.status === 200 && r.text.includes('₽ (Себестоимость)') && r.text.includes('Себест., ₽'), 'Ф2: движение — база «себестоимость» (₽)');
+  r = await req('GET', `/org/${orgId}/reports/movement?focus=delivered&unit=money&basis=sale`);
+  ok(r.status === 200 && r.text.includes('₽ (Ср. цена 7д)') && r.text.includes('Ср.продажа, ₽'), 'Ф2: движение — база «ср. цена продажи 7д»');
   r = await req('GET', `/org/${orgId}/reports/movement?cmp=1`);
   ok(r.status === 200 && r.text.includes('Сравнение с прошлым периодом'), 'Ф2: движение — сравнение с прошлым периодом');
   // Движение попало в общий архив.
