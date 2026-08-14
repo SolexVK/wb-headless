@@ -119,6 +119,14 @@ orgRouter.post('/org/:id/member/:userId/remove', requireAuth, loadOrg, requireOw
   renderOrg(req, res, { memOk: 'Участник удалён.' });
 });
 
+// Участник сам покидает компанию (владелец так не может — удаление через супер-админа).
+orgRouter.post('/org/:id/leave', requireAuth, loadOrg, (req, res) => {
+  if (req.role === 'owner') return res.status(403).send('Владелец не может покинуть свою компанию. Удаление компании — через администратора сервиса.');
+  Members.remove(req.org.id, req.session.user.id);
+  logger.info({ orgId: req.org.id, userId: req.session.user.id }, 'участник покинул компанию');
+  res.redirect('/');
+});
+
 // ── Супер-админ: панель компаний, лицензий и пользователей ───────────────────
 orgRouter.get('/admin', requireAuth, requireSuperAdmin, (req, res) => {
   const flash = req.session.flash; req.session.flash = undefined;

@@ -180,6 +180,7 @@ try {
   ok(r.status === 302 && r.location === `/org/${orgId}`, 'Ф1: приглашение принято → организация');
   r = await req('GET', `/org/${orgId}`);
   ok(r.status === 200 && r.text.includes('Тест-компания') && r.text.includes('участник'), 'Ф1: приглашённый видит свою компанию как участник');
+  ok(r.text.includes('Покинуть компанию'), 'Ф1: у участника есть кнопка «Покинуть компанию»');
   // Участник НЕ видит токен, приглашения, места и список участников (email владельца).
   ok(!r.text.includes('name="token"') && !r.text.includes('id="invemail"'), 'Ф1: участник не видит токен/приглашения');
   ok(!r.text.includes('Места по лицензии') && !r.text.includes(email2), 'Ф1: участник не видит места и список участников');
@@ -236,6 +237,17 @@ try {
   const delUserId = (r.text.match(/\/admin\/user\/(\d+)\/delete/) || [])[1];
   r = await req('POST', `/admin/user/${delUserId}/delete`, form({ _csrf: csrfAdmin }));
   ok(r.status === 302, 'Ф1: супер-админ полностью удалил пользователя');
+
+  // Участник покидает компанию → теряет к ней доступ.
+  cookie = '';
+  r = await req('GET', '/login');
+  r = await req('POST', '/login', form({ _csrf: csrfOf(r.text), email: inviteeEmail, password: 'supersecret1' }));
+  r = await req('GET', `/org/${orgId}`);
+  const csrfLeave = csrfOf(r.text);
+  r = await req('POST', `/org/${orgId}/leave`, form({ _csrf: csrfLeave }));
+  ok(r.status === 302 && r.location === '/', 'Ф1: участник покинул компанию → на главную');
+  r = await req('GET', `/org/${orgId}`);
+  ok(r.status === 404, 'Ф1: после выхода компания недоступна (404)');
 } catch (e) {
   console.error('Ошибка теста:', e); failed++;
 } finally {

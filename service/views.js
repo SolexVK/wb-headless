@@ -283,6 +283,9 @@ export function orgPage(p) {
         ${status}
         ${ready ? `<p><a class="dl" href="${u(`/org/${org.id}/reports`)}">📊 Открыть отчёты</a></p>` : ''}
         <p class="kv" style="margin-top:14px">Вы участник этой компании. Вам доступны отчёты; управление кабинетом и участниками — у владельца.</p>
+        <form method="post" action="${u(`/org/${org.id}/leave`)}" style="margin-top:8px" onsubmit="return confirm('Покинуть компанию «${esc(org.name)}»? Доступ к её отчётам пропадёт.')">
+          ${csrfField(csrf)}<button class="btn btn-sm btn-danger" type="submit">Покинуть компанию</button>
+        </form>
       </div>`,
     });
   }
