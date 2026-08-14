@@ -294,7 +294,38 @@ export async function buildMovementXlsx(cabinet, snapshot, cost = 620) {
 export async function buildDashboardHtml(cabinet, snapshot) {
   const dir = ensureSnapshotFile(cabinet, snapshot);
   const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-replenishment-dashboard.mjs')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
-  const out = path.join(dir, 'fbs-replenishment-dashboard.artifact.html');
+  const out = path.join(dir, 'fbs-replenishment-dashboard.html');
   if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать HTML-дашборд:\n' + tail(r.err));
+  return out;
+}
+
+// HTML-дашборд остатков (тот же снимок, что и для Excel).
+export async function buildStockDashboardHtml(cabinet, snapshot) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'fbs-stock-service.json'), JSON.stringify(snapshot, null, 2));
+  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-stock-dashboard.mjs')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
+  const out = path.join(dir, 'fbs-stock-dashboard.html');
+  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать HTML-дашборд остатков:\n' + tail(r.err));
+  return out;
+}
+
+// HTML-дашборд движения заказов (cost — себестоимость ₽/шт для оценки).
+export async function buildMovementDashboardHtml(cabinet, snapshot, cost = 620) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'fbs-movement-service.json'), JSON.stringify(snapshot, null, 2));
+  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-movement-dashboard.mjs')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir, COST_PER_UNIT: String(cost) }, cwd: REPO });
+  const out = path.join(dir, 'fbs-movement-dashboard.html');
+  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать HTML-дашборд движения:\n' + tail(r.err));
+  return out;
+}
+
+// Рендер готовой HTML-страницы дашборда в PDF (встроенный Chromium).
+export async function dashboardToPdf(htmlPath) {
+  const out = htmlPath.replace(/\.html$/, '.pdf');
+  // Альбомная — чтобы широкие таблицы (день × склад) не обрезались по правому краю.
+  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'html-to-pdf.mjs'), htmlPath, out, '--landscape'], { env: process.env, cwd: REPO, timeoutMs: 3 * 60_000 });
+  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать PDF:\n' + tail(r.err));
   return out;
 }

@@ -726,8 +726,9 @@ function podsortResults(s, { downloadHref, whenLabel }) {
       <h2>Результат ${whenLabel ? `<span class="muted" style="font-size:13px;font-weight:400">${esc(whenLabel)}</span>` : ''}</h2>
       <div class="tiles">${tiles}</div>
       <div style="margin-bottom:6px">
+        <a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a>
+        <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a>
         <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a>
-        <a class="dl" href="${downloadHref('html')}">⬇ HTML-дашборд</a>
         <a class="dl" href="${downloadHref('json')}">⬇ JSON</a>
       </div>
       <h2>Сводная: подсорт по размерам × склад</h2>
@@ -756,7 +757,7 @@ function stockResults(s, { downloadHref, whenLabel }) {
   return `<div class="section">
       <h2>Результат ${whenLabel ? `<span class="muted" style="font-size:13px;font-weight:400">${esc(whenLabel)}</span>` : ''}</h2>
       <div class="tiles">${tiles}</div>
-      <div style="margin-bottom:6px"><a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
+      <div style="margin-bottom:6px"><a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a> <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a> <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
       <h2>По фулфилментам</h2>
       ${whTable}
       <h2 style="margin-top:20px">Остаток по артикул+цвет × склад</h2>
@@ -1018,7 +1019,7 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
       <p class="kv" style="margin:0 0 8px">Период по МСК (${esc(snap.tz || '+03:00')})${artLine}. «Принято» — по дате создания задания, «Передано» — по дате закрытия поставки.${snap.avgSalePrice ? ` Ср. цена продажи 7д: ${nf(snap.avgSalePrice)} ₽.` : ''}</p>
       <div class="tiles">${tiles}</div>
       ${toolbar}
-      <div style="margin-bottom:6px"><a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
+      <div style="margin-bottom:6px"><a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a> <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a> <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
       ${chart}
       ${table}
       ${compare}

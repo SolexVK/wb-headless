@@ -41,6 +41,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let failed = 0;
 const ok = (cond, msg) => { process.stdout.write(`${cond ? '✓' : '✗ FAIL'}  ${msg}\n`); if (!cond) failed++; };
+// PDF зависит от наличия Chromium. Есть → строгая проверка сигнатуры; нет → мягкий пропуск.
+async function pdfCheck(url, msg) {
+  const r = await fetch(base + url, { headers: { cookie } });
+  if (r.status === 200) { const b = Buffer.from(await r.arrayBuffer()); ok(b.slice(0, 4).toString('latin1') === '%PDF' && b.length > 1000, msg); }
+  else process.stdout.write(`  ⚠  ${msg} — пропущен (нет Chromium в этой среде)\n`);
+}
 
 try {
   // Регистрация + кабинет с валидным токеном.
@@ -114,6 +120,10 @@ try {
   const sx = await fetch(base + `/org/${orgId}/reports/stock/download/xlsx`, { headers: { cookie } });
   const xbuf = Buffer.from(await sx.arrayBuffer());
   ok(sx.status === 200 && xbuf.length > 500 && xbuf[0] === 0x50 && xbuf[1] === 0x4b, 'Ф2: выгрузка остатков (Excel .xlsx)');
+  const sh = await fetch(base + `/org/${orgId}/reports/stock/download/html`, { headers: { cookie } });
+  const shx = await sh.text();
+  ok(sh.status === 200 && shx.includes('Остатки по фулфилмент'), 'Ф2: HTML-дашборд остатков');
+  await pdfCheck(`/org/${orgId}/reports/stock/download/pdf`, 'Ф2: PDF-дашборд остатков');
   // Остатки попали в общий архив (report=stock).
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Остатки') && /остаток\s*12/.test(r.text), 'Ф2: остатки видны в архиве');
@@ -152,6 +162,10 @@ try {
   const mx = await fetch(base + `/org/${orgId}/reports/movement/download/xlsx`, { headers: { cookie } });
   const mxb = Buffer.from(await mx.arrayBuffer());
   ok(mx.status === 200 && mxb.length > 500 && mxb[0] === 0x50 && mxb[1] === 0x4b, 'Ф2: выгрузка движения (Excel .xlsx)');
+  const mh = await fetch(base + `/org/${orgId}/reports/movement/download/html`, { headers: { cookie } });
+  const mhx = await mh.text();
+  ok(mh.status === 200 && mhx.includes('Движение заказов по фулфилментам'), 'Ф2: HTML-дашборд движения');
+  await pdfCheck(`/org/${orgId}/reports/movement/download/pdf`, 'Ф2: PDF-дашборд движения');
   // Тумблер единицы (₽) и базы оценки: себестоимость / ср.цена продажи / цена заказа.
   r = await req('GET', `/org/${orgId}/reports/movement?focus=delivered&unit=money&basis=cost&cost=620`);
   ok(r.status === 200 && r.text.includes('₽ (Себестоимость)') && r.text.includes('Себест., ₽'), 'Ф2: движение — база «себестоимость» (₽)');
