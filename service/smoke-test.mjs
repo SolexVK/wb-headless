@@ -178,12 +178,14 @@ try {
   ok(r.status === 200 && r.text.includes('Принять приглашение'), 'Ф1: нужный email видит приём приглашения');
   r = await req('POST', `/invite/${inviteTok}/accept`, form({ _csrf: csrfOf(r.text) }));
   ok(r.status === 302 && r.location === `/org/${orgId}`, 'Ф1: приглашение принято → организация');
+  // Участник со страницы компании уходит прямо в отчёты (управления не видит).
   r = await req('GET', `/org/${orgId}`);
-  ok(r.status === 200 && r.text.includes('Тест-компания') && r.text.includes('участник'), 'Ф1: приглашённый видит свою компанию как участник');
-  ok(r.text.includes('Покинуть компанию'), 'Ф1: у участника есть кнопка «Покинуть компанию»');
+  ok(r.status === 302 && r.location === `/org/${orgId}/reports`, 'Ф1: участник с /org/:id перенаправлен в отчёты');
+  r = await req('GET', `/org/${orgId}/reports`);
+  ok(r.status === 200 && r.text.includes('отчёты') && r.text.includes('Покинуть компанию'), 'Ф1: участник видит только страницу отчётов (+ выход)');
   // Участник НЕ видит токен, приглашения, места и список участников (email владельца).
-  ok(!r.text.includes('name="token"') && !r.text.includes('id="invemail"'), 'Ф1: участник не видит токен/приглашения');
-  ok(!r.text.includes('Места по лицензии') && !r.text.includes(email2), 'Ф1: участник не видит места и список участников');
+  ok(!r.text.includes('name="token"') && !r.text.includes('id="invemail"') && !r.text.includes('Места по лицензии') && !r.text.includes(email2),
+    'Ф1: участник не видит токен/приглашения/места/список');
   // Участник НЕ может приглашать (owner-only) → 403.
   const csrfMember = csrfOf(r.text);
   r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfMember, email: `nope_${Date.now()}@example.com` }));
@@ -229,6 +231,7 @@ try {
   r = await req('GET', '/admin');
   const csrfAdmin = csrfOf(r.text);
   ok(r.status === 200 && r.text.includes('Панель супер-админа') && r.text.includes('Пользователи'), 'Ф1: супер-админ видит панель (компании + пользователи)');
+  ok(r.text.includes('Показать участников') && r.text.includes(inviteeEmail), 'Ф1: супер-админ видит участников по компаниям');
   r = await req('POST', `/admin/org/${orgId}/seats`, form({ _csrf: csrfAdmin, seats: '5' }));
   ok(r.status === 302, 'Ф1: супер-админ меняет число мест');
   r = await req('POST', `/admin/org/${orgId}/rename`, form({ _csrf: csrfAdmin, name: 'Переимен-супером' }));
@@ -242,11 +245,11 @@ try {
   cookie = '';
   r = await req('GET', '/login');
   r = await req('POST', '/login', form({ _csrf: csrfOf(r.text), email: inviteeEmail, password: 'supersecret1' }));
-  r = await req('GET', `/org/${orgId}`);
+  r = await req('GET', `/org/${orgId}/reports`); // у участника кнопка выхода на странице отчётов
   const csrfLeave = csrfOf(r.text);
   r = await req('POST', `/org/${orgId}/leave`, form({ _csrf: csrfLeave }));
   ok(r.status === 302 && r.location === '/', 'Ф1: участник покинул компанию → на главную');
-  r = await req('GET', `/org/${orgId}`);
+  r = await req('GET', `/org/${orgId}/reports`);
   ok(r.status === 404, 'Ф1: после выхода компания недоступна (404)');
 } catch (e) {
   console.error('Ошибка теста:', e); failed++;

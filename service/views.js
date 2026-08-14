@@ -201,7 +201,7 @@ export function registerPage({ csrf, error, email, name, notice, base = '' }) {
 export function homePage({ user, orgs, csrf, base = '', superAdmin }) {
   const u = (p) => base + p;
   const orgList = orgs.length
-    ? orgs.map((o) => `<a class="tile" href="${u(`/org/${o.id}`)}" style="display:block">
+    ? orgs.map((o) => `<a class="tile" href="${u(o.role === 'owner' ? `/org/${o.id}` : `/org/${o.id}/reports`)}" style="display:block">
         <h3>${esc(o.name)} <span class="badge ${esc(o.role)}">${esc(roleRu(o.role))}</span></h3>
         <p>${o.role === 'owner' ? 'Кабинет, участники и отчёты' : 'Отчёты компании'} →</p></a>`).join('')
     : `<div class="tile"><p class="muted">Вы пока не состоите ни в одной компании. Создайте свою ниже или, если вас пригласили, откройте ссылку-приглашение снова.</p></div>`;
@@ -440,7 +440,14 @@ export function adminPage({ user, csrf, base = '', orgs, users, resets, resetLin
       </details>
       <div class="kv">${esc(o.owner_email)}</div>
     </td>
-    <td>${esc(String(o.members))}${o.pending ? ` <span class="muted">(+${esc(String(o.pending))} приглаш.)</span>` : ''}</td>
+    <td>
+      <details style="border:0;padding:0;background:none;display:inline-block">
+        <summary style="padding:0" title="Показать участников с ролями">${esc(String(o.members))}${o.pending ? ` <span class="muted">(+${esc(String(o.pending))})</span>` : ''}</summary>
+        <div style="margin-top:6px;text-align:left">
+          ${(o.memberList || []).map((m) => `<div class="kv" style="margin-top:2px"><span class="badge ${esc(m.role)}">${esc(roleRu(m.role))}</span> ${esc(m.email)}</div>`).join('')}
+        </div>
+      </details>
+    </td>
     <td>
       <form method="post" action="${u(`/admin/org/${o.id}/seats`)}" class="row-form" style="gap:6px;justify-content:center">
         ${csrfField(csrf)}
@@ -574,22 +581,31 @@ function podsortGlossary() {
 export function reportsPage(p) {
   const { user, csrf, base = '', org, role, active } = p;
   const u = (path) => base + path;
+  const owner = role === 'owner';
   const cabLine = active
-    ? `<p class="kv">Активный кабинет: <b>${esc(active.name)}</b>${active.meta?.sid ? ` · продавец ${esc(String(active.meta.sid).slice(0, 8))}…` : ''}</p>`
-    : `<div class="warn">Нет активного кабинета с токеном. <a href="${u(`/org/${org.id}`)}">Подключите кабинет</a> и сделайте его активным.</div>`;
+    ? `<p class="kv">Кабинет: <b>${esc(active.name)}</b> <span class="badge on">подключён</span></p>`
+    : owner
+      ? `<div class="warn">Кабинет ещё не настроен. <a href="${u(`/org/${org.id}`)}">Настроить кабинет</a>.</div>`
+      : `<div class="warn">Кабинет ещё не настроен владельцем — отчёты пока недоступны.</div>`;
   const card = (href, title, desc, ready) => ready
     ? `<a class="tile" href="${u(href)}" style="display:block"><h3>${esc(title)}</h3><p>${esc(desc)} →</p></a>`
     : `<div class="tile soon"><h3>${esc(title)} <span class="pill">скоро</span></h3><p>${esc(desc)}</p></div>`;
+  const crumb = owner ? `<a href="${u(`/org/${org.id}`)}">← ${esc(org.name)}</a>` : `<a href="${u('/')}">← Компании</a>`;
+  const leave = owner ? '' : `
+    <form method="post" action="${u(`/org/${org.id}/leave`)}" style="margin-top:20px" onsubmit="return confirm('Покинуть компанию «${esc(org.name)}»? Доступ к её отчётам пропадёт.')">
+      ${csrfField(csrf)}<button class="btn btn-sm btn-danger" type="submit">Покинуть компанию</button>
+    </form>`;
   return layout({
     title: `Отчёты — ${org.name}`, user, csrf, base,
     body: `<div class="wrap">
-      <div class="crumbs"><a href="${u(`/org/${org.id}`)}">← ${esc(org.name)}</a></div>
-      <h1>Отчёты</h1>
+      <div class="crumbs">${crumb}</div>
+      <h1>${esc(org.name)} — отчёты</h1>
       ${cabLine}
       <div class="grid" style="margin-top:14px">
         ${card(`/org/${org.id}/reports/podsort`, 'Подсорт', 'Рекомендации к заказу по складам и размерам + пробный завоз', !!active)}
         ${card(`/org/${org.id}/reports/podsort`, 'Остатки', 'Остатки FBS по артикулам и цветам', false)}
       </div>
+      ${leave}
     </div>`,
   });
 }

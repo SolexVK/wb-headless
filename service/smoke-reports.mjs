@@ -53,7 +53,7 @@ try {
   ok(r.status === 200 && r.text.includes('сохранён'), 'Ф2: кабинет с токеном подключён (настройка компании)');
 
   r = await req('GET', `/org/${orgId}/reports`);
-  ok(r.status === 200 && r.text.includes('Подсорт') && r.text.includes('Активный кабинет'), 'Ф2: список отчётов + активный кабинет');
+  ok(r.status === 200 && r.text.includes('Подсорт') && r.text.includes('подключён'), 'Ф2: список отчётов + подключённый кабинет');
 
   r = await req('GET', `/org/${orgId}/reports/podsort`);
   const csrfP = csrfOf(r.text);

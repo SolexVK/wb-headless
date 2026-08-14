@@ -56,8 +56,10 @@ orgRouter.post('/company', requireAuth, (req, res) => {
   res.redirect(`/org/${id}`);
 });
 
-// ── Страница организации ─────────────────────────────────────────────────────
+// ── Страница компании ────────────────────────────────────────────────────────
 orgRouter.get('/org/:id', requireAuth, loadOrg, (req, res) => {
+  // Участник (не владелец) управленческую страницу не видит — сразу в отчёты.
+  if (req.role !== 'owner') return res.redirect(`/org/${req.org.id}/reports`);
   // Flash после POST-Redirect-GET (напр. созданная ссылка-приглашение) — чистый URL.
   const flash = req.session.flash; req.session.flash = undefined;
   renderOrg(req, res, flash && flash.orgId === req.org.id ? flash.data : {});
@@ -132,9 +134,10 @@ orgRouter.get('/admin', requireAuth, requireSuperAdmin, (req, res) => {
   const flash = req.session.flash; req.session.flash = undefined;
   const origin = `${req.protocol}://${req.get('host')}${res.locals.base || ''}`;
   const resets = PasswordResets.pending().map((p) => ({ ...p, url: `${origin}/reset/${p.token}` }));
+  const orgs = Orgs.all().map((o) => ({ ...o, memberList: Members.ofOrg(o.id) })); // участники с ролями по компании
   res.send(adminPage({
     user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
-    orgs: Orgs.all(), users: Users.all(), resets,
+    orgs, users: Users.all(), resets,
     resetLink: flash?.adminResetLink, ok: req.query.ok, err: req.query.err,
   }));
 });
