@@ -87,6 +87,35 @@ try {
   r = await req('POST', '/login', form({ email, password: 'x' }));
   ok(r.status === 403, 'POST без CSRF → 403');
 
+  // ── Восстановление пароля ───────────────────────────────────────────────────
+  cookie = '';
+  r = await req('GET', '/forgot');
+  const csrfForgot = csrfOf(r.text);
+  ok(r.status === 200 && !!csrfForgot, 'Сброс: страница «Забыли пароль» + CSRF');
+  r = await req('POST', '/forgot', form({ _csrf: csrfForgot, email }));
+  ok(r.status === 200 && r.text.includes('Заявка принята'), 'Сброс: заявка принята (нейтральный ответ)');
+  // Токен берём из БД (в проде админ выдаёт ссылку из /admin).
+  const { PasswordResets: PR, Users: U } = await import('./models.js');
+  const uid = U.byEmail(email).id;
+  const rtok = PR.create(uid);
+  r = await req('GET', `/reset/${rtok}`);
+  const csrfReset = csrfOf(r.text);
+  ok(r.status === 200 && r.text.includes('Новый пароль'), 'Сброс: страница нового пароля по токену');
+  r = await req('POST', `/reset/${rtok}`, form({ _csrf: csrfReset, password: 'newsecret9', password2: 'newsecret9' }));
+  ok(r.status === 302 && /\/login\?reset=1/.test(r.location || ''), 'Сброс: пароль изменён → /login?reset=1');
+  // Повторное использование того же токена запрещено.
+  r = await req('GET', `/reset/${rtok}`);
+  ok(r.status === 410, 'Сброс: использованный токен недействителен (410)');
+  // Вход с новым паролем работает, со старым — нет.
+  r = await req('GET', '/login');
+  r = await req('POST', '/login', form({ _csrf: csrfOf(r.text), email, password: 'newsecret9' }));
+  ok(r.status === 302 && r.location === '/', 'Сброс: вход с новым паролем работает');
+  cookie = '';
+  r = await req('GET', '/login');
+  r = await req('POST', '/login', form({ _csrf: csrfOf(r.text), email, password: 'supersecret1' }));
+  ok(r.status === 401, 'Сброс: старый пароль больше не работает');
+  cookie = '';
+
   // ── Фаза 1: организация, кабинет+токен WB, права, приглашения ───────────────
   cookie = '';
   const email2 = `phase1_${Date.now()}@example.com`;

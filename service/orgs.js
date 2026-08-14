@@ -4,7 +4,7 @@
 // приглашения; менять его может только супер-админ. Приглашённый — участник без
 // права приглашать и без доступа к токену. Одна компания = один кабинет.
 import express from 'express';
-import { Orgs, Members, Cabinets, Invitations, Users } from './models.js';
+import { Orgs, Members, Cabinets, Invitations, Users, PasswordResets } from './models.js';
 import { requireAuth } from './security.js';
 import { validateToken } from './wb.js';
 import { orgPage, inviteAcceptPage, adminPage } from './views.js';
@@ -121,10 +121,24 @@ orgRouter.post('/org/:id/member/:userId/remove', requireAuth, loadOrg, requireOw
 
 // ── Супер-админ: панель компаний, лицензий и пользователей ───────────────────
 orgRouter.get('/admin', requireAuth, requireSuperAdmin, (req, res) => {
+  const flash = req.session.flash; req.session.flash = undefined;
+  const origin = `${req.protocol}://${req.get('host')}${res.locals.base || ''}`;
+  const resets = PasswordResets.pending().map((p) => ({ ...p, url: `${origin}/reset/${p.token}` }));
   res.send(adminPage({
     user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
-    orgs: Orgs.all(), users: Users.all(), ok: req.query.ok, err: req.query.err,
+    orgs: Orgs.all(), users: Users.all(), resets,
+    resetLink: flash?.adminResetLink, ok: req.query.ok, err: req.query.err,
   }));
+});
+// Создать ссылку сброса пароля пользователю (для передачи ему вручную).
+orgRouter.post('/admin/user/:id/reset', requireAuth, requireSuperAdmin, (req, res) => {
+  const user = Users.byId(Number(req.params.id));
+  if (!user) return res.redirect('/admin?err=nouser');
+  const token = PasswordResets.create(user.id);
+  const link = `${req.protocol}://${req.get('host')}${res.locals.base || ''}/reset/${token}`;
+  logger.info({ userId: user.id, by: req.session.user.email }, 'супер-админ: создал ссылку сброса пароля');
+  req.session.flash = { adminResetLink: { email: user.email, url: link } };
+  res.redirect('/admin?ok=1');
 });
 orgRouter.post('/admin/org/:id/seats', requireAuth, requireSuperAdmin, (req, res) => {
   const seats = Math.max(1, Math.round(Number(req.body.seats) || 1));

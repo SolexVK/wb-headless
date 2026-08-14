@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node --experimental-sqlite server.js",
     "dev": "node --experimental-sqlite --watch server.js",
-    "test": "node --experimental-sqlite smoke-test.mjs && node --experimental-sqlite smoke-basepath.mjs && node --experimental-sqlite smoke-reports.mjs"
+    "test": "node --experimental-sqlite smoke-test.mjs && node --experimental-sqlite smoke-basepath.mjs && node --experimental-sqlite smoke-reports.mjs",
+    "reset-password": "node --experimental-sqlite reset-password.mjs"
   },
   "engines": {
     "node": ">=22.5"

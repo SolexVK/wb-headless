@@ -18,6 +18,15 @@ const q = {
       (SELECT COUNT(*) FROM organizations o WHERE o.owner_user_id = u.id) AS owns
     FROM users u ORDER BY u.created_at DESC`),
   touchLogin: db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?"),
+  setPassword: db.prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
+
+  insertReset: db.prepare('INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)'),
+  resetByToken: db.prepare(`SELECT pr.*, u.email FROM password_resets pr JOIN users u ON u.id = pr.user_id WHERE pr.token = ?`),
+  useReset: db.prepare("UPDATE password_resets SET used_at = datetime('now') WHERE id = ?"),
+  pendingResets: db.prepare(`
+    SELECT pr.id, pr.token, pr.expires_at, pr.created_at, u.email
+    FROM password_resets pr JOIN users u ON u.id = pr.user_id
+    WHERE pr.used_at IS NULL AND pr.expires_at > datetime('now') ORDER BY pr.created_at DESC`),
 
   insertOrg: db.prepare('INSERT INTO organizations (name, owner_user_id, license_seats) VALUES (?, ?, ?)'),
   orgById: db.prepare('SELECT * FROM organizations WHERE id = ?'),
@@ -98,6 +107,24 @@ export const Users = {
   // удаляются его членства и принадлежащие ему компании (кабинеты/снимки/приглашения).
   all: () => q.allUsers.all(),
   remove: (id) => q.deleteUser.run(id).changes > 0,
+
+  setPassword: (id, plain) => q.setPassword.run(bcrypt.hashSync(String(plain), 12), id).changes > 0,
+};
+
+const RESET_TTL_MIN = 60;
+
+export const PasswordResets = {
+  // Создать одноразовый токен сброса (1 час). Возвращает токен.
+  create: (userId) => {
+    const token = crypto.randomBytes(24).toString('base64url');
+    const expires = new Date(Date.now() + RESET_TTL_MIN * 60_000).toISOString();
+    q.insertReset.run(userId, token, expires);
+    return token;
+  },
+  byToken: (token) => q.resetByToken.get(token),
+  isValid: (r) => r && !r.used_at && new Date(r.expires_at).getTime() > Date.now(),
+  use: (id) => q.useReset.run(id),
+  pending: () => q.pendingResets.all(),
 };
 
 export const Orgs = {

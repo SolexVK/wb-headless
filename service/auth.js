@@ -1,8 +1,8 @@
 // service/auth.js — маршруты регистрации / входа / выхода.
 import express from 'express';
-import { Users, Orgs } from './models.js';
+import { Users, Orgs, PasswordResets } from './models.js';
 import { authLimiter, requireAuth } from './security.js';
-import { loginPage, registerPage, homePage } from './views.js';
+import { loginPage, registerPage, homePage, forgotPage, forgotSentPage, resetPage } from './views.js';
 import { logger } from './logger.js';
 import { isSuperAdmin } from './config.js';
 
@@ -59,7 +59,8 @@ authRouter.post('/register', authLimiter, (req, res) => {
 // ── Вход ────────────────────────────────────────────────────────────────────
 authRouter.get('/login', (req, res) => {
   if (req.session.user) return res.redirect('/');
-  res.send(loginPage({ csrf: res.locals.csrf, base: res.locals.base, ...inviteNotice(req) }));
+  const notice = req.query.reset ? 'Пароль изменён. Войдите с новым паролем.' : undefined;
+  res.send(loginPage({ csrf: res.locals.csrf, base: res.locals.base, notice, ...inviteNotice(req) }));
 });
 
 authRouter.post('/login', authLimiter, (req, res) => {
@@ -78,6 +79,47 @@ authRouter.post('/login', authLimiter, (req, res) => {
 // ── Выход ───────────────────────────────────────────────────────────────────
 authRouter.post('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/login'));
+});
+
+// ── Восстановление пароля ────────────────────────────────────────────────────
+authRouter.get('/forgot', (req, res) => {
+  if (req.session.user) return res.redirect('/');
+  res.send(forgotPage({ csrf: res.locals.csrf, base: res.locals.base }));
+});
+
+authRouter.post('/forgot', authLimiter, (req, res) => {
+  const email = String(req.body.email || '').trim();
+  const u = email && Users.byEmail(email);
+  // Ответ всегда нейтральный (не раскрываем, есть ли аккаунт). Ссылку создаём,
+  // только если пользователь есть; доставляет её админ (почта — позже).
+  if (u) {
+    const token = PasswordResets.create(u.id);
+    const link = `${req.protocol}://${req.get('host')}${res.locals.base || ''}/reset/${token}`;
+    logger.info({ userId: u.id, resetLink: link }, 'создана ссылка сброса пароля (выдаёт админ)');
+  } else {
+    logger.info({ email }, 'запрос сброса пароля для несуществующего email');
+  }
+  res.send(forgotSentPage({ base: res.locals.base }));
+});
+
+authRouter.get('/reset/:token', (req, res) => {
+  const r = PasswordResets.byToken(req.params.token);
+  if (!PasswordResets.isValid(r)) return res.status(410).send(resetPage({ csrf: res.locals.csrf, base: res.locals.base, invalid: true }));
+  res.send(resetPage({ csrf: res.locals.csrf, base: res.locals.base, token: req.params.token }));
+});
+
+authRouter.post('/reset/:token', authLimiter, (req, res) => {
+  const r = PasswordResets.byToken(req.params.token);
+  if (!PasswordResets.isValid(r)) return res.status(410).send(resetPage({ csrf: res.locals.csrf, base: res.locals.base, invalid: true }));
+  const password = String(req.body.password || '');
+  const password2 = String(req.body.password2 || '');
+  const fail = (error) => res.status(400).send(resetPage({ csrf: res.locals.csrf, base: res.locals.base, token: req.params.token, error }));
+  if (password.length < 8) return fail('Пароль должен быть не короче 8 символов.');
+  if (password !== password2) return fail('Пароли не совпадают.');
+  Users.setPassword(r.user_id, password);
+  PasswordResets.use(r.id);
+  logger.info({ userId: r.user_id }, 'пароль сброшен по ссылке');
+  res.redirect('/login?reset=1');
 });
 
 // ── Домашняя (требует входа) ─────────────────────────────────────────────────

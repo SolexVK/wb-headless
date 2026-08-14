@@ -115,7 +115,64 @@ export function loginPage({ csrf, error, email, notice, base = '' }) {
         <input id="password" name="password" type="password" autocomplete="current-password" required>
         <button class="btn" type="submit">Войти</button>
       </form>
-      <div class="alt">Нет аккаунта? <a href="${u('/register')}">Зарегистрироваться</a></div>
+      <div class="alt"><a href="${u('/forgot')}">Забыли пароль?</a> · Нет аккаунта? <a href="${u('/register')}">Зарегистрироваться</a></div>
+    </div></div>`,
+  });
+}
+
+export function forgotPage({ csrf, error, email, base = '' }) {
+  const u = (p) => base + p;
+  return layout({
+    title: 'Восстановление пароля — FBS-сервис', base,
+    body: `<div class="center"><div class="card auth">
+      <h1>Восстановление пароля</h1><p class="sub">Введите email — создадим ссылку для смены пароля</p>
+      ${errBox(error)}
+      <form method="post" action="${u('/forgot')}">${csrfField(csrf)}
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username" value="${esc(email || '')}" required>
+        <button class="btn" type="submit">Восстановить пароль</button>
+      </form>
+      <div class="alt"><a href="${u('/login')}">Вернуться ко входу</a></div>
+    </div></div>`,
+  });
+}
+
+export function forgotSentPage({ base = '' }) {
+  const u = (p) => base + p;
+  return layout({
+    title: 'Заявка принята — FBS-сервис', base,
+    body: `<div class="center"><div class="card auth">
+      <h1>Заявка принята</h1>
+      <p class="sub">Если аккаунт с таким email существует, для него создана ссылка сброса пароля (действует 1 час).</p>
+      <div class="note">Пока почтовая отправка не подключена, ссылку выдаёт администратор сервиса. Напишите ему — он передаст ссылку для смены пароля.</div>
+      <div class="alt"><a href="${u('/login')}">Вернуться ко входу</a></div>
+    </div></div>`,
+  });
+}
+
+export function resetPage({ csrf, token, error, invalid, base = '' }) {
+  const u = (p) => base + p;
+  if (invalid) {
+    return layout({
+      title: 'Ссылка недействительна — FBS-сервис', base,
+      body: `<div class="center"><div class="card auth">
+        <h1>Ссылка недействительна</h1><p class="sub">Ссылка сброса истекла или уже использована.</p>
+        <div class="alt"><a href="${u('/forgot')}">Запросить снова</a></div>
+      </div></div>`,
+    });
+  }
+  return layout({
+    title: 'Новый пароль — FBS-сервис', base,
+    body: `<div class="center"><div class="card auth">
+      <h1>Новый пароль</h1><p class="sub">Придумайте новый пароль для входа</p>
+      ${errBox(error)}
+      <form method="post" action="${u(`/reset/${esc(token)}`)}">${csrfField(csrf)}
+        <label for="password">Новый пароль <span class="muted">(мин. 8 символов)</span></label>
+        <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+        <label for="password2">Повторите пароль</label>
+        <input id="password2" name="password2" type="password" autocomplete="new-password" minlength="8" required>
+        <button class="btn" type="submit">Сохранить пароль</button>
+      </form>
     </div></div>`,
   });
 }
@@ -364,7 +421,7 @@ export function inviteAcceptPage({ csrf, user, org, invite, already, mismatch, f
 }
 
 // ── Панель супер-админа: компании (название/лицензия) и пользователи ─────────
-export function adminPage({ user, csrf, base = '', orgs, users, ok, err }) {
+export function adminPage({ user, csrf, base = '', orgs, users, resets, resetLink, ok, err }) {
   const u = (p) => base + p;
 
   const orgRows = orgs.map((o) => `<tr>
@@ -397,9 +454,28 @@ export function adminPage({ user, csrf, base = '', orgs, users, ok, err }) {
       <td class="tl"><b>${esc(usr.name || '—')}</b><div class="kv">${esc(usr.email)}</div></td>
       <td class="kv">${esc(String(usr.created_at).slice(0, 10))}</td>
       <td>${esc(String(usr.owns))} / ${esc(String(usr.memberships))}</td>
-      <td style="text-align:right">${isMe ? '<span class="muted">это вы</span>' : formBtn(csrf, u(`/admin/user/${usr.id}/delete`), 'Удалить', 'mini btn-danger', `Полностью удалить пользователя ${usr.email}? Система забудет его (включая email), его компании будут удалены. Отменить нельзя.`)}</td>
+      <td style="text-align:right;white-space:nowrap">
+        ${formBtn(csrf, u(`/admin/user/${usr.id}/reset`), 'Сброс пароля', 'mini btn-sm')}
+        ${isMe ? '<span class="muted" style="margin-left:6px">это вы</span>' : formBtn(csrf, u(`/admin/user/${usr.id}/delete`), 'Удалить', 'mini btn-danger', `Полностью удалить пользователя ${usr.email}? Система забудет его (включая email), его компании будут удалены. Отменить нельзя.`)}
+      </td>
     </tr>`;
   }).join('');
+
+  const resetLinkBox = resetLink
+    ? `<div class="ok">Ссылка сброса пароля для <b>${esc(resetLink.email)}</b> (действует 1 час). Передайте её человеку:
+        <div style="margin-top:8px"><a href="${esc(resetLink.url)}" style="font-weight:600;word-break:break-all">${esc(resetLink.url)}</a></div>
+        <input class="linkbox" style="width:100%;margin-top:8px" readonly value="${esc(resetLink.url)}" onclick="this.select()" aria-label="Ссылка сброса пароля"></div>`
+    : '';
+  const resetRows = (resets || []).map((rr) => `<tr>
+      <td class="tl">${esc(rr.email)}</td>
+      <td class="kv">${esc(String(rr.created_at).slice(0, 16).replace('T', ' '))}</td>
+      <td class="tl"><a href="${esc(rr.url)}" style="word-break:break-all">${esc(rr.url)}</a></td>
+    </tr>`).join('');
+  const resetSection = (resets && resets.length)
+    ? `<div class="section"><h2>Запросы на сброс пароля</h2>
+        <p class="kv" style="margin:0 0 8px">Пользователи запросили сброс через «Забыли пароль?». Передайте им ссылку (действует 1 час).</p>
+        <div class="scroll"><table class="rt"><thead><tr>${thT('Email', 'Кто запросил')}${thT('Когда', 'Время запроса')}${thT('Ссылка сброса', 'Передайте пользователю')}</tr></thead><tbody>${resetRows}</tbody></table></div></div>`
+    : '';
 
   return layout({
     title: 'Панель супер-админа', user, csrf, base,
@@ -407,7 +483,8 @@ export function adminPage({ user, csrf, base = '', orgs, users, ok, err }) {
       <div class="crumbs"><a href="${u('/')}">← Компании</a></div>
       <h1>Панель супер-админа</h1>
       <p class="sub">Управление всеми компаниями (название, лицензия) и пользователями сервиса.</p>
-      ${ok ? okBox('Сохранено.') : ''}${err === 'self' ? errBox('Нельзя удалить самого себя.') : ''}${err === 'name' ? errBox('Введите название компании.') : ''}
+      ${ok ? okBox('Сохранено.') : ''}${err === 'self' ? errBox('Нельзя удалить самого себя.') : ''}${err === 'name' ? errBox('Введите название компании.') : ''}${err === 'nouser' ? errBox('Пользователь не найден.') : ''}
+      ${resetLinkBox}
 
       <div class="section">
         <h2>Компании</h2>
@@ -424,6 +501,8 @@ export function adminPage({ user, csrf, base = '', orgs, users, ok, err }) {
           <tbody>${userRows || '<tr><td colspan="4" class="muted">Пользователей нет.</td></tr>'}</tbody>
         </table></div>
       </div>
+
+      ${resetSection}
     </div>`,
   });
 }
