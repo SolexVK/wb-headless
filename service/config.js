@@ -45,6 +45,10 @@ export const config = {
   // Супер-админы (могут менять число мест у любой компании). Список email через запятую.
   superAdminEmails: String(process.env.SUPER_ADMIN_EMAILS || 'solexvk@gmail.com')
     .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+  // Ежедневный автоснимок остатков (копит историю для «динамики по фулфилменту»).
+  // Включён по умолчанию; тесты выключают через AUTO_SNAPSHOT_STOCK=0.
+  autoSnapshotStock: !['0', 'false', 'no'].includes(String(process.env.AUTO_SNAPSHOT_STOCK || '').toLowerCase())
+    && process.env.NODE_ENV !== 'test',
 };
 
 export const isSuperAdmin = (email) => !!email && config.superAdminEmails.includes(String(email).toLowerCase());

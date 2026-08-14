@@ -62,6 +62,7 @@ const q = {
   cabinetById: db.prepare('SELECT * FROM cabinets WHERE id = ?'),
   firstCabinet: db.prepare('SELECT * FROM cabinets WHERE org_id = ? ORDER BY created_at LIMIT 1'),
   activeCabinet: db.prepare('SELECT * FROM cabinets WHERE org_id = ? AND is_active = 1 AND wb_token_enc IS NOT NULL ORDER BY created_at LIMIT 1'),
+  allActiveCabinets: db.prepare('SELECT * FROM cabinets WHERE is_active = 1 AND wb_token_enc IS NOT NULL'),
   updateCabinetToken: db.prepare('UPDATE cabinets SET wb_token_enc = ?, token_iv = ?, token_tag = ?, token_meta = ? WHERE id = ?'),
   clearActive: db.prepare('UPDATE cabinets SET is_active = 0 WHERE org_id = ?'),
   setActive: db.prepare('UPDATE cabinets SET is_active = 1 WHERE id = ?'),
@@ -71,6 +72,9 @@ const q = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   latestRun: db.prepare('SELECT * FROM report_runs WHERE cabinet_id = ? AND report = ? ORDER BY created_at DESC, id DESC LIMIT 1'),
   runById: db.prepare('SELECT * FROM report_runs WHERE id = ?'),
+  runsByReport: db.prepare(`
+    SELECT id, generated_at, created_at, user_id FROM report_runs
+    WHERE cabinet_id = ? AND report = ? ORDER BY created_at DESC, id DESC LIMIT 200`),
   runsList: db.prepare(`
     SELECT r.id, r.report, r.params_json, r.summary_json, r.generated_at, r.created_at, r.user_id, u.email AS user_email
     FROM report_runs r LEFT JOIN users u ON u.id = r.user_id
@@ -194,6 +198,7 @@ export const Cabinets = {
   byId: (id) => q.cabinetById.get(id),
   activeOf: (orgId) => q.activeCabinet.get(orgId),
   firstOf: (orgId) => q.firstCabinet.get(orgId), // одна компания = один кабинет
+  allActive: () => q.allActiveCabinets.all(), // все активные кабинеты (для автоснимков)
 
   // Создать кабинет и (опц.) сразу привязать зашифрованный токен.
   create: (orgId, name, token, meta) => tx(() => {
@@ -264,6 +269,10 @@ export const ReportRuns = {
       createdAt: row.created_at, generatedAt: row.generated_at,
       params: safeJson(row.params_json), summary: safeJson(row.summary_json), data: gunz(row.data_gz) };
   },
+  // Список запусков одного отчёта (лёгкий) — для выбора даты в отчёте.
+  datesOf: (cabinetId, report) => q.runsByReport.all(cabinetId, report).map((r) => ({
+    id: r.id, createdAt: r.created_at, generatedAt: r.generated_at, authorId: r.user_id,
+  })),
   // Удалить может только автор запуска (проверка через user_id в запросе).
   deleteByAuthor: (id, userId) => q.deleteRunByAuthor.run(id, userId).changes > 0,
   purge: () => q.purgeRuns.run(`-${RETENTION_DAYS} days`),

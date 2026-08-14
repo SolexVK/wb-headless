@@ -118,6 +118,22 @@ try {
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Остатки') && /остаток\s*12/.test(r.text), 'Ф2: остатки видны в архиве');
 
+  // Второй снимок остатков → выбор даты (dropdown) на странице отчёта.
+  r = await req('GET', `/org/${orgId}/reports/stock`);
+  r = await req('POST', `/org/${orgId}/reports/stock/refresh`, form({ _csrf: csrfOf(r.text) }));
+  let twoSnaps = false, stockOpts = [];
+  for (let i = 0; i < 30 && !twoSnaps; i++) {
+    await sleep(80);
+    r = await req('GET', `/org/${orgId}/reports/stock`);
+    stockOpts = [...new Set((r.text.match(/<option value="(\d+)"/g) || []).map((m) => m.match(/\d+/)[0]))];
+    if (r.text.includes('Снимок на дату') && stockOpts.length >= 2) twoSnaps = true;
+  }
+  ok(twoSnaps, 'Ф2: выбор даты остатков появился (≥2 снимка)');
+  // Открыть более ранний снимок из архива по ?run= — показывается пометка «из архива».
+  const older = stockOpts[stockOpts.length - 1];
+  r = await req('GET', `/org/${orgId}/reports/stock?run=${older}`);
+  ok(r.status === 200 && r.text.includes('из архива') && r.text.includes('Снимок остатков на'), 'Ф2: остатки на выбранную дату (снимок из архива)');
+
   // Автор удаляет СВОЙ запуск из архива.
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Удалить'), 'Ф2: автор видит кнопку удаления своего запуска');

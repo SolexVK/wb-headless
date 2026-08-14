@@ -755,7 +755,7 @@ function stockResults(s, { downloadHref, whenLabel }) {
 }
 
 export function stockPage(p) {
-  const { user, csrf, base = '', org, role, active, latest, job } = p;
+  const { user, csrf, base = '', org, role, active, latest, snapshots = [], selected, job } = p;
   const u = (path) => base + path;
   const back = `<div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>`;
   if (!active) {
@@ -768,16 +768,39 @@ export function stockPage(p) {
   if (running) statusBox = `<div class="running">⏳ Получаю остатки на токене кабинета «${esc(active.name)}»… ${esc(job.log || '')}<br><span class="muted">Страница обновится сама.</span></div>`;
   else if (job && job.state === 'error') statusBox = `<div class="err" style="white-space:pre-wrap">Ошибка: ${esc(job.error || '')}</div>`;
   else if (job && job.state === 'done') statusBox = okBox('Готово.');
-  const results = latest?.data
-    ? stockResults(latest.data, { downloadHref: (k) => u(`/org/${org.id}/reports/stock/download/${k}`), whenLabel: latest.createdAt ? String(latest.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '' })
+
+  // Показываем выбранный снимок из архива (на дату) либо последний.
+  const view = selected || latest;
+  const isArchived = !!selected;
+  const whenLabel = view?.createdAt ? String(view.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '';
+  const dlHref = isArchived
+    ? (k) => u(`/org/${org.id}/reports/archive/${selected.id}/download/${k}`)
+    : (k) => u(`/org/${org.id}/reports/stock/download/${k}`);
+  const results = view?.data
+    ? `${isArchived ? `<div class="section" style="padding-bottom:0"><div class="warn" style="margin:0">📅 Снимок остатков на <b>${esc(whenLabel)}</b> (из архива). <a href="${u(`/org/${org.id}/reports/stock`)}">← к текущему</a></div></div>` : ''}
+       ${stockResults(view.data, { downloadHref: dlHref, whenLabel })}`
     : `<div class="section"><p class="muted">Данных пока нет — нажмите «Обновить данные».</p></div>`;
+
+  // Выпадающий выбор даты снимка (из накопленного архива остатков).
+  const curId = latest?.id;
+  const dateOpts = snapshots.map((s) => {
+    const label = String(s.createdAt || '').slice(0, 16).replace('T', ' ') + ' UTC' + (s.id === curId ? ' — текущий' : '') + (s.authorId ? '' : ' · авто');
+    const sel = (isArchived ? s.id === selected.id : s.id === curId) ? ' selected' : '';
+    return `<option value="${s.id}"${sel}>${esc(label)}</option>`;
+  }).join('');
+  const datePicker = snapshots.length > 1
+    ? `<div class="section"><label class="kv" style="display:block;margin-bottom:6px" title="Показать остатки на выбранную сохранённую дату (из архива снимков)">Снимок на дату</label>
+       <form method="get" action="${u(`/org/${org.id}/reports/stock`)}"><select name="run" style="max-width:340px" onchange="this.form.submit()">${dateOpts}</select> <noscript><button class="btn" type="submit" style="max-width:140px;display:inline-block">Показать</button></noscript></form></div>`
+    : '';
+
   return layout({
     title: `Остатки — ${org.name}`, user, csrf, base, head,
     body: `<div class="wrap">${back}
       <h1>Остатки <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
-      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Текущий остаток FBS по каждому складу и по артикулам/цветам. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
+      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Текущий остаток FBS по складам и артикулам/цветам. Снимок сохраняется автоматически раз в сутки. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
       ${statusBox}
       <div class="section"><form method="post" action="${u(`/org/${org.id}/reports/stock/refresh`)}">${csrfField(csrf)}<button class="btn" type="submit" style="max-width:280px"${running ? ' disabled' : ''}>${running ? 'Идёт обновление…' : 'Обновить данные'}</button></form></div>
+      ${datePicker}
       ${results}
     </div>`,
   });

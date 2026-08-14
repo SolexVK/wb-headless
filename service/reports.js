@@ -98,11 +98,19 @@ reportsRouter.get('/org/:id/reports/podsort/download/:kind', requireAuth, loadOr
 reportsRouter.get('/org/:id/reports/stock', requireAuth, loadOrg, (req, res) => {
   const cab = Cabinets.activeOf(req.org.id);
   const latest = cab ? ReportRuns.latest(cab.id, 'stock') : null;
+  // Список собранных снимков остатков (для выбора даты) + выбранный из архива.
+  const snapshots = cab ? ReportRuns.datesOf(cab.id, 'stock') : [];
+  let selected = null;
+  const wantId = Number(req.query.run);
+  if (cab && wantId && latest && wantId !== latest.id) {
+    const run = ReportRuns.byId(wantId);
+    if (run && run.cabinetId === cab.id && run.report === 'stock' && run.data) selected = run;
+  }
   res.send(stockPage({
     user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
     org: req.org, role: req.role,
     active: cab ? { id: cab.id, name: cab.name } : null,
-    latest, job: cab ? getJob(cab.id, 'stock') : null,
+    latest, snapshots, selected, job: cab ? getJob(cab.id, 'stock') : null,
   }));
 });
 
