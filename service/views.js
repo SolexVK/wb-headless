@@ -745,7 +745,7 @@ function stockResults(s, { downloadHref, whenLabel }) {
   return `<div class="section">
       <h2>Результат ${whenLabel ? `<span class="muted" style="font-size:13px;font-weight:400">${esc(whenLabel)}</span>` : ''}</h2>
       <div class="tiles">${tiles}</div>
-      <div style="margin-bottom:6px"><a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
+      <div style="margin-bottom:6px"><a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
       <h2>По фулфилментам</h2>
       ${whTable}
       <h2 style="margin-top:20px">Остаток по артикул+цвет × склад</h2>

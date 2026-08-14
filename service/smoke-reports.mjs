@@ -110,6 +110,10 @@ try {
   const sj = await req('GET', `/org/${orgId}/reports/stock/download/json`);
   let sp = null; try { sp = JSON.parse(sj.text); } catch { /* */ }
   ok(sj.status === 200 && sp?.totals?.grandTotal === 12, 'Ф2: выгрузка остатков (JSON)');
+  // Excel-выгрузка остатков (openpyxl → .xlsx = zip, сигнатура PK\x03\x04).
+  const sx = await fetch(base + `/org/${orgId}/reports/stock/download/xlsx`, { headers: { cookie } });
+  const xbuf = Buffer.from(await sx.arrayBuffer());
+  ok(sx.status === 200 && xbuf.length > 500 && xbuf[0] === 0x50 && xbuf[1] === 0x4b, 'Ф2: выгрузка остатков (Excel .xlsx)');
   // Остатки попали в общий архив (report=stock).
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Остатки') && /остаток\s*12/.test(r.text), 'Ф2: остатки видны в архиве');

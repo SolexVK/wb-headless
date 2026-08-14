@@ -223,6 +223,17 @@ export async function buildXlsx(cabinet, snapshot) {
   return out;
 }
 
+// Excel по остаткам: пишем агрегированный снимок и запускаем python-генератор.
+export async function buildStockXlsx(cabinet, snapshot) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'fbs-stock-service.json'), JSON.stringify(snapshot, null, 2));
+  const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-stock-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
+  const out = path.join(dir, 'fbs-stock.xlsx');
+  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать Excel остатков:\n' + tail(r.err));
+  return out;
+}
+
 export async function buildDashboardHtml(cabinet, snapshot) {
   const dir = ensureSnapshotFile(cabinet, snapshot);
   const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-replenishment-dashboard.mjs')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });

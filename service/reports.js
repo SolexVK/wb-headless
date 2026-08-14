@@ -6,7 +6,7 @@ import express from 'express';
 import { Orgs, Cabinets, ReportRuns } from './models.js';
 import { requireAuth } from './security.js';
 import { reportsPage, podsortPage, stockPage, archivePage, archiveViewPage } from './views.js';
-import { podsortDefaults, normalizePodsort, startPodsort, startStock, getJob, buildXlsx, buildDashboardHtml } from './reports-runner.js';
+import { podsortDefaults, normalizePodsort, startPodsort, startStock, getJob, buildXlsx, buildStockXlsx, buildDashboardHtml } from './reports-runner.js';
 import { logger } from './logger.js';
 
 export const reportsRouter = express.Router();
@@ -43,10 +43,12 @@ async function sendDownload(res, kind, cabId, snapshot, stem, report = 'podsort'
     res.setHeader('Content-Disposition', `attachment; filename="${stem}.json"`);
     return res.send(JSON.stringify(snapshot, null, 2));
   }
-  if (report !== 'podsort') return res.status(404).send('Для этого отчёта доступна выгрузка только в JSON.');
-  if (kind === 'xlsx') return res.download(await buildXlsx({ id: cabId }, snapshot), `${stem}.xlsx`);
-  if (kind === 'html') return res.download(await buildDashboardHtml({ id: cabId }, snapshot), `${stem}-dashboard.html`);
-  return res.status(404).send('Неизвестный формат');
+  if (kind === 'xlsx') {
+    const file = report === 'stock' ? await buildStockXlsx({ id: cabId }, snapshot) : await buildXlsx({ id: cabId }, snapshot);
+    return res.download(file, `${stem}.xlsx`);
+  }
+  if (kind === 'html' && report === 'podsort') return res.download(await buildDashboardHtml({ id: cabId }, snapshot), `${stem}-dashboard.html`);
+  return res.status(404).send('Для этого отчёта такой формат недоступен.');
 }
 
 // ── Список отчётов ───────────────────────────────────────────────────────────
