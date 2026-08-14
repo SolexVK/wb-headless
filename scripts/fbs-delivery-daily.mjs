@@ -50,14 +50,23 @@ const inWindow = new Set(windowDays);
 async function fetchOrders() {
   const nowSec = Math.floor(Date.now() / 1000);
   const fromSec = Math.floor(Date.parse(windowDays[windowDays.length - 1] + 'T00:00:00Z') / 1000) - BUFFER * 86400;
-  const orders = []; let next = 0;
-  for (let p = 1; ; p++) {
-    const { data } = await wb.get('marketplace', '/api/v3/orders', { query: { limit: 1000, next, dateFrom: fromSec, dateTo: nowSec }, methodLimit: MP });
-    const b = data.orders || []; orders.push(...b);
-    log(`  orders: стр.${p} +${b.length} (${orders.length})`);
-    if (b.length < 1000) break; next = data.next;
+  // WB /api/v3/orders не принимает окно больше ~30 дней одним запросом — тянем
+  // кусками ≤28 дней (как в подсорте) и дедупим по id на стыках.
+  const CHUNK = 28 * 86400;
+  const byId = new Map();
+  for (let end = nowSec; end > fromSec;) {
+    const start = Math.max(fromSec, end - CHUNK);
+    let next = 0;
+    for (let p = 1; ; p++) {
+      const { data } = await wb.get('marketplace', '/api/v3/orders', { query: { limit: 1000, next, dateFrom: start, dateTo: end }, methodLimit: MP });
+      const b = data.orders || [];
+      for (const o of b) byId.set(o.id ?? `${o.rid}`, o);
+      log(`  orders ${new Date(start * 1000).toISOString().slice(0, 10)}..${new Date(end * 1000).toISOString().slice(0, 10)}: стр.${p} +${b.length} (${byId.size})`);
+      if (b.length < 1000) break; next = data.next;
+    }
+    end = start;
   }
-  return orders;
+  return [...byId.values()];
 }
 async function fetchSupplies(neededIds) {
   const map = new Map(); let next = 0;
