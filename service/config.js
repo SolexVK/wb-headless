@@ -22,9 +22,16 @@ const tokenEncKey = process.env.TOKEN_ENC_KEY || null;
 if (!tokenEncKey && isProd) throw new Error('TOKEN_ENC_KEY обязателен в production (нужен для шифрования WB-токенов, см. .env.example)');
 if (!tokenEncKey) process.stderr.write('[config] TOKEN_ENC_KEY не задан — подключение кабинетов WB будет недоступно (Фаза 1). Задайте .env.\n');
 
+// BASE_PATH — префикс, под которым сервис отдаётся наружу (напр. '/fbs' за Caddy).
+// Нормализуем к виду '' | '/fbs' (ведущий слэш, без хвостового). Пустой = корень.
+let basePath = String(process.env.BASE_PATH || '').trim();
+if (basePath && !basePath.startsWith('/')) basePath = '/' + basePath;
+basePath = basePath.replace(/\/+$/, '');
+
 export const config = {
   host: process.env.HOST || '127.0.0.1',
   port: Number(process.env.PORT || 9110),
+  basePath,
   isProd,
   sessionSecret,
   tokenEncKey, // нужен с Фазы 1 (шифрование WB-токенов)

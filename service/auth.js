@@ -20,14 +20,14 @@ const popReturnTo = (req) => {
 // ── Регистрация ─────────────────────────────────────────────────────────────
 authRouter.get('/register', (req, res) => {
   if (req.session.user) return res.redirect('/');
-  res.send(registerPage({ csrf: res.locals.csrf }));
+  res.send(registerPage({ csrf: res.locals.csrf, base: res.locals.base }));
 });
 
 authRouter.post('/register', authLimiter, (req, res) => {
   const email = String(req.body.email || '').trim();
   const password = String(req.body.password || '');
   const name = String(req.body.name || '').trim();
-  const fail = (error) => res.status(400).send(registerPage({ csrf: res.locals.csrf, error, email, name }));
+  const fail = (error) => res.status(400).send(registerPage({ csrf: res.locals.csrf, error, email, name, base: res.locals.base }));
 
   if (!EMAIL_RE.test(email)) return fail('Введите корректный email.');
   if (password.length < 8) return fail('Пароль должен быть не короче 8 символов.');
@@ -48,7 +48,7 @@ authRouter.post('/register', authLimiter, (req, res) => {
 // ── Вход ────────────────────────────────────────────────────────────────────
 authRouter.get('/login', (req, res) => {
   if (req.session.user) return res.redirect('/');
-  res.send(loginPage({ csrf: res.locals.csrf }));
+  res.send(loginPage({ csrf: res.locals.csrf, base: res.locals.base }));
 });
 
 authRouter.post('/login', authLimiter, (req, res) => {
@@ -56,7 +56,7 @@ authRouter.post('/login', authLimiter, (req, res) => {
   const password = String(req.body.password || '');
   const u = Users.byEmail(email);
   if (!u || !Users.verify(u, password)) {
-    return res.status(401).send(loginPage({ csrf: res.locals.csrf, error: 'Неверный email или пароль.', email }));
+    return res.status(401).send(loginPage({ csrf: res.locals.csrf, error: 'Неверный email или пароль.', email, base: res.locals.base }));
   }
   Users.touchLogin(u.id);
   setSession(req, u);
@@ -72,5 +72,5 @@ authRouter.post('/logout', (req, res) => {
 // ── Домашняя (требует входа) ─────────────────────────────────────────────────
 authRouter.get('/', requireAuth, (req, res) => {
   const orgs = Orgs.ofUser(req.session.user.id);
-  res.send(homePage({ user: req.session.user, orgs, csrf: res.locals.csrf }));
+  res.send(homePage({ user: req.session.user, orgs, csrf: res.locals.csrf, base: res.locals.base }));
 });

@@ -17,20 +17,40 @@ export function buildApp() {
   app.use(httpLogger);
   app.use(helmetMw);
   app.use(express.urlencoded({ extended: false, limit: '32kb' }));
-  app.use(session({
+
+  const base = config.basePath || '';
+  const healthz = (req, res) => res.json({ status: 'ok', phase: 1, base: base || '/', ts: new Date().toISOString() });
+  // Health-check по корню — без сессии/CSRF (для мониторинга/Caddy, вне префикса).
+  app.get('/healthz', healthz);
+
+  // Всё приложение живёт под base (BASE_PATH за Caddy). Сессию/CSRF вешаем ВНУТРИ
+  // этого мостика: cookie ограничена path=base, и express-session не создаёт
+  // req.session для запросов вне base — иначе CSRF падал бы на них.
+  const root = express.Router();
+  root.use(session({
     name: 'fbs.sid',
     store: new SqliteSessionStore(),
     secret: config.sessionSecret,
     resave: false,
     saveUninitialized: false,
     rolling: true,
-    cookie: { httpOnly: true, sameSite: 'lax', secure: config.isProd, maxAge: 7 * 24 * 3600 * 1000 },
+    cookie: { httpOnly: true, sameSite: 'lax', secure: config.isProd, maxAge: 7 * 24 * 3600 * 1000, path: base || '/' },
   }));
-  app.use(csrf);
-
-  app.get('/healthz', (req, res) => res.json({ status: 'ok', phase: 1, ts: new Date().toISOString() }));
-  app.use('/', authRouter);
-  app.use('/', orgRouter);
+  root.use(csrf);
+  // Префикс для ссылок (res.locals.base) и авто-дополнение редиректов на абсолютные пути.
+  root.use((req, res, next) => {
+    res.locals.base = base;
+    if (base) {
+      const orig = res.redirect.bind(res);
+      res.redirect = (loc) => (typeof loc === 'string' && loc.startsWith('/') && !loc.startsWith('//'))
+        ? orig(base + loc) : orig(loc);
+    }
+    next();
+  });
+  root.get('/healthz', healthz);
+  root.use('/', authRouter);
+  root.use('/', orgRouter);
+  app.use(base || '/', root);
 
   app.use((req, res) => res.status(404).send('Не найдено'));
   app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars

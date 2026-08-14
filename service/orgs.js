@@ -3,7 +3,7 @@
 // приглашения, роли) — owner/admin. WB-токен проверяется (validateToken) перед
 // привязкой и хранится только в шифрованном виде.
 import express from 'express';
-import { Orgs, Members, Cabinets, Invitations, Users } from './models.js';
+import { Orgs, Members, Cabinets, Invitations } from './models.js';
 import { requireAuth } from './security.js';
 import { validateToken } from './wb.js';
 import { orgPage, inviteAcceptPage } from './views.js';
@@ -30,12 +30,11 @@ const requireManage = (req, res, next) =>
 function renderOrg(req, res, extra = {}) {
   const cabinets = Cabinets.ofOrg(req.org.id).map((c) => ({ ...c, meta: safeMeta(c.token_meta) }));
   res.status(extra.status || 200).send(orgPage({
-    user: req.session.user, csrf: res.locals.csrf,
+    user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
     org: req.org, role: req.role,
     members: Members.ofOrg(req.org.id),
     invites: Orgs.canManage(req.role) ? Invitations.pending(req.org.id) : [],
     cabinets,
-    baseUrl: `${req.protocol}://${req.get('host')}`,
     ...extra,
   }));
 }
@@ -100,7 +99,7 @@ orgRouter.post('/org/:id/invite', requireAuth, loadOrg, requireManage, (req, res
   if (!['admin', 'member'].includes(role)) return renderOrg(req, res, { status: 400, invError: 'Некорректная роль.' });
   const token = Invitations.create(req.org.id, email, role);
   logger.info({ orgId: req.org.id, email, role }, 'приглашение создано');
-  const link = `${req.protocol}://${req.get('host')}/invite/${token}`;
+  const link = `${req.protocol}://${req.get('host')}${res.locals.base || ''}/invite/${token}`;
   renderOrg(req, res, { invOk: `Приглашение создано. Ссылка (действует 7 дней): ${link}` });
 });
 
@@ -125,16 +124,17 @@ orgRouter.post('/org/:id/member/:userId/remove', requireAuth, loadOrg, requireMa
 // ── Приём приглашения ────────────────────────────────────────────────────────
 orgRouter.get('/invite/:token', (req, res) => {
   const invite = Invitations.byToken(req.params.token);
-  if (!req.session.user) { req.session.returnTo = req.originalUrl; return res.redirect('/login'); }
-  if (!Invitations.isValid(invite)) return res.status(410).send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, invalid: true }));
+  // req.url — путь без префикса base (его срезает mount); redirect-обёртка вернёт base сама.
+  if (!req.session.user) { req.session.returnTo = req.url; return res.redirect('/login'); }
+  if (!Invitations.isValid(invite)) return res.status(410).send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, invalid: true, base: res.locals.base }));
   const org = Orgs.byId(invite.org_id);
   const already = Orgs.isMember(req.session.user.id, invite.org_id);
-  res.send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, org, invite, already, token: req.params.token }));
+  res.send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, org, invite, already, token: req.params.token, base: res.locals.base }));
 });
 
 orgRouter.post('/invite/:token/accept', requireAuth, (req, res) => {
   const invite = Invitations.byToken(req.params.token);
-  if (!Invitations.isValid(invite)) return res.status(410).send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, invalid: true }));
+  if (!Invitations.isValid(invite)) return res.status(410).send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, invalid: true, base: res.locals.base }));
   Invitations.accept(invite, req.session.user.id);
   logger.info({ orgId: invite.org_id, userId: req.session.user.id }, 'приглашение принято');
   res.redirect(`/org/${invite.org_id}`);

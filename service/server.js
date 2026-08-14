@@ -6,7 +6,7 @@ import { buildApp } from './app.js';
 
 const app = buildApp();
 const server = app.listen(config.port, config.host, () => {
-  logger.info({ url: `http://${config.host}:${config.port}` }, 'FBS-сервис запущен (Фаза 0)');
+  logger.info({ url: `http://${config.host}:${config.port}${config.basePath || ''}` }, 'FBS-сервис запущен');
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

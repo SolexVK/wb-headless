@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Мульти-тенант веб-сервис отчётов FBS (Фаза 0: каркас + авторизация)",
+  "description": "Мульти-тенант веб-сервис отчётов FBS (Фазы 0–1: авторизация, организации, кабинеты WB)",
   "scripts": {
     "start": "node --experimental-sqlite server.js",
     "dev": "node --experimental-sqlite --watch server.js",
-    "test": "node --experimental-sqlite smoke-test.mjs"
+    "test": "node --experimental-sqlite smoke-test.mjs && node --experimental-sqlite smoke-basepath.mjs"
   },
   "engines": {
     "node": ">=22.5"

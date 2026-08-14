@@ -8,7 +8,7 @@ const CSS = `
 *{box-sizing:border-box}body{margin:0;background:var(--ground);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.55}
 a{color:var(--accent-d);text-decoration:none}a:hover{text-decoration:underline}
 .top{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--surface)}
-.top .brand{font-weight:750;letter-spacing:-.01em}.top .brand span{color:var(--accent-d)}
+.top .brand{font-weight:750;letter-spacing:-.01em;color:var(--ink)}.top .brand:hover{text-decoration:none}.top .brand span{color:var(--accent-d)}
 .top form{margin:0}
 .wrap{max-width:960px;margin:0 auto;padding:28px 22px}
 .center{min-height:calc(100vh - 0px);display:grid;place-items:center;padding:24px}
@@ -59,12 +59,13 @@ select{padding:9px 12px;border:1px solid var(--line);border-radius:9px;backgroun
 .scopes span{display:inline-block;font-size:11px;padding:1px 7px;border-radius:6px;background:var(--ground);border:1px solid var(--line);margin:2px 3px 0 0}
 `;
 
-function layout({ title, body, user, csrf }) {
+function layout({ title, body, user, csrf, base = '' }) {
+  const u = (p) => base + p;
   const nav = user
-    ? `<div class="top"><div class="brand">FBS<span>·</span>сервис</div>
+    ? `<div class="top"><a class="brand" href="${u('/')}">FBS<span>·</span>сервис</a>
         <div style="display:flex;gap:12px;align-items:center">
           <span class="muted" style="font-size:13px">${esc(user.email)}</span>
-          <form method="post" action="/logout">${csrfField(csrf)}<button class="btn btn-sm" type="submit">Выйти</button></form>
+          <form method="post" action="${u('/logout')}">${csrfField(csrf)}<button class="btn btn-sm" type="submit">Выйти</button></form>
         </div></div>`
     : '';
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
@@ -75,31 +76,33 @@ function layout({ title, body, user, csrf }) {
 const csrfField = (csrf) => `<input type="hidden" name="_csrf" value="${esc(csrf)}">`;
 const errBox = (e) => (e ? `<div class="err">${esc(e)}</div>` : '');
 
-export function loginPage({ csrf, error, email }) {
+export function loginPage({ csrf, error, email, base = '' }) {
+  const u = (p) => base + p;
   return layout({
-    title: 'Вход — FBS-сервис',
+    title: 'Вход — FBS-сервис', base,
     body: `<div class="center"><div class="card auth">
       <h1>Вход</h1><p class="sub">FBS-сервис отчётов и подсорта</p>
       ${errBox(error)}
-      <form method="post" action="/login">${csrfField(csrf)}
+      <form method="post" action="${u('/login')}">${csrfField(csrf)}
         <label for="email">Email</label>
         <input id="email" name="email" type="email" autocomplete="username" value="${esc(email || '')}" required>
         <label for="password">Пароль</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required>
         <button class="btn" type="submit">Войти</button>
       </form>
-      <div class="alt">Нет аккаунта? <a href="/register">Зарегистрироваться</a></div>
+      <div class="alt">Нет аккаунта? <a href="${u('/register')}">Зарегистрироваться</a></div>
     </div></div>`,
   });
 }
 
-export function registerPage({ csrf, error, email, name }) {
+export function registerPage({ csrf, error, email, name, base = '' }) {
+  const u = (p) => base + p;
   return layout({
-    title: 'Регистрация — FBS-сервис',
+    title: 'Регистрация — FBS-сервис', base,
     body: `<div class="center"><div class="card auth">
       <h1>Регистрация</h1><p class="sub">Создаётся аккаунт и ваша организация — потом подключите кабинет WB</p>
       ${errBox(error)}
-      <form method="post" action="/register">${csrfField(csrf)}
+      <form method="post" action="${u('/register')}">${csrfField(csrf)}
         <label for="name">Имя</label>
         <input id="name" name="name" type="text" autocomplete="name" value="${esc(name || '')}">
         <label for="email">Email</label>
@@ -108,20 +111,21 @@ export function registerPage({ csrf, error, email, name }) {
         <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
         <button class="btn" type="submit">Создать аккаунт</button>
       </form>
-      <div class="alt">Уже есть аккаунт? <a href="/login">Войти</a></div>
+      <div class="alt">Уже есть аккаунт? <a href="${u('/login')}">Войти</a></div>
     </div></div>`,
   });
 }
 
-export function homePage({ user, orgs, csrf }) {
+export function homePage({ user, orgs, csrf, base = '' }) {
+  const u = (p) => base + p;
   const orgList = orgs.length
-    ? orgs.map((o) => `<a class="tile" href="/org/${o.id}" style="display:block">
+    ? orgs.map((o) => `<a class="tile" href="${u(`/org/${o.id}`)}" style="display:block">
         <h3>${esc(o.name)} <span class="badge ${esc(o.role)}">${esc(roleRu(o.role))}</span></h3>
         <p>Кабинеты, участники и отчёты →</p></a>`).join('')
     : `<div class="tile"><p class="muted">Организаций пока нет.</p></div>`;
   return layout({
     title: 'FBS-сервис',
-    user, csrf,
+    user, csrf, base,
     body: `<div class="wrap">
       <h1>Здравствуйте, ${esc(user.name || user.email)}</h1>
       <p class="sub">Ваши организации. Откройте организацию, чтобы подключить кабинет WB и участников.</p>
@@ -151,7 +155,8 @@ function tokenMetaLine(meta) {
 }
 
 export function orgPage(p) {
-  const { user, csrf, org, role, members, invites, cabinets, baseUrl } = p;
+  const { user, csrf, org, role, members, invites, cabinets, base = '' } = p;
+  const u = (path) => base + path;
   const manage = role === 'owner' || role === 'admin';
 
   // Кабинеты.
@@ -160,13 +165,13 @@ export function orgPage(p) {
       <td><b>${esc(c.name)}</b>${c.is_active ? ' <span class="badge on">активный</span>' : ''}</td>
       <td>${c.has_token ? tokenMetaLine(c.meta) : '<span class="badge off">нет токена</span>'}</td>
       <td style="white-space:nowrap;text-align:right">
-        ${manage && !c.is_active && c.has_token ? formBtn(csrf, `/org/${org.id}/cabinet/${c.id}/activate`, 'Сделать активным', 'mini btn-sm') : ''}
-        ${manage ? formBtn(csrf, `/org/${org.id}/cabinet/${c.id}/remove`, 'Удалить', 'mini btn-danger', 'Удалить кабинет и его токен?') : ''}
+        ${manage && !c.is_active && c.has_token ? formBtn(csrf, u(`/org/${org.id}/cabinet/${c.id}/activate`), 'Сделать активным', 'mini btn-sm') : ''}
+        ${manage ? formBtn(csrf, u(`/org/${org.id}/cabinet/${c.id}/remove`), 'Удалить', 'mini btn-danger', 'Удалить кабинет и его токен?') : ''}
       </td>
     </tr>`).join('') : `<tr><td colspan="3" class="muted">Кабинетов пока нет — подключите первый ниже.</td></tr>`;
 
   const connectForm = manage ? `
-    <form method="post" action="/org/${org.id}/cabinet" style="margin-top:14px">
+    <form method="post" action="${u(`/org/${org.id}/cabinet`)}" style="margin-top:14px">
       ${csrfField(csrf)}
       <label for="cabname">Название кабинета</label>
       <input id="cabname" name="name" type="text" placeholder="Напр. Основной магазин" value="${esc(p.cabForm?.name || '')}">
@@ -182,7 +187,7 @@ export function orgPage(p) {
     const isMe = m.user_id === user.id;
     const canEdit = manage && m.role !== 'owner' && !isMe;
     const roleCell = canEdit ? `
-      <form method="post" action="/org/${org.id}/member/${m.user_id}/role" class="row-form" style="gap:6px">
+      <form method="post" action="${u(`/org/${org.id}/member/${m.user_id}/role`)}" class="row-form" style="gap:6px">
         ${csrfField(csrf)}
         <select name="role" onchange="this.form.submit()">
           <option value="member" ${m.role === 'member' ? 'selected' : ''}>участник</option>
@@ -192,7 +197,7 @@ export function orgPage(p) {
     return `<tr>
       <td><b>${esc(m.name || m.email)}</b>${isMe ? ' <span class="muted">(вы)</span>' : ''}<div class="kv">${esc(m.email)}</div></td>
       <td>${roleCell}</td>
-      <td style="text-align:right">${canEdit ? formBtn(csrf, `/org/${org.id}/member/${m.user_id}/remove`, 'Убрать', 'mini btn-danger', 'Убрать участника из организации?') : ''}</td>
+      <td style="text-align:right">${canEdit ? formBtn(csrf, u(`/org/${org.id}/member/${m.user_id}/remove`), 'Убрать', 'mini btn-danger', 'Убрать участника из организации?') : ''}</td>
     </tr>`;
   }).join('');
 
@@ -201,14 +206,14 @@ export function orgPage(p) {
       <td>${esc(i.email)}</td>
       <td><span class="badge ${esc(i.role)}">${esc(roleRu(i.role))}</span></td>
       <td class="kv">${esc(String(i.expires_at).slice(0, 10))}</td>
-      <td style="text-align:right">${formBtn(csrf, `/org/${org.id}/invite/${i.id}/revoke`, 'Отозвать', 'mini btn-sm')}</td>
+      <td style="text-align:right">${formBtn(csrf, u(`/org/${org.id}/invite/${i.id}/revoke`), 'Отозвать', 'mini btn-sm')}</td>
     </tr>`).join('');
 
   const inviteSection = manage ? `
     <div class="section">
       <h2>Приглашения</h2>
       ${p.invError ? errBox(p.invError) : ''}${p.invOk ? okBox(p.invOk) : ''}
-      <form method="post" action="/org/${org.id}/invite" class="row-form">
+      <form method="post" action="${u(`/org/${org.id}/invite`)}" class="row-form">
         ${csrfField(csrf)}
         <div><label for="invemail">Email</label><input id="invemail" name="email" type="email" placeholder="user@example.com" required></div>
         <div><label for="invrole">Роль</label>
@@ -219,9 +224,9 @@ export function orgPage(p) {
     </div>` : '';
 
   return layout({
-    title: `${org.name} — FBS-сервис`, user, csrf,
+    title: `${org.name} — FBS-сервис`, user, csrf, base,
     body: `<div class="wrap">
-      <div class="crumbs"><a href="/">← Организации</a></div>
+      <div class="crumbs"><a href="${u('/')}">← Организации</a></div>
       <h1>${esc(org.name)} <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
 
       <div class="section">
@@ -242,21 +247,22 @@ export function orgPage(p) {
   });
 }
 
-export function inviteAcceptPage({ csrf, user, org, invite, already, token, invalid }) {
+export function inviteAcceptPage({ csrf, user, org, invite, already, token, invalid, base = '' }) {
+  const u = (p) => base + p;
   const body = invalid
-    ? `<h1>Приглашение недействительно</h1><p class="sub">Ссылка истекла или уже использована.</p><div class="alt"><a href="/">На главную</a></div>`
+    ? `<h1>Приглашение недействительно</h1><p class="sub">Ссылка истекла или уже использована.</p><div class="alt"><a href="${u('/')}">На главную</a></div>`
     : already
-      ? `<h1>Вы уже участник</h1><p class="sub">${esc(org.name)} — вы уже состоите в этой организации.</p><div class="alt"><a href="/org/${org.id}">Открыть организацию</a></div>`
+      ? `<h1>Вы уже участник</h1><p class="sub">${esc(org.name)} — вы уже состоите в этой организации.</p><div class="alt"><a href="${u(`/org/${org.id}`)}">Открыть организацию</a></div>`
       : `<h1>Приглашение</h1>
          <p class="sub">Вас приглашают в организацию <b>${esc(org.name)}</b> как <span class="badge ${esc(invite.role)}">${esc(roleRu(invite.role))}</span></p>
-         <form method="post" action="/invite/${esc(token)}/accept">${csrfField(csrf)}
+         <form method="post" action="${u(`/invite/${esc(token)}/accept`)}">${csrfField(csrf)}
            <button class="btn" type="submit">Принять приглашение</button>
          </form>
-         <div class="alt"><a href="/">Отказаться</a></div>`;
-  return layout({ title: 'Приглашение — FBS-сервис', user, csrf, body: `<div class="center"><div class="card auth">${body}</div></div>` });
+         <div class="alt"><a href="${u('/')}">Отказаться</a></div>`;
+  return layout({ title: 'Приглашение — FBS-сервис', user, csrf, base, body: `<div class="center"><div class="card auth">${body}</div></div>` });
 }
 
-// Кнопка-форма (POST + CSRF) для одиночных действий.
+// Кнопка-форма (POST + CSRF) для одиночных действий. action уже с префиксом base.
 function formBtn(csrf, action, label, cls = 'mini btn-sm', confirm) {
   const onsubmit = confirm ? ` onsubmit="return confirm('${esc(confirm)}')"` : '';
   return `<form method="post" action="${action}" style="display:inline-block;margin:0 0 0 6px"${onsubmit}>${csrfField(csrf)}<button class="btn ${cls}" type="submit">${esc(label)}</button></form>`;
