@@ -115,7 +115,8 @@ const snapshot = {
 };
 
 if (!jsonOnly) {
-  const outDir = path.join(REPO, 'reports-output');
+  // REPORTS_OUTPUT_DIR — папка вывода (для мультитенант-сервиса, свой каталог на кабинет).
+  const outDir = process.env.REPORTS_OUTPUT_DIR ? path.resolve(process.env.REPORTS_OUTPUT_DIR) : path.join(REPO, 'reports-output');
   fs.mkdirSync(outDir, { recursive: true });
   const out = path.join(outDir, 'fbs-stock.json');
   fs.writeFileSync(out, JSON.stringify(snapshot, null, 2) + '\n');

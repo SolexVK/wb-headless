@@ -8,6 +8,7 @@ import { SqliteSessionStore } from './db.js';
 import { helmetMw, csrf } from './security.js';
 import { authRouter } from './auth.js';
 import { orgRouter } from './orgs.js';
+import { reportsRouter } from './reports.js';
 
 export function buildApp() {
   const app = express();
@@ -50,6 +51,7 @@ export function buildApp() {
   root.get('/healthz', healthz);
   root.use('/', authRouter);
   root.use('/', orgRouter);
+  root.use('/', reportsRouter);
   app.use(base || '/', root);
 
   app.use((req, res) => res.status(404).send('Не найдено'));

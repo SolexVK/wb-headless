@@ -31,7 +31,9 @@ import { WbClient } from '../lib/wbClient.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
-const R = (p) => path.join(REPO, 'reports-output', p);
+// REPORTS_OUTPUT_DIR — папка ввода/вывода (для мультитенант-сервиса, свой каталог на кабинет).
+const OUT_DIR = process.env.REPORTS_OUTPUT_DIR ? path.resolve(process.env.REPORTS_OUTPUT_DIR) : path.join(REPO, 'reports-output');
+const R = (p) => path.join(OUT_DIR, p);
 const arg = (n, d) => { const i = process.argv.indexOf('--' + n); return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 let CFG = {};
 try { CFG = JSON.parse(fs.readFileSync(path.join(REPO, 'config/replenishment.json'), 'utf8')); } catch { /* дефолты */ }

@@ -1,0 +1,89 @@
+// service/smoke-reports.mjs — Фаза 2: оболочка отчётов + Подсорт (офлайн).
+// PODSORT_FAKE=1 → раннер не ходит в WB, а кладёт канонический снимок.
+//   node --experimental-sqlite smoke-reports.mjs
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+process.env.NODE_ENV = 'test';
+process.env.SESSION_SECRET = 'test-secret-please-change';
+process.env.TOKEN_ENC_KEY = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
+process.env.WB_PING_ONLINE = '0';
+process.env.PODSORT_FAKE = '1';
+process.env.DB_PATH = path.join(os.tmpdir(), `fbs-reports-${process.pid}.sqlite`);
+
+const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+const goodToken = (() => {
+  const s = 2 ** 1 + 2 ** 4 + 2 ** 5; // Контент+Маркетплейс+Статистика
+  const exp = Math.floor(Date.now() / 1000) + 365 * 86400;
+  return `${b64url({ alg: 'HS256' })}.${b64url({ s, acc: 1, sid: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', exp, t: false })}.sig`;
+})();
+
+const { buildApp } = await import('./app.js');
+const app = buildApp();
+const server = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+const base = `http://127.0.0.1:${server.address().port}`;
+
+let cookie = '';
+async function req(method, url, body) {
+  const headers = {};
+  if (cookie) headers.cookie = cookie;
+  if (body) headers['content-type'] = 'application/x-www-form-urlencoded';
+  const res = await fetch(base + url, { method, headers, body, redirect: 'manual' });
+  for (const c of (res.headers.getSetCookie?.() || [])) cookie = c.split(';')[0];
+  return { status: res.status, location: res.headers.get('location'), text: await res.text() };
+}
+const form = (o) => new URLSearchParams(o).toString();
+const csrfOf = (html) => (html.match(/name="_csrf" value="([^"]+)"/) || [])[1];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let failed = 0;
+const ok = (cond, msg) => { process.stdout.write(`${cond ? '✓' : '✗ FAIL'}  ${msg}\n`); if (!cond) failed++; };
+
+try {
+  // Регистрация + кабинет с валидным токеном.
+  let r = await req('GET', '/register');
+  const email = `rep_${Date.now()}@example.com`;
+  r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email, password: 'supersecret1', name: 'Отчёты' }));
+  r = await req('GET', '/');
+  const orgId = (r.text.match(/href="\/org\/(\d+)"/) || [])[1];
+  r = await req('GET', `/org/${orgId}`);
+  r = await req('POST', `/org/${orgId}/cabinet`, form({ _csrf: csrfOf(r.text), name: 'Осн', token: goodToken }));
+  ok(r.status === 200 && r.text.includes('проверен и сохранён'), 'Ф2: кабинет с токеном подключён');
+
+  r = await req('GET', `/org/${orgId}/reports`);
+  ok(r.status === 200 && r.text.includes('Подсорт') && r.text.includes('Активный кабинет'), 'Ф2: список отчётов + активный кабинет');
+
+  r = await req('GET', `/org/${orgId}/reports/podsort`);
+  const csrfP = csrfOf(r.text);
+  ok(r.status === 200 && r.text.includes('Параметры расчёта') && r.text.includes('Данных пока нет'), 'Ф2: страница подсорта (форма, данных нет)');
+
+  r = await req('POST', `/org/${orgId}/reports/podsort/refresh`, form({ _csrf: csrfP, articles: '002,003', velocityDays: 28, leadMin: 12, leadMax: 18, cover: 28, seedMin: 10, historyDays: 90 }));
+  ok(r.status === 302, 'Ф2: запуск пересчёта → 302');
+
+  // Ждём завершения фонового (фейкового) джоба.
+  let done = false;
+  for (let i = 0; i < 30 && !done; i++) {
+    await sleep(80);
+    r = await req('GET', `/org/${orgId}/reports/podsort`);
+    if (r.text.includes('Подсорт, шт') && r.text.includes('42')) done = true;
+  }
+  ok(done, 'Ф2: результат появился (подсорт 42 шт)');
+  ok(r.text.includes('Сводная') && r.text.includes('⬇ Excel'), 'Ф2: сводная + кнопки выгрузки');
+
+  const j = await req('GET', `/org/${orgId}/reports/podsort/download/json`);
+  let parsed = null; try { parsed = JSON.parse(j.text); } catch { /* */ }
+  ok(j.status === 200 && parsed?.totals?.reorderUnits === 42, 'Ф2: выгрузка JSON корректна');
+
+  // Доступ: аноним не видит отчёты.
+  cookie = '';
+  r = await req('GET', `/org/${orgId}/reports/podsort`);
+  ok(r.status === 302 && /\/login$/.test(r.location || ''), 'Ф2: без входа отчёты недоступны → /login');
+} catch (e) {
+  console.error('Ошибка теста:', e); failed++;
+} finally {
+  server.close();
+  for (const suf of ['', '-wal', '-shm']) { try { fs.rmSync(process.env.DB_PATH + suf, { force: true }); } catch { /* */ } }
+}
+process.stdout.write(failed ? `\n${failed} проверок упало\n` : '\nОтчёты (Ф2): все проверки зелёные\n');
+process.exit(failed ? 1 : 0);

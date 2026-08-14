@@ -32,10 +32,17 @@ const q = {
     VALUES (?, ?, ?, ?, ?, ?, ?)`),
   cabinetsOfOrg: db.prepare('SELECT id, org_id, name, token_meta, is_active, created_at, (wb_token_enc IS NOT NULL) AS has_token FROM cabinets WHERE org_id = ? ORDER BY created_at'),
   cabinetById: db.prepare('SELECT * FROM cabinets WHERE id = ?'),
+  activeCabinet: db.prepare('SELECT * FROM cabinets WHERE org_id = ? AND is_active = 1 AND wb_token_enc IS NOT NULL ORDER BY created_at LIMIT 1'),
   updateCabinetToken: db.prepare('UPDATE cabinets SET wb_token_enc = ?, token_iv = ?, token_tag = ?, token_meta = ? WHERE id = ?'),
   clearActive: db.prepare('UPDATE cabinets SET is_active = 0 WHERE org_id = ?'),
   setActive: db.prepare('UPDATE cabinets SET is_active = 1 WHERE id = ?'),
   deleteCabinet: db.prepare('DELETE FROM cabinets WHERE id = ?'),
+
+  putSnap: db.prepare(`INSERT INTO snapshot_cache (cabinet_id, report, params_hash, json)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(cabinet_id, report, params_hash) DO UPDATE SET json = excluded.json, refreshed_at = datetime('now')`),
+  latestSnap: db.prepare(`SELECT json, params_hash, refreshed_at FROM snapshot_cache
+    WHERE cabinet_id = ? AND report = ? ORDER BY refreshed_at DESC LIMIT 1`),
 
   insertInvite: db.prepare('INSERT INTO invitations (org_id, email, role, token, expires_at) VALUES (?, ?, ?, ?, ?)'),
   inviteByToken: db.prepare('SELECT * FROM invitations WHERE token = ?'),
@@ -91,6 +98,7 @@ export const Members = {
 export const Cabinets = {
   ofOrg: (orgId) => q.cabinetsOfOrg.all(orgId),
   byId: (id) => q.cabinetById.get(id),
+  activeOf: (orgId) => q.activeCabinet.get(orgId),
 
   // Создать кабинет и (опц.) сразу привязать зашифрованный токен.
   create: (orgId, name, token, meta) => tx(() => {
@@ -126,6 +134,16 @@ export const Cabinets = {
   }),
 
   remove: (id) => q.deleteCabinet.run(id).changes > 0,
+};
+
+export const Snapshots = {
+  put: (cabinetId, report, paramsHash, obj) => q.putSnap.run(cabinetId, report, paramsHash, JSON.stringify(obj)),
+  latest: (cabinetId, report) => {
+    const row = q.latestSnap.get(cabinetId, report);
+    if (!row) return null;
+    try { return { data: JSON.parse(row.json), paramsHash: row.params_hash, refreshedAt: row.refreshed_at }; }
+    catch { return null; }
+  },
 };
 
 const INVITE_TTL_DAYS = 7;

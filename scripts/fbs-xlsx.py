@@ -23,8 +23,10 @@ from openpyxl.formatting.rule import CellIsRule
 from openpyxl.utils import get_column_letter
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SNAP = os.path.join(REPO, 'reports-output', 'fbs-replenishment.json')
-OUT = os.path.join(REPO, 'reports-output', 'fbs-podsort.xlsx')
+# REPORTS_OUTPUT_DIR — папка ввода/вывода (мультитенант-сервис: свой каталог на кабинет).
+OUT_DIR = os.path.abspath(os.environ['REPORTS_OUTPUT_DIR']) if os.environ.get('REPORTS_OUTPUT_DIR') else os.path.join(REPO, 'reports-output')
+SNAP = os.path.join(OUT_DIR, 'fbs-replenishment.json')
+OUT = os.path.join(OUT_DIR, 'fbs-podsort.xlsx')
 
 with open(SNAP, encoding='utf-8') as f:
     snap = json.load(f)

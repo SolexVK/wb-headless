@@ -57,9 +57,22 @@ select{padding:9px 12px;border:1px solid var(--line);border-radius:9px;backgroun
 .linkbox{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--ground);border:1px solid var(--line);border-radius:8px;padding:8px 10px;word-break:break-all;margin-top:6px}
 .crumbs{font-size:13px;margin-bottom:4px}
 .scopes span{display:inline-block;font-size:11px;padding:1px 7px;border-radius:6px;background:var(--ground);border:1px solid var(--line);margin:2px 3px 0 0}
+.tiles{display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 14px}
+.tilek{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;min-width:118px}
+.tilek .n{font-size:22px;font-weight:750;letter-spacing:-.02em}.tilek .l{font-size:12px;color:var(--muted)}
+details{margin:10px 0;border:1px solid var(--line);border-radius:10px;padding:6px 14px;background:var(--surface)}
+summary{cursor:pointer;font-weight:600;font-size:14px;padding:6px 0}
+.badge.st-gap{background:#F1E7EA;color:var(--danger)}.badge.st-risk{background:#FCF3E2;color:#8A5A12}.badge.st-ok{background:#E6F5EE;color:var(--ok)}.badge.st-dead{background:#EEF1F6;color:#57617A}
+@media(prefers-color-scheme:dark){.badge.st-gap{background:#3a2029;color:#E98AA0}.badge.st-risk{background:#2c2413;color:#E3B778}.badge.st-ok{background:#123021;color:#5FD39C}.badge.st-dead{background:#1E2340;color:#9AA4B8}}
+.dl{display:inline-block;margin:0 8px 8px 0;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-weight:600;background:var(--surface);color:var(--accent-d)}
+.dl:hover{text-decoration:none;border-color:var(--accent)}
+.running{background:#E8EEFF;border:1px solid #C7D6FF;color:#2A46A8;border-radius:9px;padding:11px 13px;margin-bottom:12px;font-size:13.5px}
+@media(prefers-color-scheme:dark){.running{background:#12203f;border-color:#243a63;color:#9DB4F5}}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto}
 `;
 
-function layout({ title, body, user, csrf, base = '' }) {
+function layout({ title, body, user, csrf, base = '', head = '' }) {
   const u = (p) => base + p;
   const nav = user
     ? `<div class="top"><a class="brand" href="${u('/')}">FBS<span>·</span>сервис</a>
@@ -69,7 +82,7 @@ function layout({ title, body, user, csrf, base = '' }) {
         </div></div>`
     : '';
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">${head}<title>${esc(title)}</title>
 <style>${CSS}</style></head><body>${nav}${body}</body></html>`;
 }
 
@@ -228,6 +241,7 @@ export function orgPage(p) {
     body: `<div class="wrap">
       <div class="crumbs"><a href="${u('/')}">← Организации</a></div>
       <h1>${esc(org.name)} <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
+      <p><a class="dl" href="${u(`/org/${org.id}/reports`)}">📊 Открыть отчёты</a></p>
 
       <div class="section">
         <h2>Кабинеты WB</h2>
@@ -269,3 +283,137 @@ function formBtn(csrf, action, label, cls = 'mini btn-sm', confirm) {
 }
 const okBox = (m) => `<div class="ok">${esc(m)}</div>`;
 const okOrWarn = (m) => `<div class="warn">${esc(m)}</div>`;
+
+// ── Отчёты ───────────────────────────────────────────────────────────────────
+const nf = (n) => (n == null ? '' : Number(n).toLocaleString('ru-RU'));
+const ST = { 'разрыв до поставки': 'st-gap', 'нет остатка': 'st-gap', 'риск разрыва': 'st-risk', 'ок': 'st-ok', 'неликвид': 'st-dead', 'нет данных': 'st-dead' };
+const statusBadge = (s) => `<span class="badge ${ST[s] || 'st-dead'}">${esc(s)}</span>`;
+
+export function reportsPage(p) {
+  const { user, csrf, base = '', org, role, active } = p;
+  const u = (path) => base + path;
+  const cabLine = active
+    ? `<p class="kv">Активный кабинет: <b>${esc(active.name)}</b>${active.meta?.sid ? ` · продавец ${esc(String(active.meta.sid).slice(0, 8))}…` : ''}</p>`
+    : `<div class="warn">Нет активного кабинета с токеном. <a href="${u(`/org/${org.id}`)}">Подключите кабинет</a> и сделайте его активным.</div>`;
+  const card = (href, title, desc, ready) => ready
+    ? `<a class="tile" href="${u(href)}" style="display:block"><h3>${esc(title)}</h3><p>${esc(desc)} →</p></a>`
+    : `<div class="tile soon"><h3>${esc(title)} <span class="pill">скоро</span></h3><p>${esc(desc)}</p></div>`;
+  return layout({
+    title: `Отчёты — ${org.name}`, user, csrf, base,
+    body: `<div class="wrap">
+      <div class="crumbs"><a href="${u(`/org/${org.id}`)}">← ${esc(org.name)}</a></div>
+      <h1>Отчёты</h1>
+      ${cabLine}
+      <div class="grid" style="margin-top:14px">
+        ${card(`/org/${org.id}/reports/podsort`, 'Подсорт', 'Рекомендации к заказу по складам и размерам + пробный завоз', !!active)}
+        ${card(`/org/${org.id}/reports/podsort`, 'Остатки', 'Остатки FBS по артикулам и цветам', false)}
+      </div>
+    </div>`,
+  });
+}
+
+export function podsortPage(p) {
+  const { user, csrf, base = '', org, role, active, latest, job, form } = p;
+  const u = (path) => base + path;
+  const back = `<div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>`;
+
+  if (!active) {
+    return layout({
+      title: `Подсорт — ${org.name}`, user, csrf, base,
+      body: `<div class="wrap">${back}<h1>Подсорт</h1>
+        <div class="warn">Нет активного кабинета с токеном. <a href="${u(`/org/${org.id}`)}">Подключите кабинет</a> и сделайте его активным.</div></div>`,
+    });
+  }
+
+  const running = job && job.state === 'running';
+  const meta = running ? '<meta http-equiv="refresh" content="4">' : '';
+  let statusBox = '';
+  if (running) statusBox = `<div class="running">⏳ Идёт пересчёт на токене кабинета «${esc(active.name)}»… ${esc(job.log || '')}<br><span class="muted">Страница обновится сама. Это может занять 1–3 минуты (запрос к WB).</span></div>`;
+  else if (job && job.state === 'error') statusBox = `<div class="err" style="white-space:pre-wrap">Ошибка пересчёта: ${esc(job.error || '')}</div>`;
+  else if (job && job.state === 'done') statusBox = okBox('Пересчёт завершён.');
+
+  // Форма параметров.
+  const f = form;
+  const field = (name, label, val, hint) => `<div><label for="${name}">${esc(label)}${hint ? ` <span class="muted">${esc(hint)}</span>` : ''}</label>
+    <input id="${name}" name="${name}" type="number" min="1" value="${esc(String(val))}" style="width:110px"></div>`;
+  const formSection = `
+    <div class="section">
+      <h2>Параметры расчёта</h2>
+      <form method="post" action="${u(`/org/${org.id}/reports/podsort/refresh`)}">
+        ${csrfField(csrf)}
+        <label for="articles">Артикулы в работе <span class="muted">(номера через запятую; пусто — по умолчанию)</span></label>
+        <input id="articles" name="articles" type="text" value="${esc(f.articles)}" placeholder="002, 003, 023 …">
+        <div class="row-form" style="margin-top:12px;gap:14px">
+          ${field('velocityDays', 'Окно скорости, дн', f.velocityDays)}
+          ${field('leadMin', 'Лид мин, дн', f.leadMin)}
+          ${field('leadMax', 'Лид макс, дн', f.leadMax)}
+          ${field('cover', 'Запас, дн', f.cover)}
+          ${field('seedMin', 'Завоз/размер', f.seedMin)}
+          ${field('historyDays', 'История, дн', f.historyDays)}
+        </div>
+        <button class="btn" type="submit" style="max-width:280px;margin-top:18px"${running ? ' disabled' : ''}>${running ? 'Идёт пересчёт…' : 'Обновить данные'}</button>
+      </form>
+    </div>`;
+
+  // Результаты последнего снимка.
+  let results = `<div class="section"><p class="muted">Данных пока нет — нажмите «Обновить данные», чтобы рассчитать подсорт на токене активного кабинета.</p></div>`;
+  if (latest?.data) {
+    const s = latest.data;
+    const t = s.totals || {};
+    const when = latest.refreshedAt ? esc(String(latest.refreshedAt)) + ' UTC' : '';
+    const tiles = [
+      ['Подсорт, шт', t.reorderUnits], ['Строк в риске', t.riskRows],
+      ['Пробный завоз, шт', t.seedUnits], ['Складов', t.warehouses], ['Номенклатура', t.nomenclature],
+    ].map(([l, n]) => `<div class="tilek"><div class="n">${nf(n)}</div><div class="l">${esc(l)}</div></div>`).join('');
+
+    // Сводная: артикул×цвет×размер × склад.
+    const cols = s.warehouseList || [];
+    const pivotHead = `<tr><th>Арт</th><th>Цвет</th><th>Разм</th>${cols.map((c) => `<th class="num">${esc(c)}</th>`).join('')}<th class="num">Итого</th></tr>`;
+    const pivotRows = (s.pivot || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td>${esc(r.variant)}</td><td>${esc(r.techSize)}</td>${cols.map((c) => `<td class="num">${r.byWarehouse?.[c] ? nf(r.byWarehouse[c]) : ''}</td>`).join('')}<td class="num"><b>${nf(r.total)}</b></td></tr>`).join('');
+    const pivotTable = pivotRows
+      ? `<div class="scroll"><table><thead>${pivotHead}</thead><tbody>${pivotRows}</tbody></table></div>`
+      : '<p class="muted">Подсорт не требуется (0 строк).</p>';
+
+    // Детально по складам.
+    const whBlocks = (s.warehouses || []).filter((w) => w.rows?.length).map((w) => `
+      <details><summary>${esc(w.name)} — остаток ${nf(w.stockUnits)} · подсорт ${nf(w.reorderUnits)} шт · строк ${w.rows.length}</summary>
+        <div class="scroll"><table>
+          <thead><tr><th>Арт</th><th>Цвет</th><th>Разм</th><th class="num">Остаток</th><th class="num">/дн</th><th class="num">Дней до 0</th><th class="num">Подсорт</th><th>Статус</th></tr></thead>
+          <tbody>${w.rows.map((r) => `<tr><td>${esc(r.articleNum)}</td><td>${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td class="num">${nf(r.stock)}</td><td class="num">${esc(String(r.perDay))}</td><td class="num">${r.daysToZero == null ? '∞' : esc(String(r.daysToZero))}</td><td class="num"><b>${nf(r.reorderQty)}</b></td><td>${statusBadge(r.status)}</td></tr>`).join('')}</tbody>
+        </table></div>
+      </details>`).join('');
+
+    // Пробный завоз.
+    const seedRows = (s.seedGrid || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td>${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td><span class="badge ${r.kind === 'новинка' ? 'st-ok' : 'st-risk'}">${esc(r.kind)}</span></td><td class="num"><b>${nf(r.seedTotal)}</b></td></tr>`).join('');
+    const seedBlock = seedRows
+      ? `<details><summary>Пробный завоз — ${nf(t.seedRows)} строк (${nf(t.seedNovelty)} новинок + ${nf(t.seedRefill)} докладок) = ${nf(t.seedUnits)} шт</summary>
+          <div class="scroll"><table><thead><tr><th>Арт</th><th>Цвет</th><th>Разм</th><th>Тип</th><th class="num">Кол-во</th></tr></thead><tbody>${seedRows}</tbody></table></div></details>`
+      : '';
+
+    results = `<div class="section">
+        <h2>Результат <span class="muted" style="font-size:13px;font-weight:400">обновлено ${when}</span></h2>
+        <div class="tiles">${tiles}</div>
+        <div style="margin-bottom:6px">
+          <a class="dl" href="${u(`/org/${org.id}/reports/podsort/download/xlsx`)}">⬇ Excel</a>
+          <a class="dl" href="${u(`/org/${org.id}/reports/podsort/download/html`)}">⬇ HTML-дашборд</a>
+          <a class="dl" href="${u(`/org/${org.id}/reports/podsort/download/json`)}">⬇ JSON</a>
+        </div>
+        <h2>Сводная: подсорт по размерам × склад</h2>
+        ${pivotTable}
+        <h2 style="margin-top:20px">Детально по складам</h2>
+        ${whBlocks || '<p class="muted">Нет строк.</p>'}
+        ${seedBlock}
+      </div>`;
+  }
+
+  return layout({
+    title: `Подсорт — ${org.name}`, user, csrf, base, head: meta,
+    body: `<div class="wrap">${back}
+      <h1>Подсорт <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
+      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Расчёт по FF-складам и размерам; лид-тайм и запас задаются ниже.</p>
+      ${statusBox}
+      ${formSection}
+      ${results}
+    </div>`,
+  });
+}

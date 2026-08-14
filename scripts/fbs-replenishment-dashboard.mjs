@@ -14,7 +14,8 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
-const R = (p) => path.join(REPO, 'reports-output', p);
+const OUT_DIR = process.env.REPORTS_OUTPUT_DIR ? path.resolve(process.env.REPORTS_OUTPUT_DIR) : path.join(REPO, 'reports-output');
+const R = (p) => path.join(OUT_DIR, p);
 const snap = JSON.parse(fs.readFileSync(R('fbs-replenishment.json'), 'utf8'));
 const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
 const P = snap.params, t = snap.totals;
