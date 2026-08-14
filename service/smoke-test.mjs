@@ -182,9 +182,16 @@ try {
   r = await req('GET', `/org/${Number(orgId) + 99999}`);
   ok(r.status === 404, 'Ф1: чужая компания недоступна (404)');
 
-  // Супер-админ: панель доступна только ему; правит имя/места/пользователей.
+  // Изоляция: посторонний (владелец своей компании) НЕ видит чужую и не входит в /admin.
+  cookie = '';
+  r = await req('GET', '/register');
+  r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email: `outsider_${Date.now()}@example.com`, password: 'supersecret1', name: 'Посторонний' }));
+  r = await req('GET', `/org/${orgId}`);
+  ok(r.status === 404, 'Ф1: посторонний не видит чужую компанию (404)');
+  r = await req('GET', '/');
+  ok(!r.text.includes(`/org/${orgId}"`), 'Ф1: чужая компания не показана на главной постороннего');
   r = await req('GET', '/admin');
-  ok(r.status === 403, 'Ф1: обычный пользователь не входит в /admin (403)');
+  ok(r.status === 403, 'Ф1: посторонний не видит панель супер-админа (403)');
   cookie = '';
   r = await req('GET', '/register');
   r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email: 'super@example.com', password: 'supersecret1', name: 'Админ' }));
