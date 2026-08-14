@@ -49,13 +49,22 @@ NODE_ENV=production
 	}
 	@fbs path /fbs /fbs/*
 	handle @fbs {
-		reverse_proxy 127.0.0.1:9110
+		reverse_proxy 127.0.0.1:9110 {
+			header_up X-Forwarded-Proto https
+		}
 	}
 	handle {
 		reverse_proxy 127.0.0.1:8477
 	}
 }
 ```
+
+> **Важно — `header_up X-Forwarded-Proto https`.** Снаружи всё по HTTPS (TLS
+> терминирует Tailscale), но до сервиса запрос доходит по HTTP
+> (`Tailscale → Caddy → 9110`). В проде cookie сессии помечена `Secure` и
+> ставится только если сервис считает соединение защищённым. `trust proxy`
+> уже включён; эта строка сообщает исходный протокол — иначе сессия/CSRF не
+> работают (ошибка «проверки формы» при регистрации/входе).
 
 Проверить и применить без перезапуска (Funnel/443 не трогаются):
 
