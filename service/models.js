@@ -1,7 +1,7 @@
 // service/models.js — доступ к данным (users / organizations / memberships).
 // Тонкий слой поверх db; при переезде на Postgres переписываем только его.
 import bcrypt from 'bcryptjs';
-import { db } from './db.js';
+import { db, tx } from './db.js';
 
 const q = {
   userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
@@ -22,7 +22,7 @@ export const Users = {
   touchLogin: (id) => q.touchLogin.run(id),
 
   // Регистрация: пользователь + личная организация + membership owner (в транзакции).
-  register: db.transaction((email, password, name) => {
+  register: (email, password, name) => tx(() => {
     const hash = bcrypt.hashSync(password, 12);
     const u = q.insertUser.run(String(email).trim(), hash, name || null);
     const userId = Number(u.lastInsertRowid);

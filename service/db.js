@@ -1,6 +1,8 @@
-// service/db.js — SQLite (better-sqlite3) + схема + сессионный стор.
-// Тонкий слой: вся схема здесь; при переезде на Postgres меняем только этот модуль.
-import Database from 'better-sqlite3';
+// service/db.js — SQLite (ВСТРОЕННЫЙ node:sqlite) + схема + сессионный стор.
+// Нативных зависимостей нет (важно для надёжной установки). Требует Node >= 22.5
+// и флаг --experimental-sqlite (прописан в npm-скриптах). Тонкий слой: вся схема
+// здесь; при переезде на Postgres меняем только этот модуль.
+import { DatabaseSync } from 'node:sqlite';
 import fs from 'fs';
 import path from 'path';
 import session from 'express-session';
@@ -8,9 +10,16 @@ import { config } from './config.js';
 import { logger } from './logger.js';
 
 fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
-export const db = new Database(config.dbPath);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+export const db = new DatabaseSync(config.dbPath);
+db.exec('PRAGMA journal_mode = WAL;');
+db.exec('PRAGMA foreign_keys = ON;');
+
+// Хелпер транзакции (в node:sqlite нет db.transaction, как в better-sqlite3).
+export function tx(fn) {
+  db.exec('BEGIN');
+  try { const r = fn(); db.exec('COMMIT'); return r; }
+  catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+}
 
 // ── Схема (idempotent) ──────────────────────────────────────────────────────
 // Полная модель заведена сразу; в Фазе 0 используются users/organizations/memberships.

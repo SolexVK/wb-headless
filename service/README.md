@@ -8,6 +8,11 @@
 helmet, структурные логи (pino), health-check. При регистрации создаётся
 пользователь + его личная организация (роль `owner`).
 
+## Требования
+- **Node.js ≥ 22.5** — используется встроенный `node:sqlite` (флаг
+  `--experimental-sqlite` уже прописан в npm-скриптах). **Нативных зависимостей нет** —
+  `npm install` не собирает ничего через node-gyp (надёжно на любой сети).
+
 ## Запуск
 ```bash
 cd service
@@ -16,6 +21,7 @@ cp .env.example .env      # задайте SESSION_SECRET (и позже TOKEN_E
 npm start                 # http://127.0.0.1:9110   (только loopback!)
 npm test                  # in-process дымовой тест (10 проверок)
 ```
+При старте Node печатает `ExperimentalWarning` про `node:sqlite` — это норма.
 Слушаем ТОЛЬКО `127.0.0.1:PORT` — наружу публикует Caddy (правила Mac Mini,
 `../docs/china-fbs/deploy/MAC-MINI-RULES.md`). В коде нет привязок к 443/Funnel.
 
