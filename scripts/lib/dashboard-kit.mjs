@@ -35,6 +35,15 @@ export function insights(items) {
   return `<section class="insights">${items.map((i) => `<div class="insight" style="--kc:${i.accent || AC.green}"><span class="ins-ic">${i.icon || '•'}</span><span class="ins-tx">${i.text}</span></div>`).join('')}</section>`;
 }
 
+// ── Сегментированная статус-полоса (доли по статусам) ────────────────────────
+// segs: [{label, count, cls, extra}] где cls ∈ st-crit/st-warn/st-ok/st-dead/st-mute
+export function statusBar(segs) {
+  const total = segs.reduce((s, x) => s + x.count, 0) || 1;
+  const bar = segs.filter((x) => x.count > 0).map((x) => `<span class="seg ${x.cls}" style="width:${(x.count / total * 100).toFixed(2)}%" title="${esc(x.label)}: ${x.count}"></span>`).join('');
+  const leg = segs.map((x) => `<div class="lg"><span class="dot ${x.cls}"></span><span class="lg-lab">${esc(x.label)}</span><span class="lg-num">${nf(x.count)}</span>${x.extra ? `<span class="lg-sub">${esc(x.extra)}</span>` : ''}</div>`).join('');
+  return `<div class="sbar">${bar}</div><div class="legend">${leg}</div>`;
+}
+
 // ── Легенда категорий ────────────────────────────────────────────────────────
 export function legend(items) {
   return `<div class="legend">${items.map((it) => `<div class="lg"><span class="dot" style="background:${it.color}"></span><span class="lg-lab">${esc(it.label)}</span>${it.value != null ? `<span class="lg-num">${esc(String(it.value))}</span>` : ''}${it.sub ? `<span class="lg-sub">${esc(it.sub)}</span>` : ''}</div>`).join('')}</div>`;
@@ -217,16 +226,28 @@ tfoot td{padding:7px 9px;border-top:2px solid var(--line-2);font-weight:750;font
 @media (max-width:560px){ .wrap{padding:24px 14px} .kpis{grid-template-columns:repeat(2,1fr)} .head h1{font-size:21px} }
 
 @media print{
-  @page{ size:A4 landscape; margin:10mm; }
+  @page{ size:A4 landscape; margin:8mm; }
   html,body{background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .wrap{max-width:none;padding:0}
-  .panel,.kpi,.kpis,section,.hbar{ page-break-inside:avoid }
+  .panel,.kpi,.kpis,.insights,.insight,.hbar{ page-break-inside:avoid }
   .kpis{grid-template-columns:repeat(5,1fr)}
   .panel{box-shadow:none;border-color:#D0D8D2}
-  /* Широкие таблицы целиком на альбомный лист: без прокрутки, компактнее. */
+  /* Широкие таблицы ЦЕЛИКОМ в ширину листа: тянем на 100%, переносим текст,
+     мелкий кегль — ничего не уезжает за границу страницы. */
   .table-scroll{overflow:visible}
-  table{font-size:10px} thead th,tbody td,tfoot td{padding:4px 6px}
-  .a-name{max-width:150px}
+  table{width:100%!important;table-layout:auto;font-size:8.5px;border-collapse:collapse}
+  thead th,tbody td,tfoot td{padding:2.5px 4px;white-space:normal;word-break:break-word;overflow-wrap:anywhere}
+  .a-name{max-width:none;white-space:normal}
   thead{display:table-header-group} tr{page-break-inside:avoid}
 }
+
+/* ── Статусные утилиты (подсорт: сегментированная полоса, пилюли, точки) ── */
+.sbar{display:flex;height:16px;border-radius:6px;overflow:hidden;background:var(--surface-2);border:1px solid var(--line)}
+.sbar .seg{height:100%}
+.st-crit{background:var(--crit)} .st-warn{background:var(--warn)} .st-ok{background:var(--ok)} .st-dead{background:var(--faint)} .st-mute{background:var(--line-2)}
+.pill.crit{background:var(--crit-soft);color:var(--crit)} .pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.dead{background:var(--surface-2);color:var(--faint)} .pill.mute{background:var(--surface-2);color:var(--muted)}
+.pill.newx{background:var(--accent-soft);color:var(--accent-d)} .pill.refill{background:var(--warn-soft);color:var(--warn)}
+.reorder{font-weight:750;color:var(--accent-d)} .dtz-crit{color:var(--crit);font-weight:700} .dtz-warn{color:var(--warn);font-weight:700}
+tbody tr.row-crit td.art{box-shadow:inset 3px 0 0 var(--crit)} tbody tr.row-warn td.art{box-shadow:inset 3px 0 0 var(--warn)}
 `;

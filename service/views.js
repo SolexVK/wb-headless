@@ -5,8 +5,8 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 // Палитра как токены. Тёмная тема применяется двумя способами: по системной
 // настройке (когда явная тема НЕ выбрана) и при явном выборе data-theme="dark".
 // Явный светлый выбор (data-theme="light") оставляет светлые токены :root.
-const LIGHT = '--ground:#EDF0F6;--surface:#fff;--ink:#141A24;--muted:#57617A;--line:#E1E7F1;--accent:#4B57C6;--accent-d:#3A45AE;--danger:#C43A50;--ok:#1C8A5B;--radius:12px;--chip-bg:#E9EAFB;--err-bg:#FBE7EA;--err-bd:#F0C4CD;--ok-bg:#E6F5EE;--ok-bd:#BFE6D3;--warn-bg:#FCF3E2;--warn-bd:#F0DCB0;--warn-tx:#8A5A12;--info-bg:#E8EEFF;--info-bd:#C7D6FF;--info-tx:#2A46A8;--b-owner-bg:#E7ECFF;--b-owner-tx:#3A45AE;--b-admin-bg:#E6F0FF;--b-admin-tx:#2563B0;--b-neutral-bg:#EEF1F6;--b-neutral-tx:#57617A;--b-ok-bg:#E6F5EE;--b-ok-tx:#1C8A5B;--b-bad-bg:#F1E7EA;--b-bad-tx:#C43A50';
-const DARK = '--ground:#0C0F16;--surface:#141926;--ink:#E7ECF5;--muted:#9AA4B8;--line:#232B3C;--accent:#8E97F5;--accent-d:#A7AEFB;--chip-bg:#1E2340;--err-bg:#2E1620;--err-bd:#5a2733;--ok-bg:#122a20;--ok-bd:#1f4736;--warn-bg:#2c2413;--warn-bd:#514023;--warn-tx:#E3B778;--info-bg:#12203f;--info-bd:#243a63;--info-tx:#9DB4F5;--b-owner-bg:#262c52;--b-owner-tx:#A7AEFB;--b-admin-bg:#1c2c46;--b-admin-tx:#8FB6F0;--b-neutral-bg:#232B3C;--b-neutral-tx:#9AA4B8;--b-ok-bg:#123021;--b-ok-tx:#5FD39C;--b-bad-bg:#3a2029;--b-bad-tx:#E98AA0';
+const LIGHT = '--ground:#EDF0F6;--surface:#fff;--surface-2:#F3F7FB;--ink:#141A24;--muted:#57617A;--faint:#8695A6;--line:#E1E7F1;--accent:#4B57C6;--accent-d:#3A45AE;--danger:#C43A50;--ok:#1C8A5B;--radius:12px;--chip-bg:#E9EAFB;--err-bg:#FBE7EA;--err-bd:#F0C4CD;--ok-bg:#E6F5EE;--ok-bd:#BFE6D3;--warn-bg:#FCF3E2;--warn-bd:#F0DCB0;--warn-tx:#8A5A12;--info-bg:#E8EEFF;--info-bd:#C7D6FF;--info-tx:#2A46A8;--b-owner-bg:#E7ECFF;--b-owner-tx:#3A45AE;--b-admin-bg:#E6F0FF;--b-admin-tx:#2563B0;--b-neutral-bg:#EEF1F6;--b-neutral-tx:#57617A;--b-ok-bg:#E6F5EE;--b-ok-tx:#1C8A5B;--b-bad-bg:#F1E7EA;--b-bad-tx:#C43A50;--total:#4338ca;--c-green:#127045;--c-blue:#1d4ed8;--c-violet:#6d28d9;--c-amber:#b45309;--c-teal:#0f766e;--c-red:#be2b41;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--s7:#4a3aa7;--s8:#e34948';
+const DARK = '--ground:#0C0F16;--surface:#141926;--surface-2:#1B2130;--ink:#E7ECF5;--muted:#9AA4B8;--faint:#6B7688;--line:#232B3C;--accent:#8E97F5;--accent-d:#A7AEFB;--danger:#F0708A;--ok:#3FBE86;--chip-bg:#1E2340;--err-bg:#2E1620;--err-bd:#5a2733;--ok-bg:#122a20;--ok-bd:#1f4736;--warn-bg:#2c2413;--warn-bd:#514023;--warn-tx:#E3B778;--info-bg:#12203f;--info-bd:#243a63;--info-tx:#9DB4F5;--b-owner-bg:#262c52;--b-owner-tx:#A7AEFB;--b-admin-bg:#1c2c46;--b-admin-tx:#8FB6F0;--b-neutral-bg:#232B3C;--b-neutral-tx:#9AA4B8;--b-ok-bg:#123021;--b-ok-tx:#5FD39C;--b-bad-bg:#3a2029;--b-bad-tx:#E98AA0;--total:#a5b4fc;--c-green:#3FBE86;--c-blue:#6ea8fe;--c-violet:#b79cf6;--c-amber:#e3b778;--c-teal:#4bc3b6;--c-red:#f0708a;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#2f9e2f;--s7:#9085e9;--s8:#e66767';
 const CSS = `
 :root{${LIGHT}}
 @media(prefers-color-scheme:dark){:root:not([data-theme]){${DARK}}}
@@ -79,6 +79,18 @@ summary{cursor:pointer;font-weight:600;font-size:14px;padding:6px 0}
 .mv-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:2px 0 6px;font-size:12px;color:var(--muted)}
 .mv-legend span{display:inline-flex;align-items:center;gap:5px}
 .mv-legend i{width:11px;height:3px;border-radius:2px;display:inline-block}
+/* Дашборд-стиль внутри отчётов: KPI-карточки, инсайты, шапки блоков. */
+.dk-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:2px 0 16px}
+.dk-kpi{position:relative;background:linear-gradient(180deg,color-mix(in srgb,var(--kc) 8%,var(--surface)),var(--surface));border:1px solid var(--line);border-top:3px solid var(--kc);border-radius:14px;padding:14px 15px;overflow:hidden}
+.dk-kpi .ic{position:absolute;top:11px;right:11px;width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;background:color-mix(in srgb,var(--kc) 15%,var(--surface))}
+.dk-kpi .n{font-size:22px;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--kc);padding-right:30px;line-height:1.06;word-break:break-word}
+.dk-kpi .l{margin-top:5px;font-size:11.5px;color:var(--muted)}
+.dk-insights{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin:0 0 16px}
+.dk-insight{display:flex;align-items:center;gap:10px;background:linear-gradient(180deg,color-mix(in srgb,var(--kc) 9%,var(--surface)),var(--surface));border:1px solid var(--line);border-left:4px solid var(--kc);border-radius:12px;padding:11px 13px;font-size:12.5px}
+.dk-insight .ic{font-size:18px;flex:none;line-height:1} .dk-insight .tx{color:var(--muted)} .dk-insight .tx b{color:var(--kc);font-weight:750}
+.ph{display:flex;align-items:center;gap:10px;margin:0 0 13px;padding-bottom:11px;border-bottom:1px solid var(--line)}
+.ph .ic{width:30px;height:30px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;font-size:16px;background:color-mix(in srgb,var(--pc) 14%,var(--surface));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pc) 24%,transparent)}
+.ph h2{margin:0;font-size:15.5px;font-weight:750} .ph .sub{margin-left:auto;font-size:12px;color:var(--muted);white-space:nowrap} .ph .sub b{color:var(--ink)}
 /* Таблицы отчётов: заголовки по центру (гориз.+верт.), данные по центру, кроме .tl (Цвет/Статус — слева). */
 .rt th,.rt td{text-align:center;vertical-align:middle}
 .rt td.tl{text-align:left}
@@ -555,6 +567,11 @@ function inviteCreatedBox({ email, url }) {
 
 // ── Отчёты ───────────────────────────────────────────────────────────────────
 const nf = (n) => (n == null ? '' : Number(n).toLocaleString('ru-RU'));
+// Дашборд-компоненты для страниц отчётов (в стиле HTML-дашбордов/PDF).
+const DKAC = { green: 'var(--c-green)', blue: 'var(--c-blue)', violet: 'var(--c-violet)', amber: 'var(--c-amber)', teal: 'var(--c-teal)', red: 'var(--c-red)', indigo: 'var(--total)' };
+const dkKpi = (n, label, { icon = '', accent = DKAC.green } = {}) => `<div class="dk-kpi" style="--kc:${accent}">${icon ? `<span class="ic">${icon}</span>` : ''}<div class="n">${esc(String(n))}</div><div class="l">${label}</div></div>`;
+const dkInsights = (items) => (items && items.length ? `<div class="dk-insights">${items.filter(Boolean).map((i) => `<div class="dk-insight" style="--kc:${i.accent || DKAC.green}"><span class="ic">${i.icon || '•'}</span><span class="tx">${i.text}</span></div>`).join('')}</div>` : '');
+const ph = (icon, title, sub = '', accent = 'var(--accent)') => `<div class="ph" style="--pc:${accent}"><span class="ic">${icon}</span><h2>${esc(title)}</h2>${sub ? `<span class="sub">${sub}</span>` : ''}</div>`;
 const ST = { 'разрыв до поставки': 'st-gap', 'нет остатка': 'st-gap', 'риск разрыва': 'st-risk', 'ок': 'st-ok', 'неликвид': 'st-dead', 'нет данных': 'st-dead' };
 const statusBadge = (s) => `<span class="badge ${ST[s] || 'st-dead'}">${esc(s)}</span>`;
 
@@ -697,9 +714,18 @@ const reportRu = (r) => ({ podsort: 'Подсорт', stock: 'Остатки', m
 function podsortResults(s, { downloadHref, whenLabel }) {
   const t = s.totals || {};
   const tiles = [
-    ['Подсорт, шт', t.reorderUnits], ['Строк в риске', t.riskRows],
-    ['Пробный завоз, шт', t.seedUnits], ['Складов', t.warehouses], ['Номенклатура', t.nomenclature],
-  ].map(([l, n]) => `<div class="tilek"><div class="n">${nf(n)}</div><div class="l">${esc(l)}</div></div>`).join('');
+    dkKpi(nf(t.reorderUnits), 'штук к подсорту', { icon: '🛒', accent: DKAC.green }),
+    dkKpi(nf(t.riskRows), 'строк в риске', { icon: '⚠️', accent: DKAC.red }),
+    dkKpi(nf(t.seedUnits), 'штук пробного завоза', { icon: '🌱', accent: DKAC.violet }),
+    dkKpi(nf(t.warehouses), 'складов', { icon: '🏭', accent: DKAC.blue }),
+    dkKpi(nf(t.nomenclature), 'номенклатура', { icon: '🎨', accent: DKAC.teal }),
+  ].join('');
+  const topWh = [...(s.warehouses || [])].sort((a, b) => (b.reorderUnits || 0) - (a.reorderUnits || 0))[0];
+  const insightRow = dkInsights([
+    { icon: '🛒', accent: DKAC.green, text: `К подсорту всего: <b>${nf(t.reorderUnits)} шт</b>` },
+    topWh && topWh.reorderUnits ? { icon: '🏭', accent: DKAC.blue, text: `Больше всего дозаказа: <b>${esc(topWh.name)}</b> — ${nf(topWh.reorderUnits)} шт` } : null,
+    t.riskRows ? { icon: '⚠️', accent: DKAC.red, text: `В риске разрыва: <b>${nf(t.riskRows)}</b> строк` } : { icon: '✅', accent: DKAC.green, text: 'Строк в риске нет' },
+  ]);
 
   const cols = s.warehouseList || [];
   const pivotHead = `<tr>${thT('Арт', 'Номер артикула (модель)')}${thT('Цвет', 'Вариант/цвет исполнения')}${thT('Разм', 'Размер (techSize карточки)')}${cols.map((c) => thT(c, `Сколько заказать на склад «${c}»`, 'num')).join('')}${thT('Итого', 'Сумма подсорта по строке (все склады)', 'num')}</tr>`;
@@ -723,45 +749,66 @@ function podsortResults(s, { downloadHref, whenLabel }) {
     : '';
 
   return `<div class="section">
-      <h2>Результат ${whenLabel ? `<span class="muted" style="font-size:13px;font-weight:400">${esc(whenLabel)}</span>` : ''}</h2>
-      <div class="tiles">${tiles}</div>
-      <div style="margin-bottom:6px">
+      ${whenLabel ? `<p class="kv" style="margin:0 0 12px">Обновлено: <b>${esc(whenLabel)}</b></p>` : ''}
+      <div class="dk-kpis">${tiles}</div>
+      ${insightRow}
+      <div style="margin-bottom:14px">
         <a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a>
         <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a>
         <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a>
         <a class="dl" href="${downloadHref('json')}">⬇ JSON</a>
       </div>
-      <h2>Сводная: подсорт по размерам × склад</h2>
+      ${ph('📊', 'Сводная: подсорт по размерам × склад', `${nf((s.pivot || []).length)} строк`, DKAC.indigo)}
       ${pivotTable}
-      <h2 style="margin-top:20px">Детально по складам</h2>
+      <div style="margin-top:22px"></div>
+      ${ph('🏭', 'Детально по складам', '', DKAC.blue)}
       ${whBlocks || '<p class="muted">Нет строк.</p>'}
       ${seedBlock}
     </div>`;
 }
 
+// Фон тепловой ячейки (последовательная шкала к акценту).
+const heatCell = (v, max) => (!v || v <= 0 ? '' : ` style="background:color-mix(in srgb, var(--c-teal) ${(10 + 80 * Math.min(1, v / (max || 1))).toFixed(0)}%, transparent)"`);
+
 // Рендер результатов остатков из снимка (страница отчёта и архив).
 function stockResults(s, { downloadHref, whenLabel }) {
   const t = s.totals || {};
+  const whs = [...(s.warehouses || [])].filter((w) => w.totalQuantity > 0).sort((a, b) => b.totalQuantity - a.totalQuantity);
+  const grand = t.grandTotal || whs.reduce((a, w) => a + w.totalQuantity, 0);
+  const top = whs[0];
   const tiles = [
-    ['Всего, шт', t.grandTotal], ['Активных складов', t.activeWarehouses], ['Артикул+цвет', t.articleCount],
-  ].map(([l, n]) => `<div class="tilek"><div class="n">${nf(n)}</div><div class="l">${esc(l)}</div></div>`).join('');
+    dkKpi(nf(grand), 'штук на FBS (всего)', { icon: '📦', accent: DKAC.green }),
+    dkKpi(nf(t.activeWarehouses ?? whs.length), 'активных складов', { icon: '🏭', accent: DKAC.blue }),
+    dkKpi(nf(t.articleCount), 'артикул + цвет', { icon: '🎨', accent: DKAC.violet }),
+    dkKpi(top ? esc(top.name) : '—', 'крупнейший склад', { icon: '🏆', accent: DKAC.amber }),
+    dkKpi(nf(top ? top.totalQuantity : 0), 'штук на нём', { icon: '⚖️', accent: DKAC.teal }),
+  ].join('');
+  const topArt = (s.articles || [])[0];
+  const insightRow = dkInsights([
+    top ? { icon: '🏆', accent: DKAC.green, text: `Больше всего: <b>${esc(top.name)}</b> — ${nf(top.totalQuantity)} шт (${(top.totalQuantity / (grand || 1) * 100).toFixed(1)}%)` } : null,
+    topArt ? { icon: '🎨', accent: DKAC.violet, text: `Топ-артикул: <b>${esc(topArt.articleNum)} ${esc(topArt.variant)}</b> — ${nf(topArt.total)} шт` } : null,
+    { icon: '🏭', accent: DKAC.blue, text: `Распределён по <b>${nf(t.activeWarehouses ?? whs.length)}</b> складам` },
+  ]);
 
-  const whRows = (s.warehouses || []).map((w) => `<tr><td class="tl">${esc(w.name)}</td><td class="num">${nf(w.totalQuantity)}</td><td class="num">${nf(w.skuInStock)}</td></tr>`).join('');
+  const whMax = Math.max(1, ...whs.map((w) => w.totalQuantity));
+  const whRows = whs.map((w) => `<tr><td class="tl">${esc(w.name)}</td><td class="num"${heatCell(w.totalQuantity, whMax)}>${nf(w.totalQuantity)}</td><td class="num">${nf(w.skuInStock)}</td></tr>`).join('');
   const whTable = `<div class="scroll"><table class="rt"><thead><tr>${thT('Фулфилмент', 'Склад продавца (FBS)')}${thT('Остаток, шт', 'Всего единиц на складе', 'num')}${thT('Позиций (SKU)', 'Сколько штрихкодов в наличии', 'num')}</tr></thead><tbody>${whRows}</tbody></table></div>`;
 
   const cols = s.warehouseList || [];
+  const cellMax = Math.max(1, ...(s.articles || []).flatMap((a) => cols.map((c) => a.byWarehouse?.[c] || 0)));
   const head = `<tr>${thT('Арт', 'Номер артикула')}${thT('Цвет', 'Вариант/цвет')}${cols.map((c) => thT(c, `Остаток на «${c}»`, 'num')).join('')}${thT('Итого', 'Всего по всем складам', 'num')}</tr>`;
-  const rows = (s.articles || []).map((a) => `<tr><td>${esc(a.articleNum)}</td><td class="tl">${esc(a.variant)}</td>${cols.map((c) => `<td class="num">${a.byWarehouse?.[c] ? nf(a.byWarehouse[c]) : ''}</td>`).join('')}<td class="num"><b>${nf(a.total)}</b></td></tr>`).join('');
+  const rows = (s.articles || []).map((a) => `<tr><td>${esc(a.articleNum)}</td><td class="tl">${esc(a.variant)}</td>${cols.map((c) => { const v = a.byWarehouse?.[c] || 0; return `<td class="num"${heatCell(v, cellMax)}>${v ? nf(v) : ''}</td>`; }).join('')}<td class="num"><b>${nf(a.total)}</b></td></tr>`).join('');
   const matrix = rows ? `<div class="scroll"><table class="rt"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Нет остатков.</p>';
 
   return `<div class="section">
-      <h2>Результат ${whenLabel ? `<span class="muted" style="font-size:13px;font-weight:400">${esc(whenLabel)}</span>` : ''}</h2>
-      <div class="tiles">${tiles}</div>
-      <div style="margin-bottom:6px"><a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a> <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a> <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
-      <h2>По фулфилментам</h2>
+      <p class="kv" style="margin:0 0 12px">Текущий остаток FBS по складам и артикулам/цветам.${whenLabel ? ` <b>${esc(whenLabel)}</b>` : ''}</p>
+      <div class="dk-kpis">${tiles}</div>
+      ${insightRow}
+      <div style="margin-bottom:14px"><a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a> <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a> <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
+      ${ph('🏭', 'По фулфилментам', `всего ${nf(grand)} шт`, DKAC.blue)}
       ${whTable}
-      <h2 style="margin-top:20px">Остаток по артикул+цвет × склад</h2>
-      <p class="kv" style="margin:0 0 8px">Размеры внутри карточки (nmID) объединены в одну цифру.</p>
+      <div style="margin-top:22px"></div>
+      ${ph('🎨', 'Остаток: артикул + цвет × склад', 'интенсивность = величина', DKAC.violet)}
       ${matrix}
     </div>`;
 }
@@ -819,7 +866,7 @@ export function stockPage(p) {
 }
 
 // ── Движение заказов (принято / передано / разница) ─────────────────────────
-const MV_PALETTE = ['#4e79a7', '#f28e2b', '#59a14f', '#e15759', '#b07aa1', '#76b7b2', '#edc948', '#9c755f', '#ff9da7', '#bab0ac'];
+const MV_PALETTE = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)', 'var(--s7)', 'var(--s8)'];
 const MV_FOCUS = { accepted: 'Принято', delivered: 'Передано', diff: 'Разница' };
 
 // Нормализация состояния просмотра (из query) с дефолтами.
@@ -944,9 +991,22 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   const sumF = (k, f) => display.reduce((s, d) => s + fldShown(d[k], f), 0);
   const accC = sumC('accepted'), delC = sumC('delivered');
   const tiles = [
-    ['Принято, шт', accC], ['Передано, шт', delC],
-    ['Себест., ₽', Math.round(delC * cost)], ['Ср.продажа, ₽', Math.round(sumF('delivered', 'moneyAvg'))], ['Цена заказа, ₽', Math.round(sumF('delivered', 'money'))],
-  ].map(([l, v]) => `<div class="tilek"><div class="n">${nf(v)}</div><div class="l">${esc(l)}</div></div>`).join('');
+    dkKpi(nf(accC), 'Принято, шт', { icon: '📥', accent: DKAC.blue }),
+    dkKpi(nf(delC), 'Передано, шт', { icon: '🚚', accent: DKAC.green }),
+    dkKpi(nf(Math.round(delC * cost)), 'Себест., ₽', { icon: '🏷️', accent: DKAC.violet }),
+    dkKpi(nf(Math.round(sumF('delivered', 'moneyAvg'))), 'Ср.продажа, ₽', { icon: '💰', accent: DKAC.indigo }),
+    dkKpi(nf(Math.round(sumF('delivered', 'money'))), 'Цена заказа, ₽', { icon: '🧾', accent: DKAC.amber }),
+  ].join('');
+  // Инсайты за период (по показанным складам).
+  const diffC = delC - accC;
+  const ffRank = ffShown.map((n) => ({ n, v: display.reduce((a, d) => a + ((d.delivered?.byFulfillment?.[n] || {}).count || 0), 0) })).sort((a, b) => b.v - a.v);
+  const l3 = display.slice(-3);
+  const l3a = l3.reduce((a, d) => a + fldShown(d.accepted, 'count'), 0), l3d = l3.reduce((a, d) => a + fldShown(d.delivered, 'count'), 0);
+  const insightRow = dkInsights([
+    ffRank[0] && ffRank[0].v ? { icon: '🏆', accent: DKAC.green, text: `Лидер по отгрузкам: <b>${esc(ffRank[0].n)}</b> — ${nf(ffRank[0].v)} шт` } : null,
+    { icon: diffC >= 0 ? '📈' : '📉', accent: diffC >= 0 ? DKAC.teal : DKAC.red, text: `Разница за ${N} дн: <b>${diffC >= 0 ? '+' : ''}${nf(diffC)} шт</b>` },
+    { icon: l3d >= l3a ? '✅' : '⏳', accent: l3d >= l3a ? DKAC.green : DKAC.amber, text: `Последние 3 дня: принято ${nf(l3a)} · передано <b>${nf(l3d)}</b>` },
+  ]);
 
   // Тумблеры.
   const seg = (lab, key, opts) => (nav ? `<div class="mv-seg"><span class="lab">${esc(lab)}</span>${opts.map((o) => `<a class="mv-chip${view[key] === o.v ? ' on' : ''}" href="${nav({ [key]: o.v })}">${esc(o.label)}</a>`).join('')}</div>` : '');
@@ -960,7 +1020,7 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   }).join('')}${(view.hide && view.hide.length) ? `<a class="mv-chip" href="${nav({ hide: [] })}">сбросить</a>` : ''}</div>` : '';
   const hidden = ['focus', 'unit', 'basis', 'gran', 'ov', 'cmp'].map((k) => `<input type="hidden" name="${k}" value="${esc(view[k])}">`).join('') + `<input type="hidden" name="hide" value="${esc((view.hide || []).join(','))}">`;
   const costInput = (nav && money && view.basis === 'cost')
-    ? `<form method="get" class="mv-seg" style="margin:0 16px 8px 0">${hidden}<span class="lab">Себест., ₽/шт</span><input name="cost" type="number" min="0" value="${esc(String(cost))}" style="width:92px" onchange="this.form.submit()"><noscript><button class="btn btn-sm" type="submit">OK</button></noscript></form>`
+    ? `<form method="get" action="${nav({})}" class="mv-seg" style="margin:0 16px 8px 0">${hidden}<span class="lab">Себест., ₽/шт</span><input name="cost" type="number" min="0" value="${esc(String(cost))}" style="width:92px" onchange="this.form.submit()"><noscript><button class="btn btn-sm" type="submit">OK</button></noscript></form>`
     : '';
   const salesWarn = (money && view.basis === 'sale' && snap.salesAvailable === false)
     ? '<div class="warn" style="margin:0 0 8px">Статистика продаж недоступна на этом токене — «ср. цена 7д» замещена ценой заказа.</div>' : '';
@@ -983,7 +1043,7 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   const buckets = mvBuckets(display, view, ffShown);
   const win = view.gran === 'day' ? 7 : 3;
   const lines = ffShown.map((n, i) => ({ name: n, color: MV_PALETTE[ffAll.indexOf(n) % MV_PALETTE.length], bold: false, values: mvOverlay(buckets.map((b) => b.byFf[n] || 0), view.ov, win) }));
-  const totalLine = { name: 'Итого', color: 'var(--accent)', bold: true, values: mvOverlay(buckets.map((b) => b.total), view.ov, win) };
+  const totalLine = { name: 'Итого', color: 'var(--total)', bold: true, values: mvOverlay(buckets.map((b) => b.total), view.ov, win) };
   const chartLines = ffShown.length > 1 ? [...lines, totalLine] : lines;
   const legend = `<div class="mv-legend">${chartLines.map((ln) => `<span><i style="background:${ln.color}"></i>${esc(ln.name)}</span>`).join('')}</div>`;
   const chart = buckets.length ? `${mvChart(buckets, chartLines)}${legend}` : '<p class="muted">Нет данных за период.</p>';
@@ -1007,19 +1067,20 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
       const line = (label, c, p) => `<tr><td class="tl">${esc(label)}</td><td class="num">${mvVal(c, money)}</td><td class="num">${mvVal(p, money)}</td><td class="num">${c - p >= 0 ? '+' : ''}${mvVal(c - p, money)}</td><td class="num">${esc(pct(c, p))}</td></tr>`;
       const curTot = ffShown.reduce((s, n) => s + curBy(n), 0), prvTot = ffShown.reduce((s, n) => s + prvBy(n), 0);
       const body = ffShown.map((n) => line(n, curBy(n), prvBy(n))).join('') + `<tr style="border-top:2px solid var(--line)"><td class="tl"><b>Итого</b></td><td class="num"><b>${mvVal(curTot, money)}</b></td><td class="num"><b>${mvVal(prvTot, money)}</b></td><td class="num"><b>${curTot - prvTot >= 0 ? '+' : ''}${mvVal(curTot - prvTot, money)}</b></td><td class="num"><b>${esc(pct(curTot, prvTot))}</b></td></tr>`;
-      compare = `<h2 style="margin-top:20px">Сравнение с прошлым периодом</h2>
-        <p class="kv" style="margin:0 0 8px">Показатель «${esc(MV_FOCUS[view.focus])}» за ${N} дн против предыдущих ${N} дн.</p>
+      compare = `${ph('🔀', 'Сравнение с прошлым периодом', `${esc(MV_FOCUS[view.focus])} · ${N} дн ↔ пред. ${N} дн`, DKAC.amber)}
         <div class="scroll"><table class="rt"><thead><tr>${thT('Фулфилмент', 'Склад')}${thT('Текущий', 'Текущий период', 'num')}${thT('Прошлый', 'Предыдущий период', 'num')}${thT('Δ', 'Разница', 'num')}${thT('%', 'Изменение', 'num')}</tr></thead><tbody>${body}</tbody></table></div>`;
     }
   }
 
   const artLine = (snap.articles && snap.articles.length) ? ` · артикулы: ${esc(snap.articles.join(', '))}` : '';
+  const focusLabel = `${MV_FOCUS[view.focus]}${money ? `, ₽ (${MV_BASIS[view.basis]})` : ', шт'} · ${N} дн${whenLabel ? ` · ${whenLabel}` : ''}`;
   return `<div class="section">
-      <h2>${esc(MV_FOCUS[view.focus])}${money ? `, ₽ (${esc(MV_BASIS[view.basis])})` : ', шт'} за ${N} дн ${whenLabel ? `<span class="muted" style="font-size:13px;font-weight:400">${esc(whenLabel)}</span>` : ''}</h2>
-      <p class="kv" style="margin:0 0 8px">Период по МСК (${esc(snap.tz || '+03:00')})${artLine}. «Принято» — по дате создания задания, «Передано» — по дате закрытия поставки.${snap.avgSalePrice ? ` Ср. цена продажи 7д: ${nf(snap.avgSalePrice)} ₽.` : ''}</p>
-      <div class="tiles">${tiles}</div>
+      <p class="kv" style="margin:0 0 12px">Период по МСК (${esc(snap.tz || '+03:00')})${artLine}. «Принято» — по дате создания задания, «Передано» — по дате закрытия поставки.${snap.avgSalePrice ? ` Ср. цена продажи 7д: ${nf(snap.avgSalePrice)} ₽.` : ''}</p>
+      <div class="dk-kpis">${tiles}</div>
+      ${insightRow}
+      <div style="margin-bottom:12px"><a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a> <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a> <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
+      ${ph('📈', focusLabel, `${nf(delC)} шт передано`, DKAC.green)}
       ${toolbar}
-      <div style="margin-bottom:6px"><a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a> <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a> <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
       ${chart}
       ${table}
       ${compare}
@@ -1056,9 +1117,11 @@ export function movementPage(p) {
       <button class="btn" type="submit" style="max-width:280px;margin-top:16px"${running ? ' disabled' : ''}>${running ? 'Идёт сбор…' : 'Обновить данные'}</button>
     </form></div>`;
 
+  // #mv — якорь на блок результатов: после клика по тумблеру страница
+  // перезагружается и остаётся на панели тумблеров, а не прыгает вверх.
   const nav = (patch) => {
     const v = { ...view, ...patch };
-    return u(`/org/${org.id}/reports/movement?focus=${v.focus}&unit=${v.unit}&basis=${v.basis}&cost=${v.cost}&gran=${v.gran}&ov=${v.ov}&cmp=${v.cmp}&hide=${(v.hide || []).join(',')}`);
+    return u(`/org/${org.id}/reports/movement?focus=${v.focus}&unit=${v.unit}&basis=${v.basis}&cost=${v.cost}&gran=${v.gran}&ov=${v.ov}&cmp=${v.cmp}&hide=${(v.hide || []).join(',')}#mv`);
   };
   const results = latest?.data
     ? movementResults(latest.data, { view, nav, downloadHref: (k) => u(`/org/${org.id}/reports/movement/download/${k}?cost=${view.cost}`), whenLabel: latest.createdAt ? String(latest.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '' })
@@ -1071,7 +1134,7 @@ export function movementPage(p) {
       <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Принято на фулфилмент и передано в доставку — по дням и складам, в штуках и рублях. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
       ${statusBox}
       ${formSection}
-      ${results}
+      <div id="mv" style="scroll-margin-top:14px">${results}</div>
     </div>`,
   });
 }

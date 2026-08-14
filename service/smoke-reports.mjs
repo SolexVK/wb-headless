@@ -74,7 +74,7 @@ try {
   for (let i = 0; i < 30 && !done; i++) {
     await sleep(80);
     r = await req('GET', `/org/${orgId}/reports/podsort`);
-    if (r.text.includes('Подсорт, шт') && r.text.includes('42')) done = true;
+    if (r.text.includes('штук к подсорту') && r.text.includes('42')) done = true;
   }
   ok(done, 'Ф2: результат появился (подсорт 42 шт)');
   ok(r.text.includes('Сводная') && r.text.includes('⬇ Excel'), 'Ф2: сводная + кнопки выгрузки');
@@ -92,7 +92,7 @@ try {
 
   // Открыть архивный запуск — регенерируется вывод из снимка.
   r = await req('GET', `/org/${orgId}/reports/archive/${runIds[0]}`);
-  ok(r.status === 200 && r.text.includes('Результат') && r.text.includes('42'), 'Ф2: просмотр архивного запуска');
+  ok(r.status === 200 && r.text.includes('подсорту') && r.text.includes('42'), 'Ф2: просмотр архивного запуска');
   const aj = await req('GET', `/org/${orgId}/reports/archive/${runIds[0]}/download/json`);
   let ap = null; try { ap = JSON.parse(aj.text); } catch { /* */ }
   ok(aj.status === 200 && ap?.totals?.reorderUnits === 42, 'Ф2: выгрузка архивного запуска (JSON)');
