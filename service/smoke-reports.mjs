@@ -159,9 +159,16 @@ try {
   ok(r.status === 200 && r.text.includes('₽ (Ср. цена 7д)') && r.text.includes('Ср.продажа, ₽'), 'Ф2: движение — база «ср. цена продажи 7д»');
   r = await req('GET', `/org/${orgId}/reports/movement?cmp=1`);
   ok(r.status === 200 && r.text.includes('Сравнение с прошлым периодом'), 'Ф2: движение — сравнение с прошлым периодом');
+  // Фильтр складов: скрыть единственный склад → просьба выбрать хотя бы один.
+  r = await req('GET', `/org/${orgId}/reports/movement?hide=0`);
+  ok(r.status === 200 && r.text.includes('Выберите хотя бы один склад'), 'Ф2: движение — фильтр складов (скрыт всё → подсказка)');
   // Движение попало в общий архив.
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Движение заказов') && /принято\s+[\d\s ]+·\s*передано/.test(r.text), 'Ф2: движение видно в архиве');
+  // Фильтр архива по типу отчёта.
+  ok(r.text.includes('Тип отчёта:') && r.text.includes('<option value="movement"'), 'Ф2: в архиве есть фильтр по типу отчёта');
+  r = await req('GET', `/org/${orgId}/reports/archive?report=stock`);
+  ok(r.status === 200 && /остаток\s+\d/.test(r.text) && !/·\s*передано\s+\d/.test(r.text), 'Ф2: фильтр архива показывает только выбранный тип');
 
   // Автор удаляет СВОЙ запуск из архива.
   r = await req('GET', `/org/${orgId}/reports/archive`);

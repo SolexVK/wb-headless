@@ -833,6 +833,7 @@ export function movementView(q = {}) {
     gran: one(q.gran, ['day', 'week'], 'day'),
     ov: one(q.ov, ['none', 'cum', 'ma'], 'none'),
     cmp: String(q.cmp) === '1' ? '1' : '0',
+    hide: String(q.hide ?? '').split(',').map((x) => parseInt(x, 10)).filter((x) => Number.isInteger(x) && x >= 0),
   };
 }
 
@@ -930,11 +931,16 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   const prev = series.length > N ? series.slice(Math.max(0, series.length - 2 * N), series.length - N) : [];
   const ffAll = snap.fulfillments || [];
   const money = view.unit === 'money';
+  // Фильтр складов (view-time): показываем только не скрытые индексы.
+  const hideSet = new Set(view.hide || []);
+  const ffShown = ffAll.filter((_, i) => !hideSet.has(i));
+  const empty = ffShown.length === 0;
 
   const cost = view.cost || 620;
-  // Сводные плитки: штуки + три базы денег (себестоимость / ср.продажа / заказ) по «передано».
-  const sumC = (k) => display.reduce((s, d) => s + (d[k]?.count || 0), 0);
-  const sumF = (k, f) => display.reduce((s, d) => s + (d[k]?.[f] || 0), 0);
+  // Сводные плитки: штуки + три базы денег (себестоимость / ср.продажа / заказ) по «передано» — по показанным складам.
+  const fldShown = (blk, f) => ffShown.reduce((a, n) => a + ((blk?.byFulfillment?.[n] || {})[f] || 0), 0);
+  const sumC = (k) => display.reduce((s, d) => s + fldShown(d[k], 'count'), 0);
+  const sumF = (k, f) => display.reduce((s, d) => s + fldShown(d[k], f), 0);
   const accC = sumC('accepted'), delC = sumC('delivered');
   const tiles = [
     ['Принято, шт', accC], ['Передано, шт', delC],
@@ -945,7 +951,13 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   const seg = (lab, key, opts) => (nav ? `<div class="mv-seg"><span class="lab">${esc(lab)}</span>${opts.map((o) => `<a class="mv-chip${view[key] === o.v ? ' on' : ''}" href="${nav({ [key]: o.v })}">${esc(o.label)}</a>`).join('')}</div>` : '');
   // База оценки — только когда единица ₽. Ввод себестоимости — только при базе «Себестоимость».
   const basisSeg = (nav && money) ? seg('База ₽', 'basis', [{ v: 'cost', label: 'Себестоимость' }, { v: 'sale', label: 'Ср. цена 7д' }, { v: 'order', label: 'Цена заказа' }]) : '';
-  const hidden = ['focus', 'unit', 'basis', 'gran', 'ov', 'cmp'].map((k) => `<input type="hidden" name="${k}" value="${esc(view[k])}">`).join('');
+  // Выбор складов: чип на каждый склад (вкл/выкл), + «сбросить».
+  const whChips = (nav && ffAll.length > 1) ? `<div class="mv-seg"><span class="lab">Склады</span>${ffAll.map((n, i) => {
+    const hid = hideSet.has(i);
+    const next = hid ? (view.hide || []).filter((x) => x !== i) : [...(view.hide || []), i];
+    return `<a class="mv-chip${hid ? '' : ' on'}" href="${nav({ hide: next })}">${esc(n)}</a>`;
+  }).join('')}${(view.hide && view.hide.length) ? `<a class="mv-chip" href="${nav({ hide: [] })}">сбросить</a>` : ''}</div>` : '';
+  const hidden = ['focus', 'unit', 'basis', 'gran', 'ov', 'cmp'].map((k) => `<input type="hidden" name="${k}" value="${esc(view[k])}">`).join('') + `<input type="hidden" name="hide" value="${esc((view.hide || []).join(','))}">`;
   const costInput = (nav && money && view.basis === 'cost')
     ? `<form method="get" class="mv-seg" style="margin:0 16px 8px 0">${hidden}<span class="lab">Себест., ₽/шт</span><input name="cost" type="number" min="0" value="${esc(String(cost))}" style="width:92px" onchange="this.form.submit()"><noscript><button class="btn btn-sm" type="submit">OK</button></noscript></form>`
     : '';
@@ -959,21 +971,26 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
     ${seg('Разбивка', 'gran', [{ v: 'day', label: 'День' }, { v: 'week', label: 'Неделя' }])}
     ${seg('График', 'ov', [{ v: 'none', label: '—' }, { v: 'cum', label: 'Нарастающий' }, { v: 'ma', label: 'Скользящее' }])}
     ${seg('Сравнение', 'cmp', [{ v: '1', label: 'вкл' }, { v: '0', label: 'выкл' }])}
+    ${whChips}
   </div>${salesWarn}` : '';
 
-  // Корзины + линии графика.
-  const buckets = mvBuckets(display, view, ffAll);
+  if (empty) {
+    return `<div class="section">${toolbar}<p class="warn" style="margin:8px 0 0">Выберите хотя бы один склад в фильтре «Склады».</p></div>`;
+  }
+
+  // Корзины + линии графика (по показанным складам).
+  const buckets = mvBuckets(display, view, ffShown);
   const win = view.gran === 'day' ? 7 : 3;
-  const lines = ffAll.map((n, i) => ({ name: n, color: MV_PALETTE[i % MV_PALETTE.length], bold: false, values: mvOverlay(buckets.map((b) => b.byFf[n] || 0), view.ov, win) }));
+  const lines = ffShown.map((n, i) => ({ name: n, color: MV_PALETTE[ffAll.indexOf(n) % MV_PALETTE.length], bold: false, values: mvOverlay(buckets.map((b) => b.byFf[n] || 0), view.ov, win) }));
   const totalLine = { name: 'Итого', color: 'var(--ink)', bold: true, values: mvOverlay(buckets.map((b) => b.total), view.ov, win) };
-  const chartLines = ffAll.length > 1 ? [...lines, totalLine] : lines;
+  const chartLines = ffShown.length > 1 ? [...lines, totalLine] : lines;
   const legend = `<div class="mv-legend">${chartLines.map((ln) => `<span><i style="background:${ln.color}"></i>${esc(ln.name)}</span>`).join('')}</div>`;
   const chart = buckets.length ? `${mvChart(buckets, chartLines)}${legend}` : '<p class="muted">Нет данных за период.</p>';
 
   // Таблица корзина × фулфилмент.
-  const head = `<tr>${thT(view.gran === 'day' ? 'День' : 'Неделя', 'Период')}${ffAll.map((n) => thT(n, `${MV_FOCUS[view.focus]} — ${n}`, 'num')).join('')}${thT('Итого', 'Сумма по строке', 'num')}</tr>`;
-  const rows = buckets.map((b) => `<tr><td class="tl">${esc(b.label)}</td>${ffAll.map((n) => `<td class="num">${b.byFf[n] ? mvVal(b.byFf[n], money) : ''}</td>`).join('')}<td class="num"><b>${mvVal(b.total, money)}</b></td></tr>`).join('');
-  const colTotals = ffAll.map((n) => buckets.reduce((s, b) => s + (b.byFf[n] || 0), 0));
+  const head = `<tr>${thT(view.gran === 'day' ? 'День' : 'Неделя', 'Период')}${ffShown.map((n) => thT(n, `${MV_FOCUS[view.focus]} — ${n}`, 'num')).join('')}${thT('Итого', 'Сумма по строке', 'num')}</tr>`;
+  const rows = buckets.map((b) => `<tr><td class="tl">${esc(b.label)}</td>${ffShown.map((n) => `<td class="num">${b.byFf[n] ? mvVal(b.byFf[n], money) : ''}</td>`).join('')}<td class="num"><b>${mvVal(b.total, money)}</b></td></tr>`).join('');
+  const colTotals = ffShown.map((n) => buckets.reduce((s, b) => s + (b.byFf[n] || 0), 0));
   const grand = buckets.reduce((s, b) => s + b.total, 0);
   const footer = `<tr style="border-top:2px solid var(--line)"><td class="tl"><b>Итого</b></td>${colTotals.map((v) => `<td class="num"><b>${mvVal(v, money)}</b></td>`).join('')}<td class="num"><b>${mvVal(grand, money)}</b></td></tr>`;
   const table = buckets.length ? `<div class="scroll"><table class="rt"><thead>${head}</thead><tbody>${rows}${footer}</tbody></table></div>` : '';
@@ -987,7 +1004,8 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
       const prvBy = (n) => prev.reduce((s, d) => s + mvCell(d, view, n), 0);
       const pct = (c, p) => (p ? `${c - p >= 0 ? '+' : ''}${Math.round((c - p) / Math.abs(p) * 100)}%` : (c ? '—' : '0%'));
       const line = (label, c, p) => `<tr><td class="tl">${esc(label)}</td><td class="num">${mvVal(c, money)}</td><td class="num">${mvVal(p, money)}</td><td class="num">${c - p >= 0 ? '+' : ''}${mvVal(c - p, money)}</td><td class="num">${esc(pct(c, p))}</td></tr>`;
-      const body = ffAll.map((n) => line(n, curBy(n), prvBy(n))).join('') + `<tr style="border-top:2px solid var(--line)"><td class="tl"><b>Итого</b></td><td class="num"><b>${mvVal(curBy(null), money)}</b></td><td class="num"><b>${mvVal(prvBy(null), money)}</b></td><td class="num"><b>${curBy(null) - prvBy(null) >= 0 ? '+' : ''}${mvVal(curBy(null) - prvBy(null), money)}</b></td><td class="num"><b>${esc(pct(curBy(null), prvBy(null)))}</b></td></tr>`;
+      const curTot = ffShown.reduce((s, n) => s + curBy(n), 0), prvTot = ffShown.reduce((s, n) => s + prvBy(n), 0);
+      const body = ffShown.map((n) => line(n, curBy(n), prvBy(n))).join('') + `<tr style="border-top:2px solid var(--line)"><td class="tl"><b>Итого</b></td><td class="num"><b>${mvVal(curTot, money)}</b></td><td class="num"><b>${mvVal(prvTot, money)}</b></td><td class="num"><b>${curTot - prvTot >= 0 ? '+' : ''}${mvVal(curTot - prvTot, money)}</b></td><td class="num"><b>${esc(pct(curTot, prvTot))}</b></td></tr>`;
       compare = `<h2 style="margin-top:20px">Сравнение с прошлым периодом</h2>
         <p class="kv" style="margin:0 0 8px">Показатель «${esc(MV_FOCUS[view.focus])}» за ${N} дн против предыдущих ${N} дн.</p>
         <div class="scroll"><table class="rt"><thead><tr>${thT('Фулфилмент', 'Склад')}${thT('Текущий', 'Текущий период', 'num')}${thT('Прошлый', 'Предыдущий период', 'num')}${thT('Δ', 'Разница', 'num')}${thT('%', 'Изменение', 'num')}</tr></thead><tbody>${body}</tbody></table></div>`;
@@ -1039,7 +1057,7 @@ export function movementPage(p) {
 
   const nav = (patch) => {
     const v = { ...view, ...patch };
-    return u(`/org/${org.id}/reports/movement?focus=${v.focus}&unit=${v.unit}&basis=${v.basis}&cost=${v.cost}&gran=${v.gran}&ov=${v.ov}&cmp=${v.cmp}`);
+    return u(`/org/${org.id}/reports/movement?focus=${v.focus}&unit=${v.unit}&basis=${v.basis}&cost=${v.cost}&gran=${v.gran}&ov=${v.ov}&cmp=${v.cmp}&hide=${(v.hide || []).join(',')}`);
   };
   const results = latest?.data
     ? movementResults(latest.data, { view, nav, downloadHref: (k) => u(`/org/${org.id}/reports/movement/download/${k}?cost=${view.cost}`), whenLabel: latest.createdAt ? String(latest.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '' })
@@ -1058,9 +1076,16 @@ export function movementPage(p) {
 }
 
 // ── Архив отчётов компании: список запусков ─────────────────────────────────
-export function archivePage({ user, csrf, base = '', org, role, runs }) {
+export function archivePage({ user, csrf, base = '', org, role, runs, report = '', types = [] }) {
   const u = (p) => base + p;
   const dt = (v) => esc(String(v || '').slice(0, 16).replace('T', ' ')) + ' UTC';
+  const filter = types.length > 1 ? `<form method="get" action="${u(`/org/${org.id}/reports/archive`)}" style="margin:0 0 12px">
+      <label class="kv" title="Показать в архиве только выбранный тип отчёта" style="margin-right:8px">Тип отчёта:</label>
+      <select name="report" style="max-width:240px" onchange="this.form.submit()">
+        <option value=""${report ? '' : ' selected'}>Все отчёты</option>
+        ${types.map((t) => `<option value="${esc(t)}"${report === t ? ' selected' : ''}>${esc(reportRu(t))}</option>`).join('')}
+      </select> <noscript><button class="btn btn-sm" type="submit">Показать</button></noscript>
+    </form>` : '';
   const summ = (r) => {
     const sm = r.summary || {};
     if (r.report === 'stock') return `остаток ${nf(sm.grandTotal)} шт · складов ${nf(sm.activeWarehouses)} · арт+цвет ${nf(sm.articleCount)}`;
@@ -1086,6 +1111,7 @@ export function archivePage({ user, csrf, base = '', org, role, runs }) {
       <div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>
       <h1>Архив отчётов</h1>
       <p class="sub">История запусков компании (хранится 90 дней). Откройте запуск, чтобы посмотреть содержимое или скачать. Удалить запуск может только тот, кто его создал.</p>
+      ${filter}
       <div class="section"><div class="scroll"><table class="rt">
         <thead><tr>${thT('Дата', 'Когда запущен (UTC) — ссылка на просмотр')}${thT('Отчёт', 'Тип отчёта')}${thT('Кто', 'Кто запустил')}${thT('Итоги', 'Ключевые цифры запуска')}${thT('Выгрузки', 'Скачать этот запуск')}</tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="muted">Пока нет запусков. Соберите отчёт на странице отчётов.</td></tr>'}</tbody>

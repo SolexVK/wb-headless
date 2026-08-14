@@ -173,10 +173,13 @@ reportsRouter.get('/org/:id/reports/movement/download/:kind', requireAuth, loadO
 // ── Архив отчётов компании (общий): список запусков ──────────────────────────
 reportsRouter.get('/org/:id/reports/archive', requireAuth, loadOrg, (req, res) => {
   const cab = Cabinets.firstOf(req.org.id);
-  const runs = cab ? ReportRuns.list(cab.id) : [];
+  const all = cab ? ReportRuns.list(cab.id) : [];
+  const types = [...new Set(all.map((r) => r.report))];
+  const report = types.includes(req.query.report) ? req.query.report : '';
+  const runs = report ? all.filter((r) => r.report === report) : all;
   res.send(archivePage({
     user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
-    org: req.org, role: req.role, runs,
+    org: req.org, role: req.role, runs, report, types,
   }));
 });
 
