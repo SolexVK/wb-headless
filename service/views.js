@@ -234,9 +234,8 @@ export function orgPage(p) {
       <div class="section">
         <h2>Кабинет WB</h2>
         ${p.cabError ? errBox(p.cabError) : ''}${(p.cabWarn || []).map(okOrWarn).join('')}${p.cabOk ? okBox(p.cabOk) : ''}
-        ${tokenExpired ? `<div class="warn">Токен истёк — обновите его, иначе отчёты не будут считаться.</div>` : ''}
+        ${tokenExpired ? `<div class="warn">Токен истёк — отчёты не считаются.${owner ? ' Обновите токен ниже.' : ' Сообщите владельцу компании.'}</div>` : ''}
         <p><b>${esc(cabinet.name)}</b> <span class="badge on">подключён</span></p>
-        ${owner ? tokenMetaLine(cabinet.meta) : '<p class="kv">Токен подключён владельцем. Детали доступны только владельцу.</p>'}
         ${refreshForm}
       </div>`;
   }
@@ -252,7 +251,7 @@ export function orgPage(p) {
     </tr>`;
   }).join('');
 
-  const seatLine = `<p class="kv" style="margin:0 0 8px">Места по лицензии: <b>${esc(String(seats.used))}</b> из <b>${esc(String(seats.total))}</b>${owner && !seats.canInvite ? ' — лимит исчерпан' : ''}</p>`;
+  const seatLine = `<p class="kv" style="margin:0 0 8px">Места по лицензии: <b>${esc(String(seats.used))}</b> из <b>${esc(String(seats.total))}</b> <span class="muted">(участников ${esc(String(seats.members))}, приглашений ${esc(String(seats.pending))})</span>${owner && !seats.canInvite ? ' — <b>лимит исчерпан</b>' : ''}</p>`;
 
   // ── Приглашения (только владелец) ──
   const inviteRows = invites.map((i) => `
@@ -268,7 +267,7 @@ export function orgPage(p) {
         <div><label for="invemail" title="Email приглашаемого. Принять приглашение сможет только этот адрес.">Email участника</label><input id="invemail" name="email" type="email" placeholder="manager@example.com" required></div>
         <button class="btn mini" type="submit" style="height:38px">Создать ссылку</button>
       </form>`
-    : `<div class="warn">Все места по лицензии заняты (${esc(String(seats.total))}). Чтобы добавить ещё участников, напишите администратору сервиса для расширения лицензии.</div>`;
+    : `<div class="warn">Все места по лицензии заняты (${esc(String(seats.total))}).${seats.pending ? ' Часть мест держат неиспользованные приглашения ниже — отзовите ненужные, чтобы освободить места.' : ''} Для расширения лицензии напишите администратору сервиса.</div>`;
 
   const inviteSection = owner ? `
     <div class="section">
@@ -332,31 +331,67 @@ export function inviteAcceptPage({ csrf, user, org, invite, already, mismatch, f
   return layout({ title: 'Приглашение — FBS-сервис', user, csrf, base, body: `<div class="center"><div class="card auth">${body}</div></div>` });
 }
 
-// ── Панель супер-админа: лицензии (число мест компаний) ─────────────────────
-export function adminPage({ user, csrf, base = '', orgs, ok }) {
+// ── Панель супер-админа: компании (название/лицензия) и пользователи ─────────
+export function adminPage({ user, csrf, base = '', orgs, users, ok, err }) {
   const u = (p) => base + p;
-  const rows = orgs.map((o) => `<tr>
-    <td class="tl"><b>${esc(o.name)}</b><div class="kv">${esc(o.owner_email)}</div></td>
+
+  const orgRows = orgs.map((o) => `<tr>
+    <td class="tl">
+      <b>${esc(o.name)}</b>
+      <details style="display:inline-block;border:0;padding:0;margin:0 0 0 6px;background:none">
+        <summary title="Переименовать компанию" style="display:inline;padding:0">✏️</summary>
+        <form method="post" action="${u(`/admin/org/${o.id}/rename`)}" class="row-form" style="gap:6px;margin-top:6px">
+          ${csrfField(csrf)}
+          <input name="name" type="text" value="${esc(o.name)}" style="min-width:180px" aria-label="Название компании">
+          <button class="btn mini" type="submit" style="height:34px">Сохранить</button>
+        </form>
+      </details>
+      <div class="kv">${esc(o.owner_email)}</div>
+    </td>
     <td>${esc(String(o.members))}${o.pending ? ` <span class="muted">(+${esc(String(o.pending))} приглаш.)</span>` : ''}</td>
     <td>
       <form method="post" action="${u(`/admin/org/${o.id}/seats`)}" class="row-form" style="gap:6px;justify-content:center">
         ${csrfField(csrf)}
-        <input name="seats" type="number" min="1" value="${esc(String(o.license_seats))}" style="width:80px" aria-label="Мест">
-        <button class="btn mini" type="submit" style="height:36px">Сохранить</button>
+        <input name="seats" type="number" min="1" value="${esc(String(o.license_seats))}" style="width:76px" aria-label="Мест">
+        <button class="btn mini" type="submit" style="height:34px">OK</button>
       </form>
     </td>
+    <td style="text-align:right">${formBtn(csrf, u(`/admin/org/${o.id}/delete`), 'Отозвать лицензию', 'mini btn-danger', `Отозвать лицензию и удалить компанию «${o.name}» со всеми данными? Пользователи останутся.`)}</td>
   </tr>`).join('');
+
+  const userRows = users.map((usr) => {
+    const isMe = usr.id === user.id;
+    return `<tr>
+      <td class="tl"><b>${esc(usr.name || '—')}</b><div class="kv">${esc(usr.email)}</div></td>
+      <td class="kv">${esc(String(usr.created_at).slice(0, 10))}</td>
+      <td>${esc(String(usr.owns))} / ${esc(String(usr.memberships))}</td>
+      <td style="text-align:right">${isMe ? '<span class="muted">это вы</span>' : formBtn(csrf, u(`/admin/user/${usr.id}/delete`), 'Удалить', 'mini btn-danger', `Полностью удалить пользователя ${usr.email}? Система забудет его (включая email), его компании будут удалены. Отменить нельзя.`)}</td>
+    </tr>`;
+  }).join('');
+
   return layout({
-    title: 'Супер-админ — лицензии', user, csrf, base,
+    title: 'Панель супер-админа', user, csrf, base,
     body: `<div class="wrap">
       <div class="crumbs"><a href="${u('/')}">← Компании</a></div>
-      <h1>Лицензии компаний</h1>
-      <p class="sub">Задайте число мест (человек, включая владельца) для каждой компании.</p>
-      ${ok ? okBox('Сохранено.') : ''}
-      <div class="section"><div class="scroll"><table class="rt">
-        <thead><tr>${thT('Компания', 'Название и email владельца')}${thT('Участников', 'Сейчас в компании + непринятые приглашения')}${thT('Мест по лицензии', 'Всего мест; владелец приглашает в пределах этого числа')}</tr></thead>
-        <tbody>${rows || '<tr><td colspan="3" class="muted">Компаний пока нет.</td></tr>'}</tbody>
-      </table></div></div>
+      <h1>Панель супер-админа</h1>
+      <p class="sub">Управление всеми компаниями (название, лицензия) и пользователями сервиса.</p>
+      ${ok ? okBox('Сохранено.') : ''}${err === 'self' ? errBox('Нельзя удалить самого себя.') : ''}${err === 'name' ? errBox('Введите название компании.') : ''}
+
+      <div class="section">
+        <h2>Компании</h2>
+        <div class="scroll"><table class="rt">
+          <thead><tr>${thT('Компания', 'Название (✏️ — переименовать) и email владельца')}${thT('Участников', 'Сейчас в компании + непринятые приглашения')}${thT('Мест', 'Число мест по лицензии — владелец приглашает в пределах этого числа')}${thT('Лицензия', 'Отозвать лицензию — удалить компанию со всеми данными')}</tr></thead>
+          <tbody>${orgRows || '<tr><td colspan="4" class="muted">Компаний пока нет.</td></tr>'}</tbody>
+        </table></div>
+      </div>
+
+      <div class="section">
+        <h2>Пользователи</h2>
+        <div class="scroll"><table class="rt">
+          <thead><tr>${thT('Пользователь', 'Имя и email')}${thT('Регистрация', 'Дата регистрации')}${thT('Компаний', 'Владелец / участник (сколько компаний)')}${thT('Действие', 'Полное удаление пользователя из системы')}</tr></thead>
+          <tbody>${userRows || '<tr><td colspan="4" class="muted">Пользователей нет.</td></tr>'}</tbody>
+        </table></div>
+      </div>
     </div>`,
   });
 }

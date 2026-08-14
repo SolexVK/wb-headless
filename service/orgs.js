@@ -4,7 +4,7 @@
 // приглашения; менять его может только супер-админ. Приглашённый — участник без
 // права приглашать и без доступа к токену. Одна компания = один кабинет.
 import express from 'express';
-import { Orgs, Members, Cabinets, Invitations } from './models.js';
+import { Orgs, Members, Cabinets, Invitations, Users } from './models.js';
 import { requireAuth } from './security.js';
 import { validateToken } from './wb.js';
 import { orgPage, inviteAcceptPage, adminPage } from './views.js';
@@ -40,7 +40,7 @@ function renderOrg(req, res, extra = {}) {
     members: Members.ofOrg(org.id),
     invites: Orgs.canManage(req.role) ? Invitations.pending(org.id) : [],
     cabinet: cabinet ? { ...cabinet, meta: safeMeta(cabinet.token_meta) } : null,
-    seats: { total: Orgs.seats(org), used: Orgs.usedSeats(org.id), canInvite: Orgs.canInviteMore(org) },
+    seats: { total: Orgs.seats(org), used: Orgs.usedSeats(org.id), members: Orgs.membersCount(org.id), pending: Orgs.pendingCount(org.id), canInvite: Orgs.canInviteMore(org) },
     superAdmin: isSuperAdmin(req.session.user.email),
     ...extra,
   }));
@@ -110,14 +110,36 @@ orgRouter.post('/org/:id/member/:userId/remove', requireAuth, loadOrg, requireOw
   renderOrg(req, res, { memOk: 'Участник удалён.' });
 });
 
-// ── Супер-админ: лицензии (число мест компаний) ─────────────────────────────
+// ── Супер-админ: панель компаний, лицензий и пользователей ───────────────────
 orgRouter.get('/admin', requireAuth, requireSuperAdmin, (req, res) => {
-  res.send(adminPage({ user: req.session.user, csrf: res.locals.csrf, base: res.locals.base, orgs: Orgs.all(), ok: req.query.ok }));
+  res.send(adminPage({
+    user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
+    orgs: Orgs.all(), users: Users.all(), ok: req.query.ok, err: req.query.err,
+  }));
 });
 orgRouter.post('/admin/org/:id/seats', requireAuth, requireSuperAdmin, (req, res) => {
   const seats = Math.max(1, Math.round(Number(req.body.seats) || 1));
   Orgs.setSeats(Number(req.params.id), seats);
   logger.info({ orgId: Number(req.params.id), seats, by: req.session.user.email }, 'супер-админ: изменил число мест');
+  res.redirect('/admin?ok=1');
+});
+orgRouter.post('/admin/org/:id/rename', requireAuth, requireSuperAdmin, (req, res) => {
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.redirect('/admin?err=name');
+  Orgs.rename(Number(req.params.id), name);
+  logger.info({ orgId: Number(req.params.id), name, by: req.session.user.email }, 'супер-админ: переименовал компанию');
+  res.redirect('/admin?ok=1');
+});
+orgRouter.post('/admin/org/:id/delete', requireAuth, requireSuperAdmin, (req, res) => {
+  Orgs.remove(Number(req.params.id)); // отзыв лицензии = удаление компании (каскад)
+  logger.info({ orgId: Number(req.params.id), by: req.session.user.email }, 'супер-админ: отозвал лицензию (удалил компанию)');
+  res.redirect('/admin?ok=1');
+});
+orgRouter.post('/admin/user/:id/delete', requireAuth, requireSuperAdmin, (req, res) => {
+  const uid = Number(req.params.id);
+  if (uid === req.session.user.id) return res.redirect('/admin?err=self'); // себя удалять нельзя
+  Users.remove(uid); // каскад: членства + принадлежащие компании (кабинеты/снимки/приглашения)
+  logger.info({ userId: uid, by: req.session.user.email }, 'супер-админ: полностью удалил пользователя');
   res.redirect('/admin?ok=1');
 });
 

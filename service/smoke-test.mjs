@@ -161,11 +161,20 @@ try {
   r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfOwner, email: `seat4_${Date.now()}@example.com` }));
   ok(r.status === 403 && r.text.includes('Лимит мест'), 'Ф1: сверх лицензии — приглашение отклонено (403)');
 
+  // Место держит неиспользованное приглашение: отзыв освобождает место.
+  r = await req('GET', `/org/${orgId}`);
+  ok(/приглашений\s*<?\/?b?>?\s*1/.test(r.text) || r.text.includes('приглашений 1'), 'Ф1: видно, что место держит приглашение');
+  const revokeId = (r.text.match(/\/invite\/(\d+)\/revoke/) || [])[1];
+  r = await req('POST', `/org/${orgId}/invite/${revokeId}/revoke`, form({ _csrf: csrfOwner }));
+  ok(r.status === 200, 'Ф1: приглашение отозвано');
+  r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfOwner, email: `freed_${Date.now()}@example.com` }));
+  ok(r.status === 302, 'Ф1: после отзыва место освободилось — приглашение снова проходит');
+
   // Доступ: чужая/несуществующая компания → 404.
   r = await req('GET', `/org/${Number(orgId) + 99999}`);
   ok(r.status === 404, 'Ф1: чужая компания недоступна (404)');
 
-  // Супер-админ: панель лицензий доступна только ему.
+  // Супер-админ: панель доступна только ему; правит имя/места/пользователей.
   r = await req('GET', '/admin');
   ok(r.status === 403, 'Ф1: обычный пользователь не входит в /admin (403)');
   cookie = '';
@@ -173,9 +182,15 @@ try {
   r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email: 'super@example.com', password: 'supersecret1', name: 'Админ' }));
   r = await req('GET', '/admin');
   const csrfAdmin = csrfOf(r.text);
-  ok(r.status === 200 && r.text.includes('Лицензии компаний'), 'Ф1: супер-админ видит панель лицензий');
+  ok(r.status === 200 && r.text.includes('Панель супер-админа') && r.text.includes('Пользователи'), 'Ф1: супер-админ видит панель (компании + пользователи)');
   r = await req('POST', `/admin/org/${orgId}/seats`, form({ _csrf: csrfAdmin, seats: '5' }));
-  ok(r.status === 302 && /\/admin/.test(r.location || ''), 'Ф1: супер-админ меняет число мест');
+  ok(r.status === 302, 'Ф1: супер-админ меняет число мест');
+  r = await req('POST', `/admin/org/${orgId}/rename`, form({ _csrf: csrfAdmin, name: 'Переимен-супером' }));
+  r = await req('GET', '/admin');
+  ok(r.text.includes('Переимен-супером'), 'Ф1: супер-админ переименовал компанию');
+  const delUserId = (r.text.match(/\/admin\/user\/(\d+)\/delete/) || [])[1];
+  r = await req('POST', `/admin/user/${delUserId}/delete`, form({ _csrf: csrfAdmin }));
+  ok(r.status === 302, 'Ф1: супер-админ полностью удалил пользователя');
 } catch (e) {
   console.error('Ошибка теста:', e); failed++;
 } finally {

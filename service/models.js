@@ -11,12 +11,19 @@ const q = {
   userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
   userById: db.prepare('SELECT id, email, name, created_at, last_login_at FROM users WHERE id = ?'),
   insertUser: db.prepare('INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'),
+  deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
+  allUsers: db.prepare(`
+    SELECT u.id, u.email, u.name, u.created_at, u.last_login_at,
+      (SELECT COUNT(*) FROM memberships m WHERE m.user_id = u.id) AS memberships,
+      (SELECT COUNT(*) FROM organizations o WHERE o.owner_user_id = u.id) AS owns
+    FROM users u ORDER BY u.created_at DESC`),
   touchLogin: db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?"),
 
   insertOrg: db.prepare('INSERT INTO organizations (name, owner_user_id, license_seats) VALUES (?, ?, ?)'),
   orgById: db.prepare('SELECT * FROM organizations WHERE id = ?'),
   renameOrg: db.prepare('UPDATE organizations SET name = ? WHERE id = ?'),
   setSeats: db.prepare('UPDATE organizations SET license_seats = ? WHERE id = ?'),
+  deleteOrg: db.prepare('DELETE FROM organizations WHERE id = ?'),
   orgsOfUser: db.prepare(`
     SELECT o.id, o.name, o.license_seats, m.role
     FROM memberships m JOIN organizations o ON o.id = m.org_id
@@ -86,6 +93,11 @@ export const Users = {
   }),
 
   verify: (user, password) => bcrypt.compareSync(password, user.password_hash),
+
+  // Полное удаление пользователя (система «забывает», включая email). Каскадом
+  // удаляются его членства и принадлежащие ему компании (кабинеты/снимки/приглашения).
+  all: () => q.allUsers.all(),
+  remove: (id) => q.deleteUser.run(id).changes > 0,
 };
 
 export const Orgs = {
@@ -105,8 +117,10 @@ export const Orgs = {
   usedSeats: (orgId) => q.membersCount.get(orgId).n + q.pendingCount.get(orgId).n, // участники + непринятые приглашения
   canInviteMore: (org) => (q.membersCount.get(org.id).n + q.pendingCount.get(org.id).n) < Number(org.license_seats || 1),
   membersCount: (orgId) => q.membersCount.get(orgId).n,
+  pendingCount: (orgId) => q.pendingCount.get(orgId).n,
 
   all: () => q.allOrgs.all(),
+  remove: (id) => q.deleteOrg.run(id).changes > 0, // отзыв лицензии = удаление компании (каскад)
 };
 
 export const Members = {
