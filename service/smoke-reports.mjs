@@ -95,6 +95,25 @@ try {
   r = await req('GET', `/org/${orgId}/reports/archive/999999`);
   ok(r.status === 404, 'Ф2: несуществующий запуск → 404');
 
+  // ── Отчёт «Остатки» ─────────────────────────────────────────────────────────
+  r = await req('GET', `/org/${orgId}/reports/stock`);
+  ok(r.status === 200 && r.text.includes('Остатки') && r.text.includes('Обновить данные'), 'Ф2: страница остатков');
+  r = await req('POST', `/org/${orgId}/reports/stock/refresh`, form({ _csrf: csrfOf(r.text) }));
+  ok(r.status === 302, 'Ф2: запуск остатков → 302');
+  let stDone = false;
+  for (let i = 0; i < 30 && !stDone; i++) {
+    await sleep(80);
+    r = await req('GET', `/org/${orgId}/reports/stock`);
+    if (r.text.includes('По фулфилментам') && r.text.includes('Тест-склад')) stDone = true;
+  }
+  ok(stDone, 'Ф2: остатки собрались (по фулфилментам)');
+  const sj = await req('GET', `/org/${orgId}/reports/stock/download/json`);
+  let sp = null; try { sp = JSON.parse(sj.text); } catch { /* */ }
+  ok(sj.status === 200 && sp?.totals?.grandTotal === 12, 'Ф2: выгрузка остатков (JSON)');
+  // Остатки попали в общий архив (report=stock).
+  r = await req('GET', `/org/${orgId}/reports/archive`);
+  ok(r.text.includes('Остатки') && /остаток\s*12/.test(r.text), 'Ф2: остатки видны в архиве');
+
   // Автор удаляет СВОЙ запуск из архива.
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Удалить'), 'Ф2: автор видит кнопку удаления своего запуска');

@@ -5,8 +5,8 @@
 import express from 'express';
 import { Orgs, Cabinets, ReportRuns } from './models.js';
 import { requireAuth } from './security.js';
-import { reportsPage, podsortPage, archivePage, archiveViewPage } from './views.js';
-import { podsortDefaults, normalizePodsort, startPodsort, getJob, buildXlsx, buildDashboardHtml } from './reports-runner.js';
+import { reportsPage, podsortPage, stockPage, archivePage, archiveViewPage } from './views.js';
+import { podsortDefaults, normalizePodsort, startPodsort, startStock, getJob, buildXlsx, buildDashboardHtml } from './reports-runner.js';
 import { logger } from './logger.js';
 
 export const reportsRouter = express.Router();
@@ -36,13 +36,14 @@ function formFrom(latest) {
   };
 }
 
-// Выгрузка снимка в нужном формате (используется и для последнего, и для архивного).
-async function sendDownload(res, kind, cabId, snapshot, stem) {
+// Выгрузка снимка. JSON — для любого отчёта; Excel/HTML-дашборд — пока только подсорт.
+async function sendDownload(res, kind, cabId, snapshot, stem, report = 'podsort') {
   if (kind === 'json') {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${stem}.json"`);
     return res.send(JSON.stringify(snapshot, null, 2));
   }
+  if (report !== 'podsort') return res.status(404).send('Для этого отчёта доступна выгрузка только в JSON.');
   if (kind === 'xlsx') return res.download(await buildXlsx({ id: cabId }, snapshot), `${stem}.xlsx`);
   if (kind === 'html') return res.download(await buildDashboardHtml({ id: cabId }, snapshot), `${stem}-dashboard.html`);
   return res.status(404).send('Неизвестный формат');
@@ -91,6 +92,36 @@ reportsRouter.get('/org/:id/reports/podsort/download/:kind', requireAuth, loadOr
   catch (e) { logger.error({ err: e.message }, 'подсорт: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
 });
 
+// ── Остатки: страница + пересчёт + выгрузка ─────────────────────────────────
+reportsRouter.get('/org/:id/reports/stock', requireAuth, loadOrg, (req, res) => {
+  const cab = Cabinets.activeOf(req.org.id);
+  const latest = cab ? ReportRuns.latest(cab.id, 'stock') : null;
+  res.send(stockPage({
+    user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
+    org: req.org, role: req.role,
+    active: cab ? { id: cab.id, name: cab.name } : null,
+    latest, job: cab ? getJob(cab.id, 'stock') : null,
+  }));
+});
+
+reportsRouter.post('/org/:id/reports/stock/refresh', requireAuth, loadOrg, (req, res) => {
+  const cab = Cabinets.activeOf(req.org.id);
+  if (!cab) return res.redirect(`/org/${req.org.id}/reports/stock`);
+  const token = Cabinets.decryptedToken(cab);
+  if (!token) return res.redirect(`/org/${req.org.id}/reports/stock`);
+  const { already } = startStock({ id: cab.id }, token, Cabinets.meta(cab), {}, req.session.user.id);
+  if (already) logger.info({ cabinetId: cab.id }, 'остатки: пересчёт уже идёт — пропускаю');
+  res.redirect(`/org/${req.org.id}/reports/stock`);
+});
+
+reportsRouter.get('/org/:id/reports/stock/download/:kind', requireAuth, loadOrg, async (req, res) => {
+  const cab = Cabinets.activeOf(req.org.id);
+  const latest = cab ? ReportRuns.latest(cab.id, 'stock') : null;
+  if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
+  try { await sendDownload(res, req.params.kind, cab.id, latest.data, 'fbs-stock', 'stock'); }
+  catch (e) { logger.error({ err: e.message }, 'остатки: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
+});
+
 // ── Архив отчётов компании (общий): список запусков ──────────────────────────
 reportsRouter.get('/org/:id/reports/archive', requireAuth, loadOrg, (req, res) => {
   const cab = Cabinets.firstOf(req.org.id);
@@ -131,6 +162,6 @@ reportsRouter.get('/org/:id/reports/archive/:runId/download/:kind', requireAuth,
   const run = ReportRuns.byId(Number(req.params.runId));
   if (!run || !cab || run.cabinetId !== cab.id || !run.data) return res.status(404).send('Запуск не найден');
   const stem = `fbs-${run.report}-${String(run.created_at || run.createdAt || '').slice(0, 10)}`;
-  try { await sendDownload(res, req.params.kind, cab.id, run.data, stem); }
+  try { await sendDownload(res, req.params.kind, cab.id, run.data, stem, run.report); }
   catch (e) { logger.error({ err: e.message }, 'архив: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
 });

@@ -121,40 +121,89 @@ async function runPodsortPipeline(cabinet, token, meta, params, onLog) {
 }
 const tail = (s, n = 1200) => String(s || '').slice(-n);
 
-// ── Single-flight + фоновый статус на кабинет ───────────────────────────────
-const jobs = new Map(); // cabinetId → { state, startedAt, finishedAt, error, log, paramsHash }
+// ── Пайплайн «Остатки»: fbs-stock → агрегация по артикулу+цвету ──────────────
+function parseArt(vc) {
+  const s = String(vc || '');
+  const m = s.match(/^\s*(\d+)/);
+  const num = m ? m[1] : '';
+  const numInt = m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
+  let variant = s.slice(m ? m[0].length : 0).replace(/^[\s_\-/]+/, '').trim();
+  if (!variant) variant = s;
+  return { num, numInt, variant };
+}
+function buildStockSnapshot(raw) {
+  const warehouses = (raw.warehouses || []).map((w) => ({ id: w.id, name: w.name, totalQuantity: w.totalQuantity || 0, skuInStock: w.skuInStock || 0 }))
+    .sort((a, b) => b.totalQuantity - a.totalQuantity);
+  const artMap = new Map();
+  for (const w of raw.warehouses || []) {
+    for (const p of w.positions || []) {
+      if (!artMap.has(p.nmID)) { const a = parseArt(p.vendorCode); artMap.set(p.nmID, { nmID: p.nmID, vendorCode: p.vendorCode, articleNum: a.num, articleNumInt: a.numInt, variant: a.variant, byWarehouse: {}, total: 0 }); }
+      const e = artMap.get(p.nmID); e.byWarehouse[w.name] = (e.byWarehouse[w.name] || 0) + p.amount; e.total += p.amount;
+    }
+  }
+  const articles = [...artMap.values()].sort((a, b) => b.total - a.total || (a.articleNumInt - b.articleNumInt));
+  const active = warehouses.filter((w) => w.totalQuantity > 0);
+  return {
+    generatedAt: new Date().toISOString(),
+    warehouseList: active.map((w) => w.name),
+    warehouses, articles,
+    totals: { grandTotal: raw.grandTotalQuantity || warehouses.reduce((s, w) => s + w.totalQuantity, 0), warehouseCount: warehouses.length, activeWarehouses: active.length, articleCount: articles.length },
+  };
+}
+function fakeStock() {
+  return buildStockSnapshot({ grandTotalQuantity: 12, warehouses: [
+    { id: 1, name: 'Тест-склад', totalQuantity: 12, skuInStock: 2, positions: [
+      { sku: 'b1', nmID: 1, vendorCode: '002_чёрный', amount: 7 },
+      { sku: 'b2', nmID: 2, vendorCode: '003_синий', amount: 5 }] }] });
+}
+async function runStockPipeline(cabinet, token, meta, params, onLog) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  if (process.env.PODSORT_FAKE) return fakeStock();
+  const env = envFor(token, meta, dir);
+  onLog?.('Получаю остатки по складам (fbs-stock)…');
+  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-stock.mjs'), '--json'], { env, cwd: REPO });
+  if (r.code !== 0) throw new Error('Ошибка получения остатков (fbs-stock):\n' + tail(r.err));
+  let raw; try { raw = JSON.parse(r.out); } catch { throw new Error('Не удалось разобрать остатки.'); }
+  return buildStockSnapshot(raw);
+}
 
-export function getJob(cabinetId) { return jobs.get(Number(cabinetId)) || null; }
+// ── Single-flight + фоновый статус (ключ = кабинет:отчёт) ────────────────────
+const jobs = new Map();
+const jobKey = (cabinetId, report) => `${Number(cabinetId)}:${report}`;
+export function getJob(cabinetId, report = 'podsort') { return jobs.get(jobKey(cabinetId, report)) || null; }
 
-export function startPodsort(cabinet, token, meta, params, userId) {
+// Обобщённый фоновый запуск отчёта с сохранением в архив.
+function startRun({ cabinet, token, meta, params, userId, report, pipeline, summarize }) {
   const id = Number(cabinet.id);
-  const cur = jobs.get(id);
+  const key = jobKey(id, report);
+  const cur = jobs.get(key);
   if (cur && cur.state === 'running') return { already: true, job: cur };
-
   const ph = paramsHash(params);
   const job = { state: 'running', startedAt: Date.now(), finishedAt: null, error: null, log: 'старт…', paramsHash: ph };
-  jobs.set(id, job);
-  logger.info({ cabinetId: id, params }, 'подсорт: старт пересчёта');
-
+  jobs.set(key, job);
+  logger.info({ cabinetId: id, report }, 'отчёт: старт пересчёта');
   (async () => {
     try {
-      const snap = await runPodsortPipeline(cabinet, token, meta, params, (m) => { job.log = m; });
-      const t = snap?.totals || {};
-      const summary = {
-        reorderUnits: t.reorderUnits, riskRows: t.riskRows, seedUnits: t.seedUnits,
-        warehouses: t.warehouses, nomenclature: t.nomenclature, pivotRows: t.pivotRows,
-        articles: params.articles, leadMin: params.leadMin, leadMax: params.leadMax, cover: params.cover,
-      };
-      ReportRuns.add({ cabinetId: id, report: 'podsort', paramsHash: ph, params, userId, summary, snapshot: snap });
+      const snap = await pipeline(cabinet, token, meta, params, (m) => { job.log = m; });
+      ReportRuns.add({ cabinetId: id, report, paramsHash: ph, params, userId, summary: summarize(snap, params), snapshot: snap });
       job.state = 'done'; job.finishedAt = Date.now(); job.log = 'готово';
-      logger.info({ cabinetId: id, reorderUnits: t.reorderUnits }, 'подсорт: готово, сохранено в архив');
+      logger.info({ cabinetId: id, report }, 'отчёт: готово, сохранено в архив');
     } catch (e) {
       job.state = 'error'; job.finishedAt = Date.now(); job.error = e.message; job.log = 'ошибка';
-      logger.error({ cabinetId: id, err: e.message }, 'подсорт: ошибка');
+      logger.error({ cabinetId: id, report, err: e.message }, 'отчёт: ошибка');
     }
   })();
-
   return { already: false, job };
+}
+
+export function startPodsort(cabinet, token, meta, params, userId) {
+  return startRun({ cabinet, token, meta, params, userId, report: 'podsort', pipeline: runPodsortPipeline,
+    summarize: (snap, p) => { const t = snap?.totals || {}; return { reorderUnits: t.reorderUnits, riskRows: t.riskRows, seedUnits: t.seedUnits, warehouses: t.warehouses, nomenclature: t.nomenclature, pivotRows: t.pivotRows, articles: p.articles, leadMin: p.leadMin, leadMax: p.leadMax, cover: p.cover }; } });
+}
+export function startStock(cabinet, token, meta, params, userId) {
+  return startRun({ cabinet, token, meta, params, userId, report: 'stock', pipeline: runStockPipeline,
+    summarize: (snap) => { const t = snap?.totals || {}; return { grandTotal: t.grandTotal, activeWarehouses: t.activeWarehouses, articleCount: t.articleCount }; } });
 }
 
 // ── Артефакты для скачивания (по последнему снимку в каталоге кабинета) ──────

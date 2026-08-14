@@ -608,7 +608,7 @@ export function reportsPage(p) {
       ${cabLine}
       <div class="grid" style="margin-top:14px">
         ${card(`/org/${org.id}/reports/podsort`, 'Подсорт', 'Рекомендации к заказу по складам и размерам + пробный завоз', !!active)}
-        ${card(`/org/${org.id}/reports/podsort`, 'Остатки', 'Остатки FBS по артикулам и цветам', false)}
+        ${card(`/org/${org.id}/reports/stock`, 'Остатки', 'Остатки FBS по складам и по артикулам/цветам', !!active)}
       </div>
       <p style="margin-top:16px"><a class="dl" href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив отчётов</a></p>
     </div>`,
@@ -727,20 +727,77 @@ function podsortResults(s, { downloadHref, whenLabel }) {
     </div>`;
 }
 
+// Рендер результатов остатков из снимка (страница отчёта и архив).
+function stockResults(s, { downloadHref, whenLabel }) {
+  const t = s.totals || {};
+  const tiles = [
+    ['Всего, шт', t.grandTotal], ['Активных складов', t.activeWarehouses], ['Артикул+цвет', t.articleCount],
+  ].map(([l, n]) => `<div class="tilek"><div class="n">${nf(n)}</div><div class="l">${esc(l)}</div></div>`).join('');
+
+  const whRows = (s.warehouses || []).map((w) => `<tr><td class="tl">${esc(w.name)}</td><td class="num">${nf(w.totalQuantity)}</td><td class="num">${nf(w.skuInStock)}</td></tr>`).join('');
+  const whTable = `<div class="scroll"><table class="rt"><thead><tr>${thT('Фулфилмент', 'Склад продавца (FBS)')}${thT('Остаток, шт', 'Всего единиц на складе', 'num')}${thT('Позиций (SKU)', 'Сколько штрихкодов в наличии', 'num')}</tr></thead><tbody>${whRows}</tbody></table></div>`;
+
+  const cols = s.warehouseList || [];
+  const head = `<tr>${thT('Арт', 'Номер артикула')}${thT('Цвет', 'Вариант/цвет')}${cols.map((c) => thT(c, `Остаток на «${c}»`, 'num')).join('')}${thT('Итого', 'Всего по всем складам', 'num')}</tr>`;
+  const rows = (s.articles || []).map((a) => `<tr><td>${esc(a.articleNum)}</td><td class="tl">${esc(a.variant)}</td>${cols.map((c) => `<td class="num">${a.byWarehouse?.[c] ? nf(a.byWarehouse[c]) : ''}</td>`).join('')}<td class="num"><b>${nf(a.total)}</b></td></tr>`).join('');
+  const matrix = rows ? `<div class="scroll"><table class="rt"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Нет остатков.</p>';
+
+  return `<div class="section">
+      <h2>Результат ${whenLabel ? `<span class="muted" style="font-size:13px;font-weight:400">${esc(whenLabel)}</span>` : ''}</h2>
+      <div class="tiles">${tiles}</div>
+      <div style="margin-bottom:6px"><a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
+      <h2>По фулфилментам</h2>
+      ${whTable}
+      <h2 style="margin-top:20px">Остаток по артикул+цвет × склад</h2>
+      <p class="kv" style="margin:0 0 8px">Размеры внутри карточки (nmID) объединены в одну цифру.</p>
+      ${matrix}
+    </div>`;
+}
+
+export function stockPage(p) {
+  const { user, csrf, base = '', org, role, active, latest, job } = p;
+  const u = (path) => base + path;
+  const back = `<div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>`;
+  if (!active) {
+    return layout({ title: `Остатки — ${org.name}`, user, csrf, base,
+      body: `<div class="wrap">${back}<h1>Остатки</h1><div class="warn">Нет активного кабинета с токеном. <a href="${u(`/org/${org.id}`)}">Настройте кабинет</a>.</div></div>` });
+  }
+  const running = job && job.state === 'running';
+  const head = running ? '<meta http-equiv="refresh" content="4">' : '';
+  let statusBox = '';
+  if (running) statusBox = `<div class="running">⏳ Получаю остатки на токене кабинета «${esc(active.name)}»… ${esc(job.log || '')}<br><span class="muted">Страница обновится сама.</span></div>`;
+  else if (job && job.state === 'error') statusBox = `<div class="err" style="white-space:pre-wrap">Ошибка: ${esc(job.error || '')}</div>`;
+  else if (job && job.state === 'done') statusBox = okBox('Готово.');
+  const results = latest?.data
+    ? stockResults(latest.data, { downloadHref: (k) => u(`/org/${org.id}/reports/stock/download/${k}`), whenLabel: latest.createdAt ? String(latest.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '' })
+    : `<div class="section"><p class="muted">Данных пока нет — нажмите «Обновить данные».</p></div>`;
+  return layout({
+    title: `Остатки — ${org.name}`, user, csrf, base, head,
+    body: `<div class="wrap">${back}
+      <h1>Остатки <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
+      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Текущий остаток FBS по каждому складу и по артикулам/цветам. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
+      ${statusBox}
+      <div class="section"><form method="post" action="${u(`/org/${org.id}/reports/stock/refresh`)}">${csrfField(csrf)}<button class="btn" type="submit" style="max-width:280px"${running ? ' disabled' : ''}>${running ? 'Идёт обновление…' : 'Обновить данные'}</button></form></div>
+      ${results}
+    </div>`,
+  });
+}
+
 // ── Архив отчётов компании: список запусков ─────────────────────────────────
 export function archivePage({ user, csrf, base = '', org, role, runs }) {
   const u = (p) => base + p;
   const dt = (v) => esc(String(v || '').slice(0, 16).replace('T', ' ')) + ' UTC';
-  const rows = (runs || []).map((r) => {
+  const summ = (r) => {
     const sm = r.summary || {};
+    if (r.report === 'stock') return `остаток ${nf(sm.grandTotal)} шт · складов ${nf(sm.activeWarehouses)} · арт+цвет ${nf(sm.articleCount)}`;
+    return `подсорт ${nf(sm.reorderUnits)} · риск ${nf(sm.riskRows)} · завоз ${nf(sm.seedUnits)}${(sm.articles && sm.articles.length) ? ` · арт: ${esc(sm.articles.join(', '))}` : ''}`;
+  };
+  const rows = (runs || []).map((r) => {
     return `<tr>
       <td class="tl"><a href="${u(`/org/${org.id}/reports/archive/${r.id}`)}">${dt(r.createdAt)}</a></td>
       <td>${esc(reportRu(r.report))}</td>
       <td class="tl kv">${esc(r.userEmail || '—')}</td>
-      <td class="num">${nf(sm.reorderUnits)}</td>
-      <td class="num">${nf(sm.riskRows)}</td>
-      <td class="num">${nf(sm.seedUnits)}</td>
-      <td class="tl kv">${esc((sm.articles || []).join(', '))}</td>
+      <td class="tl kv">${summ(r)}</td>
       <td style="text-align:right;white-space:nowrap">
         <a class="dl" style="padding:5px 9px;font-size:12px;margin:0 4px 0 0" href="${u(`/org/${org.id}/reports/archive/${r.id}/download/xlsx`)}">Excel</a>
         <a class="dl" style="padding:5px 9px;font-size:12px;margin:0" href="${u(`/org/${org.id}/reports/archive/${r.id}/download/json`)}">JSON</a>
@@ -755,8 +812,8 @@ export function archivePage({ user, csrf, base = '', org, role, runs }) {
       <h1>Архив отчётов</h1>
       <p class="sub">История запусков компании (хранится 90 дней). Откройте запуск, чтобы посмотреть содержимое или скачать. Удалить запуск может только тот, кто его создал.</p>
       <div class="section"><div class="scroll"><table class="rt">
-        <thead><tr>${thT('Дата', 'Когда запущен (UTC) — ссылка на просмотр')}${thT('Отчёт', 'Тип отчёта')}${thT('Кто', 'Кто запустил')}${thT('Подсорт', 'Итого к заказу, шт')}${thT('Риск', 'Строк в риске')}${thT('Завоз', 'Пробный завоз, шт')}${thT('Артикулы', 'Артикулы в работе')}${thT('Выгрузки', 'Скачать этот запуск')}</tr></thead>
-        <tbody>${rows || '<tr><td colspan="8" class="muted">Пока нет запусков. Соберите отчёт на странице подсорта.</td></tr>'}</tbody>
+        <thead><tr>${thT('Дата', 'Когда запущен (UTC) — ссылка на просмотр')}${thT('Отчёт', 'Тип отчёта')}${thT('Кто', 'Кто запустил')}${thT('Итоги', 'Ключевые цифры запуска')}${thT('Выгрузки', 'Скачать этот запуск')}</tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="muted">Пока нет запусков. Соберите отчёт на странице отчётов.</td></tr>'}</tbody>
       </table></div></div>
     </div>`,
   });
@@ -766,9 +823,12 @@ export function archivePage({ user, csrf, base = '', org, role, runs }) {
 export function archiveViewPage({ user, csrf, base = '', org, role, run }) {
   const u = (p) => base + p;
   const when = esc(String(run.createdAt || '').slice(0, 16).replace('T', ' ')) + ' UTC';
-  const body = run.data
-    ? podsortResults(run.data, { downloadHref: (k) => u(`/org/${org.id}/reports/archive/${run.id}/download/${k}`), whenLabel: '' })
-    : '<div class="section"><p class="muted">Не удалось прочитать снимок этого запуска.</p></div>';
+  const dl = (k) => u(`/org/${org.id}/reports/archive/${run.id}/download/${k}`);
+  const body = !run.data
+    ? '<div class="section"><p class="muted">Не удалось прочитать снимок этого запуска.</p></div>'
+    : run.report === 'stock'
+      ? stockResults(run.data, { downloadHref: dl, whenLabel: '' })
+      : podsortResults(run.data, { downloadHref: dl, whenLabel: '' });
   const p = run.params || {};
   return layout({
     title: `Архив: ${reportRu(run.report)} — ${org.name}`, user, csrf, base,
