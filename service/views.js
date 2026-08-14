@@ -69,6 +69,10 @@ summary{cursor:pointer;font-weight:600;font-size:14px;padding:6px 0}
 .running{background:#E8EEFF;border:1px solid #C7D6FF;color:#2A46A8;border-radius:9px;padding:11px 13px;margin-bottom:12px;font-size:13.5px}
 @media(prefers-color-scheme:dark){.running{background:#12203f;border-color:#243a63;color:#9DB4F5}}
 .num{text-align:right;font-variant-numeric:tabular-nums}
+/* Таблицы отчётов: заголовки по центру (гориз.+верт.), данные по центру, кроме .tl (Цвет/Статус — слева). */
+.rt th,.rt td{text-align:center;vertical-align:middle}
+.rt td.tl{text-align:left}
+.rt .num{text-align:center;font-variant-numeric:tabular-nums}
 .scroll{overflow-x:auto}
 .note{background:#E8EEFF;border:1px solid #C7D6FF;color:#2A46A8;border-radius:9px;padding:10px 12px;margin-bottom:12px;font-size:13.5px}
 @media(prefers-color-scheme:dark){.note{background:#12203f;border-color:#243a63;color:#9DB4F5}}
@@ -248,7 +252,8 @@ export function orgPage(p) {
     <div class="section">
       <h2>Приглашения</h2>
       ${p.invError ? errBox(p.invError) : ''}${p.invOk ? okBox(p.invOk) : ''}
-      <p class="kv" style="margin:0 0 10px">Пока приглашение — это <b>ссылка</b>: вы создаёте её и отправляете человеку сами (почта/мессенджер). Он откроет ссылку, зарегистрируется своим паролем (или войдёт) и подтвердит вступление. Автоотправка на email появится позже.</p>
+      ${p.inviteCreated ? inviteCreatedBox(p.inviteCreated) : ''}
+      <p class="kv" style="margin:0 0 10px">Пока приглашение — это <b>ссылка</b>: вы создаёте её и отправляете человеку сами (почта/мессенджер). Принять сможет <b>только тот email</b>, который вы укажете. Он откроет ссылку, зарегистрируется этим email (или войдёт) и подтвердит вступление. Автоотправка на email появится позже.</p>
       <form method="post" action="${u(`/org/${org.id}/invite`)}" class="row-form">
         ${csrfField(csrf)}
         <div><label for="invemail" title="Email приглашаемого. Пока используется как пометка и подставляется в его регистрацию.">Email</label><input id="invemail" name="email" type="email" placeholder="user@example.com" required></div>
@@ -285,21 +290,29 @@ export function orgPage(p) {
   });
 }
 
-export function inviteAcceptPage({ csrf, user, org, invite, already, token, invalid, base = '' }) {
+export function inviteAcceptPage({ csrf, user, org, invite, already, mismatch, token, invalid, base = '' }) {
   const u = (p) => base + p;
-  const body = invalid
-    ? `<h1>Приглашение недействительно</h1><p class="sub">Ссылка истекла или уже использована.</p><div class="alt"><a href="${u('/')}">На главную</a></div>`
-    : already
-      ? `<h1>Вы уже участник</h1><p class="sub">${esc(org.name)} — вы уже состоите в этой организации.</p><div class="alt"><a href="${u(`/org/${org.id}`)}">Открыть организацию</a></div>`
-      : `<h1>Приглашение</h1>
-         <p class="sub">Приглашение для <b>${esc(invite.email)}</b> в организацию <b>${esc(org.name)}</b> как <span class="badge ${esc(invite.role)}">${esc(roleRu(invite.role))}</span></p>
-         ${user.email && invite.email && user.email.toLowerCase() !== String(invite.email).toLowerCase()
-    ? `<div class="warn">Вы вошли как <b>${esc(user.email)}</b> — это не тот email, на который выписано приглашение. Можно вступить этим аккаунтом или выйти и войти под нужным.</div>`
-    : `<p class="kv">Вы вошли как <b>${esc(user.email)}</b>. Нажмите кнопку, чтобы вступить.</p>`}
-         <form method="post" action="${u(`/invite/${esc(token)}/accept`)}">${csrfField(csrf)}
-           <button class="btn" type="submit">Принять приглашение</button>
-         </form>
-         <div class="alt"><a href="${u('/')}">Отказаться</a></div>`;
+  let body;
+  if (invalid) {
+    body = `<h1>Приглашение недействительно</h1><p class="sub">Ссылка истекла или уже использована.</p><div class="alt"><a href="${u('/')}">На главную</a></div>`;
+  } else if (already) {
+    body = `<h1>Вы уже участник</h1><p class="sub">${esc(org.name)} — вы уже состоите в этой организации.</p><div class="alt"><a href="${u(`/org/${org.id}`)}">Открыть организацию</a></div>`;
+  } else if (mismatch) {
+    // Строгая привязка: аккаунт не совпадает с email приглашения — принять нельзя.
+    body = `<h1>Другой аккаунт</h1>
+      <p class="sub">Приглашение выписано на <b>${esc(invite.email)}</b>, а вы вошли как <b>${esc(user.email)}</b>.</p>
+      <div class="warn">Принять приглашение может только владелец адреса <b>${esc(invite.email)}</b>. Выйдите и войдите (или зарегистрируйтесь) под этим email, затем снова откройте ссылку-приглашение.</div>
+      <form method="post" action="${u('/logout')}">${csrfField(csrf)}<button class="btn" type="submit">Выйти</button></form>
+      <div class="alt"><a href="${u('/')}">На главную</a></div>`;
+  } else {
+    body = `<h1>Приглашение</h1>
+       <p class="sub">Приглашение для <b>${esc(invite.email)}</b> в организацию <b>${esc(org.name)}</b> как <span class="badge ${esc(invite.role)}">${esc(roleRu(invite.role))}</span></p>
+       <p class="kv">Вы вошли как <b>${esc(user.email)}</b>. Нажмите кнопку, чтобы вступить.</p>
+       <form method="post" action="${u(`/invite/${esc(token)}/accept`)}">${csrfField(csrf)}
+         <button class="btn" type="submit">Принять приглашение</button>
+       </form>
+       <div class="alt"><a href="${u('/')}">Отказаться</a></div>`;
+  }
   return layout({ title: 'Приглашение — FBS-сервис', user, csrf, base, body: `<div class="center"><div class="card auth">${body}</div></div>` });
 }
 
@@ -310,6 +323,15 @@ function formBtn(csrf, action, label, cls = 'mini btn-sm', confirm) {
 }
 const okBox = (m) => `<div class="ok">${esc(m)}</div>`;
 const okOrWarn = (m) => `<div class="warn">${esc(m)}</div>`;
+
+// Блок созданной ссылки-приглашения: кликабельная ссылка + поле для копирования.
+function inviteCreatedBox({ email, url }) {
+  return `<div class="ok">
+    Ссылка-приглашение для <b>${esc(email)}</b> создана (действует 7 дней). Отправьте её человеку — принять сможет только этот email.
+    <div style="margin-top:8px"><a href="${esc(url)}" style="font-weight:600;word-break:break-all">${esc(url)}</a></div>
+    <input class="linkbox" style="width:100%;margin-top:8px" readonly value="${esc(url)}" onclick="this.select()" aria-label="Ссылка-приглашение">
+  </div>`;
+}
 
 // ── Отчёты ───────────────────────────────────────────────────────────────────
 const nf = (n) => (n == null ? '' : Number(n).toLocaleString('ru-RU'));
@@ -414,7 +436,7 @@ export function podsortPage(p) {
           ${field('leadMin', 'Лид мин, дн', f.leadMin, '', 'Минимальный срок «заказ → товар на FF-складе» (сборка + доставка). Если запас кончится раньше — статус «разрыв до поставки».')}
           ${field('leadMax', 'Лид макс, дн', f.leadMax, '', 'Максимальный срок поставки на FF-склад. Горизонт заказа = Лид макс + Запас.')}
           ${field('cover', 'Запас, дн', f.cover, '', 'Страховой запас в днях сверх лид-тайма — на сколько дней продаж хотим покрыть. Горизонт заказа = Лид макс + Запас.')}
-          ${field('seedMin', 'Завоз/размер', f.seedMin, '', 'Сколько штук завозить «на пробу» на склад, где этого размера ещё не было (новинка/докладка), — на каждый размер.')}
+          ${field('seedMin', 'Пробный завоз/размер', f.seedMin, '', 'Сколько штук завозить «на пробу» на склад, где этого размера ещё не было (новинка/докладка), — на каждый размер.')}
           ${field('historyDays', 'История, дн', f.historyDays, '', 'За сколько последних дней берём заказы для анализа присутствия товара и скорости.')}
         </div>
         <button class="btn" type="submit" style="max-width:280px;margin-top:18px"${running ? ' disabled' : ''}>${running ? 'Идёт пересчёт…' : 'Обновить данные'}</button>
@@ -436,25 +458,25 @@ export function podsortPage(p) {
     // Сводная: артикул×цвет×размер × склад.
     const cols = s.warehouseList || [];
     const pivotHead = `<tr>${thT('Арт', 'Номер артикула (модель)')}${thT('Цвет', 'Вариант/цвет исполнения')}${thT('Разм', 'Размер (techSize карточки)')}${cols.map((c) => thT(c, `Сколько заказать на склад «${c}»`, 'num')).join('')}${thT('Итого', 'Сумма подсорта по строке (все склады)', 'num')}</tr>`;
-    const pivotRows = (s.pivot || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td>${esc(r.variant)}</td><td>${esc(r.techSize)}</td>${cols.map((c) => `<td class="num">${r.byWarehouse?.[c] ? nf(r.byWarehouse[c]) : ''}</td>`).join('')}<td class="num"><b>${nf(r.total)}</b></td></tr>`).join('');
+    const pivotRows = (s.pivot || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td class="tl">${esc(r.variant)}</td><td>${esc(r.techSize)}</td>${cols.map((c) => `<td class="num">${r.byWarehouse?.[c] ? nf(r.byWarehouse[c]) : ''}</td>`).join('')}<td class="num"><b>${nf(r.total)}</b></td></tr>`).join('');
     const pivotTable = pivotRows
-      ? `<div class="scroll"><table><thead>${pivotHead}</thead><tbody>${pivotRows}</tbody></table></div>`
+      ? `<div class="scroll"><table class="rt"><thead>${pivotHead}</thead><tbody>${pivotRows}</tbody></table></div>`
       : '<p class="muted">Подсорт не требуется (0 строк).</p>';
 
     // Детально по складам.
     const whBlocks = (s.warehouses || []).filter((w) => w.rows?.length).map((w) => `
       <details><summary>${esc(w.name)} — остаток ${nf(w.stockUnits)} · подсорт ${nf(w.reorderUnits)} шт · строк ${w.rows.length}</summary>
-        <div class="scroll"><table>
+        <div class="scroll"><table class="rt">
           <thead><tr>${thT('Арт', 'Номер артикула (модель)')}${thT('Цвет', 'Вариант/цвет')}${thT('Разм', 'Размер')}${thT('Остаток', 'Текущий остаток этого размера на этом складе (FBS)', 'num')}${thT('/дн', 'Средняя скорость продаж, шт/день, за окно скорости', 'num')}${thT('Дней до 0', 'На сколько дней хватит остатка при текущей скорости (∞ — продаж нет)', 'num')}${thT('Подсорт', 'Рекомендация к заказу = скорость × горизонт − остаток (округление вверх, минимум 0)', 'num')}${thT('Статус', 'Оценка риска нехватки — см. «Пояснения» выше')}</tr></thead>
-          <tbody>${w.rows.map((r) => `<tr><td>${esc(r.articleNum)}</td><td>${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td class="num">${nf(r.stock)}</td><td class="num">${esc(String(r.perDay))}</td><td class="num">${r.daysToZero == null ? '∞' : esc(String(r.daysToZero))}</td><td class="num"><b>${nf(r.reorderQty)}</b></td><td>${statusBadge(r.status)}</td></tr>`).join('')}</tbody>
+          <tbody>${w.rows.map((r) => `<tr><td>${esc(r.articleNum)}</td><td class="tl">${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td class="num">${nf(r.stock)}</td><td class="num">${esc(String(r.perDay))}</td><td class="num">${r.daysToZero == null ? '∞' : esc(String(r.daysToZero))}</td><td class="num"><b>${nf(r.reorderQty)}</b></td><td class="tl">${statusBadge(r.status)}</td></tr>`).join('')}</tbody>
         </table></div>
       </details>`).join('');
 
     // Пробный завоз.
-    const seedRows = (s.seedGrid || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td>${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td><span class="badge ${r.kind === 'новинка' ? 'st-ok' : 'st-risk'}">${esc(r.kind)}</span></td><td class="num"><b>${nf(r.seedTotal)}</b></td></tr>`).join('');
+    const seedRows = (s.seedGrid || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td class="tl">${esc(r.variant)}</td><td>${esc(r.techSize)}</td><td><span class="badge ${r.kind === 'новинка' ? 'st-ok' : 'st-risk'}">${esc(r.kind)}</span></td><td class="num"><b>${nf(r.seedTotal)}</b></td></tr>`).join('');
     const seedBlock = seedRows
       ? `<details><summary>Пробный завоз — ${nf(t.seedRows)} строк (${nf(t.seedNovelty)} новинок + ${nf(t.seedRefill)} докладок) = ${nf(t.seedUnits)} шт</summary>
-          <div class="scroll"><table><thead><tr>${thT('Арт', 'Номер артикула')}${thT('Цвет', 'Вариант/цвет')}${thT('Разм', 'Размер')}${thT('Тип', 'Новинка — карточки ещё не было ни на одном FF-складе; докладка — есть на других складах, но не на этом')}${thT('Кол-во', 'Всего штук к пробному завозу по всем складам (по seedMin на размер)', 'num')}</tr></thead><tbody>${seedRows}</tbody></table></div></details>`
+          <div class="scroll"><table class="rt"><thead><tr>${thT('Арт', 'Номер артикула')}${thT('Цвет', 'Вариант/цвет')}${thT('Разм', 'Размер')}${thT('Тип', 'Новинка — карточки ещё не было ни на одном FF-складе; докладка — есть на других складах, но не на этом')}${thT('Кол-во', 'Всего штук к пробному завозу по всем складам (по seedMin на размер)', 'num')}</tr></thead><tbody>${seedRows}</tbody></table></div></details>`
       : '';
 
     results = `<div class="section">

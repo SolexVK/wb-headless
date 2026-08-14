@@ -110,20 +110,32 @@ try {
   ok(r.text.includes('Основной') && r.text.includes('активный'), 'Ф1: кабинет показан как активный');
   ok(!r.text.includes(GOOD_TOKEN), 'Ф1: токен НЕ отображается на странице');
 
-  // Приглашение участника → ссылка выдана.
-  r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfOrg, email: 'friend@example.com', role: 'member' }));
+  // Приглашение конкретного email → PRG-редирект, ссылка на странице организации.
+  const inviteeEmail = `invitee_${Date.now()}@example.com`;
+  r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfOrg, email: inviteeEmail, role: 'member' }));
+  ok(r.status === 302 && r.location === `/org/${orgId}`, 'Ф1: приглашение → 302 на организацию (PRG)');
+  r = await req('GET', `/org/${orgId}`);
   const inviteTok = (r.text.match(/\/invite\/([A-Za-z0-9_-]{10,})/) || [])[1];
-  ok(r.status === 200 && !!inviteTok, 'Ф1: приглашение создаёт ссылку');
+  ok(!!inviteTok && r.text.includes('создана'), 'Ф1: кликабельная ссылка-приглашение на странице');
 
-  // Второй пользователь принимает приглашение и попадает в организацию как участник.
+  // Строгая привязка: ЧУЖОЙ email принять не может.
   cookie = '';
-  const email3 = `invitee_${Date.now()}@example.com`;
+  const wrongEmail = `wrong_${Date.now()}@example.com`;
   r = await req('GET', '/register');
-  r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email: email3, password: 'supersecret1', name: 'Гость' }));
+  r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email: wrongEmail, password: 'supersecret1', name: 'Чужой' }));
   r = await req('GET', `/invite/${inviteTok}`);
-  ok(r.status === 200 && r.text.includes('Принять приглашение'), 'Ф1: страница приёма приглашения');
+  ok(r.status === 200 && r.text.includes('Другой аккаунт'), 'Ф1: чужой email видит «Другой аккаунт»');
   r = await req('POST', `/invite/${inviteTok}/accept`, form({ _csrf: csrfOf(r.text) }));
-  ok(r.status === 302 && r.location === `/org/${orgId}`, 'Ф1: приглашение принято → редирект в организацию');
+  ok(r.status === 403, 'Ф1: чужой email не может принять (403)');
+
+  // Правильный email принимает и попадает в организацию.
+  cookie = '';
+  r = await req('GET', '/register');
+  r = await req('POST', '/register', form({ _csrf: csrfOf(r.text), email: inviteeEmail, password: 'supersecret1', name: 'Гость' }));
+  r = await req('GET', `/invite/${inviteTok}`);
+  ok(r.status === 200 && r.text.includes('Принять приглашение'), 'Ф1: нужный email видит приём приглашения');
+  r = await req('POST', `/invite/${inviteTok}/accept`, form({ _csrf: csrfOf(r.text) }));
+  ok(r.status === 302 && r.location === `/org/${orgId}`, 'Ф1: приглашение принято → организация');
   r = await req('GET', `/org/${orgId}`);
   ok(r.status === 200 && r.text.includes('Гость'), 'Ф1: приглашённый видит организацию как участник');
 

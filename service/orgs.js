@@ -41,7 +41,11 @@ function renderOrg(req, res, extra = {}) {
 const safeMeta = (j) => { try { return JSON.parse(j || '{}'); } catch { return {}; } };
 
 // ── Страница организации ─────────────────────────────────────────────────────
-orgRouter.get('/org/:id', requireAuth, loadOrg, (req, res) => renderOrg(req, res));
+orgRouter.get('/org/:id', requireAuth, loadOrg, (req, res) => {
+  // Flash после POST-Redirect-GET (напр. созданная ссылка-приглашение) — чистый URL.
+  const flash = req.session.flash; req.session.flash = undefined;
+  renderOrg(req, res, flash && flash.orgId === req.org.id ? flash.data : {});
+});
 
 // ── Кабинеты: привязка/обновление токена WB ─────────────────────────────────
 orgRouter.post('/org/:id/cabinet', requireAuth, loadOrg, requireManage, async (req, res) => {
@@ -100,7 +104,10 @@ orgRouter.post('/org/:id/invite', requireAuth, loadOrg, requireManage, (req, res
   const token = Invitations.create(req.org.id, email, role);
   logger.info({ orgId: req.org.id, email, role }, 'приглашение создано');
   const link = `${req.protocol}://${req.get('host')}${res.locals.base || ''}/invite/${token}`;
-  renderOrg(req, res, { invOk: `Ссылка-приглашение для ${email} создана (действует 7 дней). Отправьте её человеку любым способом — почта/мессенджер. Он откроет её, зарегистрируется своим паролем (или войдёт) и подтвердит вступление:\n${link}` });
+  // PRG: кладём результат во flash и редиректим на чистый URL организации,
+  // чтобы ссылка отображалась кликабельной, а адресная строка не путала.
+  req.session.flash = { orgId: req.org.id, data: { inviteCreated: { email, url: link } } };
+  res.redirect(`/org/${req.org.id}`);
 });
 
 orgRouter.post('/org/:id/invite/:inviteId/revoke', requireAuth, loadOrg, requireManage, (req, res) => {
@@ -137,12 +144,18 @@ orgRouter.get('/invite/:token', (req, res) => {
   if (!Invitations.isValid(invite)) return res.status(410).send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, invalid: true, base: res.locals.base }));
   const org = Orgs.byId(invite.org_id);
   const already = Orgs.isMember(req.session.user.id, invite.org_id);
-  res.send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, org, invite, already, token: req.params.token, base: res.locals.base }));
+  const mismatch = String(req.session.user.email).toLowerCase() !== String(invite.email).toLowerCase();
+  res.send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, org, invite, already, mismatch, token: req.params.token, base: res.locals.base }));
 });
 
 orgRouter.post('/invite/:token/accept', requireAuth, (req, res) => {
   const invite = Invitations.byToken(req.params.token);
   if (!Invitations.isValid(invite)) return res.status(410).send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, invalid: true, base: res.locals.base }));
+  // Строгая привязка: принять может только тот, на чей email выписано приглашение.
+  if (String(req.session.user.email).toLowerCase() !== String(invite.email).toLowerCase()) {
+    const org = Orgs.byId(invite.org_id);
+    return res.status(403).send(inviteAcceptPage({ csrf: res.locals.csrf, user: req.session.user, org, invite, token: req.params.token, mismatch: true, base: res.locals.base }));
+  }
   Invitations.accept(invite, req.session.user.id);
   logger.info({ orgId: invite.org_id, userId: req.session.user.id }, 'приглашение принято');
   res.redirect(`/org/${invite.org_id}`);
