@@ -27,12 +27,13 @@ const sumF = (k, f) => display.reduce((a, d) => a + (d[k]?.[f] || 0), 0);
 const accC = sumC('accepted'), delC = sumC('delivered');
 
 const diff = delC - accC;
+const avgCheck = delC ? Math.round(sumF('delivered', 'money') / delC) : 0;
 const kpis = [
   kpi(nf(accC), `принято за ${N} дн`, { icon: '📥', accent: AC.blue }),
   kpi(nf(delC), `передано за ${N} дн`, { icon: '🚚', accent: AC.green }),
-  kpi(`${diff >= 0 ? '+' : ''}${nf(diff)}`, 'разница (передано−принято)', { icon: diff < 0 ? '⚠️' : '⚖️', accent: diff < 0 ? AC.red : AC.teal }),
+  kpi(`${diff >= 0 ? '+' : ''}${nf(diff)}`, 'разница (передано−принято)', { icon: diff < 0 ? '📉' : '📈', accent: diff < 0 ? AC.red : AC.teal }),
   kpi(nf(delC * COST), `себест. передано, ₽ (${nf(COST)}/шт)`, { icon: '🏷️', accent: AC.violet }),
-  kpi(nf(sumF('delivered', 'moneyAvg')), 'ср. цена продажи, ₽', { icon: '💰', accent: AC.indigo }),
+  kpi(nf(avgCheck), 'ср. чек, ₽/шт', { icon: '💰', accent: AC.indigo }),
 ].join('');
 
 // Выводы/инсайты.
@@ -86,12 +87,12 @@ const valPanel = `<section class="panel">
 
 // Таблица день × фулфилмент (передано).
 const head = `<tr><th class="tl">День</th>${ff.map((n) => `<th class="ta-r">${esc(n)}</th>`).join('')}<th class="ta-r">Итого</th></tr>`;
-const rows = display.map((d) => `<tr><td class="tl mono">${esc(d.date)}</td>${ff.map((n) => { const v = (d.delivered?.byFulfillment?.[n] || {}).count || 0; return `<td class="cellnum">${v ? nf(v) : ''}</td>`; }).join('')}<td class="cellnum"><b>${nf(d.delivered?.count || 0)}</b></td></tr>`).join('');
+const rows = display.map((d) => `<tr><td class="tl mono">${esc(d.date)}</td>${ff.map((n) => { const v = (d.delivered?.byFulfillment?.[n] || {}).count || 0; return `<td class="cellnum" data-v="${v}">${v ? nf(v) : ''}</td>`; }).join('')}<td class="cellnum" data-v="${d.delivered?.count || 0}"><b>${nf(d.delivered?.count || 0)}</b></td></tr>`).join('');
 const colTot = ff.map((n) => display.reduce((a, d) => a + ((d.delivered?.byFulfillment?.[n] || {}).count || 0), 0));
 const foot = `<tr><td class="tl">Итого</td>${colTot.map((v) => `<td class="cellnum">${nf(v)}</td>`).join('')}<td class="cellnum">${nf(delC)}</td></tr>`;
 const tablePanel = `<section class="panel">
   ${panelHead('🗓️', 'Передано по дням и складам', `штук, за ${N} дн`, AC.teal)}
-  <div class="table-scroll"><table><thead>${head}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>
+  <div class="table-scroll"><table class="sortable"><thead>${head}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>
 </section>`;
 
 const artLine = (s.articles && s.articles.length) ? ` Только артикулы: ${esc(s.articles.join(', '))}.` : '';

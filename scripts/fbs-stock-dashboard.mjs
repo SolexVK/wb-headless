@@ -23,11 +23,12 @@ const topWh = warehouses[0];
 // KPI.
 const activeN = t.activeWarehouses ?? warehouses.length;
 const avgPerWh = activeN ? Math.round(grand / activeN) : 0;
+const totalSku = warehouses.reduce((a, w) => a + (w.skuInStock || 0), 0);
 const kpis = [
   kpi(nf(grand), 'штук на FBS (всего)', { icon: '📦', accent: AC.green }),
   kpi(nf(activeN), 'активных складов', { icon: '🏭', accent: AC.blue }),
-  kpi(nf(t.articleCount ?? articles.length), 'артикул + цвет', { icon: '🎨', accent: AC.violet }),
-  kpi(topWh ? esc(topWh.name) : '—', 'крупнейший склад', { icon: '🏆', accent: AC.amber }),
+  kpi(nf(t.articleCount ?? articles.length), 'артикул + цвет (позиций)', { icon: '🎨', accent: AC.violet }),
+  kpi(nf(totalSku), 'SKU в наличии', { icon: '🔖', accent: AC.amber }),
   kpi(nf(avgPerWh), 'в среднем на склад, шт', { icon: '⚖️', accent: AC.teal }),
 ].join('');
 
@@ -61,17 +62,17 @@ const shown = articles.slice(0, TOP);
 const maxCell = Math.max(1, ...shown.flatMap((a) => cols.map((c) => a.byWarehouse?.[c] || 0)));
 const head = `<tr><th class="ta-r">Арт</th><th class="tl">Цвет / вариант</th>${cols.map((c) => `<th class="ta-r">${esc(c)}</th>`).join('')}<th class="ta-r">Итого</th></tr>`;
 const rows = shown.map((a) => `<tr>
-  <td class="art">${esc(a.articleNum || '—')}</td>
+  <td class="art" data-v="${esc(a.articleNum || '')}">${esc(a.articleNum || '—')}</td>
   <td class="a-name">${esc(a.variant)}</td>
-  ${cols.map((c) => { const v = a.byWarehouse?.[c] || 0; return `<td class="cellnum" style="background:${heatBg(v, maxCell)}">${v ? nf(v) : ''}</td>`; }).join('')}
-  <td class="cellnum"><b>${nf(a.total)}</b></td>
+  ${cols.map((c) => { const v = a.byWarehouse?.[c] || 0; return `<td class="cellnum" data-v="${v}" style="background:${heatBg(v, maxCell)}">${v ? nf(v) : ''}</td>`; }).join('')}
+  <td class="cellnum" data-v="${a.total}"><b>${nf(a.total)}</b></td>
 </tr>`).join('');
 const colTot = cols.map((c) => shown.reduce((acc, a) => acc + (a.byWarehouse?.[c] || 0), 0));
 const foot = `<tr><td></td><td class="tl">Итого (показано)</td>${colTot.map((v) => `<td class="cellnum">${nf(v)}</td>`).join('')}<td class="cellnum">${nf(shown.reduce((acc, a) => acc + a.total, 0))}</td></tr>`;
 const matrixPanel = `<section class="panel">
   ${panelHead('🎨', 'Остаток: артикул + цвет × склад', `${articles.length > TOP ? `топ ${TOP} из ${nf(articles.length)}` : `${nf(articles.length)} позиций`} · интенсивность цвета = величина остатка`, AC.violet)}
-  <div class="table-scroll"><table><thead>${head}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>
-  <p class="note">Размеры внутри карточки (nmID) объединены в одну цифру. Пустая ячейка — на складе нет остатка по этому артикулу.</p>
+  <div class="table-scroll"><table class="sortable"><thead>${head}</thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>
+  <p class="note">Клик по заголовку столбца — сортировка. Размеры внутри карточки (nmID) объединены в одну цифру. Пустая ячейка — на складе нет остатка.</p>
 </section>`;
 
 const body = `<div class="wrap">

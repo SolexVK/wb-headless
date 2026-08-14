@@ -1,5 +1,6 @@
 // service/views.js — минимальный серверный рендер (без шаблонизатора).
 // Утилитарные страницы авторизации + заглушка кабинета. Экранируем весь ввод.
+import { INTERACTIVE_CSS, INTERACTIVE_JS } from '../scripts/lib/report-interactive.mjs';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // Палитра как токены. Тёмная тема применяется двумя способами: по системной
@@ -124,7 +125,7 @@ function layout({ title, body, user, csrf, base = '', head = '' }) {
     : '';
   return `<!doctype html><html lang="ru"${themeAttr}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">${head}<title>${esc(title)}</title>
-<style>${CSS}</style></head><body>${nav}${body}</body></html>`;
+<style>${CSS}${INTERACTIVE_CSS}</style></head><body>${nav}${body}<script>${INTERACTIVE_JS}</script></body></html>`;
 }
 
 const csrfField = (csrf) => `<input type="hidden" name="_csrf" value="${esc(csrf)}">`;
@@ -728,10 +729,17 @@ function podsortResults(s, { downloadHref, whenLabel }) {
   ]);
 
   const cols = s.warehouseList || [];
-  const pivotHead = `<tr>${thT('Арт', 'Номер артикула (модель)')}${thT('Цвет', 'Вариант/цвет исполнения')}${thT('Разм', 'Размер (techSize карточки)')}${cols.map((c) => thT(c, `Сколько заказать на склад «${c}»`, 'num')).join('')}${thT('Итого', 'Сумма подсорта по строке (все склады)', 'num')}</tr>`;
-  const pivotRows = (s.pivot || []).map((r) => `<tr><td>${esc(r.articleNum)}</td><td class="tl">${esc(r.variant)}</td><td>${esc(r.techSize)}</td>${cols.map((c) => `<td class="num">${r.byWarehouse?.[c] ? nf(r.byWarehouse[c]) : ''}</td>`).join('')}<td class="num"><b>${nf(r.total)}</b></td></tr>`).join('');
+  // Остаток по (артикул|цвет|размер) × склад — из детальных строк складов.
+  const stockMap = {};
+  for (const w of (s.warehouses || [])) for (const r of (w.rows || [])) { const k = `${r.articleNum}|${r.variant}|${r.techSize}`; (stockMap[k] = stockMap[k] || {}); stockMap[k][w.name] = (stockMap[k][w.name] || 0) + (r.stock || 0); }
+  const stockOf = (p) => stockMap[`${p.articleNum}|${p.variant}|${p.techSize}`] || {};
+  const pivotHead = `<tr>${thT('Арт', 'Номер артикула (модель)')}${thT('Цвет', 'Вариант/цвет исполнения')}${thT('Разм', 'Размер')}${cols.map((c) => thT(c, `Остаток на «${c}»`, 'num oscol print-hide')).join('')}${thT('Ост.∑', 'Итого остаток по строке', 'num oscol print-hide')}${cols.map((c) => thT(c, `Подсорт: сколько заказать на «${c}»`, 'num')).join('')}${thT('Итого', 'Итого подсорт по строке', 'num')}</tr>`;
+  const pivotRows = (s.pivot || []).map((r) => {
+    const st = stockOf(r); const stT = cols.reduce((a, c) => a + (st[c] || 0), 0);
+    return `<tr><td data-v="${esc(r.articleNum)}">${esc(r.articleNum)}</td><td class="tl">${esc(r.variant)}</td><td>${esc(r.techSize)}</td>${cols.map((c) => `<td class="num oscol print-hide" data-v="${st[c] || 0}">${st[c] ? nf(st[c]) : ''}</td>`).join('')}<td class="num oscol print-hide" data-v="${stT}">${nf(stT)}</td>${cols.map((c) => `<td class="num" data-v="${r.byWarehouse?.[c] || 0}">${r.byWarehouse?.[c] ? nf(r.byWarehouse[c]) : '·'}</td>`).join('')}<td class="num" data-v="${r.total}"><b>${nf(r.total)}</b></td></tr>`;
+  }).join('');
   const pivotTable = pivotRows
-    ? `<div class="scroll"><table class="rt"><thead>${pivotHead}</thead><tbody>${pivotRows}</tbody></table></div>`
+    ? `<p class="blk-hint">Слева — <span class="os">Остаток по складам</span>, справа (после «Ост.∑») — <span class="ps">Подсорт по складам</span>. Прокрутите таблицу вправо; первые 3 столбца закреплены. Клик по заголовку — сортировка.</p><div class="scroll"><table class="rt sortable frozen3"><thead>${pivotHead}</thead><tbody>${pivotRows}</tbody></table></div>`
     : '<p class="muted">Подсорт не требуется (0 строк).</p>';
 
   const whBlocks = (s.warehouses || []).filter((w) => w.rows?.length).map((w) => `
@@ -776,12 +784,14 @@ function stockResults(s, { downloadHref, whenLabel }) {
   const whs = [...(s.warehouses || [])].filter((w) => w.totalQuantity > 0).sort((a, b) => b.totalQuantity - a.totalQuantity);
   const grand = t.grandTotal || whs.reduce((a, w) => a + w.totalQuantity, 0);
   const top = whs[0];
+  const activeN = t.activeWarehouses ?? whs.length;
+  const totalSku = whs.reduce((a, w) => a + (w.skuInStock || 0), 0);
   const tiles = [
     dkKpi(nf(grand), 'штук на FBS (всего)', { icon: '📦', accent: DKAC.green }),
-    dkKpi(nf(t.activeWarehouses ?? whs.length), 'активных складов', { icon: '🏭', accent: DKAC.blue }),
-    dkKpi(nf(t.articleCount), 'артикул + цвет', { icon: '🎨', accent: DKAC.violet }),
-    dkKpi(top ? esc(top.name) : '—', 'крупнейший склад', { icon: '🏆', accent: DKAC.amber }),
-    dkKpi(nf(top ? top.totalQuantity : 0), 'штук на нём', { icon: '⚖️', accent: DKAC.teal }),
+    dkKpi(nf(activeN), 'активных складов', { icon: '🏭', accent: DKAC.blue }),
+    dkKpi(nf(t.articleCount), 'артикул + цвет (позиций)', { icon: '🎨', accent: DKAC.violet }),
+    dkKpi(nf(totalSku), 'SKU в наличии', { icon: '🔖', accent: DKAC.amber }),
+    dkKpi(nf(activeN ? Math.round(grand / activeN) : 0), 'в среднем на склад, шт', { icon: '⚖️', accent: DKAC.teal }),
   ].join('');
   const topArt = (s.articles || [])[0];
   const insightRow = dkInsights([
@@ -791,14 +801,14 @@ function stockResults(s, { downloadHref, whenLabel }) {
   ]);
 
   const whMax = Math.max(1, ...whs.map((w) => w.totalQuantity));
-  const whRows = whs.map((w) => `<tr><td class="tl">${esc(w.name)}</td><td class="num"${heatCell(w.totalQuantity, whMax)}>${nf(w.totalQuantity)}</td><td class="num">${nf(w.skuInStock)}</td></tr>`).join('');
-  const whTable = `<div class="scroll"><table class="rt"><thead><tr>${thT('Фулфилмент', 'Склад продавца (FBS)')}${thT('Остаток, шт', 'Всего единиц на складе', 'num')}${thT('Позиций (SKU)', 'Сколько штрихкодов в наличии', 'num')}</tr></thead><tbody>${whRows}</tbody></table></div>`;
+  const whRows = whs.map((w) => `<tr><td class="tl">${esc(w.name)}</td><td class="num" data-v="${w.totalQuantity}"${heatCell(w.totalQuantity, whMax)}>${nf(w.totalQuantity)}</td><td class="num" data-v="${w.skuInStock}">${nf(w.skuInStock)}</td></tr>`).join('');
+  const whTable = `<div class="scroll"><table class="rt sortable"><thead><tr>${thT('Фулфилмент', 'Склад продавца (FBS)')}${thT('Остаток, шт', 'Всего единиц на складе', 'num')}${thT('Позиций (SKU)', 'Сколько штрихкодов в наличии', 'num')}</tr></thead><tbody>${whRows}</tbody></table></div>`;
 
   const cols = s.warehouseList || [];
   const cellMax = Math.max(1, ...(s.articles || []).flatMap((a) => cols.map((c) => a.byWarehouse?.[c] || 0)));
   const head = `<tr>${thT('Арт', 'Номер артикула')}${thT('Цвет', 'Вариант/цвет')}${cols.map((c) => thT(c, `Остаток на «${c}»`, 'num')).join('')}${thT('Итого', 'Всего по всем складам', 'num')}</tr>`;
-  const rows = (s.articles || []).map((a) => `<tr><td>${esc(a.articleNum)}</td><td class="tl">${esc(a.variant)}</td>${cols.map((c) => { const v = a.byWarehouse?.[c] || 0; return `<td class="num"${heatCell(v, cellMax)}>${v ? nf(v) : ''}</td>`; }).join('')}<td class="num"><b>${nf(a.total)}</b></td></tr>`).join('');
-  const matrix = rows ? `<div class="scroll"><table class="rt"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Нет остатков.</p>';
+  const rows = (s.articles || []).map((a) => `<tr><td data-v="${esc(a.articleNum)}">${esc(a.articleNum)}</td><td class="tl">${esc(a.variant)}</td>${cols.map((c) => { const v = a.byWarehouse?.[c] || 0; return `<td class="num" data-v="${v}"${heatCell(v, cellMax)}>${v ? nf(v) : ''}</td>`; }).join('')}<td class="num" data-v="${a.total}"><b>${nf(a.total)}</b></td></tr>`).join('');
+  const matrix = rows ? `<div class="scroll"><table class="rt sortable"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Нет остатков.</p>';
 
   return `<div class="section">
       <p class="kv" style="margin:0 0 12px">Текущий остаток FBS по складам и артикулам/цветам.${whenLabel ? ` <b>${esc(whenLabel)}</b>` : ''}</p>
@@ -948,7 +958,7 @@ function mvOverlay(values, ov, win) {
 }
 
 // Многолинейный SVG-график (тема через var()). lines: [{name,color,values,bold}].
-function mvChart(buckets, lines) {
+function mvChart(buckets, lines, money = false) {
   const W = 760, H = 280, pl = 46, pr = 14, pt = 12, pb = 40;
   const iw = W - pl - pr, ih = H - pt - pb, n = buckets.length;
   let max = 0, min = 0;
@@ -967,7 +977,13 @@ function mvChart(buckets, lines) {
     const pts = ln.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
     paths += `<polyline points="${pts}" fill="none" stroke="${ln.color}" stroke-width="${ln.bold ? 3.4 : 1.6}" stroke-linejoin="round" stroke-linecap="round"${ln.bold ? '' : ' opacity="0.92"'}/>`;
   }
-  return `<svg viewBox="0 0 ${W} ${H}" class="mv-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="График движения заказов">${grid}${zero}${paths}${xlab}</svg>`;
+  const cross = `<line class="rt-cross" x1="0" y1="${pt}" x2="0" y2="${pt + ih}" style="display:none"/>`;
+  const bw = n > 1 ? iw / (n - 1) : iw;
+  const hits = buckets.map((b, i) => {
+    const tip = lines.map((ln) => ({ n: ln.name, c: ln.color, v: mvVal(ln.values[i] || 0, money) }));
+    return `<rect class="rt-hit" x="${(x(i) - bw / 2).toFixed(1)}" y="${pt}" width="${bw.toFixed(1)}" height="${ih}" data-cx="${x(i).toFixed(1)}" data-label="${esc(b.label)}" data-tip="${esc(JSON.stringify(tip))}"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="mv-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="График движения заказов">${grid}${zero}${paths}${cross}${hits}${xlab}</svg>`;
 }
 
 // Рендер результатов движения (страница отчёта и архив).
@@ -990,12 +1006,14 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   const sumC = (k) => display.reduce((s, d) => s + fldShown(d[k], 'count'), 0);
   const sumF = (k, f) => display.reduce((s, d) => s + fldShown(d[k], f), 0);
   const accC = sumC('accepted'), delC = sumC('delivered');
+  const diffKpi = delC - accC;
+  const avgCheck = delC ? Math.round(sumF('delivered', 'money') / delC) : 0;
   const tiles = [
     dkKpi(nf(accC), 'Принято, шт', { icon: '📥', accent: DKAC.blue }),
     dkKpi(nf(delC), 'Передано, шт', { icon: '🚚', accent: DKAC.green }),
-    dkKpi(nf(Math.round(delC * cost)), 'Себест., ₽', { icon: '🏷️', accent: DKAC.violet }),
-    dkKpi(nf(Math.round(sumF('delivered', 'moneyAvg'))), 'Ср.продажа, ₽', { icon: '💰', accent: DKAC.indigo }),
-    dkKpi(nf(Math.round(sumF('delivered', 'money'))), 'Цена заказа, ₽', { icon: '🧾', accent: DKAC.amber }),
+    dkKpi(`${diffKpi >= 0 ? '+' : ''}${nf(diffKpi)}`, 'Разница, шт', { icon: diffKpi < 0 ? '📉' : '📈', accent: diffKpi < 0 ? DKAC.red : DKAC.teal }),
+    dkKpi(nf(Math.round(delC * cost)), `Себест. передано, ₽ (${nf(cost)}/шт)`, { icon: '🏷️', accent: DKAC.violet }),
+    dkKpi(nf(avgCheck), 'Ср. чек, ₽/шт', { icon: '💰', accent: DKAC.indigo }),
   ].join('');
   // Инсайты за период (по показанным складам).
   const diffC = delC - accC;
@@ -1046,15 +1064,15 @@ function movementResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   const totalLine = { name: 'Итого', color: 'var(--total)', bold: true, values: mvOverlay(buckets.map((b) => b.total), view.ov, win) };
   const chartLines = ffShown.length > 1 ? [...lines, totalLine] : lines;
   const legend = `<div class="mv-legend">${chartLines.map((ln) => `<span><i style="background:${ln.color}"></i>${esc(ln.name)}</span>`).join('')}</div>`;
-  const chart = buckets.length ? `${mvChart(buckets, chartLines)}${legend}` : '<p class="muted">Нет данных за период.</p>';
+  const chart = buckets.length ? `${mvChart(buckets, chartLines, money)}${legend}` : '<p class="muted">Нет данных за период.</p>';
 
   // Таблица корзина × фулфилмент.
   const head = `<tr>${thT(view.gran === 'day' ? 'День' : 'Неделя', 'Период')}${ffShown.map((n) => thT(n, `${MV_FOCUS[view.focus]} — ${n}`, 'num')).join('')}${thT('Итого', 'Сумма по строке', 'num')}</tr>`;
-  const rows = buckets.map((b) => `<tr><td class="tl">${esc(b.label)}</td>${ffShown.map((n) => `<td class="num">${b.byFf[n] ? mvVal(b.byFf[n], money) : ''}</td>`).join('')}<td class="num"><b>${mvVal(b.total, money)}</b></td></tr>`).join('');
+  const rows = buckets.map((b) => `<tr><td class="tl">${esc(b.label)}</td>${ffShown.map((n) => `<td class="num" data-v="${b.byFf[n] || 0}">${b.byFf[n] ? mvVal(b.byFf[n], money) : ''}</td>`).join('')}<td class="num" data-v="${b.total}"><b>${mvVal(b.total, money)}</b></td></tr>`).join('');
   const colTotals = ffShown.map((n) => buckets.reduce((s, b) => s + (b.byFf[n] || 0), 0));
   const grand = buckets.reduce((s, b) => s + b.total, 0);
-  const footer = `<tr style="border-top:2px solid var(--line)"><td class="tl"><b>Итого</b></td>${colTotals.map((v) => `<td class="num"><b>${mvVal(v, money)}</b></td>`).join('')}<td class="num"><b>${mvVal(grand, money)}</b></td></tr>`;
-  const table = buckets.length ? `<div class="scroll"><table class="rt"><thead>${head}</thead><tbody>${rows}${footer}</tbody></table></div>` : '';
+  const footer = `<tr class="nosort" style="border-top:2px solid var(--line)"><td class="tl"><b>Итого</b></td>${colTotals.map((v) => `<td class="num"><b>${mvVal(v, money)}</b></td>`).join('')}<td class="num"><b>${mvVal(grand, money)}</b></td></tr>`;
+  const table = buckets.length ? `<div class="scroll"><table class="rt sortable"><thead>${head}</thead><tbody>${rows}${footer}</tbody></table></div>` : '';
 
   // Сравнение с прошлым периодом.
   let compare = '';

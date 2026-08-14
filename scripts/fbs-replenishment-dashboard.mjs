@@ -50,15 +50,23 @@ const statusPanel = `<section class="panel">
   <p class="note">«разрыв до поставки» — закончится раньше, чем за ${P.leadMin} дн (подсорт не успеет доехать); «риск разрыва» — может не дожить до ${P.leadMax} дн.</p>
 </section>`;
 
-// Сводная: подсорт по размерам × склад.
+// Сводная: слева Остаток по складам, справа Подсорт по складам (в PDF Остаток скрыт).
 const whList = snap.warehouseList || (snap.warehouses || []).map((w) => w.name);
 const pivot = snap.pivot || [];
-const pivotHead = `<tr><th class="ta-r">Арт</th><th class="tl">Цвет</th><th class="tl">Размер</th>${whList.map((n) => `<th class="ta-r">${esc(n)}</th>`).join('')}<th class="ta-r">Итого</th></tr>`;
-const pivotRows = pivot.map((r) => `<tr><td class="art">${esc(r.articleNum || '—')}</td><td class="a-name">${esc(r.variant)}</td><td class="tl">${esc(r.techSize)}</td>${whList.map((w) => `<td class="cellnum">${r.byWarehouse[w] ? nf(r.byWarehouse[w]) : '·'}</td>`).join('')}<td class="cellnum reorder">${nf(r.total)}</td></tr>`).join('');
+const stockMap = {};
+for (const w of (snap.warehouses || [])) for (const r of (w.rows || [])) { const k = `${r.articleNum}|${r.variant}|${r.techSize}`; (stockMap[k] = stockMap[k] || {}); stockMap[k][w.name] = (stockMap[k][w.name] || 0) + (r.stock || 0); }
+const stockOf = (p) => stockMap[`${p.articleNum}|${p.variant}|${p.techSize}`] || {};
+const th = (t, cls) => `<th class="${cls}">${esc(t)}</th>`;
+const pivotHead = `<tr>${th('Арт', 'ta-r')}${th('Цвет', 'tl')}${th('Размер', 'tl')}${whList.map((n) => th(n, 'ta-r oscol print-hide')).join('')}${th('Ост.∑', 'ta-r oscol print-hide')}${whList.map((n) => th(n, 'ta-r')).join('')}${th('Итого', 'ta-r')}</tr>`;
+const pivotRows = pivot.map((r) => {
+  const st = stockOf(r); const stT = whList.reduce((a, w) => a + (st[w] || 0), 0);
+  return `<tr><td class="art" data-v="${esc(r.articleNum || '')}">${esc(r.articleNum || '—')}</td><td class="a-name">${esc(r.variant)}</td><td class="tl">${esc(r.techSize)}</td>${whList.map((w) => `<td class="cellnum oscol print-hide" data-v="${st[w] || 0}">${st[w] ? nf(st[w]) : ''}</td>`).join('')}<td class="cellnum oscol print-hide" data-v="${stT}">${nf(stT)}</td>${whList.map((w) => `<td class="cellnum" data-v="${r.byWarehouse[w] || 0}">${r.byWarehouse[w] ? nf(r.byWarehouse[w]) : '·'}</td>`).join('')}<td class="cellnum reorder" data-v="${r.total}">${nf(r.total)}</td></tr>`;
+}).join('');
 const pivotPanel = pivot.length ? `<section class="panel">
-  ${panelHead('📊', 'Сводная: подсорт по размерам × склад', `${nf(pivot.length)} строк (артикул × цвет × размер)`, AC.indigo)}
-  <div class="table-scroll"><table><thead>${pivotHead}</thead><tbody>${pivotRows}</tbody></table></div>
-  <p class="note">Рекомендованный подсорт (шт) по каждому размеру и складу. «·» — подсорт не нужен.</p>
+  ${panelHead('📊', 'Сводная: остаток и подсорт по размерам × склад', `${nf(pivot.length)} строк (артикул × цвет × размер)`, AC.indigo)}
+  <p class="blk-hint print-hide">Слева — <span class="os">Остаток по складам</span>, справа (после «Ост.∑») — <span class="ps">Подсорт по складам</span>. Прокрутите вправо; первые 3 столбца закреплены. Клик по заголовку — сортировка.</p>
+  <div class="table-scroll"><table class="sortable frozen3"><thead>${pivotHead}</thead><tbody>${pivotRows}</tbody></table></div>
+  <p class="note">«·» — подсорт не нужен. В PDF выводится только блок «Подсорт» (как раньше).</p>
 </section>` : '';
 
 // По каждому складу.

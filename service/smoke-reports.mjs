@@ -170,7 +170,7 @@ try {
   r = await req('GET', `/org/${orgId}/reports/movement?focus=delivered&unit=money&basis=cost&cost=620`);
   ok(r.status === 200 && r.text.includes('₽ (Себестоимость)') && r.text.includes('Себест., ₽'), 'Ф2: движение — база «себестоимость» (₽)');
   r = await req('GET', `/org/${orgId}/reports/movement?focus=delivered&unit=money&basis=sale`);
-  ok(r.status === 200 && r.text.includes('₽ (Ср. цена 7д)') && r.text.includes('Ср.продажа, ₽'), 'Ф2: движение — база «ср. цена продажи 7д»');
+  ok(r.status === 200 && r.text.includes('₽ (Ср. цена 7д)'), 'Ф2: движение — база «ср. цена продажи 7д»');
   r = await req('GET', `/org/${orgId}/reports/movement?cmp=1`);
   ok(r.status === 200 && r.text.includes('Сравнение с прошлым периодом'), 'Ф2: движение — сравнение с прошлым периодом');
   // Фильтр складов: скрыть единственный склад → просьба выбрать хотя бы один.

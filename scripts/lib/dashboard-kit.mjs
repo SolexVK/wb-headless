@@ -3,6 +3,7 @@
 // SVG-графики (линии, пончик) и HTML-инфографика (горизонтальные бары, тепловые
 // ячейки). Категорийная палитра прогнана валидатором dataviz (light+dark).
 // Правила печати: A4, контроль разрывов, точная цветопередача — тексты не наезжают.
+import { INTERACTIVE_CSS, INTERACTIVE_JS } from './report-interactive.mjs';
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 export const nf = (n) => Number(Math.round(n) || 0).toLocaleString('ru-RU');
@@ -52,7 +53,7 @@ export function legend(items) {
 // ── Горизонтальные бары (магнитуда по категориям) — чистый HTML, без наездов ──
 export function hbars(items, { max, fmt = nf, accent = 'var(--accent)' } = {}) {
   const m = max || Math.max(1, ...items.map((i) => i.value));
-  return `<div class="hbars">${items.map((it) => `<div class="hbar">
+  return `<div class="hbars">${items.map((it) => `<div class="hbar" data-tip="${esc(JSON.stringify([{ n: it.label, c: it.color || accent, v: fmt(it.value) }]))}">
     <span class="hb-lab" title="${esc(it.label)}">${esc(it.label)}</span>
     <span class="hb-track"><span class="hb-fill" style="width:${(Math.max(0, it.value) / m * 100).toFixed(2)}%;background:${it.color || accent}"></span></span>
     <span class="hb-val">${fmt(it.value)}${it.sub ? `<span class="hb-sub"> ${esc(it.sub)}</span>` : ''}</span>
@@ -74,7 +75,8 @@ export function donut(items, { size = 168, thickness = 26, centerTop = '', cente
   let off = 0;
   const segs = items.filter((i) => i.value > 0).map((i) => {
     const frac = i.value / total, len = frac * C;
-    const seg = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${i.color}" stroke-width="${thickness}" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"></circle>`;
+    const tip = JSON.stringify([{ n: i.label, c: i.color, v: `${nf(i.value)} (${(frac * 100).toFixed(1)}%)` }]);
+    const seg = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${i.color}" stroke-width="${thickness}" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})" data-tip="${esc(tip)}" style="cursor:pointer"></circle>`;
     off += len; return seg;
   }).join('');
   return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" class="donut" role="img">
@@ -106,7 +108,13 @@ export function lineChart(series, labels, { width = 900, height = 300, fmtY = nf
     const pts = s.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
     paths += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="${s.bold ? 3.6 : 2}" stroke-linejoin="round" stroke-linecap="round"${s.bold ? '' : ' opacity="0.95"'}/>`;
   }
-  return `<svg viewBox="0 0 ${width} ${height}" class="linechart" preserveAspectRatio="xMidYMid meet" role="img">${grid}${zero}${paths}${xlab}</svg>`;
+  const cross = `<line class="rt-cross" x1="0" y1="${pt}" x2="0" y2="${pt + ih}" style="display:none"/>`;
+  const bw = n > 1 ? iw / (n - 1) : iw;
+  const hits = labels.map((l, i) => {
+    const tip = series.map((s) => ({ n: s.name, c: s.color, v: fmtY(s.values[i] || 0) }));
+    return `<rect class="rt-hit" x="${(x(i) - bw / 2).toFixed(1)}" y="${pt}" width="${bw.toFixed(1)}" height="${ih}" data-cx="${x(i).toFixed(1)}" data-label="${esc(l)}" data-tip="${esc(JSON.stringify(tip))}"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${width} ${height}" class="linechart" preserveAspectRatio="xMidYMid meet" role="img">${grid}${zero}${paths}${cross}${hits}${xlab}</svg>`;
 }
 
 // ── Сгруппированные вертикальные бары (2 ряда: напр. принято/передано) ────────
@@ -128,16 +136,20 @@ export function groupedBars(labels, groups, { width = 900, height = 260, fmtY = 
   });
   const step = Math.max(1, Math.ceil(n / 12)); let xlab = '';
   labels.forEach((l, i) => { if (i % step === 0 || i === n - 1) xlab += `<text x="${(pl + slot * i + slot / 2).toFixed(1)}" y="${height - pb + 17}" text-anchor="middle" class="ax">${esc(l)}</text>`; });
-  return `<svg viewBox="0 0 ${width} ${height}" class="barchart" preserveAspectRatio="xMidYMid meet" role="img">${grid}${bars}${xlab}</svg>`;
+  const hits = labels.map((l, i) => {
+    const tip = groups.map((g) => ({ n: g.name, c: g.color, v: fmtY(g.values[i] || 0) }));
+    return `<rect class="rt-hit" x="${(pl + slot * i).toFixed(1)}" y="${pt}" width="${slot.toFixed(1)}" height="${ih}" data-label="${esc(l)}" data-tip="${esc(JSON.stringify(tip))}"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${width} ${height}" class="barchart" preserveAspectRatio="xMidYMid meet" role="img">${grid}${bars}${hits}${xlab}</svg>`;
 }
 
 // ── Обёртки страницы ─────────────────────────────────────────────────────────
 export function page(title, body) {
   // data-theme="light" — дашборд всегда в светлой теме (независимо от ОС).
-  return `<!doctype html><html lang="ru" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><style>${CSS}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html lang="ru" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><style>${CSS}${INTERACTIVE_CSS}</style></head><body>${body}<script>${INTERACTIVE_JS}</script></body></html>`;
 }
 export function artifact(title, body) {
-  return `<title>${esc(title)}</title>\n<style>${CSS}</style>\n${body}`;
+  return `<title>${esc(title)}</title>\n<style>${CSS}${INTERACTIVE_CSS}</style>\n${body}\n<script>${INTERACTIVE_JS}</script>`;
 }
 
 // ── Дизайн-система (CSS) ──────────────────────────────────────────────────────
