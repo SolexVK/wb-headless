@@ -150,9 +150,10 @@ try {
   r = await req('POST', `/invite/${inviteTok}/accept`, form({ _csrf: csrfOf(r.text) }));
   ok(r.status === 302 && r.location === `/org/${orgId}`, 'Ф1: приглашение принято → организация');
   r = await req('GET', `/org/${orgId}`);
-  ok(r.status === 200 && r.text.includes('Гость'), 'Ф1: приглашённый видит компанию как участник');
-  // Участник НЕ видит поля токена и формы приглашений (проверяем сами контролы).
+  ok(r.status === 200 && r.text.includes('Тест-компания') && r.text.includes('участник'), 'Ф1: приглашённый видит свою компанию как участник');
+  // Участник НЕ видит токен, приглашения, места и список участников (email владельца).
   ok(!r.text.includes('name="token"') && !r.text.includes('id="invemail"'), 'Ф1: участник не видит токен/приглашения');
+  ok(!r.text.includes('Места по лицензии') && !r.text.includes(email2), 'Ф1: участник не видит места и список участников');
   // Участник НЕ может приглашать (owner-only) → 403.
   const csrfMember = csrfOf(r.text);
   r = await req('POST', `/org/${orgId}/invite`, form({ _csrf: csrfMember, email: `nope_${Date.now()}@example.com` }));

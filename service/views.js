@@ -209,6 +209,27 @@ export function orgPage(p) {
   const invites = p.invites || [];
   const tokenExpired = cabinet?.meta?.expiresAt ? new Date(cabinet.meta.expiresAt).getTime() < Date.now() : false;
 
+  // ── Вид участника: только название компании и вход в отчёты. Ни участников,
+  // ни мест, ни токена, ни приглашений — управленческая информация скрыта.
+  if (!owner) {
+    const ready = !!cabinet && !tokenExpired;
+    const status = !cabinet
+      ? '<div class="warn">Кабинет ещё не настроен владельцем — отчёты пока недоступны.</div>'
+      : tokenExpired
+        ? '<div class="warn">Токен кабинета истёк — отчёты не считаются. Сообщите владельцу компании.</div>'
+        : '<p class="kv">Кабинет подключён — отчёты доступны.</p>';
+    return layout({
+      title: `${org.name} — FBS-сервис`, user, csrf, base,
+      body: `<div class="wrap">
+        <div class="crumbs"><a href="${u('/')}">← Компании</a></div>
+        <h1>${esc(org.name)} <span class="badge member">участник</span></h1>
+        ${status}
+        ${ready ? `<p><a class="dl" href="${u(`/org/${org.id}/reports`)}">📊 Открыть отчёты</a></p>` : ''}
+        <p class="kv" style="margin-top:14px">Вы участник этой компании. Вам доступны отчёты; управление кабинетом и участниками — у владельца.</p>
+      </div>`,
+    });
+  }
+
   // ── Кабинет компании (одна компания = один кабинет) ──
   let cabinetSection;
   if (!cabinet) {
