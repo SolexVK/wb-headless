@@ -6,6 +6,8 @@ import path from 'path';
 import puppeteer from 'puppeteer';
 import { v4 as uuidv4 } from 'uuid';
 import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
+import { buildNicheAnalysis } from './lib/nicheAnalysis.js';
+import { nicheReportToCSV } from './lib/nicheReport.js';
 import { defaultPeriod, loadItems, selectItems, selectByGroup, writeOutputs } from './report-stock.js';
 
 const app = express();
@@ -203,6 +205,55 @@ app.get('/reports/stock-availability', requireKey, async (req, res) => {
       return res.send(reportToCSV(report));
     }
     return res.json(report);
+  } catch (err) {
+    return res.status(500).json({ error: 'report_failed', detail: String(err?.message || err) });
+  }
+});
+
+// ---------- REPORT: анализ ниши (категории) ----------
+// GET /reports/niche?path=Женщинам/Одежда/Платья&d1=YYYY-MM-DD&d2=YYYY-MM-DD&format=json|csv
+// Полный анализ ниши: ёмкость, тренд, сезонность, конкуренция, насыщенность + скоринг.
+// path — путь категории WB (обязателен). Без d1/d2 берётся период = последние
+// REPORT_DAYS дней. format=csv отдаёт таблицу товаров (JSON — весь анализ).
+app.get('/reports/niche', requireKey, async (req, res) => {
+  try {
+    if (!process.env.MPSTATS_TOKEN) {
+      return res.status(500).json({ error: 'mpstats_token_missing' });
+    }
+    let { d1, d2, format, path: categoryPath, maxRows, pageSize, query, freq, supply, cost } = req.query;
+    if (!categoryPath || !String(categoryPath).trim()) {
+      return res.status(400).json({ error: 'category_path_missing', detail: 'Укажите ?path=<категория WB>' });
+    }
+    if (!d1 || !d2) ({ d1, d2 } = defaultPeriod(Number(process.env.REPORT_DAYS) || 30));
+
+    const analysis = await buildNicheAnalysis({
+      categoryPath: String(categoryPath),
+      d1,
+      d2,
+      // query может быть одиночной фразой или мультиспеком «фраза=частота:карточки; …».
+      query: query && !/[;=]/.test(String(query)) && String(query).trim() ? String(query).trim() : null,
+      frequency: freq != null && String(freq).trim() ? Number(freq) : null,
+      supplyCards: supply != null && String(supply).trim() ? Number(supply) : null,
+      queries: query && /[;=]/.test(String(query)) ? String(query) : null,
+      cost: cost != null && String(cost).trim() ? Number(cost) : null,
+      maxRows: Number(maxRows) || Number(process.env.NICHE_MAX_ROWS) || 5000,
+      pageSize: Number(pageSize) || Number(process.env.NICHE_PAGE_SIZE) || 500,
+    });
+
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="niche-${d1}_${d2}.csv"`);
+      return res.send(
+        nicheReportToCSV({
+          items: analysis.items,
+          totals: {
+            totalUnits: analysis.capacity.totalUnits,
+            totalRevenue: analysis.capacity.totalRevenue,
+          },
+        })
+      );
+    }
+    return res.json(analysis);
   } catch (err) {
     return res.status(500).json({ error: 'report_failed', detail: String(err?.message || err) });
   }

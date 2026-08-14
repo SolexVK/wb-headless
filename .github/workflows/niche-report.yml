@@ -1,0 +1,81 @@
+name: Анализ ниши (категории WB)
+
+# Запуск ТОЛЬКО вручную кнопкой «Run workflow» на вкладке Actions.
+on:
+  workflow_dispatch:
+    inputs:
+      path:
+        description: 'Путь категории WB. Пример: Женщинам/Одежда/Платья'
+        required: true
+        default: ''
+      days:
+        description: 'За сколько последних дней считать (если не заданы точные даты)'
+        required: false
+        default: '30'
+      d1:
+        description: 'Дата начала (YYYY-MM-DD) — необязательно'
+        required: false
+        default: ''
+      d2:
+        description: 'Дата конца (YYYY-MM-DD) — необязательно'
+        required: false
+        default: ''
+      max_rows:
+        description: 'Сколько товаров максимум выгрузить (верх по выручке)'
+        required: false
+        default: '5000'
+
+jobs:
+  niche:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Забрать код из репозитория
+        uses: actions/checkout@v4
+
+      - name: Установить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Установить зависимости (без скачивания Chromium)
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: '1'
+        run: npm ci
+
+      - name: Проверить, что токен MPSTATS доступен
+        env:
+          MPSTATS_TOKEN: ${{ secrets.MPSTATS_TOKEN }}
+        run: |
+          if [ -z "$MPSTATS_TOKEN" ]; then
+            echo "::error::Секрет MPSTATS_TOKEN пуст или не найден."
+            echo "Добавьте его: Settings → Secrets and variables → Actions →"
+            echo "вкладка Secrets → New repository secret, имя РОВНО: MPSTATS_TOKEN"
+            exit 1
+          fi
+          echo "Токен получен ✓ (длина ${#MPSTATS_TOKEN} символов, значение скрыто)"
+
+      - name: Собрать анализ ниши
+        env:
+          MPSTATS_TOKEN: ${{ secrets.MPSTATS_TOKEN }}
+          REPORT_DAYS: ${{ github.event.inputs.days }}
+          NICHE_PATH: ${{ github.event.inputs.path }}
+          NICHE_MAX_ROWS: ${{ github.event.inputs.max_rows }}
+          # Тайм-аут с запасом на медленные ответы MPSTATS.
+          MPSTATS_TIMEOUT_MS: '45000'
+        run: |
+          if [ -n "${{ github.event.inputs.d1 }}" ] && [ -n "${{ github.event.inputs.d2 }}" ]; then
+            echo "Период: ${{ github.event.inputs.d1 }} … ${{ github.event.inputs.d2 }}"
+            node report-niche.js "${{ github.event.inputs.path }}" "${{ github.event.inputs.d1 }}" "${{ github.event.inputs.d2 }}"
+          else
+            echo "Период: последние ${REPORT_DAYS} дней"
+            node report-niche.js "${{ github.event.inputs.path }}"
+          fi
+
+      - name: Приложить готовый отчёт (CSV + JSON) к запуску
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: niche-report
+          path: reports-output/*
+          if-no-files-found: warn
+          retention-days: 90
