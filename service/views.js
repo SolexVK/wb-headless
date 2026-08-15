@@ -574,6 +574,8 @@ function inviteCreatedBox({ email, url }) {
 
 // ── Отчёты ───────────────────────────────────────────────────────────────────
 const nf = (n) => (n == null ? '' : Number(n).toLocaleString('ru-RU'));
+// Часы → человекочитаемо: до суток «X ч», дальше «Y сут» (для сроков сборки/доставки).
+const fmtHrs = (h) => { const v = Number(h) || 0; return v >= 24 ? (v / 24).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' сут' : v.toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' ч'; };
 // Дашборд-компоненты для страниц отчётов (в стиле HTML-дашбордов/PDF).
 const DKAC = { green: 'var(--c-green)', blue: 'var(--c-blue)', violet: 'var(--c-violet)', amber: 'var(--c-amber)', teal: 'var(--c-teal)', red: 'var(--c-red)', indigo: 'var(--total)' };
 const dkKpi = (n, label, { icon = '', accent = DKAC.green } = {}) => `<div class="dk-kpi" style="--kc:${accent}">${icon ? `<span class="ic">${icon}</span>` : ''}<div class="n">${esc(String(n))}</div><div class="l">${label}</div></div>`;
@@ -645,6 +647,7 @@ export function reportsPage(p) {
         ${card(`/org/${org.id}/reports/stock`, 'Остатки', 'Остатки FBS по складам и по артикулам/цветам', !!active)}
         ${card(`/org/${org.id}/reports/movement`, 'Движение заказов', 'Принято на фулфилмент и передано в доставку — по дням и складам, шт и ₽', !!active)}
         ${card(`/org/${org.id}/reports/geo`, 'География', 'Продажи и возвраты по регионам и округам России — откуда покупают и откуда возвращают', !!active)}
+        ${card(`/org/${org.id}/reports/logistics`, 'Логистика', 'Сроки сборки по каждому ФФ и скорость доставки от фулфилмента до клиента', !!active)}
       </div>
       <p style="margin-top:16px"><a class="dl" href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив отчётов</a></p>
     </div>`,
@@ -715,7 +718,7 @@ export function podsortPage(p) {
   });
 }
 
-const reportRu = (r) => ({ podsort: 'Подсорт', stock: 'Остатки', movement: 'Движение заказов', geo: 'География' }[r] || r);
+const reportRu = (r) => ({ podsort: 'Подсорт', stock: 'Остатки', movement: 'Движение заказов', geo: 'География', logistics: 'Логистика' }[r] || r);
 
 // Рендер результатов подсорта из снимка (переиспользуется на странице отчёта и в архиве).
 // downloadHref(kind) → URL выгрузки; whenLabel — подпись «обновлено …».
@@ -1350,6 +1353,165 @@ export function geoPage(p) {
   });
 }
 
+// ── Логистика (сроки сборки и доставки по ФФ) ────────────────────────────────
+export function logisticsView(q = {}) {
+  const one = (v, a, d) => (a.includes(String(v)) ? String(v) : d);
+  return { tab: one(q.tab, ['assembly', 'delivery'], 'assembly') };
+}
+const logiSeg = (view, nav) => (lab, key, opts) => (nav ? `<div class="mv-seg"><span class="lab">${esc(lab)}</span>${opts.map((o) => `<a class="mv-chip${view[key] === o.v ? ' on' : ''}" href="${nav({ [key]: o.v })}">${esc(o.label)}</a>`).join('')}</div>` : '');
+
+// Горизонтальные бары из пар {label,value} (стиль geobars), значение — как есть.
+function logiBars(items, color, fmt = nf) {
+  const mx = Math.max(1, ...items.map((i) => i.value));
+  const rows = items.map((i) => { const tip = esc(JSON.stringify([{ n: i.label, c: color, v: fmt(i.value) }])); return `<div class="geobar" data-tip="${tip}"><span class="gl" title="${esc(i.label)}">${esc(i.label)}</span><span class="gt"><span class="gf" style="width:${(i.value / mx * 100).toFixed(1)}%;background:${color}"></span></span><span class="gv">${fmt(i.value)}</span></div>`; }).join('');
+  return items.length ? `<div class="geobars">${rows}</div>` : '<p class="muted">Нет данных.</p>';
+}
+
+// Разрез «Сборка»: createdAt → передача поставки в доставку (closedAt), по ФФ.
+function logisticsAssembly(snap) {
+  const a = snap.assembly || { totals: {}, byFF: [], buckets: {}, critical: [] };
+  const t = a.totals || {};
+  const tiles = [
+    dkKpi(nf(t.processed), 'обработано заданий', { icon: '📦', accent: DKAC.blue }),
+    dkKpi(fmtHrs(t.avgHours), 'среднее сборки', { icon: '⏱️', accent: DKAC.green }),
+    dkKpi(fmtHrs(t.medianHours), 'медиана сборки', { icon: '📊', accent: DKAC.teal }),
+    dkKpi(fmtHrs(t.p90Hours), '90-й перцентиль', { icon: '📈', accent: DKAC.violet }),
+    dkKpi(nf(t.criticalCount), `критично (> ${snap.critAssemblyH || 48} ч)`, { icon: '🚨', accent: DKAC.red }),
+  ].join('');
+  const proc = (a.byFF || []).filter((r) => r.processed >= 5);
+  const fast = [...proc].sort((x, y) => x.medianHours - y.medianHours)[0];
+  const slow = [...proc].sort((x, y) => y.medianHours - x.medianHours)[0];
+  const pend = (a.byFF || []).reduce((s, r) => s + (r.pending || 0), 0);
+  const insightRow = dkInsights([
+    fast ? { icon: '⚡', accent: DKAC.green, text: `Быстрее всех собирает: <b>${esc(fast.ff)}</b> — медиана ${fmtHrs(fast.medianHours)}` } : null,
+    slow && slow !== fast ? { icon: '🐢', accent: DKAC.amber, text: `Медленнее всех: <b>${esc(slow.ff)}</b> — медиана ${fmtHrs(slow.medianHours)}` } : null,
+    pend ? { icon: '⏳', accent: DKAC.blue, text: `Ещё не отгружено: <b>${nf(pend)}</b> заданий` } : { icon: '✅', accent: DKAC.green, text: 'Все задания периода отгружены' },
+  ]);
+  const buckets = Object.entries(a.buckets || {}).map(([k, v]) => ({ label: k, value: v }));
+  const head = `<tr>${thT('ФФ отгрузки', 'Наш склад-фулфилмент, где собирают заказ', 'tl')}${thT('Сделано', 'Сборочных заданий за период', 'num')}${thT('Обраб.', 'Передано в доставку (собрано)', 'num')}${thT('В работе', 'Ещё не отгружено', 'num')}${thT('Среднее', 'Среднее время сборки', 'num')}${thT('Медиана', 'Медианное время сборки', 'num')}${thT('p90', '90-й перцентиль', 'num')}${thT('Макс', 'Максимум', 'num')}${thT('Крит.', `Дольше ${snap.critAssemblyH || 48} ч`, 'num')}</tr>`;
+  const rows = (a.byFF || []).map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="num" data-v="${r.made}">${nf(r.made)}</td><td class="num" data-v="${r.processed}">${nf(r.processed)}</td><td class="num" data-v="${r.pending}">${nf(r.pending)}</td><td class="num" data-v="${r.avgHours}">${fmtHrs(r.avgHours)}</td><td class="num" data-v="${r.medianHours}">${fmtHrs(r.medianHours)}</td><td class="num" data-v="${r.p90Hours}">${fmtHrs(r.p90Hours)}</td><td class="num" data-v="${r.maxHours}">${fmtHrs(r.maxHours)}</td><td class="num" data-v="${r.criticalCount}">${nf(r.criticalCount)}</td></tr>`).join('');
+  const table = (a.byFF || []).length ? `<div class="scroll"><table class="rt sortable"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Нет данных за период.</p>';
+  const crit = (a.critical || []).slice(0, 15);
+  const critTable = crit.length ? `${ph('🚨', 'Самые долгие сборки', `дольше ${snap.critAssemblyH || 48} ч`, DKAC.red)}
+    <div class="scroll"><table class="rt sortable"><thead><tr>${thT('ФФ', '', 'tl')}${thT('Артикул', '', 'tl')}${thT('Время сборки', '', 'num')}${thT('Создан', '', 'tl')}${thT('Отгружен', '', 'tl')}</tr></thead><tbody>${crit.map((c) => `<tr><td class="tl">${esc(c.ff)}</td><td class="tl">${esc(c.article)}</td><td class="num" data-v="${c.hours}">${fmtHrs(c.hours)}</td><td class="tl kv">${esc(String(c.createdAt).slice(0, 16).replace('T', ' '))}</td><td class="tl kv">${esc(String(c.closedAt).slice(0, 16).replace('T', ' '))}</td></tr>`).join('')}</tbody></table></div>` : '';
+  return `<p class="kv" style="margin:0 0 12px">Время сборки = от создания сборочного задания до передачи поставки в доставку (createdAt → closedAt), по нашему складу-фулфилменту. За ${snap.days} дн.</p>
+      <div class="dk-kpis">${tiles}</div>
+      ${insightRow}
+      ${ph('🏭', 'Сроки сборки по ФФ', 'среднее / медиана / p90 · клик по заголовку — сортировка', DKAC.blue)}
+      ${table}
+      <div style="margin-top:22px"></div>
+      ${ph('⏱️', 'Распределение по времени сборки', 'сколько заданий в каждом интервале', DKAC.teal)}
+      ${logiBars(buckets, 'var(--accent)', nf)}
+      ${critTable ? `<div style="margin-top:22px"></div>${critTable}` : ''}`;
+}
+
+// Разрез «Доставка»: closedAt → sale.date (выкуп), по ФФ отгрузки и региону.
+function logisticsDelivery(snap) {
+  const d = snap.delivery || { available: false, totals: {}, byFF: [], byRegion: [], buckets: {}, byDay: [] };
+  const t = d.totals || {};
+  if (!d.available) {
+    return `<div class="dk-insights"><div class="dk-insight" style="--kc:var(--c-green)"><span class="ic">✅</span><span class="tx">За период нет выкупов FBS, привязанных к ФФ отгрузки, — скорость доставки появится автоматически при первых продажах. Механизм привязки проверен (srid = rid, 100%).</span></div></div>`;
+  }
+  const tiles = [
+    dkKpi(nf(t.count), 'выкупов измерено', { icon: '📬', accent: DKAC.green }),
+    dkKpi(fmtHrs(t.avgHours), 'среднее доставки', { icon: '🚚', accent: DKAC.blue }),
+    dkKpi(fmtHrs(t.medianHours), 'медиана доставки', { icon: '📊', accent: DKAC.teal }),
+    dkKpi(fmtHrs(t.p90Hours), '90-й перцентиль', { icon: '📈', accent: DKAC.violet }),
+  ].join('');
+  const ffP = (d.byFF || []).filter((r) => r.count >= 5);
+  const fastFF = [...ffP].sort((x, y) => x.medianHours - y.medianHours)[0];
+  const regP = (d.byRegion || []).filter((r) => r.count >= 5);
+  const fastReg = [...regP].sort((x, y) => x.medianHours - y.medianHours)[0];
+  const slowReg = [...regP].sort((x, y) => y.medianHours - x.medianHours)[0];
+  const insightRow = dkInsights([
+    fastFF ? { icon: '⚡', accent: DKAC.green, text: `Быстрее всех доставляет: <b>${esc(fastFF.ff)}</b> — медиана ${fmtHrs(fastFF.medianHours)}` } : null,
+    fastReg ? { icon: '🏆', accent: DKAC.blue, text: `Быстрее всех регион: <b>${esc(fastReg.region)}</b> — ${fmtHrs(fastReg.medianHours)}` } : null,
+    slowReg && slowReg !== fastReg ? { icon: '🐢', accent: DKAC.amber, text: `Дольше всех регион: <b>${esc(slowReg.region)}</b> — ${fmtHrs(slowReg.medianHours)}` } : null,
+  ]);
+  const buckets = Object.entries(d.buckets || {}).map(([k, v]) => ({ label: k, value: v }));
+  const ffHead = `<tr>${thT('ФФ отгрузки', 'С какого нашего склада уехал товар', 'tl')}${thT('Выкупов', 'Сколько доставок измерено', 'num')}${thT('Среднее', 'Среднее время доставки', 'num')}${thT('Медиана', 'Медианное время', 'num')}${thT('p90', '90-й перцентиль', 'num')}${thT('Мин', '', 'num')}${thT('Макс', '', 'num')}</tr>`;
+  const ffRows = (d.byFF || []).map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="num" data-v="${r.count}">${nf(r.count)}</td><td class="num" data-v="${r.avgHours}">${fmtHrs(r.avgHours)}</td><td class="num" data-v="${r.medianHours}">${fmtHrs(r.medianHours)}</td><td class="num" data-v="${r.p90Hours}">${fmtHrs(r.p90Hours)}</td><td class="num" data-v="${r.minHours}">${fmtHrs(r.minHours)}</td><td class="num" data-v="${r.maxHours}">${fmtHrs(r.maxHours)}</td></tr>`).join('');
+  const ffTable = (d.byFF || []).length ? `<div class="scroll"><table class="rt sortable"><thead>${ffHead}</thead><tbody>${ffRows}</tbody></table></div>` : '<p class="muted">Нет данных.</p>';
+  const bd = d.byDay || [];
+  const dayChart = bd.length ? mvChart(bd.map((x) => ({ label: x.date.slice(5) })), [
+    { name: 'Среднее, ч', color: 'var(--accent)', bold: true, values: bd.map((x) => x.avgHours) },
+  ], false) + `<div class="mv-legend"><span><i style="background:var(--accent)"></i>Среднее время доставки, ч (по дню отгрузки)</span></div>` : '<p class="muted">Нет данных.</p>';
+  const rHead = `<tr>${thT('Округ', '', 'tl')}${thT('Регион покупателя', '', 'tl')}${thT('Выкупов', '', 'num')}${thT('Среднее', 'Среднее время доставки', 'num')}${thT('Медиана', '', 'num')}</tr>`;
+  const rRows = (d.byRegion || []).slice(0, 200).map((r) => `<tr><td class="tl kv">${esc(r.okrug)}</td><td class="tl">${esc(r.region)}</td><td class="num" data-v="${r.count}">${nf(r.count)}</td><td class="num" data-v="${r.avgHours}">${fmtHrs(r.avgHours)}</td><td class="num" data-v="${r.medianHours}">${fmtHrs(r.medianHours)}</td></tr>`).join('');
+  const rTable = (d.byRegion || []).length ? `<div class="scroll"><table class="rt sortable"><thead>${rHead}</thead><tbody>${rRows}</tbody></table></div>` : '<p class="muted">Нет данных.</p>';
+  return `<p class="kv" style="margin:0 0 12px">Скорость доставки = от передачи поставки в доставку (уход с ФФ) до выкупа клиентом (closedAt → дата продажи из статистики WB). Выкуп привязан к <b>исходному ФФ отгрузки</b> по номеру заказа (srid = rid). Включает межскладскую и последнюю милю WB. За ${snap.days} дн.</p>
+      <div class="dk-kpis">${tiles}</div>
+      ${insightRow}
+      ${ph('🚚', 'Скорость доставки по ФФ отгрузки', 'ФФ → конечный клиент · клик по заголовку — сортировка', DKAC.blue)}
+      ${ffTable}
+      <div style="margin-top:22px"></div>
+      ${ph('⏱️', 'Распределение по времени доставки', 'сколько выкупов в каждом интервале (в сутках)', DKAC.teal)}
+      ${logiBars(buckets, 'var(--c-teal)', nf)}
+      <div style="margin-top:22px"></div>
+      ${ph('📈', 'Динамика по дням отгрузки', 'среднее время доставки, ч', DKAC.green)}
+      <div class="chart-wrap">${dayChart}</div>
+      <div style="margin-top:22px"></div>
+      ${ph('🗺️', 'Скорость доставки по регионам покупателя', `${nf((d.byRegion || []).length)} регионов`, DKAC.violet)}
+      ${rTable}`;
+}
+
+function logisticsResults(snap, { view, nav = null, downloadHref, whenLabel }) {
+  const seg = logiSeg(view, nav);
+  const tabBar = nav ? `<div class="mv-bar">${seg('Разрез', 'tab', [{ v: 'assembly', label: 'Сборка' }, { v: 'delivery', label: 'Доставка' }])}</div>` : '';
+  const dl = `<div style="margin-bottom:12px"><a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a> <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a> <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>`;
+  const content = view.tab === 'delivery' ? logisticsDelivery(snap) : logisticsAssembly(snap);
+  return `<div class="section">
+      <p class="kv" style="margin:0 0 10px">Данные за ${snap.days} дн, с ${esc(snap.from || '')}.${whenLabel ? ` <b>${esc(whenLabel)}</b>` : ''}</p>
+      ${dl}
+      ${tabBar}
+      ${content}
+    </div>`;
+}
+
+export function logisticsPage(p) {
+  const { user, csrf, base = '', org, role, active, latest, job, view, form } = p;
+  const u = (path) => base + path;
+  const back = `<div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>`;
+  if (!active) {
+    return layout({ title: `Логистика — ${org.name}`, user, csrf, base,
+      body: `<div class="wrap">${back}<h1>Логистика</h1><div class="warn">Нет активного кабинета с токеном. <a href="${u(`/org/${org.id}`)}">Настройте кабинет</a>.</div></div>` });
+  }
+  const running = job && job.state === 'running';
+  const head = running ? '<meta http-equiv="refresh" content="4">' : '';
+  let statusBox = '';
+  if (running) statusBox = `<div class="running">⏳ Считаю сроки сборки и доставки на токене кабинета «${esc(active.name)}»… ${esc(job.log || '')}<br><span class="muted">Статистика WB — 1 запрос/мин, может занять 1–3 минуты.</span></div>`;
+  else if (job && job.state === 'error') statusBox = `<div class="err" style="white-space:pre-wrap">Ошибка: ${esc(job.error || '')}</div>`;
+  else if (job && job.state === 'done') statusBox = okBox('Готово.');
+
+  const f = form;
+  const formSection = `<div class="section">
+    <h2>Параметры</h2>
+    <form method="post" action="${u(`/org/${org.id}/reports/logistics/refresh`)}">
+      ${csrfField(csrf)}
+      <div class="row-form" style="gap:14px;align-items:flex-end">
+        <div><label for="ldays" title="За сколько последних дней считать сроки сборки и доставки (WB хранит статистику ~90 дней).">Период, дней</label>
+          <select id="ldays" name="days" style="width:130px">${[7, 14, 30, 60, 90].map((n) => `<option value="${n}"${Number(f.days) === n ? ' selected' : ''}>${n} дней</option>`).join('')}</select></div>
+      </div>
+      <button class="btn" type="submit" style="max-width:280px;margin-top:16px"${running ? ' disabled' : ''}>${running ? 'Идёт сбор…' : 'Обновить данные'}</button>
+    </form></div>`;
+
+  const nav = (patch) => { const v = { ...view, ...patch }; return u(`/org/${org.id}/reports/logistics?tab=${v.tab}#logi`); };
+  const results = latest?.data
+    ? logisticsResults(latest.data, { view, nav, downloadHref: (k) => u(`/org/${org.id}/reports/logistics/download/${k}`), whenLabel: latest.createdAt ? String(latest.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '' })
+    : `<div class="section"><p class="muted">Данных пока нет — задайте период и нажмите «Обновить данные».</p></div>`;
+
+  return layout({
+    title: `Логистика — ${org.name}`, user, csrf, base, head,
+    body: `<div class="wrap">${back}
+      <h1>Логистика — сроки сборки и доставки <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
+      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Среднее время сборки по каждому ФФ и скорость доставки от фулфилмента до конечного клиента. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
+      ${statusBox}
+      ${formSection}
+      <div id="logi" style="scroll-margin-top:14px">${results}</div>
+    </div>`,
+  });
+}
+
 // ── Архив отчётов компании: список запусков ─────────────────────────────────
 export function archivePage({ user, csrf, base = '', org, role, runs, report = '', types = [] }) {
   const u = (p) => base + p;
@@ -1366,6 +1528,7 @@ export function archivePage({ user, csrf, base = '', org, role, runs, report = '
     if (r.report === 'stock') return `остаток ${nf(sm.grandTotal)} шт · складов ${nf(sm.activeWarehouses)} · арт+цвет ${nf(sm.articleCount)}`;
     if (r.report === 'movement') return `принято ${nf(sm.acceptedTotal)} · передано ${nf(sm.deliveredTotal)} · Δ ${sm.diffTotal >= 0 ? '+' : ''}${nf(sm.diffTotal)} · ${nf(sm.deliveredMoney)} ₽ (${nf(sm.days)} дн)`;
     if (r.report === 'geo') return `продаж ${nf(sm.salesCount)} · возвратов ${nf(sm.returnCount)} (${sm.returnPct}%) · регионов ${nf(sm.regions)} (${nf(sm.days)} дн)`;
+    if (r.report === 'logistics') return `сборка медиана ${fmtHrs(sm.asmMedianHours)} (${nf(sm.asmProcessed)}) · доставка медиана ${fmtHrs(sm.delMedianHours)} (${nf(sm.delCount)}) (${nf(sm.days)} дн)`;
     return `подсорт ${nf(sm.reorderUnits)} · риск ${nf(sm.riskRows)} · завоз ${nf(sm.seedUnits)}${(sm.articles && sm.articles.length) ? ` · арт: ${esc(sm.articles.join(', '))}` : ''}`;
   };
   const rows = (runs || []).map((r) => {
@@ -1409,7 +1572,9 @@ export function archiveViewPage({ user, csrf, base = '', org, role, run }) {
         ? movementResults(run.data, { view: movementView({}), nav: null, downloadHref: dl, whenLabel: '' })
         : run.report === 'geo'
           ? geoResults(run.data, { view: geoView({}), nav: null, downloadHref: dl, whenLabel: '' })
-          : podsortResults(run.data, { downloadHref: dl, whenLabel: '' });
+          : run.report === 'logistics'
+            ? logisticsResults(run.data, { view: logisticsView({}), nav: null, downloadHref: dl, whenLabel: '' })
+            : podsortResults(run.data, { downloadHref: dl, whenLabel: '' });
   const p = run.params || {};
   return layout({
     title: `Архив: ${reportRu(run.report)} — ${org.name}`, user, csrf, base,

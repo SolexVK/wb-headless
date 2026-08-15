@@ -214,6 +214,33 @@ try {
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('География') && /продаж\s+\d+\s*·\s*возвратов/.test(r.text), 'Ф2: география видна в архиве');
 
+  // ── Отчёт «Логистика» (сроки сборки и доставки) ─────────────────────────────
+  r = await req('GET', `/org/${orgId}/reports/logistics`);
+  ok(r.status === 200 && r.text.includes('сроки сборки и доставки') && r.text.includes('Параметры'), 'Ф2: страница логистики');
+  r = await req('POST', `/org/${orgId}/reports/logistics/refresh`, form({ _csrf: csrfOf(r.text), days: 30 }));
+  ok(r.status === 302, 'Ф2: запуск логистики → 302');
+  let logiDone = false;
+  for (let i = 0; i < 30 && !logiDone; i++) {
+    await sleep(80);
+    r = await req('GET', `/org/${orgId}/reports/logistics`);
+    if (r.text.includes('Сроки сборки по ФФ') && r.text.includes('Казань')) logiDone = true;
+  }
+  ok(logiDone, 'Ф2: логистика собралась (сборка по ФФ)');
+  const lj = await req('GET', `/org/${orgId}/reports/logistics/download/json`);
+  let lp = null; try { lp = JSON.parse(lj.text); } catch { /* */ }
+  ok(lj.status === 200 && lp?.assembly?.byFF?.length >= 2 && lp?.delivery?.byFF?.length >= 2, 'Ф2: выгрузка логистики (JSON)');
+  const lx = await fetch(base + `/org/${orgId}/reports/logistics/download/xlsx`, { headers: { cookie } });
+  const lxb = Buffer.from(await lx.arrayBuffer());
+  ok(lx.status === 200 && lxb.length > 500 && lxb[0] === 0x50 && lxb[1] === 0x4b, 'Ф2: выгрузка логистики (Excel .xlsx)');
+  const lh = await fetch(base + `/org/${orgId}/reports/logistics/download/html`, { headers: { cookie } });
+  const lhx = await lh.text();
+  ok(lh.status === 200 && lhx.includes('Логистика — сроки сборки и доставки'), 'Ф2: HTML-дашборд логистики');
+  await pdfCheck(`/org/${orgId}/reports/logistics/download/pdf`, 'Ф2: PDF-дашборд логистики');
+  r = await req('GET', `/org/${orgId}/reports/logistics?tab=delivery`);
+  ok(r.status === 200 && r.text.includes('Скорость доставки по ФФ отгрузки') && r.text.includes('исходному ФФ отгрузки'), 'Ф2: логистика — вкладка «Доставка»');
+  r = await req('GET', `/org/${orgId}/reports/archive`);
+  ok(r.text.includes('Логистика') && /сборка медиана/.test(r.text), 'Ф2: логистика видна в архиве');
+
   // Автор удаляет СВОЙ запуск из архива.
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Удалить'), 'Ф2: автор видит кнопку удаления своего запуска');

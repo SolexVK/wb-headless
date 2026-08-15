@@ -277,6 +277,79 @@ export async function buildGeoDashboardHtml(cabinet, snapshot) {
   return out;
 }
 
+// ── Пайплайн «Логистика» (сроки сборки и доставки по ФФ) ─────────────────────
+export const logisticsDefaults = () => ({ days: 30 });
+export function normalizeLogistics(body = {}) {
+  const days = [7, 14, 30, 60, 90].includes(Number(body.days)) ? Number(body.days) : 30;
+  return { days };
+}
+function fakeLogistics(params) {
+  const days = params.days || 30;
+  const asmFF = [
+    { ff: 'Мск зелёная зона', warehouseId: 1939911, made: 120, processed: 110, pending: 10, avgHours: 9.2, medianHours: 7.5, p90Hours: 20.1, maxHours: 51.3, criticalCount: 2 },
+    { ff: 'Казань', warehouseId: 700, made: 60, processed: 55, pending: 5, avgHours: 14.6, medianHours: 12.0, p90Hours: 33.0, maxHours: 60.2, criticalCount: 3 },
+  ];
+  const delFF = [
+    { ff: 'Мск зелёная зона', count: 90, avgHours: 62.4, medianHours: 58.0, p90Hours: 110.0, minHours: 18.0, maxHours: 190.0 },
+    { ff: 'Казань', count: 40, avgHours: 88.7, medianHours: 84.0, p90Hours: 150.0, minHours: 30.0, maxHours: 240.0 },
+  ];
+  const delReg = [
+    { okrug: 'Центральный федеральный округ', region: 'Москва', count: 70, avgHours: 40.2, medianHours: 36.0 },
+    { okrug: 'Приволжский федеральный округ', region: 'Республика Татарстан', count: 30, avgHours: 30.5, medianHours: 28.0 },
+    { okrug: 'Сибирский федеральный округ', region: 'Омская область', count: 30, avgHours: 150.0, medianHours: 144.0 },
+  ];
+  return {
+    generatedAt: new Date().toISOString(), days, from: '2026-07-16', ordDays: 88, critAssemblyH: 48,
+    assembly: {
+      totals: { orders: 180, processed: 165, pending: 15, avgHours: 11.1, medianHours: 9.0, p90Hours: 26.0, criticalCount: 5 },
+      byFF: asmFF, buckets: { '<6ч': 60, '6–24ч': 80, '24–48ч': 20, '>48ч': 5 },
+      critical: [{ ff: 'Казань', article: '014', hours: 60.2, createdAt: '2026-08-10T08:00:00Z', closedAt: '2026-08-12T20:12:00Z' }],
+    },
+    delivery: {
+      available: true,
+      totals: { count: 130, joined: 135, avgHours: 70.5, medianHours: 64.0, p90Hours: 132.0 },
+      byFF: delFF, byRegion: delReg, buckets: { '<2 сут': 40, '2–4 сут': 60, '4–7 сут': 20, '>7 сут': 10 },
+      byDay: [{ date: '2026-08-12', count: 45, avgHours: 66.0 }, { date: '2026-08-13', count: 48, avgHours: 70.0 }, { date: '2026-08-14', count: 37, avgHours: 74.0 }],
+    },
+  };
+}
+async function runLogisticsPipeline(cabinet, token, meta, params, onLog) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  if (process.env.PODSORT_FAKE) return fakeLogistics(params);
+  const env = envFor(token, meta, dir);
+  onLog?.('Собираю заказы, поставки и выкупы (fbs-logistics)…');
+  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-logistics.mjs'), '--days', String(params.days), '--json'], { env, cwd: REPO, timeoutMs: 12 * 60_000 });
+  if (r.code !== 0) throw new Error('Ошибка сбора логистики (fbs-logistics):\n' + tail(r.err));
+  let snap; try { snap = JSON.parse(r.out); } catch { throw new Error('Не удалось разобрать логистику.'); }
+  return snap;
+}
+function logisticsSummary(snap, p) {
+  const a = snap?.assembly?.totals || {}; const d = snap?.delivery?.totals || {};
+  return { days: p.days || snap.days || 30, asmMedianHours: a.medianHours || 0, asmProcessed: a.processed || 0, delMedianHours: d.medianHours || 0, delCount: d.count || 0 };
+}
+export function startLogistics(cabinet, token, meta, params, userId) {
+  return startRun({ cabinet, token, meta, params, userId, report: 'logistics', pipeline: runLogisticsPipeline, summarize: logisticsSummary });
+}
+export async function buildLogisticsXlsx(cabinet, snapshot) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'fbs-logistics-service.json'), JSON.stringify(snapshot, null, 2));
+  const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-logistics-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
+  const out = path.join(dir, 'fbs-logistics.xlsx');
+  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать Excel логистики:\n' + tail(r.err));
+  return out;
+}
+export async function buildLogisticsDashboardHtml(cabinet, snapshot) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'fbs-logistics-service.json'), JSON.stringify(snapshot, null, 2));
+  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-logistics-dashboard.mjs')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
+  const out = path.join(dir, 'fbs-logistics-dashboard.html');
+  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать HTML-дашборд логистики:\n' + tail(r.err));
+  return out;
+}
+
 // ── Single-flight + фоновый статус (ключ = кабинет:отчёт) ────────────────────
 const jobs = new Map();
 const jobKey = (cabinetId, report) => `${Number(cabinetId)}:${report}`;
