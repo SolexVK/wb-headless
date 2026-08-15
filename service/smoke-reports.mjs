@@ -208,6 +208,9 @@ try {
   await pdfCheck(`/org/${orgId}/reports/geo/download/pdf`, 'Ф2: PDF-дашборд географии');
   r = await req('GET', `/org/${orgId}/reports/geo?scope=moscow&focus=pct&gran=okrug`);
   ok(r.status === 200 && r.text.includes('Товары моск. FF'), 'Ф2: география — тумблеры (моск. FF / % / округа)');
+  ok(gp?.fbs?.byFF?.length >= 2 && gp?.fbs?.totals?.shipped > 0, 'Ф2: география — FBS-блок в снимке (byFF, отгружено)');
+  r = await req('GET', `/org/${orgId}/reports/geo?tab=ff`);
+  ok(r.status === 200 && r.text.includes('По ФФ отгрузки') && r.text.includes('Казань') && r.text.includes('исходному ФФ отгрузки'), 'Ф2: география — вкладка «По ФФ отгрузки» (привязка возвратов)');
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('География') && /продаж\s+\d+\s*·\s*возвратов/.test(r.text), 'Ф2: география видна в архиве');
 

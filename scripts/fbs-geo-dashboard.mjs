@@ -75,22 +75,46 @@ const mosPanel = `<section class="panel">
   </div>
 </section>`;
 
+// ── FBS: возвраты по ФФ отгрузки ─────────────────────────────────────────────
+const F = s.fbs || { totals: {}, byFF: [], ffByRegion: [], byArticle: [], unattributed: {} };
+const ff = F.totals || {};
+const ffKpis = `<div class="kpis" style="grid-template-columns:repeat(5,1fr)">
+  ${kpi(nf(ff.shipped), 'отгружено заданий', { icon: '📦', accent: AC.blue })}
+  ${kpi(nf(ff.salesCount), 'выкуплено', { icon: '🛒', accent: AC.green })}
+  ${kpi(nf(ff.returnCount), 'возвращено', { icon: '↩️', accent: AC.red })}
+  ${kpi(`${(ff.returnPct || 0).toFixed(1)}%`, '% возврата', { icon: '📉', accent: AC.amber })}
+  ${kpi(nf((F.unattributed || {}).returnCount || 0), 'без привязки к ФФ', { icon: '❓', accent: AC.violet })}
+</div>`;
+const ffRows = (F.byFF || []).map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="cellnum" data-v="${r.shipped}">${nf(r.shipped)}</td><td class="cellnum" data-v="${r.salesCount}">${nf(r.salesCount)}</td><td class="cellnum" data-v="${r.returnCount}">${nf(r.returnCount)}</td><td class="cellnum" data-v="${r.returnPct}">${r.returnPct}%</td><td class="cellnum" data-v="${r.salesRub}">${nf(r.salesRub)}</td></tr>`).join('');
+const mRows = (F.ffByRegion || []).slice(0, 60).map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="tl">${esc(r.region)}</td><td class="cellnum" data-v="${r.salesCount}">${nf(r.salesCount)}</td><td class="cellnum" data-v="${r.returnCount}">${nf(r.returnCount)}</td><td class="cellnum" data-v="${r.returnPct}">${r.returnPct}%</td></tr>`).join('');
+const noRet = ff.returnCount ? '' : '<p class="note">За период FBS-возвратов нет. Привязка к ФФ заработает при первом возврате (механизм проверен на выкупах: srid = rid, 100%).</p>';
+const fbsPanel = `<section class="panel">
+  ${panelHead('🏭', 'FBS — возвраты по ФФ отгрузки', 'товар привязан к исходному складу отгрузки по номеру заказа (srid=rid)', AC.blue)}
+  ${ffKpis}
+  ${noRet}
+  <div class="cols cols-2" style="margin-top:14px">
+    <div><div class="panel-sub" style="margin-bottom:8px">По ФФ отгрузки</div><div class="table-scroll"><table class="sortable"><thead><tr><th class="tl">ФФ</th><th class="ta-r">Отгр.</th><th class="ta-r">Выкуп</th><th class="ta-r">Возвр.</th><th class="ta-r">%</th><th class="ta-r">Сумма ₽</th></tr></thead><tbody>${ffRows}</tbody></table></div></div>
+    <div><div class="panel-sub" style="margin-bottom:8px">ФФ × регион (топ)</div><div class="table-scroll"><table class="sortable"><thead><tr><th class="tl">ФФ</th><th class="tl">Регион</th><th class="ta-r">Выкуп</th><th class="ta-r">Возвр.</th><th class="ta-r">%</th></tr></thead><tbody>${mRows}</tbody></table></div></div>
+  </div>
+</section>`;
+
 const body = `<div class="wrap">
   <header class="head">
     <div>
       <p class="eyebrow">Wildberries · FBS · география</p>
       <h1>География продаж и возвратов</h1>
-      <p class="sub">Регион покупателя из статистики WB (продажи + возвраты) за ${s.days} дней, с ${esc(s.from || '')}. «Вся РФ» — по всем товарам; отдельный блок — только по товарам, отгружаемым с московских FF-складов.</p>
+      <p class="sub">Регион покупателя из статистики WB (продажи + возвраты) за ${s.days} дней, с ${esc(s.from || '')}. Разделы «Вся РФ» и «Товары московских FF» — по регионам; раздел «FBS по ФФ» — возвраты привязаны к исходному складу отгрузки.</p>
     </div>
     <div class="stamp">Снимок<br><b>${stamp}</b></div>
   </header>
   <section class="kpis">${kpis}</section>
   ${insightRow}
+  ${fbsPanel}
   ${retPanel}
   ${salesPanel}
   ${mosPanel}
   ${tablePanel}
-  <footer class="foot">Источник: WB API statistics /api/v1/supplier/sales (регион покупателя, продажи+возвраты) + marketplace /api/v3/orders (привязка nmID к московским FF). Данные ~90 дней, обновление ~30 мин.</footer>
+  <footer class="foot">Источник: WB API statistics /api/v1/supplier/sales (регион покупателя, продажи+возвраты, srid) + marketplace /api/v3/orders (rid→ФФ отгрузки). FBS-заказы хранятся ~90 дней.</footer>
 </div>`;
 
 fs.writeFileSync(R('fbs-geo-dashboard.html'), page('География FBS — дашборд', body));

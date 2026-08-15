@@ -46,12 +46,41 @@ def sheet(ws, rows, with_okrug):
     autofit(ws)
 
 
+def gsheet(ws, head, rows, cells):
+    ws.append(head)
+    for c in ws[1]:
+        c.font = bold
+        c.fill = HEAD
+        c.alignment = center
+    for r in rows:
+        ws.append(cells(r))
+        rr = ws.max_row
+        for j, h in enumerate(head, 1):
+            if '%' in str(h):
+                ws.cell(rr, j).number_format = '0.0"%"'
+    ws.freeze_panes = 'A2'
+    if ws.max_row > 1:
+        ws.auto_filter.ref = f'A1:{ws.cell(1, ws.max_column).column_letter}{ws.max_row}'
+    autofit(ws)
+
+
 wb = Workbook()
 ws = wb.active
 ws.title = 'Вся РФ — регионы'
 sheet(ws, s.get('scopes', {}).get('all', {}).get('byRegion', []), True)
 sheet(wb.create_sheet('Вся РФ — округа'), s.get('scopes', {}).get('all', {}).get('byOkrug', []), False)
 sheet(wb.create_sheet('Моск. FF — регионы'), s.get('scopes', {}).get('moscow', {}).get('byRegion', []), True)
+
+# FBS: возвраты по ФФ отгрузки.
+F = s.get('fbs', {}) or {}
+gsheet(wb.create_sheet('FBS по ФФ'), ['ФФ отгрузки', 'Отгружено', 'Выкуплено', 'Возвращено', '% возв.', 'Сумма ₽'],
+       F.get('byFF', []), lambda r: [r.get('ff', ''), r.get('shipped', 0), r.get('salesCount', 0), r.get('returnCount', 0), r.get('returnPct', 0), r.get('salesRub', 0)])
+gsheet(wb.create_sheet('FBS ФФ×регион'), ['ФФ отгрузки', 'Округ', 'Регион', 'Выкуплено', 'Возвращено', '% возв.'],
+       F.get('ffByRegion', []), lambda r: [r.get('ff', ''), r.get('okrug', ''), r.get('region', ''), r.get('salesCount', 0), r.get('returnCount', 0), r.get('returnPct', 0)])
+gsheet(wb.create_sheet('FBS по дням'), ['Дата', 'Выкуплено', 'Возвращено'],
+       F.get('byDay', []), lambda r: [r.get('date', ''), r.get('salesCount', 0), r.get('returnCount', 0)])
+gsheet(wb.create_sheet('FBS по товарам'), ['Артикул', 'Осн. ФФ', 'Выкуплено', 'Возвращено', '% возв.', 'Сумма ₽'],
+       F.get('byArticle', []), lambda r: [r.get('article', ''), r.get('ff', ''), r.get('salesCount', 0), r.get('returnCount', 0), r.get('returnPct', 0), r.get('salesRub', 0)])
 
 wb.save(OUT)
 print('OK', OUT)

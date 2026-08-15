@@ -1173,18 +1173,21 @@ const GEO_FOCUS = { sales: 'по продажам', returns: 'по возвра�
 export function geoView(q = {}) {
   const one = (v, a, d) => (a.includes(String(v)) ? String(v) : d);
   return {
+    tab: one(q.tab, ['regions', 'ff'], 'regions'),
     scope: one(q.scope, ['all', 'moscow'], 'all'),
     gran: one(q.gran, ['region', 'okrug'], 'region'),
     focus: one(q.focus, ['sales', 'returns', 'pct'], 'returns'),
   };
 }
 
-function geoResults(snap, { view, nav = null, downloadHref, whenLabel }) {
+const geoSeg = (view, nav) => (lab, key, opts) => (nav ? `<div class="mv-seg"><span class="lab">${esc(lab)}</span>${opts.map((o) => `<a class="mv-chip${view[key] === o.v ? ' on' : ''}" href="${nav({ [key]: o.v })}">${esc(o.label)}</a>`).join('')}</div>` : '');
+
+// Разрез «Регионы» — вся РФ / товары московских FF, по регионам/округам.
+function geoRegions(snap, view, nav) {
   const sc = snap.scopes?.[view.scope] || { totals: {}, byRegion: [], byOkrug: [] };
   const t = sc.totals || {};
   const rows0 = (view.gran === 'okrug' ? sc.byOkrug : sc.byRegion) || [];
   const lbl = (r) => r.region || r.okrug || '—';
-
   const tiles = [
     dkKpi(nf(t.salesCount), 'Продаж, шт', { icon: '🛒', accent: DKAC.green }),
     dkKpi(nf(t.returnCount), 'Возвратов, шт', { icon: '↩️', accent: DKAC.red }),
@@ -1192,7 +1195,6 @@ function geoResults(snap, { view, nav = null, downloadHref, whenLabel }) {
     dkKpi(nf(t.regions), 'Регионов', { icon: '🗺️', accent: DKAC.blue }),
     dkKpi(nf(t.salesRub), 'Сумма продаж, ₽', { icon: '💰', accent: DKAC.violet }),
   ].join('');
-
   const bySales = [...rows0].sort((a, b) => b.salesCount - a.salesCount);
   const byRet = [...rows0].sort((a, b) => b.returnCount - a.returnCount);
   const worstPct = [...rows0].filter((r) => r.salesCount >= 20).sort((a, b) => b.returnPct - a.returnPct)[0];
@@ -1201,14 +1203,12 @@ function geoResults(snap, { view, nav = null, downloadHref, whenLabel }) {
     byRet[0] && byRet[0].returnCount ? { icon: '↩️', accent: DKAC.red, text: `Больше всего возвратов: <b>${esc(lbl(byRet[0]))}</b> — ${nf(byRet[0].returnCount)} шт` } : null,
     worstPct ? { icon: '🚩', accent: DKAC.amber, text: `Худший % возврата: <b>${esc(lbl(worstPct))}</b> — ${worstPct.returnPct}% (из ${nf(worstPct.salesCount)})` } : null,
   ]);
-
-  const seg = (lab, key, opts) => (nav ? `<div class="mv-seg"><span class="lab">${esc(lab)}</span>${opts.map((o) => `<a class="mv-chip${view[key] === o.v ? ' on' : ''}" href="${nav({ [key]: o.v })}">${esc(o.label)}</a>`).join('')}</div>` : '');
+  const seg = geoSeg(view, nav);
   const toolbar = nav ? `<div class="mv-bar">
     ${seg('Охват', 'scope', [{ v: 'all', label: 'Вся РФ' }, { v: 'moscow', label: 'Товары моск. FF' }])}
     ${seg('Разбивка', 'gran', [{ v: 'region', label: 'Регионы' }, { v: 'okrug', label: 'Округа' }])}
     ${seg('Показатель', 'focus', [{ v: 'sales', label: 'Продажи' }, { v: 'returns', label: 'Возвраты' }, { v: 'pct', label: '% возврата' }])}
   </div>` : '';
-
   const metric = (r) => (view.focus === 'sales' ? r.salesCount : view.focus === 'returns' ? r.returnCount : r.returnPct);
   const color = view.focus === 'sales' ? 'var(--accent)' : view.focus === 'returns' ? 'var(--c-red)' : 'var(--c-amber)';
   const fmtM = (v) => (view.focus === 'pct' ? `${v}%` : nf(v));
@@ -1217,23 +1217,92 @@ function geoResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   const mx = Math.max(1, ...top.map(metric));
   const bars = top.map((r) => { const v = metric(r); const tip = esc(JSON.stringify([{ n: lbl(r), c: color, v: fmtM(v) }])); return `<div class="geobar" data-tip="${tip}"><span class="gl" title="${esc(lbl(r))}">${esc(lbl(r))}</span><span class="gt"><span class="gf" style="width:${(v / mx * 100).toFixed(1)}%;background:${color}"></span></span><span class="gv">${fmtM(v)}</span></div>`; }).join('');
   const chart = top.length ? `<div class="geobars">${bars}</div>` : '<p class="muted">Нет данных.</p>';
-
   const isReg = view.gran === 'region';
   const head = `<tr>${isReg ? thT('Округ', 'Федеральный округ', 'tl') : ''}${thT(isReg ? 'Регион' : 'Округ', 'Регион покупателя', 'tl')}${thT('Продано', 'Продаж, шт', 'num')}${thT('Возвращено', 'Возвратов, шт', 'num')}${thT('% возв.', 'Возвраты к продажам', 'num')}${thT('Сумма ₽', 'Сумма продаж', 'num')}</tr>`;
   const rows = rows0.map((r) => `<tr>${isReg ? `<td class="tl kv">${esc(r.okrug)}</td>` : ''}<td class="tl">${esc(lbl(r))}</td><td class="num" data-v="${r.salesCount}">${nf(r.salesCount)}</td><td class="num" data-v="${r.returnCount}">${nf(r.returnCount)}</td><td class="num" data-v="${r.returnPct}">${r.returnPct}%</td><td class="num" data-v="${r.salesRub}">${nf(r.salesRub)}</td></tr>`).join('');
   const table = rows0.length ? `<div class="scroll"><table class="rt sortable"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Нет данных за период.</p>';
-
   const mos = view.scope === 'moscow' ? ` Только товары московских FF (${nf(snap.moscowNmCount)} nmID со складов: ${esc((snap.moscowWarehouses || []).join(', '))}).` : '';
-  return `<div class="section">
-      <p class="kv" style="margin:0 0 12px">Регион покупателя из статистики WB (продажи + возвраты) за ${snap.days} дн, с ${esc(snap.from || '')}.${mos}${whenLabel ? ` <b>${esc(whenLabel)}</b>` : ''}</p>
+  return `<p class="kv" style="margin:0 0 12px">Регион покупателя из статистики WB (все продажи: FBS+FBW) за ${snap.days} дн.${mos}</p>
       <div class="dk-kpis">${tiles}</div>
       ${insightRow}
-      <div style="margin-bottom:12px"><a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a> <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a> <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
       ${ph('🗺️', `Топ-15 ${isReg ? 'регионов' : 'округов'} · ${GEO_FOCUS[view.focus]}`, GEO_SCOPE[view.scope], DKAC.blue)}
       ${toolbar}
       ${chart}
       ${ph('📋', isReg ? 'По регионам' : 'По федеральным округам', `${nf(rows0.length)} строк · клик по заголовку — сортировка`, DKAC.violet)}
-      ${table}
+      ${table}`;
+}
+
+// Разрез «По ФФ отгрузки» — FBS: возвраты привязаны к исходному складу отгрузки.
+function geoFF(snap, view) {
+  const f = snap.fbs || { totals: {}, byFF: [], ffByRegion: [], byDay: [], byArticle: [], unattributed: {} };
+  const t = f.totals || {};
+  const tiles = [
+    dkKpi(nf(t.shipped), 'Отгружено, зад.', { icon: '📦', accent: DKAC.blue }),
+    dkKpi(nf(t.salesCount), 'Продано (выкуп)', { icon: '🛒', accent: DKAC.green }),
+    dkKpi(nf(t.returnCount), 'Возвращено', { icon: '↩️', accent: DKAC.red }),
+    dkKpi(`${(t.returnPct || 0).toFixed(1)}%`, '% возврата (к выкупу)', { icon: '📉', accent: DKAC.amber }),
+    dkKpi(nf((f.unattributed || {}).returnCount || 0), 'Возвраты без привязки', { icon: '❓', accent: DKAC.violet }),
+  ].join('');
+  const ffRet = [...(f.byFF || [])].filter((x) => x.returnCount).sort((a, b) => b.returnCount - a.returnCount);
+  const worst = [...(f.byFF || [])].filter((x) => x.salesCount >= 10).sort((a, b) => b.returnPct - a.returnPct)[0];
+  const ffr = [...(f.ffByRegion || [])].filter((x) => x.returnCount).sort((a, b) => b.returnCount - a.returnCount)[0];
+  const insightRow = t.returnCount ? dkInsights([
+    ffRet[0] ? { icon: '🏭', accent: DKAC.red, text: `Больше всего возвратов с ФФ: <b>${esc(ffRet[0].ff)}</b> — ${nf(ffRet[0].returnCount)} шт` } : null,
+    worst ? { icon: '🚩', accent: DKAC.amber, text: `Худший % возврата по ФФ: <b>${esc(worst.ff)}</b> — ${worst.returnPct}%` } : null,
+    ffr ? { icon: '↩️', accent: DKAC.blue, text: `Топ маршрут возврата: <b>${esc(ffr.ff)}</b> → ${esc(ffr.region)} — ${nf(ffr.returnCount)} шт` } : null,
+  ]) : `<div class="dk-insights"><div class="dk-insight" style="--kc:var(--c-green)"><span class="ic">✅</span><span class="tx">За период <b>FBS-возвратов нет</b>. Привязка к ФФ отгрузки заработает автоматически при первом возврате — механизм проверен на выкупах (srid=rid, 100%).</span></div></div>`;
+
+  const unNote = (f.unattributed || {}).returnCount ? `<div class="warn" style="margin:0 0 10px">К ФФ не привязано возвратов: <b>${nf(f.unattributed.returnCount)}</b> — их исходный заказ старше ~${snap.ordDays || 88} дней (WB хранит FBS-заказы ~3 месяца).</div>` : '';
+
+  // По ФФ отгрузки.
+  const ffHead = `<tr>${thT('ФФ отгрузки', 'Наш склад, откуда отгружен товар', 'tl')}${thT('Отгружено', 'Сборочных заданий с этого ФФ', 'num')}${thT('Выкуплено', 'Продажи (S)', 'num')}${thT('Возвращено', 'Возвраты (R)', 'num')}${thT('% возв.', 'Возвраты к выкупам', 'num')}${thT('Сумма ₽', 'Сумма выкупов', 'num')}</tr>`;
+  const ffRows = (f.byFF || []).map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="num" data-v="${r.shipped}">${nf(r.shipped)}</td><td class="num" data-v="${r.salesCount}">${nf(r.salesCount)}</td><td class="num" data-v="${r.returnCount}">${nf(r.returnCount)}</td><td class="num" data-v="${r.returnPct}">${r.returnPct}%</td><td class="num" data-v="${r.salesRub}">${nf(r.salesRub)}</td></tr>`).join('');
+  const ffTable = (f.byFF || []).length ? `<div class="scroll"><table class="rt sortable"><thead>${ffHead}</thead><tbody>${ffRows}</tbody></table></div>` : '<p class="muted">Нет FBS-данных за период.</p>';
+
+  // Матрица ФФ × регион.
+  const mHead = `<tr>${thT('ФФ отгрузки', '', 'tl')}${thT('Округ', '', 'tl')}${thT('Регион покупателя', '', 'tl')}${thT('Выкуплено', '', 'num')}${thT('Возвращено', '', 'num')}${thT('% возв.', '', 'num')}</tr>`;
+  const mRows = (f.ffByRegion || []).slice(0, 200).map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="tl kv">${esc(r.okrug)}</td><td class="tl">${esc(r.region)}</td><td class="num" data-v="${r.salesCount}">${nf(r.salesCount)}</td><td class="num" data-v="${r.returnCount}">${nf(r.returnCount)}</td><td class="num" data-v="${r.returnPct}">${r.returnPct}%</td></tr>`).join('');
+  const mTable = (f.ffByRegion || []).length ? `<div class="scroll"><table class="rt sortable"><thead>${mHead}</thead><tbody>${mRows}</tbody></table></div>` : '<p class="muted">Нет данных.</p>';
+
+  // Динамика по дням (FBS).
+  const bd = f.byDay || [];
+  const dayChart = bd.length ? mvChart(bd.map((d) => ({ label: d.date.slice(5) })), [
+    { name: 'Выкуплено', color: 'var(--accent)', values: bd.map((d) => d.salesCount) },
+    { name: 'Возвраты', color: 'var(--c-red)', bold: true, values: bd.map((d) => d.returnCount) },
+  ], false) + `<div class="mv-legend"><span><i style="background:var(--accent)"></i>Выкуплено</span><span><i style="background:var(--c-red)"></i>Возвраты</span></div>` : '<p class="muted">Нет данных.</p>';
+
+  // По товарам (FBS).
+  const aHead = `<tr>${thT('Артикул', '', 'tl')}${thT('Осн. ФФ', 'ФФ, откуда чаще отгружался', 'tl')}${thT('Выкуплено', '', 'num')}${thT('Возвращено', '', 'num')}${thT('% возв.', '', 'num')}${thT('Сумма ₽', '', 'num')}</tr>`;
+  const aRows = (f.byArticle || []).map((r) => `<tr><td class="tl">${esc(r.article)}</td><td class="tl kv">${esc(r.ff)}</td><td class="num" data-v="${r.salesCount}">${nf(r.salesCount)}</td><td class="num" data-v="${r.returnCount}">${nf(r.returnCount)}</td><td class="num" data-v="${r.returnPct}">${r.returnPct}%</td><td class="num" data-v="${r.salesRub}">${nf(r.salesRub)}</td></tr>`).join('');
+  const aTable = (f.byArticle || []).length ? `<div class="scroll"><table class="rt sortable"><thead>${aHead}</thead><tbody>${aRows}</tbody></table></div>` : '<p class="muted">Нет данных.</p>';
+
+  return `<p class="kv" style="margin:0 0 12px">Только <b>FBS</b> (наши отгрузки). Возврат привязан к <b>исходному ФФ отгрузки</b> по номеру заказа (srid=rid). Физически возвраты приходят на московский ПВЗ; здесь видно, с какого ФФ товар изначально уехал.</p>
+      <div class="dk-kpis">${tiles}</div>
+      ${insightRow}
+      ${unNote}
+      ${ph('🏭', 'По ФФ отгрузки', 'отгружено / выкуплено / возвращено · клик по заголовку — сортировка', DKAC.blue)}
+      ${ffTable}
+      <div style="margin-top:22px"></div>
+      ${ph('🔀', 'ФФ отгрузки × регион покупателя', `${nf((f.ffByRegion || []).length)} строк`, DKAC.violet)}
+      ${mTable}
+      <div style="margin-top:22px"></div>
+      ${ph('📈', 'Динамика FBS по дням', 'выкупы и возвраты', DKAC.green)}
+      <div class="chart-wrap">${dayChart}</div>
+      <div style="margin-top:22px"></div>
+      ${ph('🎨', 'По товарам (FBS)', `${nf((f.byArticle || []).length)} артикулов`, DKAC.amber)}
+      ${aTable}`;
+}
+
+function geoResults(snap, { view, nav = null, downloadHref, whenLabel }) {
+  const seg = geoSeg(view, nav);
+  const tabBar = nav ? `<div class="mv-bar">${seg('Разрез', 'tab', [{ v: 'regions', label: 'Регионы' }, { v: 'ff', label: 'По ФФ отгрузки (FBS)' }])}</div>` : '';
+  const dl = `<div style="margin-bottom:12px"><a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a> <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a> <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>`;
+  const content = view.tab === 'ff' ? geoFF(snap, view) : geoRegions(snap, view, nav);
+  return `<div class="section">
+      <p class="kv" style="margin:0 0 10px">Данные за ${snap.days} дн, с ${esc(snap.from || '')}.${whenLabel ? ` <b>${esc(whenLabel)}</b>` : ''}</p>
+      ${dl}
+      ${tabBar}
+      ${content}
     </div>`;
 }
 
@@ -1264,7 +1333,7 @@ export function geoPage(p) {
       <button class="btn" type="submit" style="max-width:280px;margin-top:16px"${running ? ' disabled' : ''}>${running ? 'Идёт сбор…' : 'Обновить данные'}</button>
     </form></div>`;
 
-  const nav = (patch) => { const v = { ...view, ...patch }; return u(`/org/${org.id}/reports/geo?scope=${v.scope}&gran=${v.gran}&focus=${v.focus}#geo`); };
+  const nav = (patch) => { const v = { ...view, ...patch }; return u(`/org/${org.id}/reports/geo?tab=${v.tab}&scope=${v.scope}&gran=${v.gran}&focus=${v.focus}#geo`); };
   const results = latest?.data
     ? geoResults(latest.data, { view, nav, downloadHref: (k) => u(`/org/${org.id}/reports/geo/download/${k}`), whenLabel: latest.createdAt ? String(latest.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '' })
     : `<div class="section"><p class="muted">Данных пока нет — задайте период и нажмите «Обновить данные».</p></div>`;

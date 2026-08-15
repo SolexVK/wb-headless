@@ -223,7 +223,22 @@ function fakeGeo(params) {
   const okrugs = [mk('Центральный федеральный округ', '', 160, 11), mk('Сибирский федеральный округ', '', 20, 4)].map(({ region, ...x }) => x);
   const tot = (arr) => { const t = arr.reduce((a, r) => ({ salesCount: a.salesCount + r.salesCount, returnCount: a.returnCount + r.returnCount, salesRub: a.salesRub + r.salesRub, returnRub: a.returnRub + r.returnRub }), { salesCount: 0, returnCount: 0, salesRub: 0, returnRub: 0 }); t.regions = regions.length; t.returnPct = t.salesCount ? Math.round(t.returnCount / t.salesCount * 1000) / 10 : 0; return t; };
   const scope = { totals: tot(regions), byRegion: regions, byOkrug: okrugs };
-  return { generatedAt: new Date().toISOString(), days: params.days || 30, from: '2026-07-15', moscowWarehouses: ['Мск зелёная зона'], moscowNmCount: 2, scopes: { all: scope, moscow: scope } };
+  const fbs = {
+    totals: { shipped: 80, salesCount: 60, returnCount: 13, returnPct: 21.7, salesRub: 60000, returnRub: 13000 },
+    ordersByFF: { 'Мск зелёная зона': 50, 'Казань': 30 },
+    byFF: [
+      { ff: 'Казань', shipped: 30, salesCount: 20, returnCount: 8, returnPct: 40, salesRub: 20000, returnRub: 8000 },
+      { ff: 'Мск зелёная зона', shipped: 50, salesCount: 40, returnCount: 5, returnPct: 12.5, salesRub: 40000, returnRub: 5000 },
+    ],
+    ffByRegion: [
+      { ff: 'Казань', okrug: 'Центральный федеральный округ', region: 'Москва', salesCount: 10, returnCount: 8, returnPct: 80, salesRub: 10000, returnRub: 8000 },
+      { ff: 'Мск зелёная зона', okrug: 'Центральный федеральный округ', region: 'Московская область', salesCount: 30, returnCount: 5, returnPct: 16.7, salesRub: 30000, returnRub: 5000 },
+    ],
+    byDay: [{ date: '2026-08-12', salesCount: 20, returnCount: 4 }, { date: '2026-08-13', salesCount: 22, returnCount: 5 }, { date: '2026-08-14', salesCount: 18, returnCount: 4 }],
+    byArticle: [{ article: '014', ff: 'Казань', salesCount: 20, returnCount: 8, returnPct: 40, salesRub: 20000, returnRub: 8000 }, { article: '018', ff: 'Мск зелёная зона', salesCount: 40, returnCount: 5, returnPct: 12.5, salesRub: 40000, returnRub: 5000 }],
+    unattributed: { salesCount: 0, returnCount: 0 },
+  };
+  return { generatedAt: new Date().toISOString(), days: params.days || 30, from: '2026-07-15', ordDays: 88, moscowWarehouses: ['Мск зелёная зона'], moscowNmCount: 2, scopes: { all: scope, moscow: scope }, fbs };
 }
 async function runGeoPipeline(cabinet, token, meta, params, onLog) {
   const dir = cabinetDir(cabinet.id);
