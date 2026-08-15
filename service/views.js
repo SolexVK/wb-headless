@@ -92,6 +92,12 @@ summary{cursor:pointer;font-weight:600;font-size:14px;padding:6px 0}
 .ph{display:flex;align-items:center;gap:10px;margin:0 0 13px;padding-bottom:11px;border-bottom:1px solid var(--line)}
 .ph .ic{width:30px;height:30px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;font-size:16px;background:color-mix(in srgb,var(--pc) 14%,var(--surface));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pc) 24%,transparent)}
 .ph h2{margin:0;font-size:15.5px;font-weight:750} .ph .sub{margin-left:auto;font-size:12px;color:var(--muted);white-space:nowrap} .ph .sub b{color:var(--ink)}
+.geobars{display:flex;flex-direction:column;gap:7px;margin:2px 0 6px}
+.geobar{display:grid;grid-template-columns:minmax(120px,210px) 1fr minmax(56px,auto);align-items:center;gap:11px}
+.geobar .gl{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.geobar .gt{background:var(--surface-2);border-radius:6px;height:15px;overflow:hidden}
+.geobar .gf{display:block;height:100%;border-radius:6px;min-width:2px}
+.geobar .gv{font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 /* Таблицы отчётов: заголовки по центру (гориз.+верт.), данные по центру, кроме .tl (Цвет/Статус — слева). */
 .rt th,.rt td{text-align:center;vertical-align:middle}
 .rt td.tl{text-align:left}
@@ -638,6 +644,7 @@ export function reportsPage(p) {
         ${card(`/org/${org.id}/reports/podsort`, 'Подсорт', 'Рекомендации к заказу по складам и размерам + пробный завоз', !!active)}
         ${card(`/org/${org.id}/reports/stock`, 'Остатки', 'Остатки FBS по складам и по артикулам/цветам', !!active)}
         ${card(`/org/${org.id}/reports/movement`, 'Движение заказов', 'Принято на фулфилмент и передано в доставку — по дням и складам, шт и ₽', !!active)}
+        ${card(`/org/${org.id}/reports/geo`, 'География', 'Продажи и возвраты по регионам и округам России — откуда покупают и откуда возвращают', !!active)}
       </div>
       <p style="margin-top:16px"><a class="dl" href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив отчётов</a></p>
     </div>`,
@@ -708,7 +715,7 @@ export function podsortPage(p) {
   });
 }
 
-const reportRu = (r) => ({ podsort: 'Подсорт', stock: 'Остатки', movement: 'Движение заказов' }[r] || r);
+const reportRu = (r) => ({ podsort: 'Подсорт', stock: 'Остатки', movement: 'Движение заказов', geo: 'География' }[r] || r);
 
 // Рендер результатов подсорта из снимка (переиспользуется на странице отчёта и в архиве).
 // downloadHref(kind) → URL выгрузки; whenLabel — подпись «обновлено …».
@@ -1160,6 +1167,120 @@ export function movementPage(p) {
   });
 }
 
+// ── География продаж и возвратов ─────────────────────────────────────────────
+const GEO_SCOPE = { all: 'Вся РФ', moscow: 'Товары моск. FF' };
+const GEO_FOCUS = { sales: 'по продажам', returns: 'по возвратам', pct: 'по % возврата' };
+export function geoView(q = {}) {
+  const one = (v, a, d) => (a.includes(String(v)) ? String(v) : d);
+  return {
+    scope: one(q.scope, ['all', 'moscow'], 'all'),
+    gran: one(q.gran, ['region', 'okrug'], 'region'),
+    focus: one(q.focus, ['sales', 'returns', 'pct'], 'returns'),
+  };
+}
+
+function geoResults(snap, { view, nav = null, downloadHref, whenLabel }) {
+  const sc = snap.scopes?.[view.scope] || { totals: {}, byRegion: [], byOkrug: [] };
+  const t = sc.totals || {};
+  const rows0 = (view.gran === 'okrug' ? sc.byOkrug : sc.byRegion) || [];
+  const lbl = (r) => r.region || r.okrug || '—';
+
+  const tiles = [
+    dkKpi(nf(t.salesCount), 'Продаж, шт', { icon: '🛒', accent: DKAC.green }),
+    dkKpi(nf(t.returnCount), 'Возвратов, шт', { icon: '↩️', accent: DKAC.red }),
+    dkKpi(`${(t.returnPct || 0).toFixed(1)}%`, 'Возвратов, %', { icon: '📉', accent: DKAC.amber }),
+    dkKpi(nf(t.regions), 'Регионов', { icon: '🗺️', accent: DKAC.blue }),
+    dkKpi(nf(t.salesRub), 'Сумма продаж, ₽', { icon: '💰', accent: DKAC.violet }),
+  ].join('');
+
+  const bySales = [...rows0].sort((a, b) => b.salesCount - a.salesCount);
+  const byRet = [...rows0].sort((a, b) => b.returnCount - a.returnCount);
+  const worstPct = [...rows0].filter((r) => r.salesCount >= 20).sort((a, b) => b.returnPct - a.returnPct)[0];
+  const insightRow = dkInsights([
+    bySales[0] ? { icon: '🏆', accent: DKAC.green, text: `Больше всего продаж: <b>${esc(lbl(bySales[0]))}</b> — ${nf(bySales[0].salesCount)} шт` } : null,
+    byRet[0] && byRet[0].returnCount ? { icon: '↩️', accent: DKAC.red, text: `Больше всего возвратов: <b>${esc(lbl(byRet[0]))}</b> — ${nf(byRet[0].returnCount)} шт` } : null,
+    worstPct ? { icon: '🚩', accent: DKAC.amber, text: `Худший % возврата: <b>${esc(lbl(worstPct))}</b> — ${worstPct.returnPct}% (из ${nf(worstPct.salesCount)})` } : null,
+  ]);
+
+  const seg = (lab, key, opts) => (nav ? `<div class="mv-seg"><span class="lab">${esc(lab)}</span>${opts.map((o) => `<a class="mv-chip${view[key] === o.v ? ' on' : ''}" href="${nav({ [key]: o.v })}">${esc(o.label)}</a>`).join('')}</div>` : '');
+  const toolbar = nav ? `<div class="mv-bar">
+    ${seg('Охват', 'scope', [{ v: 'all', label: 'Вся РФ' }, { v: 'moscow', label: 'Товары моск. FF' }])}
+    ${seg('Разбивка', 'gran', [{ v: 'region', label: 'Регионы' }, { v: 'okrug', label: 'Округа' }])}
+    ${seg('Показатель', 'focus', [{ v: 'sales', label: 'Продажи' }, { v: 'returns', label: 'Возвраты' }, { v: 'pct', label: '% возврата' }])}
+  </div>` : '';
+
+  const metric = (r) => (view.focus === 'sales' ? r.salesCount : view.focus === 'returns' ? r.returnCount : r.returnPct);
+  const color = view.focus === 'sales' ? 'var(--accent)' : view.focus === 'returns' ? 'var(--c-red)' : 'var(--c-amber)';
+  const fmtM = (v) => (view.focus === 'pct' ? `${v}%` : nf(v));
+  const pool = view.focus === 'pct' ? rows0.filter((r) => r.salesCount >= 20) : rows0;
+  const top = [...pool].sort((a, b) => metric(b) - metric(a)).slice(0, 15);
+  const mx = Math.max(1, ...top.map(metric));
+  const bars = top.map((r) => { const v = metric(r); const tip = esc(JSON.stringify([{ n: lbl(r), c: color, v: fmtM(v) }])); return `<div class="geobar" data-tip="${tip}"><span class="gl" title="${esc(lbl(r))}">${esc(lbl(r))}</span><span class="gt"><span class="gf" style="width:${(v / mx * 100).toFixed(1)}%;background:${color}"></span></span><span class="gv">${fmtM(v)}</span></div>`; }).join('');
+  const chart = top.length ? `<div class="geobars">${bars}</div>` : '<p class="muted">Нет данных.</p>';
+
+  const isReg = view.gran === 'region';
+  const head = `<tr>${isReg ? thT('Округ', 'Федеральный округ', 'tl') : ''}${thT(isReg ? 'Регион' : 'Округ', 'Регион покупателя', 'tl')}${thT('Продано', 'Продаж, шт', 'num')}${thT('Возвращено', 'Возвратов, шт', 'num')}${thT('% возв.', 'Возвраты к продажам', 'num')}${thT('Сумма ₽', 'Сумма продаж', 'num')}</tr>`;
+  const rows = rows0.map((r) => `<tr>${isReg ? `<td class="tl kv">${esc(r.okrug)}</td>` : ''}<td class="tl">${esc(lbl(r))}</td><td class="num" data-v="${r.salesCount}">${nf(r.salesCount)}</td><td class="num" data-v="${r.returnCount}">${nf(r.returnCount)}</td><td class="num" data-v="${r.returnPct}">${r.returnPct}%</td><td class="num" data-v="${r.salesRub}">${nf(r.salesRub)}</td></tr>`).join('');
+  const table = rows0.length ? `<div class="scroll"><table class="rt sortable"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Нет данных за период.</p>';
+
+  const mos = view.scope === 'moscow' ? ` Только товары московских FF (${nf(snap.moscowNmCount)} nmID со складов: ${esc((snap.moscowWarehouses || []).join(', '))}).` : '';
+  return `<div class="section">
+      <p class="kv" style="margin:0 0 12px">Регион покупателя из статистики WB (продажи + возвраты) за ${snap.days} дн, с ${esc(snap.from || '')}.${mos}${whenLabel ? ` <b>${esc(whenLabel)}</b>` : ''}</p>
+      <div class="dk-kpis">${tiles}</div>
+      ${insightRow}
+      <div style="margin-bottom:12px"><a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a> <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a> <a class="dl" href="${downloadHref('xlsx')}">⬇ Excel</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a></div>
+      ${ph('🗺️', `Топ-15 ${isReg ? 'регионов' : 'округов'} · ${GEO_FOCUS[view.focus]}`, GEO_SCOPE[view.scope], DKAC.blue)}
+      ${toolbar}
+      ${chart}
+      ${ph('📋', isReg ? 'По регионам' : 'По федеральным округам', `${nf(rows0.length)} строк · клик по заголовку — сортировка`, DKAC.violet)}
+      ${table}
+    </div>`;
+}
+
+export function geoPage(p) {
+  const { user, csrf, base = '', org, role, active, latest, job, view, form } = p;
+  const u = (path) => base + path;
+  const back = `<div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>`;
+  if (!active) {
+    return layout({ title: `География — ${org.name}`, user, csrf, base,
+      body: `<div class="wrap">${back}<h1>География</h1><div class="warn">Нет активного кабинета с токеном. <a href="${u(`/org/${org.id}`)}">Настройте кабинет</a>.</div></div>` });
+  }
+  const running = job && job.state === 'running';
+  const head = running ? '<meta http-equiv="refresh" content="4">' : '';
+  let statusBox = '';
+  if (running) statusBox = `<div class="running">⏳ Собираю продажи, возвраты и заказы на токене кабинета «${esc(active.name)}»… ${esc(job.log || '')}<br><span class="muted">Статистика WB — 1 запрос/мин, может занять 1–3 минуты.</span></div>`;
+  else if (job && job.state === 'error') statusBox = `<div class="err" style="white-space:pre-wrap">Ошибка: ${esc(job.error || '')}</div>`;
+  else if (job && job.state === 'done') statusBox = okBox('Готово.');
+
+  const f = form;
+  const formSection = `<div class="section">
+    <h2>Параметры</h2>
+    <form method="post" action="${u(`/org/${org.id}/reports/geo/refresh`)}">
+      ${csrfField(csrf)}
+      <div class="row-form" style="gap:14px;align-items:flex-end">
+        <div><label for="gdays" title="За сколько последних дней брать продажи и возвраты (WB хранит ~90 дней).">Период, дней</label>
+          <select id="gdays" name="days" style="width:130px">${[7, 14, 30, 60, 90].map((n) => `<option value="${n}"${Number(f.days) === n ? ' selected' : ''}>${n} дней</option>`).join('')}</select></div>
+      </div>
+      <button class="btn" type="submit" style="max-width:280px;margin-top:16px"${running ? ' disabled' : ''}>${running ? 'Идёт сбор…' : 'Обновить данные'}</button>
+    </form></div>`;
+
+  const nav = (patch) => { const v = { ...view, ...patch }; return u(`/org/${org.id}/reports/geo?scope=${v.scope}&gran=${v.gran}&focus=${v.focus}#geo`); };
+  const results = latest?.data
+    ? geoResults(latest.data, { view, nav, downloadHref: (k) => u(`/org/${org.id}/reports/geo/download/${k}`), whenLabel: latest.createdAt ? String(latest.createdAt).slice(0, 16).replace('T', ' ') + ' UTC' : '' })
+    : `<div class="section"><p class="muted">Данных пока нет — задайте период и нажмите «Обновить данные».</p></div>`;
+
+  return layout({
+    title: `География — ${org.name}`, user, csrf, base, head,
+    body: `<div class="wrap">${back}
+      <h1>География продаж и возвратов <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
+      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Откуда покупают и откуда возвращают — по регионам и федеральным округам. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
+      ${statusBox}
+      ${formSection}
+      <div id="geo" style="scroll-margin-top:14px">${results}</div>
+    </div>`,
+  });
+}
+
 // ── Архив отчётов компании: список запусков ─────────────────────────────────
 export function archivePage({ user, csrf, base = '', org, role, runs, report = '', types = [] }) {
   const u = (p) => base + p;
@@ -1175,6 +1296,7 @@ export function archivePage({ user, csrf, base = '', org, role, runs, report = '
     const sm = r.summary || {};
     if (r.report === 'stock') return `остаток ${nf(sm.grandTotal)} шт · складов ${nf(sm.activeWarehouses)} · арт+цвет ${nf(sm.articleCount)}`;
     if (r.report === 'movement') return `принято ${nf(sm.acceptedTotal)} · передано ${nf(sm.deliveredTotal)} · Δ ${sm.diffTotal >= 0 ? '+' : ''}${nf(sm.diffTotal)} · ${nf(sm.deliveredMoney)} ₽ (${nf(sm.days)} дн)`;
+    if (r.report === 'geo') return `продаж ${nf(sm.salesCount)} · возвратов ${nf(sm.returnCount)} (${sm.returnPct}%) · регионов ${nf(sm.regions)} (${nf(sm.days)} дн)`;
     return `подсорт ${nf(sm.reorderUnits)} · риск ${nf(sm.riskRows)} · завоз ${nf(sm.seedUnits)}${(sm.articles && sm.articles.length) ? ` · арт: ${esc(sm.articles.join(', '))}` : ''}`;
   };
   const rows = (runs || []).map((r) => {
@@ -1216,7 +1338,9 @@ export function archiveViewPage({ user, csrf, base = '', org, role, run }) {
       ? stockResults(run.data, { downloadHref: dl, whenLabel: '' })
       : run.report === 'movement'
         ? movementResults(run.data, { view: movementView({}), nav: null, downloadHref: dl, whenLabel: '' })
-        : podsortResults(run.data, { downloadHref: dl, whenLabel: '' });
+        : run.report === 'geo'
+          ? geoResults(run.data, { view: geoView({}), nav: null, downloadHref: dl, whenLabel: '' })
+          : podsortResults(run.data, { downloadHref: dl, whenLabel: '' });
   const p = run.params || {};
   return layout({
     title: `Архив: ${reportRu(run.report)} — ${org.name}`, user, csrf, base,

@@ -184,6 +184,33 @@ try {
   r = await req('GET', `/org/${orgId}/reports/archive?report=stock`);
   ok(r.status === 200 && /остаток\s+\d/.test(r.text) && !/·\s*передано\s+\d/.test(r.text), 'Ф2: фильтр архива показывает только выбранный тип');
 
+  // ── Отчёт «География» ────────────────────────────────────────────────────────
+  r = await req('GET', `/org/${orgId}/reports/geo`);
+  ok(r.status === 200 && r.text.includes('География продаж и возвратов') && r.text.includes('Параметры'), 'Ф2: страница географии');
+  r = await req('POST', `/org/${orgId}/reports/geo/refresh`, form({ _csrf: csrfOf(r.text), days: 30 }));
+  ok(r.status === 302, 'Ф2: запуск географии → 302');
+  let geoDone = false;
+  for (let i = 0; i < 30 && !geoDone; i++) {
+    await sleep(80);
+    r = await req('GET', `/org/${orgId}/reports/geo`);
+    if (r.text.includes('dk-kpi') && r.text.includes('Москва')) geoDone = true;
+  }
+  ok(geoDone, 'Ф2: география собралась (регионы)');
+  const gj = await req('GET', `/org/${orgId}/reports/geo/download/json`);
+  let gp = null; try { gp = JSON.parse(gj.text); } catch { /* */ }
+  ok(gj.status === 200 && gp?.scopes?.all?.byRegion?.length === 3 && gp?.moscowNmCount === 2, 'Ф2: выгрузка географии (JSON)');
+  const gx = await fetch(base + `/org/${orgId}/reports/geo/download/xlsx`, { headers: { cookie } });
+  const gxb = Buffer.from(await gx.arrayBuffer());
+  ok(gx.status === 200 && gxb.length > 500 && gxb[0] === 0x50 && gxb[1] === 0x4b, 'Ф2: выгрузка географии (Excel .xlsx)');
+  const gh = await fetch(base + `/org/${orgId}/reports/geo/download/html`, { headers: { cookie } });
+  const ghx = await gh.text();
+  ok(gh.status === 200 && ghx.includes('География продаж и возвратов'), 'Ф2: HTML-дашборд географии');
+  await pdfCheck(`/org/${orgId}/reports/geo/download/pdf`, 'Ф2: PDF-дашборд географии');
+  r = await req('GET', `/org/${orgId}/reports/geo?scope=moscow&focus=pct&gran=okrug`);
+  ok(r.status === 200 && r.text.includes('Товары моск. FF'), 'Ф2: география — тумблеры (моск. FF / % / округа)');
+  r = await req('GET', `/org/${orgId}/reports/archive`);
+  ok(r.text.includes('География') && /продаж\s+\d+\s*·\s*возвратов/.test(r.text), 'Ф2: география видна в архиве');
+
   // Автор удаляет СВОЙ запуск из архива.
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Удалить'), 'Ф2: автор видит кнопку удаления своего запуска');

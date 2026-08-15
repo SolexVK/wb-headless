@@ -211,6 +211,57 @@ function movementSummary(snap, p) {
   return { days: N, articles: p.articles || [], acceptedTotal: acc, deliveredTotal: del, diffTotal: del - acc, deliveredMoney: Math.round(delMoney) };
 }
 
+// ── Пайплайн «География продаж и возвратов» ──────────────────────────────────
+export const geoDefaults = () => ({ days: 30 });
+export function normalizeGeo(body = {}) {
+  const days = [7, 14, 30, 60, 90].includes(Number(body.days)) ? Number(body.days) : 30;
+  return { days };
+}
+function fakeGeo(params) {
+  const mk = (o, r, sc, rc) => ({ okrug: o, region: r, salesCount: sc, salesRub: sc * 1000, returnCount: rc, returnRub: rc * 1000, returnPct: sc ? Math.round(rc / sc * 1000) / 10 : 0 });
+  const regions = [mk('Центральный федеральный округ', 'Москва', 100, 8), mk('Центральный федеральный округ', 'Московская область', 60, 3), mk('Сибирский федеральный округ', 'Омская область', 20, 4)];
+  const okrugs = [mk('Центральный федеральный округ', '', 160, 11), mk('Сибирский федеральный округ', '', 20, 4)].map(({ region, ...x }) => x);
+  const tot = (arr) => { const t = arr.reduce((a, r) => ({ salesCount: a.salesCount + r.salesCount, returnCount: a.returnCount + r.returnCount, salesRub: a.salesRub + r.salesRub, returnRub: a.returnRub + r.returnRub }), { salesCount: 0, returnCount: 0, salesRub: 0, returnRub: 0 }); t.regions = regions.length; t.returnPct = t.salesCount ? Math.round(t.returnCount / t.salesCount * 1000) / 10 : 0; return t; };
+  const scope = { totals: tot(regions), byRegion: regions, byOkrug: okrugs };
+  return { generatedAt: new Date().toISOString(), days: params.days || 30, from: '2026-07-15', moscowWarehouses: ['Мск зелёная зона'], moscowNmCount: 2, scopes: { all: scope, moscow: scope } };
+}
+async function runGeoPipeline(cabinet, token, meta, params, onLog) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  if (process.env.PODSORT_FAKE) return fakeGeo(params);
+  const env = envFor(token, meta, dir);
+  onLog?.('Собираю продажи, возвраты и заказы (fbs-geo)…');
+  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-geo.mjs'), '--days', String(params.days), '--json'], { env, cwd: REPO, timeoutMs: 12 * 60_000 });
+  if (r.code !== 0) throw new Error('Ошибка сбора географии (fbs-geo):\n' + tail(r.err));
+  let snap; try { snap = JSON.parse(r.out); } catch { throw new Error('Не удалось разобрать географию.'); }
+  return snap;
+}
+function geoSummary(snap, p) {
+  const t = snap?.scopes?.all?.totals || {};
+  return { days: p.days || snap.days || 30, salesCount: t.salesCount || 0, returnCount: t.returnCount || 0, returnPct: t.returnPct || 0, regions: t.regions || 0, salesRub: t.salesRub || 0 };
+}
+export function startGeo(cabinet, token, meta, params, userId) {
+  return startRun({ cabinet, token, meta, params, userId, report: 'geo', pipeline: runGeoPipeline, summarize: geoSummary });
+}
+export async function buildGeoXlsx(cabinet, snapshot) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'fbs-geo-service.json'), JSON.stringify(snapshot, null, 2));
+  const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-geo-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
+  const out = path.join(dir, 'fbs-geo.xlsx');
+  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать Excel географии:\n' + tail(r.err));
+  return out;
+}
+export async function buildGeoDashboardHtml(cabinet, snapshot) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'fbs-geo-service.json'), JSON.stringify(snapshot, null, 2));
+  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-geo-dashboard.mjs')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
+  const out = path.join(dir, 'fbs-geo-dashboard.html');
+  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать HTML-дашборд географии:\n' + tail(r.err));
+  return out;
+}
+
 // ── Single-flight + фоновый статус (ключ = кабинет:отчёт) ────────────────────
 const jobs = new Map();
 const jobKey = (cabinetId, report) => `${Number(cabinetId)}:${report}`;

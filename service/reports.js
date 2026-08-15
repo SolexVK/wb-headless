@@ -5,14 +5,14 @@
 import express from 'express';
 import { Orgs, Cabinets, ReportRuns } from './models.js';
 import { requireAuth } from './security.js';
-import { reportsPage, podsortPage, stockPage, movementPage, movementView, archivePage, archiveViewPage } from './views.js';
-import { podsortDefaults, normalizePodsort, movementDefaults, normalizeMovement, startPodsort, startStock, startMovement, getJob, buildXlsx, buildStockXlsx, buildMovementXlsx, buildDashboardHtml, buildStockDashboardHtml, buildMovementDashboardHtml, dashboardToPdf } from './reports-runner.js';
+import { reportsPage, podsortPage, stockPage, movementPage, movementView, geoPage, geoView, archivePage, archiveViewPage } from './views.js';
+import { podsortDefaults, normalizePodsort, movementDefaults, normalizeMovement, geoDefaults, normalizeGeo, startPodsort, startStock, startMovement, startGeo, getJob, buildXlsx, buildStockXlsx, buildMovementXlsx, buildGeoXlsx, buildDashboardHtml, buildStockDashboardHtml, buildMovementDashboardHtml, buildGeoDashboardHtml, dashboardToPdf } from './reports-runner.js';
 import { logger } from './logger.js';
 
 export const reportsRouter = express.Router();
 
 // Имя файла выгрузки: «Название отчёта дата» (напр. «Подсорт 2026-08-14»).
-const RU_REPORT = { podsort: 'Подсорт', stock: 'Остатки', movement: 'Движение заказов' };
+const RU_REPORT = { podsort: 'Подсорт', stock: 'Остатки', movement: 'Движение заказов', geo: 'География' };
 const fileStem = (report, date) => `${RU_REPORT[report] || report} ${(date && String(date).slice(0, 10)) || new Date().toISOString().slice(0, 10)}`;
 
 function loadOrg(req, res, next) {
@@ -50,13 +50,15 @@ async function sendDownload(res, kind, cabId, snapshot, stem, report = 'podsort'
   if (kind === 'xlsx') {
     const file = report === 'stock' ? await buildStockXlsx({ id: cabId }, snapshot)
       : report === 'movement' ? await buildMovementXlsx({ id: cabId }, snapshot, opts.cost || 620)
-        : await buildXlsx({ id: cabId }, snapshot);
+        : report === 'geo' ? await buildGeoXlsx({ id: cabId }, snapshot)
+          : await buildXlsx({ id: cabId }, snapshot);
     return res.download(file, `${stem}.xlsx`);
   }
   if (kind === 'html' || kind === 'pdf') {
     const html = report === 'stock' ? await buildStockDashboardHtml({ id: cabId }, snapshot)
       : report === 'movement' ? await buildMovementDashboardHtml({ id: cabId }, snapshot, opts.cost || 620)
-        : await buildDashboardHtml({ id: cabId }, snapshot);
+        : report === 'geo' ? await buildGeoDashboardHtml({ id: cabId }, snapshot)
+          : await buildDashboardHtml({ id: cabId }, snapshot);
     if (kind === 'html') return res.download(html, `${stem}.html`);
     return res.download(await dashboardToPdf(html), `${stem}.pdf`);
   }
@@ -178,6 +180,38 @@ reportsRouter.get('/org/:id/reports/movement/download/:kind', requireAuth, loadO
   const cost = Math.min(100000, Math.max(0, Math.round(Number(req.query.cost)) || 620));
   try { await sendDownload(res, req.params.kind, cab.id, latest.data, fileStem('movement'), 'movement', { cost }); }
   catch (e) { logger.error({ err: e.message }, 'движение: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
+});
+
+// ── География продаж и возвратов: страница + пересчёт + выгрузка ─────────────
+reportsRouter.get('/org/:id/reports/geo', requireAuth, loadOrg, (req, res) => {
+  const cab = Cabinets.activeOf(req.org.id);
+  const latest = cab ? ReportRuns.latest(cab.id, 'geo') : null;
+  const form = latest?.data ? { days: latest.data.days || geoDefaults().days } : geoDefaults();
+  res.send(geoPage({
+    user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
+    org: req.org, role: req.role,
+    active: cab ? { id: cab.id, name: cab.name } : null,
+    latest, job: cab ? getJob(cab.id, 'geo') : null,
+    view: geoView(req.query), form,
+  }));
+});
+
+reportsRouter.post('/org/:id/reports/geo/refresh', requireAuth, loadOrg, (req, res) => {
+  const cab = Cabinets.activeOf(req.org.id);
+  if (!cab) return res.redirect(`/org/${req.org.id}/reports/geo`);
+  const token = Cabinets.decryptedToken(cab);
+  if (!token) return res.redirect(`/org/${req.org.id}/reports/geo`);
+  const { already } = startGeo({ id: cab.id }, token, Cabinets.meta(cab), normalizeGeo(req.body), req.session.user.id);
+  if (already) logger.info({ cabinetId: cab.id }, 'география: пересчёт уже идёт — пропускаю');
+  res.redirect(`/org/${req.org.id}/reports/geo`);
+});
+
+reportsRouter.get('/org/:id/reports/geo/download/:kind', requireAuth, loadOrg, async (req, res) => {
+  const cab = Cabinets.activeOf(req.org.id);
+  const latest = cab ? ReportRuns.latest(cab.id, 'geo') : null;
+  if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
+  try { await sendDownload(res, req.params.kind, cab.id, latest.data, fileStem('geo'), 'geo'); }
+  catch (e) { logger.error({ err: e.message }, 'география: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
 });
 
 // ── Архив отчётов компании (общий): список запусков ──────────────────────────
