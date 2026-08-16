@@ -28,6 +28,96 @@ const rub = (n) => Math.round(n).toLocaleString('ru-RU').replace(/,/g, ' ') + ' 
 const num = (n) => Math.round(n).toLocaleString('ru-RU').replace(/,/g, ' ');
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
+// Координаты складов (широта, долгота) для карты. Ключ ищется как подстрока в warehouseName.
+const COORDS = {
+  'электросталь': [55.79, 38.45], 'шушары': [59.75, 30.40], 'краснодар': [45.04, 38.98],
+  'тула': [54.19, 37.62], 'невинномысск': [44.63, 41.94], 'сарапул': [56.46, 53.80],
+  'рязань': [54.63, 39.74], 'екатеринбург': [56.84, 60.60], 'самара': [53.38, 50.30],
+  'воронеж': [51.66, 39.20], 'волгоград': [48.71, 44.51], 'коледино': [55.28, 37.50],
+  'владимир': [56.13, 40.40], 'пенза': [53.20, 45.00], 'котовск': [52.63, 41.50],
+  'тверь': [56.71, 36.14], 'красный бор': [59.68, 30.75], 'подольск': [55.35, 37.90],
+};
+// Ручные сдвиги подписей для скучкованных точек (Москва, СПб). anchor: end = вправо-налево.
+const LABEL_OVERRIDE = {
+  'подольск': { anchor: 'start', ddy: 13 },
+  'коледино': { anchor: 'end', ddy: -3 },
+  'красный бор': { anchor: 'end', ddy: -15 },
+  'тула': { anchor: 'end' },
+  'котовск': { anchor: 'start', ddy: 12 },
+  'екатеринбург': { anchor: 'end' },
+  'владимир': { anchor: 'start', ddy: -12 },
+  'электросталь': { ddy: 4 },
+  'краснодар': { dx: 6 },
+};
+
+function short(name) {
+  return name.replace(/\s*\(.*\)\s*/, '').replace(/^СПБ\s+/, '').replace(/\s*-\s*Перспективная.*/, '').trim();
+}
+
+function buildMap(burned, totalQty, totalRub) {
+  const W = 900, H = 540, padX = 60, padTop = 20, padBot = 30;
+  const lonMin = 28, lonMax = 62, latMin = 43.5, latMax = 61;
+  const px = (lon) => padX + ((lon - lonMin) / (lonMax - lonMin)) * (W - 2 * padX);
+  const py = (lat) => padTop + ((latMax - lat) / (latMax - latMin)) * (H - padTop - padBot);
+  const maxQty = burned[0]?.qty || 1;
+  const rOf = (q) => 4 + (Math.sqrt(q) / Math.sqrt(maxQty)) * 30;
+  const colOf = (q) => (q >= 2000 ? '#E63946' : q >= 400 ? '#FF7A00' : '#FFD166');
+
+  // Точки с координатами.
+  const pts = burned.map((w) => {
+    const key = Object.keys(COORDS).find((k) => w.name.toLowerCase().includes(k));
+    if (!key) return null;
+    const [lat, lon] = COORDS[key];
+    return { ...w, key, x: px(lon), y: py(lat), r: rOf(w.qty), col: colOf(w.qty) };
+  }).filter(Boolean).sort((a, b) => b.r - a.r);
+
+  // Сетка меридианов/параллелей (для «карта»-ощущения).
+  let grid = '';
+  for (let lon = 30; lon <= 60; lon += 10) {
+    const x = px(lon);
+    grid += `<line x1="${x}" y1="${padTop}" x2="${x}" y2="${H - padBot}" class="grid"/>
+      <text x="${x}" y="${H - padBot + 14}" class="gtick">${lon}°E</text>`;
+  }
+  for (let lat = 45; lat <= 60; lat += 5) {
+    const y = py(lat);
+    grid += `<line x1="${padX}" y1="${y}" x2="${W - padX}" y2="${y}" class="grid"/>
+      <text x="${padX - 8}" y="${y + 3}" class="gtick" text-anchor="end">${lat}°N</text>`;
+  }
+
+  const markers = pts.map((p) => {
+    const ov = LABEL_OVERRIDE[p.key] || {};
+    const anchor = ov.anchor || 'start';
+    const lx = p.x + (anchor === 'end' ? -(p.r + 5) : (p.r + 5)) + (ov.dx || 0);
+    const ly = p.y + 3 + (ov.ddy || 0);
+    const showQty = p.qty >= 300;
+    return `<g>
+      <circle cx="${p.x}" cy="${p.y}" r="${p.r + 4}" fill="${p.col}" opacity="0.15"/>
+      <circle cx="${p.x}" cy="${p.y}" r="${p.r}" fill="${p.col}" opacity="0.82" stroke="#fff" stroke-width="0.8"/>
+      <text x="${lx}" y="${ly}" class="mlabel" text-anchor="${anchor}">${esc(short(p.name))}${showQty ? ` <tspan class="mqty">${num(p.qty)}</tspan>` : ''}</text>
+    </g>`;
+  }).join('');
+
+  const svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" class="map">
+    <style>
+      .grid{ stroke:rgba(255,255,255,.08); stroke-width:1; }
+      .gtick{ fill:rgba(201,184,228,.55); font:9px sans-serif; }
+      .mlabel{ fill:#F4EEFB; font:10.5px -apple-system,sans-serif; font-weight:600; }
+      .mqty{ fill:#FFD166; font-weight:800; }
+    </style>
+    ${grid}
+    ${markers}
+  </svg>`;
+
+  const legend = `<div class="mlegend">
+    <div class="lg"><span class="lgc" style="width:34px;height:34px;background:#E63946"></span>≥ 2000 ед.</div>
+    <div class="lg"><span class="lgc" style="width:22px;height:22px;background:#FF7A00"></span>400–2000</div>
+    <div class="lg"><span class="lgc" style="width:12px;height:12px;background:#FFD166"></span>&lt; 400</div>
+    <div class="lg-note">площадь круга ∝ объёму потерь · координаты складов</div>
+  </div>`;
+
+  return { svg, legend, ptsCount: pts.length };
+}
+
 function build(json) {
   const cost = json.costRub;
   const pats = json.patterns.map((p) => p.toLowerCase());
@@ -51,6 +141,7 @@ function build(json) {
   const topArt = json.articles.slice(0, 10);
 
   const dateStr = new Date(json.snapshotAt).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+  const map = buildMap(burned, totalQty, totalRub);
 
   const barRows = burned.map((w) => {
     const pct = Math.max(2, (w.qty / maxWh) * 100);
@@ -90,7 +181,7 @@ function build(json) {
     <td class="num strong">${rub(a.lossRub)}</td>
   </tr>`).join('');
 
-  return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
+  const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <style>
   @page { size: A4; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -147,6 +238,14 @@ function build(json) {
   .note{ margin-top:12px; background:rgba(230,57,70,.12); border:1px solid rgba(230,57,70,.35); border-radius:10px; padding:10px 13px; font-size:9.5px; color:#FFE1E4; line-height:1.5; }
   .note b{ color:#fff; }
   .foot{ margin-top:10px; display:flex; justify-content:space-between; font-size:8.5px; color:var(--muted); border-top:1px solid var(--line); padding-top:7px; }
+
+  .page-break{ page-break-before:always; }
+  .map{ width:100%; height:auto; display:block; }
+  .map-wrap{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px 6px; margin-top:12px; }
+  .mlegend{ display:flex; align-items:center; gap:18px; padding:6px 6px 2px; flex-wrap:wrap; }
+  .lg{ display:flex; align-items:center; gap:8px; font-size:10px; color:var(--muted); }
+  .lgc{ display:inline-block; border-radius:50%; flex:none; }
+  .lg-note{ margin-left:auto; font-size:9px; color:var(--muted); font-style:italic; }
 </style></head>
 <body><div class="page">
   <div class="top">
@@ -197,7 +296,48 @@ function build(json) {
     <span>Источник данных: Wildberries Seller API · warehouse_remains · аккаунт продавца</span>
     <span>Список складов сверён: Meduza · MP Manager · Lenta · АиФ · Фонтанка</span>
   </div>
+</div>
+
+<div class="page page-break">
+  <div class="top">
+    <div>
+      <div class="brand">Wildberries · география потерь</div>
+      <h1>Карта <span class="flame">сгоревших складов</span></h1>
+      <div class="sub">${map.ptsCount} складов с остатками продавца · размер круга ∝ объёму утраченного товара</div>
+    </div>
+    <div class="snap">итого<br><b style="color:#fff">${num(totalQty)} ед · ${num(totalRub)} ₽</b><br>снимок ${esc(dateStr)} МСК</div>
+  </div>
+  <div class="map-wrap">
+    ${map.svg}
+    ${map.legend}
+  </div>
+  <div class="grid" style="margin-top:12px">
+    <div class="card">
+      <h2><span class="ic">🔥</span> Крупнейшие очаги потерь</h2>
+      ${burned.slice(0, 6).map((w, i) => `<div class="bar-row">
+        <div class="bar-name">${i + 1}. ${esc(short(w.name))}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, (w.qty / maxWh) * 100)}%"></div></div>
+        <div class="bar-val">${num(w.qty)}<span class="bar-rub">${rub(w.rub)}</span></div>
+      </div>`).join('')}
+    </div>
+    <div class="card">
+      <h2><span class="ic">🗺️</span> Как читать карту</h2>
+      <div style="font-size:10.5px; color:var(--muted); line-height:1.7">
+        Точки размещены по географическим координатам складов WB.
+        <b style="color:#fff">Красные</b> — полностью сгоревшие крупные хабы (≥2000 ед.),
+        <b style="color:#FF7A00">оранжевые</b> — средние (400–2000),
+        <b style="color:#FFD166">жёлтые</b> — локальные (&lt;400).
+        Наибольшие потери — Электросталь и Санкт‑Петербург (Шушары),
+        далее юг (Краснодар, Невинномысск) и Поволжье/Урал.
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span>Промпт для генерации детальной карты: docs/fire-map-prompt.md</span>
+    <span>Wildberries Seller API · warehouse_remains</span>
+  </div>
 </div></body></html>`;
+  return { html, svg: map.svg };
 }
 
 async function main() {
@@ -207,9 +347,13 @@ async function main() {
   const json = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
   log(`  данные: ${path.basename(jsonPath)} · ${num(json.totalQtyLost)} ед · ${rub(json.totalLossRub)}`);
 
-  const html = build(json);
+  const { html, svg } = build(json);
   const htmlPath = outPdf.replace(/\.pdf$/, '.html');
+  const svgPath = outPdf.replace(/\.pdf$/, '-map.svg');
   fs.writeFileSync(htmlPath, html);
+  // Отдельный SVG-файл карты на тёмной подложке (для вставки куда угодно).
+  const svgStandalone = svg.replace('<svg ', '<svg style="background:#2A0A47" ');
+  fs.writeFileSync(svgPath, svgStandalone);
 
   const exe = fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined;
   const browser = await chromium.launch({ executablePath: exe });
@@ -219,6 +363,7 @@ async function main() {
   await browser.close();
   log(`  ✓ PDF: ${outPdf}`);
   log(`  ✓ HTML: ${htmlPath}`);
+  log(`  ✓ SVG-карта: ${svgPath}`);
   process.stdout.write(outPdf + '\n');
 }
 
