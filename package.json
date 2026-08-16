@@ -16,6 +16,7 @@
     "report:stock": "node report-stock.js",
     "report:fire": "node report-fire-losses.mjs",
     "report:cabinet": "node report-cabinet.mjs",
+    "pdf:cabinet": "node scripts/build-cabinet-pdf.mjs",
     "pdf:fire": "node scripts/build-fire-pdf.mjs",
     "token:check": "node scripts/wb-token-check.mjs",
     "docs:fetch": "node scripts/fetch-wb-docs.mjs",
