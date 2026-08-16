@@ -14,8 +14,8 @@
       "out": "docs/wb-api/reports-statistics.md"
     },
     {
-      "comment": "Финансовые отчёты (детализация к отчёту о реализации, reportDetailByPeriod) — здесь проходят компенсации ущерба за потери на складах FBW. Слаг требует проверки живым фетчем: в текущем окружении портал под антиботом. См. docs/wb-api/losses-burned-warehouse.md",
-      "url": "https://dev.wildberries.ru/docs/openapi/financial-reports",
+      "comment": "Финансовые отчёты и бухгалтерия: детализация к отчёту о реализации (POST /api/finance/v1/sales-reports/detailed) — здесь проходят компенсации ущерба за потери на складах FBW (поля sellerOperName/bonusTypeName/forPay). Слаг подтверждён живым фетчем 2026-08-16. См. docs/wb-api/losses-burned-warehouse.md",
+      "url": "https://dev.wildberries.ru/docs/openapi/financial-reports-and-accounting",
       "out": "docs/wb-api/finance-reports.md"
     }
   ]
