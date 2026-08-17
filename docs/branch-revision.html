@@ -1,0 +1,304 @@
+<title>Ревизия веток wb-headless</title>
+<style>
+  :root{
+    --ground:#F4F6F1; --surface:#FFFFFF; --sunk:#EDF0E9;
+    --ink:#171A16; --ink-2:#3A4137; --muted:#6C7268;
+    --rule:#DBDFD4; --rule-2:#C2C8B7;
+    --accent:#1C5A3B; --accent-2:#2C7A52; --accent-soft:#E3EDE5;
+    --signal:#A2421B; --signal-soft:#F4E7DF;
+    --amber:#8A6A12; --amber-soft:#F2EBD8;
+    --shadow:0 1px 2px rgba(23,26,22,.05), 0 8px 24px -18px rgba(23,26,22,.35);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0E110D; --surface:#151913; --sunk:#1A1F18;
+      --ink:#E6EAE2; --ink-2:#C2C9BC; --muted:#939A8E;
+      --rule:#282E24; --rule-2:#3A422F;
+      --accent:#6BC490; --accent-2:#8AD5A9; --accent-soft:#182A20;
+      --signal:#E08B63; --signal-soft:#2C1E17;
+      --amber:#D6B45C; --amber-soft:#282314;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -18px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0E110D; --surface:#151913; --sunk:#1A1F18;
+    --ink:#E6EAE2; --ink-2:#C2C9BC; --muted:#939A8E;
+    --rule:#282E24; --rule-2:#3A422F;
+    --accent:#6BC490; --accent-2:#8AD5A9; --accent-soft:#182A20;
+    --signal:#E08B63; --signal-soft:#2C1E17;
+    --amber:#D6B45C; --amber-soft:#282314;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -18px rgba(0,0,0,.8);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    font-size:17px;line-height:1.62;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 28px 96px}
+  .prose{max-width:66ch}
+  .mono,code,th,.tag,.eyebrow,.num,.chip{font-family:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace}
+  .eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.16em;color:var(--accent);
+    display:flex;align-items:center;gap:12px;margin:0 0 14px}
+  .eyebrow::after{content:"";flex:1;height:1px;background:var(--rule)}
+  h1{font-family:Georgia,"Noto Serif","Liberation Serif",serif;font-weight:400;
+    font-size:clamp(2.4rem,6.5vw,3.6rem);line-height:1.05;letter-spacing:-.015em;text-wrap:balance;margin:0 0 20px}
+  h2{font-family:Georgia,"Noto Serif","Liberation Serif",serif;font-weight:400;
+    font-size:clamp(1.55rem,3.2vw,2rem);line-height:1.2;letter-spacing:-.01em;text-wrap:balance;margin:0 0 16px}
+  h3{font-size:1.1rem;font-weight:700;margin:30px 0 10px;text-wrap:balance}
+  p{margin:0 0 16px}
+  a{color:var(--accent);text-underline-offset:3px}
+  a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
+  code{font-size:.86em;background:var(--sunk);padding:.12em .38em;border-radius:3px;border:1px solid var(--rule)}
+  section{padding:52px 0 0;border-top:1px solid var(--rule);margin-top:52px}
+  section:first-of-type{border-top:0;margin-top:0}
+  header.masthead{padding:72px 0 8px}
+  .lede{font-family:Georgia,"Noto Serif","Liberation Serif",serif;font-size:1.18rem;line-height:1.55;
+    color:var(--ink-2);max-width:58ch;margin:0 0 32px}
+  .meta{display:flex;flex-wrap:wrap;border:1px solid var(--rule);background:var(--surface);border-radius:4px;overflow:hidden}
+  .meta div{flex:1 1 140px;padding:14px 18px;border-right:1px solid var(--rule)}
+  .meta div:last-child{border-right:0}
+  .meta dt{font-family:ui-monospace,Menlo,monospace;font-size:.65rem;text-transform:uppercase;
+    letter-spacing:.14em;color:var(--muted);margin:0 0 4px}
+  .meta dd{margin:0;font-size:1.35rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2}
+  .meta dd small{display:block;font-size:.8rem;font-weight:400;color:var(--muted);letter-spacing:0}
+  figure{margin:28px 0 0;padding:24px 24px 18px;background:var(--surface);border:1px solid var(--rule);
+    border-radius:4px;box-shadow:var(--shadow);overflow-x:auto}
+  figure svg{display:block;width:100%;min-width:600px;height:auto;color:var(--ink-2)}
+  figcaption{margin-top:16px;font-size:.88rem;color:var(--muted);max-width:70ch}
+  .scroll{overflow-x:auto;margin:22px 0 0;border:1px solid var(--rule);border-radius:4px;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:.89rem;min-width:760px}
+  th{text-align:left;font-size:.63rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);
+    font-weight:400;padding:12px 14px;background:var(--sunk);border-bottom:1px solid var(--rule-2);white-space:nowrap}
+  td{padding:11px 14px;border-bottom:1px solid var(--rule);vertical-align:top;font-variant-numeric:tabular-nums}
+  tbody tr:last-child td{border-bottom:0}
+  td.id{font-family:ui-monospace,Menlo,monospace;font-size:.78rem;color:var(--accent);white-space:nowrap}
+  .v{font-family:ui-monospace,Menlo,monospace;font-size:.78rem}
+  .same{color:var(--accent)}
+  .diff{color:var(--signal);font-weight:700}
+  .none{color:var(--muted)}
+  .note{margin:22px 0 0;padding:18px 22px;border-radius:4px;background:var(--accent-soft);
+    border:1px solid var(--rule);font-size:.95rem}
+  .note.warn{background:var(--signal-soft)}
+  .note .tag{display:block;font-size:.65rem;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);margin-bottom:6px}
+  .note.warn .tag{color:var(--signal)}
+  .note p{margin:0}
+  .note p+p{margin-top:10px}
+  ul.tight{margin:0 0 16px;padding-left:1.25em}
+  ul.tight li{margin-bottom:7px;color:var(--ink-2)}
+  .steps{list-style:none;margin:24px 0 0;padding:0;counter-reset:s}
+  .steps li{counter-increment:s;position:relative;padding:0 0 24px 62px;border-left:1px solid var(--rule);margin-left:15px}
+  .steps li:last-child{border-left-color:transparent;padding-bottom:0}
+  .steps li::before{content:counter(s,decimal-leading-zero);position:absolute;left:-15px;top:0;width:30px;height:30px;
+    border-radius:50%;background:var(--surface);border:1px solid var(--rule-2);color:var(--accent);
+    font-family:ui-monospace,Menlo,monospace;font-size:.7rem;display:flex;align-items:center;justify-content:center}
+  .steps h3{margin:2px 0 6px}
+  .steps p{margin:0 0 6px;font-size:.95rem;color:var(--ink-2)}
+  .steps .tag{font-size:.68rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+  footer{margin-top:56px;padding-top:26px;border-top:1px solid var(--rule);font-size:.9rem;color:var(--muted)}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  @media (max-width:640px){body{font-size:16px}.wrap{padding:0 18px 72px}header.masthead{padding:46px 0 8px}
+    section{padding:40px 0 0;margin-top:40px}figure{padding:16px}}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Ревизия · 4 ветки · август 2026</p>
+  <h1>Инструменты уже построены. Они просто не соединены</h1>
+  <p class="lede">Ревизия четырёх веток показала: почти всё, что я планировал строить агентами, уже написано и часть даже развёрнута. Проблема не в отсутствии инструментов, а в том, что ни один из них не в <code>main</code>, а общий код разошёлся на четыре версии.</p>
+  <dl class="meta">
+    <div><dt>Веток в репозитории</dt><dd>37</dd></div>
+    <div><dt>Разобрано</dt><dd>4</dd></div>
+    <div><dt>Версий <code>lib/mpstats.js</code></dt><dd>4<small>вместо одной</small></dd></div>
+    <div><dt>Готовых отчётов FBS</dt><dd>5<small>уже развёрнуты</small></dd></div>
+    <div><dt>Ролей архитектуры закрыто</dt><dd>3<small>кодом, не агентами</small></dd></div>
+  </dl>
+</header>
+
+<section id="conflict">
+  <p class="eyebrow">Главная проблема</p>
+  <h2>Одна точка входа к MPStats существует в четырёх версиях</h2>
+  <div class="prose">
+    <p>Контракт инструментов требует: одна метрика — один источник. По факту базовый модуль доступа к данным разошёлся на четыре независимые ветви, и <code>main</code> не знает про три из них.</p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 720 260" role="img" aria-label="Схема расхождения: из одного общего предка модуль lib/mpstats.js разошёлся на четыре несовместимые версии в разных ветках">
+      <defs>
+        <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <rect x="0" y="108" width="150" height="44" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <text x="75" y="126" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor" text-anchor="middle">lib/mpstats.js</text>
+      <text x="75" y="142" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="currentColor" opacity="0.65" text-anchor="middle">общий предок</text>
+
+      <path d="M150 130 H210 M210 30 V230 M210 30 H250 M210 90 H250 M210 165 H250 M210 230 H250"
+            fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#a)"/>
+
+      <g fill="none" stroke="currentColor" stroke-width="1.4">
+        <rect x="256" y="12" width="300" height="36" rx="3"/>
+        <rect x="256" y="72" width="300" height="36" rx="3"/>
+        <rect x="256" y="147" width="300" height="36" rx="3"/>
+        <rect x="256" y="212" width="300" height="36" rx="3"/>
+      </g>
+      <g font-family="ui-monospace,Menlo,monospace" font-size="10.5" fill="currentColor">
+        <text x="268" y="35">main · agent-team</text>
+        <text x="268" y="95">sales-plan</text>
+        <text x="268" y="170">wildberries-tools</text>
+        <text x="268" y="235">fbs-fullfilment · database</text>
+      </g>
+      <g font-family="ui-monospace,Menlo,monospace" font-size="10.5" fill="currentColor" text-anchor="end" opacity="0.8">
+        <text x="546" y="35">18 024 б</text>
+        <text x="546" y="95">9 903 б</text>
+        <text x="546" y="170">9 823 б</text>
+        <text x="546" y="235">5 342 б</text>
+      </g>
+      <g font-family="ui-monospace,Menlo,monospace" font-size="9.5" fill="currentColor" opacity="0.6">
+        <text x="570" y="35">+ниша</text>
+        <text x="570" y="95">+сезонность</text>
+        <text x="570" y="170">+каскад</text>
+        <text x="570" y="235">исходная</text>
+      </g>
+    </svg>
+    <figcaption>Размеры и хеши получены через <code>git cat-file</code> по каждой ветке. Ни одна версия не является надмножеством остальных: <code>main</code> нарастил функции анализа ниши, <code>sales-plan</code> — сезонности, <code>wildberries-tools</code> — каскада. Слить механически нельзя.</figcaption>
+  </figure>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Файл</th><th>main</th><th>wildberries-tools</th><th>sales-plan</th><th>fbs-fullfilment</th><th>database</th></tr></thead>
+      <tbody>
+        <tr><td class="id">lib/mpstats.js</td><td class="v diff">18 024</td><td class="v diff">9 823</td><td class="v diff">9 903</td><td class="v diff">5 342</td><td class="v diff">5 342</td></tr>
+        <tr><td class="id">lib/wbClient.js</td><td class="v none">нет</td><td class="v diff">14 368</td><td class="v diff">14 042</td><td class="v diff">14 042</td><td class="v none">нет</td></tr>
+        <tr><td class="id">server.js</td><td class="v diff">16 704</td><td class="v diff">13 995</td><td class="v diff">15 749</td><td class="v diff">13 995</td><td class="v diff">14 248</td></tr>
+        <tr><td class="id">package.json</td><td class="v diff">461</td><td class="v diff">1 111</td><td class="v diff">488</td><td class="v diff">1 780</td><td class="v diff">557</td></tr>
+        <tr><td class="id">report-stock.js</td><td class="v same">9 433</td><td class="v same">9 433</td><td class="v same">9 433</td><td class="v same">9 433</td><td class="v diff">11 073</td></tr>
+        <tr><td class="id">lib/stockReport.js</td><td class="v same">8 925</td><td class="v same">8 925</td><td class="v same">8 925</td><td class="v same">8 925</td><td class="v diff">9 176</td></tr>
+        <tr><td class="id">config/skus.json</td><td class="v same">17 539</td><td class="v same">17 539</td><td class="v same">17 539</td><td class="v same">17 539</td><td class="v same">17 539</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="tag">Единственная опора</span>
+    <p><code>config/skus.json</code> идентичен во всех ветках. Справочник товаров — единственное, что не разошлось, и именно поэтому он годится в качестве точки сборки: по <code>nmID</code> связывается всё остальное.</p>
+  </div>
+</section>
+
+<section id="built">
+  <p class="eyebrow">Что уже построено</p>
+  <h2>Три роли архитектуры закрыты кодом, а не агентами</h2>
+
+  <h3>claude/fbs-fullfilment — работающий сервис, а не заготовка</h3>
+  <div class="prose">
+    <p>Мультитенантный веб-сервис аналитики FBS, развёрнутый на Mac Mini под launchd, с шифрованием токена AES-256-GCM. Пять отчётов, все smoke-тесты зелёные:</p>
+    <ul class="tight">
+      <li><strong>Подсорт</strong> — рекомендации к дозаказу по складам и размерам. Это ровно роль <code>replenishment</code> из архитектуры.</li>
+      <li><strong>Остатки</strong> — FBS по складам, ежесуточный автоснимок, архив 90 дней. Это те данные, которые я просил логиста выгружать в CSV вручную.</li>
+      <li><strong>География</strong> — возвраты привязаны к складу отгрузки через <code>srid = rid</code>.</li>
+      <li><strong>Движение заказов</strong> и <strong>Логистика</strong> — сроки сборки и доставки по фулфилментам, среднее, медиана, p90.</li>
+    </ul>
+  </div>
+  <div class="note warn">
+    <span class="tag">Моя находка 02 уже решена в коде</span>
+    <p>Я писал, что возвраты стекаются в московский фулфилмент и перекос надо ловить поправкой в формуле подсорта. В этой ветке привязка возврата к <em>исходному</em> складу отгрузки уже реализована. Данные для правильного расчёта есть — вопрос лишь в том, что этот сервис не связан ни с чем остальным.</p>
+  </div>
+
+  <h3>claude/wildberries-tools — каскад из трёх инструментов</h3>
+  <div class="prose">
+    <p>ТОП по фразе → сравнение карточек → конкурентный анализ, сцепленные общим JSON-контрактом по <code>nmId</code>, плюс оркестратор <code>scripts/wb-pipeline.mjs</code>. Движок конкурентного анализа — Python на ~1 950 строк, отдаёт markdown, HTML, PDF и JSON.</p>
+    <p>Здесь же живёт база доступа к WB: <code>lib/wbClient.js</code>, <code>lib/wbToken.js</code>, <code>lib/wbCabinet.js</code> через headless-браузер, снимки документации API. Токены берутся из тех же переменных окружения, что я нашёл: <code>MPSTATS_TOKEN</code>, <code>Wildberries_API</code>, <code>WB_COOKIES</code>, <code>WB_LOCALSTORAGE</code>.</p>
+  </div>
+  <div class="note warn">
+    <span class="tag">Пересечение с моим модулем</span>
+    <p>В отчёте конкурентного анализа есть блок «C. Юнит-экономика»: коридор маржи и ДРР, безубыточность с рекламой, сегменты по цене. Там зашита константа <strong>выкуп 36 %</strong>. Мой <code>lib/ownEconomics.js</code> считает то же самое, но по нашей себестоимости и из <code>config/economics.json</code>. Две реализации маржи — ровно то, против чего написан контракт. Решать, какая эталонная, нужно до того, как обе разойдутся дальше.</p>
+  </div>
+
+  <h3>claude/sales-plan — прогноз плана продаж, обкатан живьём</h3>
+  <div class="prose">
+    <p>Навык <code>seasonality-sales-plan</code>: сезонный профиль за два года с recency-взвешиванием, ранг, фазы с датами входа, разгона, пика и распродажи, дневной план заказов, рекомендованная цена по фазам. Четыре запроса MPStats на весь прогноз. Отдаёт xlsx, html, csv, json. Прогонялся на рубашках в клетку.</p>
+    <p>Это роль <code>season-plan</code>, и она в рабочем состоянии. Не сделано: отбор своих товаров через WB Seller API — база перенесена, ждёт способа отбора.</p>
+  </div>
+
+  <h3>claude/database — хранилище, которого не хватало</h3>
+  <div class="prose">
+    <p>SQLite в репозитории, <code>lib/db.js</code> со схемой и миграциями, CLI, накопление дневных рядов по SKU, статистика в <code>/health</code>, коммит базы обратно в ветку после запуска GitHub Actions. Засеян каталогом: 206 товаров, 22 группы, ноль дневных строк.</p>
+    <p>Не проверено на живом окружении: в той сессии не было токена MPStats. Сейчас он есть — это первое, что стоит прогнать.</p>
+  </div>
+</section>
+
+<section id="impact">
+  <p class="eyebrow">Следствие</p>
+  <h2>Архитектуру надо поправить</h2>
+  <div class="prose">
+    <p>Я проектировал двадцать ролей исходя из того, что инструментов нет и <code>coder</code> будет писать коннекторы. Это оказалось неверно. Уточнённая картина:</p>
+  </div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Роль</th><th>Было в проекте</th><th>На самом деле</th></tr></thead>
+      <tbody>
+        <tr><td class="id">replenishment</td><td>написать с нуля, блокирована данными</td><td><strong>готова</strong> — отчёт «Подсорт» в FBS-сервисе</td></tr>
+        <tr><td class="id">season-plan</td><td>новая роль</td><td><strong>готова</strong> — навык <code>seasonality-sales-plan</code></td></tr>
+        <tr><td class="id">competitor-watch</td><td>блокирована, нужен коннектор</td><td><strong>готова</strong> — каскад <code>wildberries-tools</code></td></tr>
+        <tr><td class="id">unit-economics</td><td>создан мной</td><td>конфликтует с блоком C конкурентного анализа</td></tr>
+        <tr><td class="id">coder</td><td>писать коннекторы</td><td>сводить существующее, а не писать новое</td></tr>
+        <tr><td class="id">qa-auditor</td><td>сверять цифры агентов</td><td>сверять <strong>версии модулей между ветками</strong> — работы больше, чем думалось</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <span class="tag">Что это меняет по сути</span>
+    <p>Дефицит у компании не в инструментах, а в связности. Пять отчётов FBS, каскад конкурентного анализа, прогноз сезонности и база данных существуют — но не знают друг о друге, живут в разных ветках, и ни один не попадает в ежедневное решение. Именно это и должна закрывать команда агентов: не считать заново, а связывать и интерпретировать.</p>
+  </div>
+</section>
+
+<section id="plan">
+  <p class="eyebrow">План</p>
+  <h2>Как сводить</h2>
+  <div class="prose">
+    <p>Порядок от нулевого риска к спорному. Каждый шаг проверяется <code>qa-auditor</code> до перехода к следующему.</p>
+  </div>
+
+  <ol class="steps">
+    <li>
+      <h3>Прогнать базу на живых токенах</h3>
+      <p>Ветка <code>database</code> не проверялась на реальном MPStats — токена не было. Сейчас есть. Это самый дешёвый шаг и он показывает, годится ли SQLite как хранилище под накопление.</p>
+      <p class="tag">Риск нулевой · ничего не сливаем</p>
+    </li>
+    <li>
+      <h3>Внести непересекающееся</h3>
+      <p>Каталог <code>service/</code> FBS-сервиса, <code>docs/wb-api/*</code>, навыки из всех четырёх веток. Эти пути не встречаются в <code>main</code>, конфликтов нет.</p>
+      <p class="tag">Риск низкий · сразу даёт пять отчётов и четыре навыка</p>
+    </li>
+    <li>
+      <h3>Выбрать эталон для <code>lib/mpstats.js</code></h3>
+      <p>Четыре версии, ни одна не надмножество. Нужно решение человека: скорее всего основой берётся версия <code>main</code> как самая полная, а функции сезонности и каскада доносятся из двух других. Механически слить нельзя.</p>
+      <p class="tag">Требует вашего решения · блокирует всё дальнейшее</p>
+    </li>
+    <li>
+      <h3>Перенести доступ к WB</h3>
+      <p><code>lib/wbClient.js</code>, <code>lib/wbToken.js</code>, <code>lib/wbCabinet.js</code> из <code>wildberries-tools</code> как более новой версии. После этого мой <code>lib/wbContent.js</code> надо будет либо встроить в <code>wbClient</code>, либо оставить как отдельный узкий модуль — решать после чтения кода.</p>
+      <p class="tag">Риск средний · две версии wbClient расходятся на 326 байт</p>
+    </li>
+    <li>
+      <h3>Развести юнит-экономику</h3>
+      <p>Блок C конкурентного анализа считает маржу по рынку и медианной цене, мой модуль — по нашей себестоимости. Скорее всего они дополняют друг друга, но константу выкупа 36 % надо вынести в <code>config/economics.json</code>, чтобы источник был один.</p>
+      <p class="tag">Требует чтения кода Python-движка</p>
+    </li>
+    <li>
+      <h3>Собрать <code>server.js</code> и <code>package.json</code> вручную</h3>
+      <p>Пять версий каждого. Это единственная часть, где придётся именно собирать, а не выбирать: эндпоинты и зависимости в ветках непересекающиеся.</p>
+      <p class="tag">Самый спорный шаг · делать последним</p>
+    </li>
+  </ol>
+
+  <div class="note warn">
+    <span class="tag">Правило, без которого всё повторится</span>
+    <p>После сведения — работать в <code>main</code> через короткоживущие ветки с обязательным merge. Тридцать семь параллельных веток появились не случайно: каждая сессия начинала своё направление и не возвращала его назад. Пока это правило не введено, любая ревизия устареет за месяц.</p>
+  </div>
+</section>
+
+<footer>
+  <p>Данные о версиях получены через <code>git cat-file -s</code> и <code>git rev-parse</code> по каждой ветке. Описания состояния — из <code>handoff.md</code> каждой ветки, разделы «Цель» и «Текущее состояние». Код модулей не читался, кроме <code>docs/sales-plan-method.md</code>; выводы о пересечениях сделаны по объявленному составу файлов и описаниям авторов.</p>
+</footer>
+
+</div>
