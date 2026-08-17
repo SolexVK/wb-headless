@@ -170,6 +170,33 @@ nmID: `fetchItemDailySales(sku, …)` отдаёт дневной ряд по к
 
 ---
 
+## 2b. Главное: половина инструментов уже написана, но лежит в неслитых ветках
+
+В репозитории **37 веток**, и `main` отстаёт от них далеко. Многое из того, что
+я планировал писать заново, уже существует. Проверено по спискам файлов (не по коду):
+
+| Ветка | Что там есть | Для какой роли |
+| --- | --- | --- |
+| `claude/wildberries-tools` | `lib/wbClient.js`, `lib/wbToken.js`, `lib/wbCabinet.js`, `lib/wbSales.js`, `lib/wbJemReports.js`, `lib/wbTopKeywords.js`, `lib/wbCardsCompare.js` + навыки конкурентного анализа и топ-ключей | **доступ к WB API уже реализован** |
+| `claude/sales-plan-hzlqew` | `lib/salesPlan.js`, `lib/forecast.js`, `lib/seasonPlanReport.js`, `lib/xlsxWriter.js`, навык `seasonality-sales-plan` с методичкой, **тесты** `test/*.test.mjs`, `docs/wb-api/` | `season-plan`, `production-plan` |
+| `claude/fbs-fullfilment-branch-cfvgir` | навыки `fbs-podsort` и `fbs-dashboards`, `docs/wb-api/fbs.md`, `docs/service/` | **`replenishment` — подсорт уже проработан** |
+| `claude/database-branch-bx2f5u` | `lib/db.js` | единая база вместо разрозненных таблиц |
+| `claude/losses-wildberries-p8dhw6` | `docs/wb-api/finance-reports.md`, `docs/wb-api/losses-burned-warehouse.md` | `ads`, `reporter` |
+| `claude/wildberries-api-docs-bfnvun`, `knowledge-base` | документация по API | все |
+
+### Что из этого следует
+
+1. **Перед разработкой любого модуля — проверить ветки.** Написать второй `wbClient`
+   при существующем — ровно то расхождение реализаций, против которого весь этот контракт.
+2. **Тесты в репозитории есть**, вопреки тому, что записано в `CLAUDE.md`: на ветке
+   `sales-plan` лежит `test/*.test.mjs`. Это относится к `code-reviewer` и `fixer`.
+3. **Разрозненность веток — риск сама по себе.** Одна метрика может быть реализована
+   в трёх ветках по-разному, и `main` не знает ни об одной. Прежде чем строить
+   операционные агенты, стоит свести полезное в `main`.
+
+Задача сведения не решается автоматически: нужен человек, который скажет, какая
+из версий каждого модуля считается верной.
+
 ## 3. Чего в инструментах НЕТ
 
 Границу надо знать, чтобы агент не делал вид, что данные есть.
