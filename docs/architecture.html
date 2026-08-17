@@ -1,0 +1,521 @@
+<title>Архитектура команды агентов</title>
+<style>
+  :root{
+    --ground:#F4F6F1; --surface:#FFFFFF; --sunk:#EDF0E9;
+    --ink:#171A16; --ink-2:#3A4137; --muted:#6C7268;
+    --rule:#DBDFD4; --rule-2:#C2C8B7;
+    --accent:#1C5A3B; --accent-2:#2C7A52; --accent-soft:#E3EDE5;
+    --signal:#A2421B; --signal-soft:#F4E7DF;
+    --amber:#8A6A12; --amber-soft:#F2EBD8;
+    --shadow:0 1px 2px rgba(23,26,22,.05), 0 8px 24px -18px rgba(23,26,22,.35);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0E110D; --surface:#151913; --sunk:#1A1F18;
+      --ink:#E6EAE2; --ink-2:#C2C9BC; --muted:#939A8E;
+      --rule:#282E24; --rule-2:#3A422F;
+      --accent:#6BC490; --accent-2:#8AD5A9; --accent-soft:#182A20;
+      --signal:#E08B63; --signal-soft:#2C1E17;
+      --amber:#D6B45C; --amber-soft:#282314;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -18px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0E110D; --surface:#151913; --sunk:#1A1F18;
+    --ink:#E6EAE2; --ink-2:#C2C9BC; --muted:#939A8E;
+    --rule:#282E24; --rule-2:#3A422F;
+    --accent:#6BC490; --accent-2:#8AD5A9; --accent-soft:#182A20;
+    --signal:#E08B63; --signal-soft:#2C1E17;
+    --amber:#D6B45C; --amber-soft:#282314;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -18px rgba(0,0,0,.8);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--ground);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    font-size:17px;line-height:1.62;-webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 28px 96px}
+  .prose{max-width:66ch}
+
+  .mono,code,th,.tag,.eyebrow,.num,.chip,.dept{
+    font-family:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  }
+  .eyebrow{
+    font-size:.7rem;text-transform:uppercase;letter-spacing:.16em;color:var(--accent);
+    display:flex;align-items:center;gap:12px;margin:0 0 14px;
+  }
+  .eyebrow::after{content:"";flex:1;height:1px;background:var(--rule)}
+
+  h1{
+    font-family:Georgia,"Noto Serif","Liberation Serif","Times New Roman",serif;font-weight:400;
+    font-size:clamp(2.4rem,6.5vw,3.7rem);line-height:1.05;letter-spacing:-.015em;
+    text-wrap:balance;margin:0 0 20px;
+  }
+  h2{
+    font-family:Georgia,"Noto Serif","Liberation Serif","Times New Roman",serif;font-weight:400;
+    font-size:clamp(1.55rem,3.2vw,2rem);line-height:1.2;letter-spacing:-.01em;
+    text-wrap:balance;margin:0 0 16px;
+  }
+  h3{font-size:1.1rem;font-weight:700;margin:32px 0 10px;text-wrap:balance}
+  p{margin:0 0 16px}
+  a{color:var(--accent);text-underline-offset:3px}
+  a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
+  code{font-size:.86em;background:var(--sunk);padding:.12em .38em;border-radius:3px;border:1px solid var(--rule)}
+
+  section{padding:54px 0 0;border-top:1px solid var(--rule);margin-top:54px}
+  section:first-of-type{border-top:0;margin-top:0}
+
+  header.masthead{padding:74px 0 8px}
+  .lede{
+    font-family:Georgia,"Noto Serif","Liberation Serif",serif;
+    font-size:1.18rem;line-height:1.55;color:var(--ink-2);max-width:58ch;margin:0 0 32px;
+  }
+  .meta{display:flex;flex-wrap:wrap;border:1px solid var(--rule);background:var(--surface);border-radius:4px;overflow:hidden}
+  .meta div{flex:1 1 140px;padding:14px 18px;border-right:1px solid var(--rule)}
+  .meta div:last-child{border-right:0}
+  .meta dt{
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    font-size:.65rem;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin:0 0 4px;
+  }
+  .meta dd{margin:0;font-size:1.35rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2}
+  .meta dd small{display:block;font-size:.8rem;font-weight:400;color:var(--muted);letter-spacing:0}
+
+  figure{margin:30px 0 0;padding:24px 24px 18px;background:var(--surface);border:1px solid var(--rule);border-radius:4px;box-shadow:var(--shadow);overflow-x:auto}
+  figure svg{display:block;width:100%;min-width:620px;height:auto;color:var(--ink-2)}
+  figcaption{margin-top:16px;font-size:.88rem;color:var(--muted);max-width:70ch}
+
+  .scroll{overflow-x:auto;margin:22px 0 0;border:1px solid var(--rule);border-radius:4px;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:.89rem;min-width:800px}
+  th{
+    text-align:left;font-size:.63rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);
+    font-weight:400;padding:12px 14px;background:var(--sunk);border-bottom:1px solid var(--rule-2);white-space:nowrap;
+  }
+  td{padding:11px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
+  tbody tr:last-child td{border-bottom:0}
+  td.id{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.8rem;color:var(--accent);white-space:nowrap}
+  tr.dept-row td{background:var(--sunk);padding:9px 14px}
+  .dept{font-size:.64rem;text-transform:uppercase;letter-spacing:.14em;color:var(--accent)}
+  .dept b{color:var(--muted);font-weight:400;margin-left:10px;letter-spacing:.06em}
+  .st{font-size:.63rem;text-transform:uppercase;letter-spacing:.1em;white-space:nowrap;font-family:ui-monospace,Menlo,monospace}
+  .st-new{color:var(--accent)}
+  .st-keep{color:var(--muted)}
+  .st-block{color:var(--signal)}
+  .st-freeze{color:var(--amber)}
+
+  .principle{
+    background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--accent);
+    border-radius:4px;padding:18px 22px;margin-bottom:12px;
+  }
+  .principle h3{margin:0 0 6px;font-size:1rem}
+  .principle p{margin:0;font-size:.95rem;color:var(--ink-2)}
+
+  .note{margin:24px 0 0;padding:18px 22px;border-radius:4px;background:var(--accent-soft);border:1px solid var(--rule);font-size:.95rem}
+  .note.warn{background:var(--signal-soft)}
+  .note .tag{display:block;font-size:.65rem;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);margin-bottom:6px}
+  .note.warn .tag{color:var(--signal)}
+  .note p{margin:0}
+  .note p+p{margin-top:10px}
+
+  ul.tight{margin:0 0 16px;padding-left:1.25em}
+  ul.tight li{margin-bottom:7px;color:var(--ink-2)}
+
+  .waves{list-style:none;margin:24px 0 0;padding:0;counter-reset:w}
+  .waves li{counter-increment:w;position:relative;padding:0 0 24px 62px;border-left:1px solid var(--rule);margin-left:15px}
+  .waves li:last-child{border-left-color:transparent;padding-bottom:0}
+  .waves li::before{
+    content:counter(w,decimal-leading-zero);position:absolute;left:-15px;top:0;width:30px;height:30px;
+    border-radius:50%;background:var(--surface);border:1px solid var(--rule-2);color:var(--accent);
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.7rem;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .waves h3{margin:2px 0 6px}
+  .waves p{margin:0 0 6px;font-size:.95rem;color:var(--ink-2)}
+  .waves .tag{font-size:.68rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+
+  footer{margin-top:60px;padding-top:26px;border-top:1px solid var(--rule);font-size:.9rem;color:var(--muted)}
+
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  @media (max-width:640px){
+    body{font-size:16px}
+    .wrap{padding:0 18px 72px}
+    header.masthead{padding:46px 0 8px}
+    section{padding:40px 0 0;margin-top:40px}
+    figure{padding:16px}
+  }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Проект · после интервью · август 2026</p>
+  <h1>Архитектура команды агентов</h1>
+  <p class="lede">Двадцать ролей в пяти слоях, разложенных по 76 процессам реестра. Что считает код, что решает агент, кто их связывает и в каком порядке всё это включать.</p>
+  <dl class="meta">
+    <div><dt>Всего ролей</dt><dd>20</dd></div>
+    <div><dt>Операционных</dt><dd>13</dd></div>
+    <div><dt>Оркестратор</dt><dd>1</dd></div>
+    <div><dt>Платформенных</dt><dd>6</dd></div>
+    <div><dt>Заблокировано</dt><dd>3<small>ждут данных</small></dd></div>
+  </dl>
+</header>
+
+<section id="status">
+  <p class="eyebrow">Где мы</p>
+  <h2>Точка остановки</h2>
+  <div class="prose">
+    <p>Пройдено: руководство по агентам, интервью на 110 вопросов с полными ответами, реестр 76 процессов с десятью находками, контракт инструментов, перенос всей работы в этот репозиторий.</p>
+    <p>Не пройдено: собственно архитектура — она перед вами — и переработка одиннадцати черновых агентов, собранных до интервью.</p>
+    <p>Два уточнения, изменившие картину со вчерашнего дня:</p>
+    <ul class="tight">
+      <li><strong>Часть «отсутствующих» процессов уже написана в коде.</strong> Упущенная выручка считается <code>report-stock.js</code> и считается методологически верно. Справочник частично есть в <code>config/skus.json</code>.</li>
+      <li><strong>Единицы учёта я перепутал.</strong> 206 записей в <code>skus.json</code> — это nmID, а 550–600 — баркоды. Разные уровни. Из этого следует разрыв, показанный на второй схеме ниже, и он важнее, чем сама ошибка.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="principles">
+  <p class="eyebrow">Основание</p>
+  <h2>Четыре принципа</h2>
+
+  <div class="principle">
+    <h3>Расчёт живёт в коде, суждение — в агенте</h3>
+    <p>Если результат детерминирован и воспроизводим — это функция, а не агент. Агент нужен там, где надо решить, что цифра означает и что с ней делать. Метрика, посчитанная агентом «на лету», при следующем запуске даст другое число, и доверие к отчёту исчезнет.</p>
+  </div>
+  <div class="principle">
+    <h3>Одна метрика — один источник</h3>
+    <p>У упущенной выручки одна реализация. У обращений к MPStats одна точка входа. Второй источник той же цифры означает, что рано или поздно они разойдутся, и никто не будет знать, какой верить.</p>
+  </div>
+  <div class="principle">
+    <h3>Агенты живут ритмами, а не запросами</h3>
+    <p>День, неделя, месяц, сезон. Агент, которого надо не забыть позвать, не работает: именно так была заброшена таблица РНП. Ритм задаёт оркестратор, а не человек.</p>
+  </div>
+  <div class="principle">
+    <h3>Действие наружу — всегда через человека</h3>
+    <p>Цена, ставка, заказ поставщику, публикация, ответ покупателю. Агент готовит решение с обоснованием и ценой вопроса. Нажимает человек. Это не осторожность ради осторожности: при лид-тайме 30–68 дней цена автоматической ошибки — два месяца.</p>
+  </div>
+</section>
+
+<section id="layers">
+  <p class="eyebrow">Устройство</p>
+  <h2>Пять слоёв</h2>
+
+  <figure>
+    <svg viewBox="0 0 760 452" role="img" aria-label="Слоистая архитектура: источники данных питают слой инструментов, инструменты отдают проверенные цифры четырём контурам агентов, оркестратор сводит их выводы в решения">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="ui-monospace, Menlo, monospace" font-size="10.5" letter-spacing="1.2" fill="currentColor" opacity="0.65">
+        <text x="0" y="10">ИСТОЧНИКИ</text>
+        <text x="0" y="112">ИНСТРУМЕНТЫ · КОД · РАСЧЁТ</text>
+        <text x="0" y="222">АГЕНТЫ · СУЖДЕНИЕ</text>
+        <text x="0" y="356">ОРКЕСТРАЦИЯ</text>
+      </g>
+
+      <g fill="none" stroke="currentColor" stroke-width="1.3">
+        <rect x="0" y="20" width="175" height="34" rx="3"/>
+        <rect x="195" y="20" width="175" height="34" rx="3"/>
+        <rect x="390" y="20" width="175" height="34" rx="3"/>
+        <rect x="585" y="20" width="175" height="34" rx="3"/>
+      </g>
+      <g font-family="-apple-system, Segoe UI, sans-serif" font-size="12" fill="currentColor" text-anchor="middle">
+        <text x="87" y="42">WB API</text>
+        <text x="282" y="42">MPStats</text>
+        <text x="477" y="42">Таблица логиста</text>
+        <text x="672" y="42">Ручные выгрузки</text>
+      </g>
+
+      <g stroke="currentColor" stroke-width="1.3" marker-end="url(#ar)">
+        <line x1="380" y1="56" x2="380" y2="118"/>
+      </g>
+      <text x="390" y="92" font-family="ui-monospace, Menlo, monospace" font-size="10" fill="currentColor" opacity="0.7">сырые данные</text>
+
+      <g fill="none" stroke="currentColor" stroke-width="1.3">
+        <rect x="0" y="124" width="175" height="34" rx="3"/>
+        <rect x="195" y="124" width="175" height="34" rx="3"/>
+        <rect x="390" y="124" width="175" height="34" rx="3" stroke-dasharray="4 3"/>
+        <rect x="585" y="124" width="175" height="34" rx="3" stroke-dasharray="4 3"/>
+      </g>
+      <g font-family="ui-monospace, Menlo, monospace" font-size="11" fill="currentColor" text-anchor="middle">
+        <text x="87" y="145">lib/mpstats.js</text>
+        <text x="282" y="145">report-stock.js</text>
+        <text x="477" y="145" opacity="0.75">wbContent · wbAds</text>
+        <text x="672" y="145" opacity="0.75">ffStock · history</text>
+      </g>
+
+      <g stroke="currentColor" stroke-width="1.3" marker-end="url(#ar)">
+        <line x1="380" y1="160" x2="380" y2="228"/>
+      </g>
+      <text x="390" y="198" font-family="ui-monospace, Menlo, monospace" font-size="10" fill="currentColor" opacity="0.7">проверенные цифры</text>
+
+      <g fill="none" stroke="currentColor" stroke-width="1.3">
+        <rect x="0" y="234" width="175" height="76" rx="3"/>
+        <rect x="195" y="234" width="175" height="76" rx="3"/>
+        <rect x="390" y="234" width="175" height="76" rx="3"/>
+        <rect x="585" y="234" width="175" height="76" rx="3"/>
+      </g>
+      <g font-family="-apple-system, Segoe UI, sans-serif" font-size="12" fill="currentColor" text-anchor="middle">
+        <text x="87" y="258">Экономика и цена</text>
+        <text x="282" y="258">Запас</text>
+        <text x="477" y="258">Спрос</text>
+        <text x="672" y="258">Управление</text>
+      </g>
+      <g font-family="ui-monospace, Menlo, monospace" font-size="9.5" fill="currentColor" opacity="0.7" text-anchor="middle">
+        <text x="87" y="278">unit-economics</text><text x="87" y="292">pricing</text><text x="87" y="306">competitor-watch</text>
+        <text x="282" y="278">replenishment</text><text x="282" y="292">production-plan</text>
+        <text x="477" y="278">ads · card-doctor</text><text x="477" y="292">listing · reviews</text>
+        <text x="672" y="278">season-plan</text><text x="672" y="292">reporter</text>
+      </g>
+
+      <g stroke="currentColor" stroke-width="1.3" marker-end="url(#ar)">
+        <line x1="87" y1="312" x2="87" y2="360"/>
+        <line x1="282" y1="312" x2="282" y2="360"/>
+        <line x1="477" y1="312" x2="477" y2="360"/>
+        <line x1="672" y1="312" x2="672" y2="360"/>
+      </g>
+      <text x="296" y="342" font-family="ui-monospace, Menlo, monospace" font-size="10" fill="currentColor" opacity="0.7">выводы контуров</text>
+
+      <rect x="0" y="366" width="760" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <text x="380" y="389" font-family="-apple-system, Segoe UI, sans-serif" font-size="12.5" fill="currentColor" text-anchor="middle">chief-of-staff — ведёт ритмы, сводит контуры, ищет противоречия между ними</text>
+
+      <g stroke="currentColor" stroke-width="1.3" marker-end="url(#ar)">
+        <line x1="380" y1="402" x2="380" y2="428"/>
+      </g>
+      <rect x="252" y="428" width="256" height="24" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <text x="380" y="445" font-family="-apple-system, Segoe UI, sans-serif" font-size="12" fill="currentColor" text-anchor="middle">решения человеку, по убыванию денег</text>
+    </svg>
+    <figcaption>Пунктиром — инструменты, которых ещё нет: доступ к карточкам и рекламе WB, остатки по фулфилментам, накопление истории. Пока они не написаны, четыре агента над ними работать не могут.</figcaption>
+  </figure>
+</section>
+
+<section id="units">
+  <p class="eyebrow">Разрыв</p>
+  <h2>Инструменты останавливаются на уровень выше, чем нужно планированию</h2>
+  <div class="prose">
+    <p>Это следствие путаницы с единицами, и оно определяет очерёдность работ сильнее всего остального.</p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 720 268" role="img" aria-label="Три уровня учёта: модель, nmID и баркод. Существующие инструменты покрывают модель и nmID, но подсорт и точка перезаказа считаются на уровне баркода, где источника данных нет">
+      <defs>
+        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <g fill="none" stroke="currentColor" stroke-width="1.3">
+        <rect x="0" y="26" width="180" height="58" rx="3"/>
+        <rect x="264" y="26" width="180" height="58" rx="3"/>
+        <rect x="528" y="26" width="180" height="58" rx="3"/>
+      </g>
+      <g font-family="-apple-system, Segoe UI, sans-serif" font-size="13" fill="currentColor" text-anchor="middle">
+        <text x="90" y="50">Модель</text>
+        <text x="354" y="50">nmID</text>
+        <text x="618" y="50">Баркод</text>
+      </g>
+      <g font-family="ui-monospace, Menlo, monospace" font-size="10" fill="currentColor" opacity="0.7" text-anchor="middle">
+        <text x="90" y="70">15 активных</text>
+        <text x="354" y="70">~68 активных</text>
+        <text x="618" y="70">550–600</text>
+      </g>
+
+      <g stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)">
+        <line x1="180" y1="55" x2="258" y2="55"/>
+        <line x1="444" y1="55" x2="522" y2="55"/>
+      </g>
+      <g font-family="ui-monospace, Menlo, monospace" font-size="10" fill="currentColor" opacity="0.7" text-anchor="middle">
+        <text x="219" y="45">× цвет</text>
+        <text x="483" y="45">× размер</text>
+      </g>
+
+      <line x1="486" y1="8" x2="486" y2="246" stroke="currentColor" stroke-width="1.2" stroke-dasharray="5 4" opacity="0.55"/>
+      <text x="478" y="18" font-family="ui-monospace, Menlo, monospace" font-size="10" fill="currentColor" opacity="0.7" text-anchor="end">граница инструментов</text>
+
+      <rect x="0" y="118" width="444" height="34" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <text x="222" y="139" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="currentColor" text-anchor="middle">lib/mpstats.js · report-stock.js — покрывают</text>
+
+      <rect x="528" y="118" width="180" height="34" rx="3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="4 3"/>
+      <text x="618" y="139" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="currentColor" opacity="0.75" text-anchor="middle">источника нет</text>
+
+      <g stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)">
+        <line x1="618" y1="196" x2="618" y2="158"/>
+      </g>
+      <rect x="470" y="202" width="238" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <text x="589" y="222" font-family="-apple-system, Segoe UI, sans-serif" font-size="12" fill="currentColor" text-anchor="middle">Подсорт и точка перезаказа</text>
+      <text x="589" y="240" font-family="ui-monospace, Menlo, monospace" font-size="10" fill="currentColor" opacity="0.7" text-anchor="middle">считаются здесь — до размера</text>
+    </svg>
+    <figcaption><code>fetchItemDailySales</code> отдаёт дневной ряд по карточке целиком: скорость продаж по цвету, но не по размеру. А заявка на подсорт составляется по размерам — именно выпавшие размеры вы ловите ежедневно (КМ-02). Пока не подключён WB Content API, ключевой контур запаса опирается на ручную таблицу логиста.</figcaption>
+  </figure>
+</section>
+
+<section id="roster">
+  <p class="eyebrow">Состав</p>
+  <h2>Двадцать ролей</h2>
+  <div class="prose">
+    <p>Колонка «процессы» — какие строки реестра закрывает роль. Статус: <span class="st st-new">новый</span> — создаём, <span class="st st-keep">есть</span> — дорабатываем существующего, <span class="st st-block">блокирован</span> — ждёт данных или инструмента, <span class="st st-freeze">заморожен</span> — процесс редкий, отложен.</p>
+  </div>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Роль</th><th>За что отвечает</th><th>Ритм</th><th>Процессы</th><th>Статус</th></tr></thead>
+      <tbody>
+        <tr class="dept-row"><td colspan="5"><span class="dept">Контур: экономика и цена<b>фундамент, без него не работает ничего</b></span></td></tr>
+        <tr><td class="id">unit-economics</td><td>Держит юнит-экономику живой: пересчитывает при изменении ткани, карго, тарифов, выкупа. Отдаёт цену безубыточности и предельный ДРР</td><td>при изменении входа</td><td>РОП-13</td><td class="st st-block">блокирован</td></tr>
+        <tr><td class="id">pricing</td><td>Цена нового товара, коридор цены, экономика акции, точка окупаемости скидки</td><td>по событию + еженедельно</td><td>РОП-04, РОП-05, КМ-08, КМ-11</td><td class="st st-keep">есть</td></tr>
+        <tr><td class="id">competitor-watch</td><td>Ежедневный срез цен и позиций конкурентов с накоплением истории — сейчас это часы ручной работы категорийного</td><td>ежедневно</td><td>КМ-04, КМ-05, КМ-06</td><td class="st st-block">блокирован</td></tr>
+
+        <tr class="dept-row"><td colspan="5"><span class="dept">Контур: запас и производство<b>самое дорогое плечо — 30–68 дней</b></span></td></tr>
+        <tr><td class="id">replenishment</td><td>Подсорт по семи фулфилментам до размера, точка перезаказа уровня 1, поправка на возвратный приток в Москву</td><td>еженедельно</td><td>КМ-07, ЛГ-01, ЛГ-02</td><td class="st st-block">блокирован</td></tr>
+        <tr><td class="id">production-plan</td><td>Точка перезаказа уровня 2, план производства от плана продаж, раскрой по размерам от истории продаж</td><td>ежемесячно</td><td>РОП-03, ПР-04, ПР-05</td><td class="st st-keep">есть</td></tr>
+
+        <tr class="dept-row"><td colspan="5"><span class="dept">Контур: спрос<b>реклама, карточка, покупатель</b></span></td></tr>
+        <tr><td class="id">ads</td><td>Окупаемость по марже, фактический ДРР от выкупленной выручки, что отключить и что усилить, сверка с остатком</td><td>еженедельно</td><td>РК-05, РК-06, РК-09, РК-10</td><td class="st st-keep">есть</td></tr>
+        <tr><td class="id">card-doctor</td><td>Диагностика падения конверсий, решение о переработке карточки, разбор A/B-тестов</td><td>еженедельно</td><td>КТ-08, КТ-12, КМ-01</td><td class="st st-new">новый</td></tr>
+        <tr><td class="id">listing</td><td>Тексты карточки, семантическое ядро, характеристики, размерная таблица, адаптация под Ozon</td><td>на артикул</td><td>КТ-02…КТ-07, КМ-12</td><td class="st st-keep">есть</td></tr>
+        <tr><td class="id">reviews</td><td>Ответы на отзывы плюс извлечение причин возвратов — рычаг выкупа из находки 03</td><td>ежедневно</td><td>КТ-09, КТ-10, КТ-11</td><td class="st st-keep">есть</td></tr>
+
+        <tr class="dept-row"><td colspan="5"><span class="dept">Контур: управление<b>план и отчётность</b></span></td></tr>
+        <tr><td class="id">season-plan</td><td>Ранги сезонности, план продаж в выручке, штуках и марже, декомпозиция до артикула и дня</td><td>раз в сезон</td><td>РОП-01, РОП-02, РОП-17</td><td class="st st-new">новый</td></tr>
+        <tr><td class="id">reporter</td><td>Отчёты собственнику и цифры к двум еженедельным совещаниям — сейчас 4–8 часов ручной работы</td><td>ежедневно и еженедельно</td><td>РОП-11, КМ-10</td><td class="st st-new">новый</td></tr>
+        <tr><td class="id">assortment</td><td>ABC и XYZ, жизненный цикл артикула, неликвид, решение о выводе из ассортимента</td><td>ежемесячно</td><td>РОП-07, РОП-14, РОП-15</td><td class="st st-new">новый</td></tr>
+        <tr><td class="id">doc-drafter</td><td>КП, договоры, спецификации, презентации</td><td>по запросу</td><td>—</td><td class="st st-freeze">заморожен</td></tr>
+
+        <tr class="dept-row"><td colspan="5"><span class="dept">Оркестрация<b>единственный, кто вызывает других агентов</b></span></td></tr>
+        <tr><td class="id">chief-of-staff</td><td>Ведёт четыре ритма, запускает контуры, сводит их выводы и ищет противоречия между ними. Каждое утро отдаёт РНП — сводку с решениями по проблемным точкам</td><td>день · неделя · месяц · сезон</td><td>РОП-16, РОП-12, КМ-01…03</td><td class="st st-new">новый</td></tr>
+
+        <tr class="dept-row"><td colspan="5"><span class="dept">Платформа<b>обслуживает саму систему</b></span></td></tr>
+        <tr><td class="id">coder</td><td>Пишет недостающие инструменты: коннекторы WB Content и Adv, остатки фулфилментов, накопление истории. Заменяет ручной вайб-кодинг единственного технического человека в команде</td><td>по задаче</td><td>—</td><td class="st st-new">новый</td></tr>
+        <tr><td class="id">code-reviewer</td><td>Ревью изменений до merge: ошибки, безопасность, совместимость</td><td>на каждое изменение</td><td>—</td><td class="st st-keep">есть</td></tr>
+        <tr><td class="id">qa-auditor</td><td>Проверяет не код, а <strong>цифры</strong>: сходится ли отчёт агента с источником, не разошлись ли две реализации метрики, не сломался ли отчёт после правки инструмента</td><td>после каждого изменения расчётов</td><td>—</td><td class="st st-new">новый</td></tr>
+        <tr><td class="id">security</td><td>Токены и секреты, права доступа агентов, персональные данные покупателей в отчётах, риск утечки при публикации</td><td>перед merge и релизом</td><td>—</td><td class="st st-new">новый</td></tr>
+        <tr><td class="id">fixer</td><td>Ремонтник: воспроизведение отказа, поиск причины, минимальная правка с тестом. Не чинит симптом</td><td>по инциденту</td><td>—</td><td class="st st-keep">есть</td></tr>
+        <tr><td class="id">agent-builder</td><td>Создание и починка агентов. Читает контракт инструментов первым делом и не даёт плодить дубли</td><td>по мере роста</td><td>—</td><td class="st st-keep">есть</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="tag">Почему аудитор отдельно от ревьюера</span>
+    <p><code>code-reviewer</code> смотрит на код: сломается ли, безопасно ли, совместимо ли. <code>qa-auditor</code> смотрит на результат: сходится ли сумма по SKU с итогом, та ли база у процента, не появилась ли вторая реализация одной метрики. В бизнесе, где решения принимаются по цифрам агентов, вторая проверка важнее первой — код может быть безупречен и при этом считать не то.</p>
+  </div>
+</section>
+
+<section id="orchestrator">
+  <p class="eyebrow">Ритмы</p>
+  <h2>Что делает оркестратор</h2>
+  <div class="prose">
+    <p><code>chief-of-staff</code> — единственная роль с правом вызывать других агентов. Остальные не знают друг о друге, и это намеренно: агент, который сам решает, кого позвать, рано или поздно уходит в бесконечную цепочку.</p>
+  </div>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Ритм</th><th>Кого запускает</th><th>Что отдаёт</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Каждое утро</strong></td><td><code>reviews</code>, срез метрик, проверка остатков и цен</td><td><strong>РНП</strong>: состояние за две минуты, проблемные точки и готовое решение по каждой</td></tr>
+        <tr><td><strong>Понедельник</strong></td><td><code>ads</code>, <code>replenishment</code>, <code>card-doctor</code>, <code>competitor-watch</code> параллельно</td><td>Решения недели по убыванию денег плюс заявка на подсорт и цифры к совещаниям</td></tr>
+        <tr><td><strong>Начало месяца</strong></td><td><code>assortment</code>, <code>production-plan</code>, <code>reporter</code></td><td>План-факт с поправкой на упущенные продажи, ABC/XYZ, план производства</td></tr>
+        <tr><td><strong>Раз в сезон</strong></td><td><code>season-plan</code>, <code>unit-economics</code>, <code>pricing</code></td><td>План продаж по рангам сезонности и пересобранная экономика</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Главная работа — не сведение, а поиск противоречий</h3>
+  <div class="prose">
+    <p>Четыре контура смотрят на бизнес с разных сторон и регулярно противоречат друг другу. Именно эти противоречия стоят денег, и увидеть их можно только при сведении:</p>
+    <ul class="tight">
+      <li>Реклама разгоняет артикул, запас которого кончится раньше, чем придёт следующая партия.</li>
+      <li>Артикул в топе по выручке убыточен после вычета фактического ДРР.</li>
+      <li>В заявке на закупку стоит модель, на которую растут жалобы по посадке.</li>
+      <li>Планируется скидка на позицию, у которой маржа уже ниже порога.</li>
+      <li>Москва затаривается возвратами, пока регионы стоят в дефиците.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="drafts">
+  <p class="eyebrow">Судьба черновиков</p>
+  <h2>Что происходит с одиннадцатью агентами</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Было</th><th>Становится</th><th>Почему</th></tr></thead>
+      <tbody>
+        <tr><td><code>sales-analyst</code></td><td><code>reporter</code> + <code>chief-of-staff</code></td><td>Роль оказалась двумя: регулярная отчётность и ежедневное сведение — разные ритмы</td></tr>
+        <tr><td><code>inventory-planner</code></td><td><code>replenishment</code> + <code>production-plan</code></td><td>Два плеча, две точки перезаказа, разные ритмы и разные адресаты</td></tr>
+        <tr><td><code>pricing-analyst</code></td><td><code>pricing</code> + <code>competitor-watch</code> + <code>unit-economics</code></td><td>Слишком много в одном: экономика, мониторинг рынка и решение о цене</td></tr>
+        <tr><td><code>ads-analyst</code></td><td><code>ads</code></td><td>Переписать под фактический ДРР и связку с остатком</td></tr>
+        <tr><td><code>listing-writer</code></td><td><code>listing</code></td><td>Привязать к <code>fetchSearchResults</code> вместо веб-поиска</td></tr>
+        <tr><td><code>review-triage</code></td><td><code>reviews</code></td><td>Добавить извлечение причин возвратов — это рычаг выкупа</td></tr>
+        <tr><td><code>content-planner</code></td><td>заморожен</td><td>Внешний маркетинг ведёт ассистент, сейчас в отпуске. Процесса фактически нет</td></tr>
+        <tr><td><code>doc-drafter</code></td><td>заморожен</td><td>Процесс редкий, приоритет низкий</td></tr>
+        <tr><td><code>code-reviewer</code>, <code>bug-fixer</code>, <code>agent-builder</code></td><td>остаются</td><td>Привязать к реальным командам проверки этого репозитория</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="waves">
+  <p class="eyebrow">Порядок</p>
+  <h2>Пять волн</h2>
+  <div class="prose">
+    <p>Порядок продиктован зависимостями, а не важностью. Каждая волна опирается на предыдущую.</p>
+  </div>
+
+  <ol class="waves">
+    <li>
+      <h3>Фундамент данных — не агенты</h3>
+      <p>Себестоимость по десяти артикулам, дающим 80–90 % выручки. Справочник баркодов из WB Content API. Остатки по семи фулфилментам из таблицы логиста в машиночитаемом виде.</p>
+      <p class="tag">Без этого четыре роли остаются заблокированными</p>
+    </li>
+    <li>
+      <h3>Платформа</h3>
+      <p><code>coder</code>, <code>code-reviewer</code>, <code>qa-auditor</code>, <code>security</code>, <code>fixer</code>, <code>agent-builder</code>. Они нужны первыми, потому что дальше мы пишем инструменты, а не тексты.</p>
+      <p class="tag">6 ролей · строят и проверяют всё остальное</p>
+    </li>
+    <li>
+      <h3>Деньги и пульс</h3>
+      <p><code>unit-economics</code> как фундамент расчётов, затем <code>chief-of-staff</code> с ежедневной РНП. Это ваш приоритет из M5 — сводка с готовыми решениями по проблемным точкам.</p>
+      <p class="tag">2 роли · первый видимый результат каждое утро</p>
+    </li>
+    <li>
+      <h3>Запас и рынок</h3>
+      <p><code>replenishment</code>, <code>production-plan</code>, <code>competitor-watch</code>, <code>pricing</code>. Самое дорогое плечо и часы ручного мониторинга конкурентов.</p>
+      <p class="tag">4 роли · требуют инструментов из волны 2</p>
+    </li>
+    <li>
+      <h3>Спрос и управление</h3>
+      <p><code>ads</code>, <code>card-doctor</code>, <code>listing</code>, <code>reviews</code>, затем <code>season-plan</code>, <code>reporter</code>, <code>assortment</code>.</p>
+      <p class="tag">7 ролей · реклама зависит от доступа к кабинету WB</p>
+    </li>
+  </ol>
+</section>
+
+<section id="blocked">
+  <p class="eyebrow">Блокеры</p>
+  <h2>Что мешает прямо сейчас</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Чего нет</th><th>Кого блокирует</th><th>Как снять</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Себестоимость на единицу</strong></td><td><code>unit-economics</code>, а через него <code>pricing</code> и <code>ads</code></td><td>Завести руками по 10 артикулам: ткань, фурнитура, работы, накладные, брак 5 %</td></tr>
+        <tr><td><strong>Справочник баркодов</strong></td><td><code>replenishment</code></td><td>Подключить WB Content API — токены есть, нужен модуль <code>lib/wbContent.js</code></td></tr>
+        <tr><td><strong>Остатки по фулфилментам</strong></td><td><code>replenishment</code></td><td>Выгрузка из таблицы логиста в фиксированном формате в <code>data/stock/</code></td></tr>
+        <tr><td><strong>Доступ к рекламному кабинету</strong></td><td><code>ads</code> частично</td><td>WB Adv API — модуль <code>lib/wbAds.js</code>. До этого работаем на ручных выгрузках</td></tr>
+        <tr><td><strong>История цен и позиций</strong></td><td><code>competitor-watch</code>, эластичность в <code>pricing</code></td><td>Ежедневный срез с накоплением — модуль <code>lib/history.js</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note warn">
+    <span class="tag">Одно решение за вами перед стартом</span>
+    <p>Волна 1 — это данные, и её невозможно сделать за вас. Себестоимость знает только ваша команда. Всё остальное — подключение API, модули, агенты — я могу строить параллельно, но экономика без себестоимости останется заглушкой, и <code>unit-economics</code>, <code>pricing</code> и <code>ads</code> будут отвечать «нет данных» вместо цифр.</p>
+  </div>
+</section>
+
+<footer>
+  <p>Основано на реестре 76 процессов (<code>docs/process-registry.html</code>), контракте инструментов (<code>docs/tools-contract.md</code>) и полных ответах интервью (<code>docs/interview/01-answers-raw.md</code>, 536 строк, прочитаны целиком).</p>
+</footer>
+
+</div>
