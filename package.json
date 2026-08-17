@@ -20,7 +20,10 @@
     "pdf:fire": "node scripts/build-fire-pdf.mjs",
     "token:check": "node scripts/wb-token-check.mjs",
     "docs:fetch": "node scripts/fetch-wb-docs.mjs",
-    "docs:limits": "node scripts/fetch-wb-docs.mjs https://dev.wildberries.ru/docs/openapi/api-information docs/wb-api/limits.md"
+    "docs:limits": "node scripts/fetch-wb-docs.mjs https://dev.wildberries.ru/docs/openapi/api-information docs/wb-api/limits.md",
+    "report:matrix": "node report-burned-matrix.mjs",
+    "xlsx:matrix": "python3 scripts/build-matrix-xlsx.py",
+    "pdf:matrix": "node scripts/build-matrix-pdf.mjs"
   },
   "engines": {
     "node": ">=18"
