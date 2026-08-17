@@ -78,8 +78,16 @@ for (const it of items) {
 const skusPath = path.join(ROOT, 'config', 'skus.json');
 const skus = JSON.parse(fs.readFileSync(skusPath, 'utf8')).items;
 const known = new Set(skus.map((s) => s.wb));
-const withCost = skus.filter((s) => byNm.has(s.wb));
-const withoutCost = skus.filter((s) => !byNm.has(s.wb));
+
+// Выведенные из оборота не считаются пробелом: по ним себестоимости не будет.
+const archivedPath = path.join(ROOT, 'config', 'archived-skus.json');
+const archived = fs.existsSync(archivedPath)
+  ? new Set(JSON.parse(fs.readFileSync(archivedPath, 'utf8')).items.map((i) => i.wb))
+  : new Set();
+
+const active = skus.filter((s) => !archived.has(s.wb));
+const withCost = active.filter((s) => byNm.has(s.wb));
+const withoutCost = active.filter((s) => !byNm.has(s.wb));
 const notInCatalog = [...byNm.values()].filter((it) => !known.has(it.wb));
 
 const payload = {
@@ -97,7 +105,8 @@ const costs = payload.items.map((i) => i.cost);
 console.log(`Импортировано: ${payload.items.length} позиций → ${path.relative(ROOT, out)}`);
 console.log(`Себестоимость: мин ${Math.min(...costs)} ₽, макс ${Math.max(...costs)} ₽, среднее ${Math.round(costs.reduce((a, b) => a + b, 0) / costs.length)} ₽`);
 console.log('');
-console.log(`Покрытие справочника config/skus.json (${skus.length} nmID):`);
+console.log(`Справочник config/skus.json: ${skus.length} nmID, из них выведено из оборота ${archived.size}`);
+console.log(`Покрытие активных (${active.length} nmID):`);
 console.log(`  с себестоимостью:  ${withCost.length}`);
 console.log(`  без себестоимости: ${withoutCost.length}`);
 console.log(`  в файле, но нет в справочнике: ${notInCatalog.length}`);

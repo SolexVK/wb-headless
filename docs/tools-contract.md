@@ -250,7 +250,14 @@ nmID: `fetchItemDailySales(sku, …)` отдаёт дневной ряд по к
 | `qa-auditor` | `lib/ownEconomics.js`, `economics-check.mjs`, `git log -p` | готов |
 | `security` | `git diff`, `git ls-files`, `grep`, поля `tools:` агентов | готов |
 | `fixer` | `node --check`, прогон скриптов, `git diff` и точечный откат | готов |
+| `unit-economics` | `lib/ownEconomics.js`, `economics-check.mjs`, `config/economics.json` | готов |
 | `agent-builder` | этот файл + `.claude/agents/` | **обязан читать этот файл перед созданием агента** |
+
+### Оркестрация — только навыки, не агенты
+
+Субагент не получает инструмент вызова других агентов: он отфильтровывается на старте.
+Поэтому оркестратор не может быть файлом в `.claude/agents/`. Ритмы держат навыки
+основной сессии: `/rnp` (ежедневно) и `/weekly-review` (еженедельно). Они и вызывают агентов.
 
 ---
 
