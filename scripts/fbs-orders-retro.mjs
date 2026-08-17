@@ -22,6 +22,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WbClient } from '../lib/wbClient.js';
+import { loadWarehouses } from './lib/warehouses.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -68,12 +69,8 @@ const DAYS = RANGE.days;
 const wb = new WbClient({ tokenType: process.env.WB_TOKEN_TYPE || 'personal' });
 const MP_LIMIT = { limit: 300, periodSec: 60, burst: 20 };
 
-// Имена наших складов (для читаемого вывода).
-let WH_NAME = {};
-try {
-  const snap = JSON.parse(fs.readFileSync(path.join(REPO, 'config/warehouses.json'), 'utf8'));
-  for (const w of snap.warehouses || []) WH_NAME[w.id] = w.name;
-} catch { /* нет файла — покажем id */ }
+// Имена наших складов — ЖИВЫМ запросом по токену кабинета (новые ФФ подхватятся сами); откат на config.
+const WH = await loadWarehouses(wb, { methodLimit: MP_LIMIT });
 
 // ── 1. Все сборочные задания за период (пагинация по next) ──────────────────
 async function fetchOrders() {
@@ -168,7 +165,7 @@ const byWh = new Map();
 const critical = [];
 for (const o of orders) {
   const wid = o.warehouseId;
-  if (!byWh.has(wid)) byWh.set(wid, { warehouseId: wid, name: WH_NAME[wid] || String(wid), made: 0, processed: 0, pending: 0, times: [], status: emptyStatus() });
+  if (!byWh.has(wid)) byWh.set(wid, { warehouseId: wid, name: WH.nameOf(wid), made: 0, processed: 0, pending: 0, times: [], status: emptyStatus() });
   const g = byWh.get(wid);
   g.made++;
 

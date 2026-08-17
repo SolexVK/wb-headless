@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WbClient } from '../lib/wbClient.js';
+import { loadWarehouses } from './lib/warehouses.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -31,8 +32,8 @@ const log = (...a) => process.stderr.write(a.join(' ') + '\n');
 const wb = new WbClient({ tokenType: process.env.WB_TOKEN_TYPE || 'personal' });
 const MP = { limit: 300, periodSec: 60, burst: 20 };
 
-let WH_NAME = {};
-try { for (const w of JSON.parse(fs.readFileSync(path.join(REPO, 'config/warehouses.json'), 'utf8')).warehouses || []) WH_NAME[w.id] = w.name; } catch { /* */ }
+// Имена складов — ЖИВЫМ запросом по токену кабинета (новые ФФ подхватятся сами); откат на config.
+const WH = await loadWarehouses(wb, { methodLimit: MP });
 
 // Смещение TZ в минутах из строки вида "+03:00".
 const tzMin = (() => { const m = /^([+-])(\d{2}):(\d{2})$/.exec(TZ); return m ? (m[1] === '-' ? -1 : 1) * (+m[2] * 60 + +m[3]) : 180; })();
@@ -103,7 +104,7 @@ for (const o of orders) {
   if (closed) bump(dayOf(closed), 'delivered', o.warehouseId);  // передано — по дате передачи в доставку
 }
 
-const fulfillments = [...whSeen].map((id) => ({ id, name: WH_NAME[id] || String(id) })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+const fulfillments = [...whSeen].map((id) => ({ id, name: WH.nameOf(id) })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 const nameById = Object.fromEntries(fulfillments.map((f) => [f.id, f.name]));
 const byName = (src) => {
   const o = {}; let total = 0;

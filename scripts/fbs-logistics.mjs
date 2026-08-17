@@ -17,6 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WbClient } from '../lib/wbClient.js';
+import { loadWarehouses } from './lib/warehouses.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -31,10 +32,9 @@ const wb = new WbClient({ tokenType: process.env.WB_TOKEN_TYPE || 'personal' });
 const MP = { limit: 300, periodSec: 60, burst: 20 };
 const STAT = { limit: 1, periodSec: 60, burst: 1 };
 
-// Имена наших складов (для читаемого вывода).
-const WH_NAME = {};
-try { for (const w of JSON.parse(fs.readFileSync(path.join(REPO, 'config/warehouses.json'), 'utf8')).warehouses || []) WH_NAME[w.id] = w.name; }
-catch { /* нет файла — покажем id */ }
+// Имена наших складов — ЖИВЫМ запросом по токену кабинета (новые ФФ подхватятся
+// автоматически); откат на config-снимок при офлайне.
+const WH = await loadWarehouses(wb, { methodLimit: MP });
 const parseArt = (vc) => { const m = String(vc || '').match(/^\s*(\d+)/); return m ? m[1] : String(vc || '').trim(); };
 
 const nowSec = Math.floor(Date.now() / 1000);
@@ -54,7 +54,7 @@ async function fetchOrders() {
       const b = data.orders || [];
       for (const o of b) {
         const id = String(o.rid); if (seen.has(id)) continue; seen.add(id);
-        const name = WH_NAME[o.warehouseId] || ('склад ' + o.warehouseId);
+        const name = WH.nameOf(o.warehouseId);
         const rec = { ff: name, warehouseId: o.warehouseId, createdAt: o.createdAt, supplyId: o.supplyId, article: parseArt(o.article), nmId: o.nmId };
         rid.set(id, rec); orders.push(rec);
       }

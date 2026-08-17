@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WbClient } from '../lib/wbClient.js';
+import { loadWarehouses } from './lib/warehouses.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -27,14 +28,10 @@ const wb = new WbClient({ tokenType: process.env.WB_TOKEN_TYPE || 'personal' });
 const MP = { limit: 300, periodSec: 60, burst: 20 };
 const STAT = { limit: 1, periodSec: 60, burst: 1 };
 
-// Склады продавца: id→имя, множество московских.
-const WH_NAME = {}; const MOSCOW_IDS = new Set(); const MOSCOW_NAMES = [];
-try {
-  for (const w of JSON.parse(fs.readFileSync(path.join(REPO, 'config/warehouses.json'), 'utf8')).warehouses || []) {
-    WH_NAME[w.id] = w.name;
-    if (/мск|москв/i.test(w.name)) { MOSCOW_IDS.add(w.id); MOSCOW_NAMES.push(w.name); }
-  }
-} catch { /* */ }
+// Склады продавца (id→имя, множество московских) — ЖИВЫМ запросом по токену кабинета,
+// чтобы новые (в т.ч. московские) ФФ подхватывались автоматически. Откат на config при офлайне.
+const WH = await loadWarehouses(wb, { methodLimit: MP });
+const MOSCOW_NAMES = WH.moscowNames;
 const parseArt = (vc) => { const m = String(vc || '').match(/^\s*(\d+)/); return m ? m[1] : String(vc || '').trim(); };
 
 const fromDate = new Date(Date.now() - DAYS * 86400000).toISOString().slice(0, 10);
@@ -54,10 +51,10 @@ async function fetchOrders() {
       const b = data.orders || [];
       for (const o of b) {
         const id = String(o.rid); if (seen.has(id)) continue; seen.add(id);
-        const name = WH_NAME[o.warehouseId] || ('склад ' + o.warehouseId);
-        rid.set(id, { ff: name, mos: MOSCOW_IDS.has(o.warehouseId), article: parseArt(o.article), nm: o.nmId });
+        const name = WH.nameOf(o.warehouseId);
+        rid.set(id, { ff: name, mos: WH.isMoscow(o.warehouseId), article: parseArt(o.article), nm: o.nmId });
         ordersByFF[name] = (ordersByFF[name] || 0) + 1;
-        if (MOSCOW_IDS.has(o.warehouseId) && o.nmId) moscowNm.add(o.nmId);
+        if (WH.isMoscow(o.warehouseId) && o.nmId) moscowNm.add(o.nmId);
       }
       if (b.length < 1000) break; next = data.next;
     }
