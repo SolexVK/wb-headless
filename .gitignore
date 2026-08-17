@@ -3,3 +3,16 @@ chrome/
 reports-output/
 .env
 *.log
+
+# Коммерческие данные — НЕ в git. Репозиторий публичный.
+# Себестоимость, цены, баркоды и остатки восстанавливаются командами из
+# data/catalog/README.md за секунды, держать их в истории незачем.
+data/catalog/*.json
+data/stock/*.csv
+data/sales/*
+data/ads/*
+data/reviews/*
+data/competitors/*
+data/company/*
+!data/**/.gitkeep
+!data/**/README.md
