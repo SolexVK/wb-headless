@@ -74,6 +74,53 @@ HTTP: `GET /reports/niche`. Пороги скоринга — `config/niche-thre
 
 Новые обращения к MPStats добавляются **сюда**, а не в код агента и не отдельным скриптом.
 
+### Юнит-экономика своих товаров
+
+`lib/ownEconomics.js` — единственная реализация расчёта маржи по нашим SKU.
+Не путать с `unitEconomics` из `lib/nicheAnalysis.js`: там оценка чужой ниши по медианной
+цене рынка, здесь точный расчёт по нашей себестоимости и нашим тарифам.
+
+Константы — `config/economics.json` (комиссия 34,5 %, налог 2 %, фулфилмент 57/104 ₽,
+карго 31 ₽, брак 5 %, пороги маржи, сценарии выкупа). **Менять только там.**
+
+| Экспорт | Что делает |
+| --- | --- |
+| `loadEconomics()` | читает и валидирует `config/economics.json` |
+| `fulfilmentPerSoldUnit(redemptionPct, e)` | ФФ на **проданную** единицу: `(57 + (1−R)×104) / R` |
+| `costWithDefect(cost, e)` | себестоимость с заложенным браком |
+| `unitMargin({price, cost, redemptionPct})` | полная раскладка расходов и маржа |
+| `breakEvenPrice({cost, redemptionPct, targetMarginPct})` | цена под заданную маржу |
+| `maxDrrPct({price, cost, redemptionPct})` | предельный ДРР от выкупленной выручки |
+| `cabinetDrrToActual(cabinetDrrPct, redemptionPct)` | пересчёт ДРР кабинета в фактический |
+
+```bash
+node scripts/economics-check.mjs                      # цена под целевую маржу по линейкам
+node scripts/economics-check.mjs --price 2100         # маржа при заданной цене
+node scripts/economics-check.mjs --sku 535397255 --price 2600   # раскладка одного артикула
+```
+
+### Себестоимость
+
+`scripts/import-cost.mjs` — импорт из xlsx/csv в `data/catalog/cost.json`, на уровне nmID.
+Печатает покрытие справочника, конфликты и непрочитанные строки.
+
+```bash
+node scripts/import-cost.mjs <файл.xlsx>
+```
+
+### Баркоды: справочник до размера
+
+`lib/wbContent.js` + `scripts/wb-barcodes.mjs` — выгрузка карточек и их размеров из
+**WB Content API** в `data/catalog/barcodes.json`. Это единственный источник на уровне
+баркода. Токен `WB_CONTENT_TOKEN`, только из окружения.
+
+```bash
+WB_CONTENT_TOKEN=xxx node scripts/wb-barcodes.mjs
+```
+
+> Модуль написан, но **на живом кабинете ещё не прогонялся** — токена в среде не было.
+> Первый запуск считать проверкой: сверить количество карточек и баркодов с кабинетом.
+
 ### Вспомогательное
 
 - `lib/oraclePhrases.js` — разбор выгрузки «Оракул запросов» (Wildbox), фильтрация фраз
@@ -198,8 +245,11 @@ nmID: `fetchItemDailySales(sku, …)` отдаёт дневной ряд по к
 | `listing-writer` | `lib/mpstats.js` → `fetchSearchResults` для запросов | переработать |
 | `content-planner` | `data/stock/`, `reports/sales/` | без изменений |
 | `doc-drafter` | `templates/`, `data/company/` | без изменений |
-| `code-reviewer` | `git diff`, запуск `node --check` | связать с реальными командами проверки |
-| `bug-fixer` | `node --check`, smoke-наборы | связать с реальными командами проверки |
+| `coder` | `node --check`, все модули `lib/` как основа | готов |
+| `code-reviewer` | `git diff`, `node --check`, прогон затронутых скриптов | готов |
+| `qa-auditor` | `lib/ownEconomics.js`, `economics-check.mjs`, `git log -p` | готов |
+| `security` | `git diff`, `git ls-files`, `grep`, поля `tools:` агентов | готов |
+| `fixer` | `node --check`, прогон скриптов, `git diff` и точечный откат | готов |
 | `agent-builder` | этот файл + `.claude/agents/` | **обязан читать этот файл перед созданием агента** |
 
 ---
