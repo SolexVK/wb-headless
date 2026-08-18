@@ -14,6 +14,7 @@
 //
 // Результат: reports-output/wb-stock-<дата>.csv и .json + сводка в консоль.
 
+import './lib/loadEnv.js'; // подхватить .env из корня (не перекрывая реальное окружение)
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
