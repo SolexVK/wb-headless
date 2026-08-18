@@ -36,6 +36,29 @@ function parseWhString(s) {
   });
 }
 
+// Персистентный peak-ledger (коммитится в git, переживает эфемерный контейнер).
+// Хранит пик остатков по каждой ячейке NMID×склад — чтобы потери, которые WB уже
+// списал, не терялись между запусками. Формат:
+//   { updatedAt, cost, meta:{nmId:{vendorCode,brand,subjectName}}, cells:{"nmId|склад":qty}, history:[...] }
+const LEDGER = () => path.join(__dirname, 'snapshots', 'peak-ledger.json');
+function loadLedger() {
+  try { return JSON.parse(fs.readFileSync(LEDGER(), 'utf8')); } catch (_) { return null; }
+}
+function saveLedger(M, cost, snapshotAt, grandQty, grandSumRub, whCount) {
+  const meta = {}, cells = {};
+  for (const r of M.values()) {
+    meta[r.nmId] = { vendorCode: r.vendorCode, brand: r.brand, subjectName: r.subjectName };
+    for (const [name, q] of r.wh) if (q > 0) cells[`${r.nmId}|${name}`] = q;
+  }
+  const prev = loadLedger();
+  const history = (prev?.history || []).filter((h) => h.date !== snapshotAt.slice(0, 10));
+  history.push({ date: snapshotAt.slice(0, 10), grandQty, grandSumRub, warehouses: whCount });
+  history.sort((a, b) => a.date.localeCompare(b.date));
+  const dir = path.join(__dirname, 'snapshots');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(LEDGER(), JSON.stringify({ updatedAt: snapshotAt, cost, meta, cells, history }, null, 2));
+}
+
 async function fetchFbo(wb) {
   const create = await wb.get('analytics', '/api/v1/warehouse_remains', {
     query: { locale: 'ru', groupByNm: true, groupBySa: true, groupByBrand: true, groupBySubject: true },
@@ -89,6 +112,18 @@ async function main() {
     }
   }
 
+  // Персистентный ledger (переживает эфемерный контейнер): пик по ячейке из прошлых прогонов.
+  const ledger = loadLedger();
+  if (ledger) {
+    log(`→ мерж с peak-ledger (обновлён ${String(ledger.updatedAt).slice(0, 10)}, ${Object.keys(ledger.cells || {}).length} ячеек)…`);
+    for (const [key, qty] of Object.entries(ledger.cells || {})) {
+      const i = key.lastIndexOf('|'); const nmId = Number(key.slice(0, i)); const name = key.slice(i + 1);
+      if (!matchBurned(name, pats)) continue;
+      const r = ensure(nmId, ledger.meta?.[nmId] || {});
+      bump(r, name, qty);
+    }
+  }
+
   // Колонки-склады: все встреченные, по убыванию суммарного количества.
   const whTotals = new Map();
   for (const r of M.values()) for (const [n, q] of r.wh) whTotals.set(n, (whTotals.get(n) || 0) + q);
@@ -101,9 +136,12 @@ async function main() {
   }).filter((r) => r.totalQty > 0).sort((a, b) => b.sumRub - a.sumRub);
 
   const grandQty = rows.reduce((s, r) => s + r.totalQty, 0);
+  const srcParts = ['warehouse_remains (сейчас)'];
+  if (hist) srcParts.push(`снимок ${new Date(hist.snapshotAt).toLocaleDateString('ru-RU')}`);
+  if (ledger) srcParts.push('peak-ledger');
   const out = {
     snapshotAt: new Date().toISOString(), cost,
-    basis: hist ? `warehouse_remains (сейчас) + снимок ${new Date(hist.snapshotAt).toLocaleDateString('ru-RU')}, пик по ячейке` : 'warehouse_remains (сейчас)',
+    basis: srcParts.join(' + ') + ', пик по ячейке',
     warehouses, warehouseTotals: Object.fromEntries(warehouses.map((n) => [n, whTotals.get(n)])),
     rows, grandQty, grandSumRub: grandQty * cost,
   };
@@ -112,6 +150,10 @@ async function main() {
   fs.mkdirSync(dir, { recursive: true });
   const stamp = out.snapshotAt.replace(/[:.]/g, '-');
   fs.writeFileSync(path.join(dir, `burned-matrix-${stamp}.json`), JSON.stringify(out, null, 2));
+
+  // Обновляем персистентный ledger (пик по ячейке) — коммитится в git.
+  saveLedger(M, cost, out.snapshotAt, grandQty, grandQty * cost, warehouses.length);
+  log(`  peak-ledger обновлён: snapshots/peak-ledger.json`);
 
   // CSV (для быстрой проверки).
   const esc = (v) => { const s = v == null ? '' : String(v); return /[",;\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
