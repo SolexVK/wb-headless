@@ -44,8 +44,15 @@ const LEAD_MIN = numOr('lead-min', 'leadMin', 12);
 const COVER = numOr('cover', 'cover', 28);
 const SEED_MIN = numOr('seed-min', 'seedMin', 10);
 const HISTORY_DAYS = numOr('history-days', 'historyDays', 90);
+// Флаг --articles/--seed-articles ПЕРЕДАН (сервис всегда его передаёт, пусть и пустым) →
+// уважаем его как есть: пусто = все артикулы (см. inScope). НЕ подставляем config-список
+// (это ассортимент одного продавца — в мультитенанте была бы утечка между кабинетами).
+// Флаг ОТСУТСТВУЕТ (одно-продавцовый CLI-прогон) → берём список из config как раньше.
+const artFlagPresent = process.argv.includes('--articles') || process.argv.includes('--seed-articles');
 const artArg = arg('articles', arg('seed-articles', null));
-const articles = artArg ? artArg.split(',').map((s) => s.trim()).filter(Boolean) : (CFG.articles || CFG.seedArticles || []);
+const articles = artFlagPresent
+  ? (artArg ? artArg.split(',').map((s) => s.trim()).filter(Boolean) : [])
+  : (CFG.articles || CFG.seedArticles || []);
 const scopeInts = new Set(articles.map((x) => parseInt(x, 10)).filter((n) => !Number.isNaN(n)));
 const inScope = (numInt) => !scopeInts.size || scopeInts.has(numInt);
 const jsonOnly = process.argv.includes('--json');

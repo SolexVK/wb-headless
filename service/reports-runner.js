@@ -16,11 +16,15 @@ const REPO = path.resolve(__dirname, '..');
 const DATA = path.dirname(config.dbPath);
 const SCRIPTS = path.join(REPO, 'scripts');
 
-// Дефолты формы подсорта — из общего config/replenishment.json (если есть).
+// Дефолты формы подсорта. Числовые параметры (лид-тайм, запас, окна) — генерик, берём из
+// общего config/replenishment.json. НО список артикулов оттуда НЕ берём: это ассортимент
+// ОДНОГО продавца, и в мультитенанте он префилил бы форму кабинета B артикулами кабинета A.
+// По умолчанию артикулы пустые (= все); каждый кабинет задаёт свой список в форме (он же
+// восстанавливается из параметров последнего запуска).
 let CFG_DEFAULTS = { articles: [], seedMin: 10, velocityDays: 28, leadMax: 18, leadMin: 12, cover: 28, historyDays: 90 };
 try {
   const c = JSON.parse(fs.readFileSync(path.join(REPO, 'config/replenishment.json'), 'utf8'));
-  CFG_DEFAULTS = { ...CFG_DEFAULTS, ...c, articles: c.articles || [] };
+  CFG_DEFAULTS = { ...CFG_DEFAULTS, ...c, articles: [] }; // числовые дефолты — да, артикулы — нет
 } catch { /* дефолты */ }
 export const podsortDefaults = () => ({
   articles: (CFG_DEFAULTS.articles || []).join(', '),

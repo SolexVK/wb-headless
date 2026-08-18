@@ -55,14 +55,18 @@ function fromConfig() {
   }
 }
 
-// Живой список складов кабинета; откат на config-снимок при ошибке/офлайне.
-// methodLimit — необязательный лимит метода (как в остальных вызовах маркетплейса).
+// Живой список складов кабинета. methodLimit — необязательный лимит метода.
+//
+// МУЛЬТИТЕНАНТ: при ошибке WB НЕ подставляем config/warehouses.json — это снимок складов
+// ОДНОГО продавца, и в мультитенанте он подсунул бы кабинету B имена/классификацию Москвы
+// кабинета A (утечка данных между тенантами). По умолчанию откатываемся на ПУСТОЙ список:
+// неизвестные id рендерятся как «склад <id>» — некрасиво, но безопасно и не чужое.
+// Config-снимок как именослов доступен только по явному opt-in (одно-продавцовые CLI-прогоны).
 export async function loadWarehouses(wb, { methodLimit } = {}) {
   try {
     const { data } = await wb.get('marketplace', '/api/v3/warehouses', methodLimit ? { methodLimit } : undefined);
-    if (Array.isArray(data) && data.length) return build(data, 'api');
-    // Пустой список у кабинета — валидно (складов ещё нет), но пробуем config как запасной именослов.
-    if (Array.isArray(data)) return build([], 'api');
-  } catch { /* нет сети/прав — падаем на снимок */ }
-  return fromConfig();
+    if (Array.isArray(data)) return build(data, 'api'); // пустой список у кабинета — тоже валидно
+  } catch { /* нет сети/прав — безопасный откат ниже */ }
+  if (process.env.WB_WAREHOUSES_FALLBACK_CONFIG === '1') return fromConfig();
+  return build([], 'empty');
 }

@@ -40,15 +40,22 @@ try {
   const b = await loadWarehouses(mockWb(async () => ({ data: [] })));
   ok(b.source === 'api' && b.all.length === 0 && b.nameOf(1) === 'склад 1', 'пустой живой список — api, без падения');
 
-  // 3) Ошибка WB (нет сети/токена) → откат на config-снимок.
+  // 3) Ошибка WB (нет сети/токена) → МУЛЬТИТЕНАНТ-безопасный откат на ПУСТОЙ список,
+  //    а НЕ на config одного продавца (иначе кабинету B подставились бы склады кабинета A).
   const c = await loadWarehouses(mockWb(async () => { throw new Error('no network'); }));
-  ok(c.source === 'config', 'при ошибке WB — откат на config-снимок');
-  ok(c.all.length > 0, 'config-снимок непустой (есть склады)');
-  ok(typeof c.nameOf === 'function' && c.nameOf(123456) === 'склад 123456', 'резолвер имён работает и на откате');
+  ok(c.source === 'empty', 'при ошибке WB — откат на пустой список (без чужих данных)');
+  ok(c.all.length === 0 && c.moscowIds.size === 0, 'откат пуст — ничего чужого не подставляется');
+  ok(c.nameOf(123456) === 'склад 123456', 'неизвестный склад на откате → «склад N» (не чужое имя)');
 
-  // 4) Неожиданный (не массив) ответ WB → тоже откат на config.
+  // 4) Неожиданный (не массив) ответ WB → тоже пустой откат.
   const d = await loadWarehouses(mockWb(async () => ({ data: { error: 'oops' } })));
-  ok(d.source === 'config', 'не-массивный ответ WB → откат на config');
+  ok(d.source === 'empty', 'не-массивный ответ WB → пустой откат');
+
+  // 5) Явный opt-in (одно-продавцовый CLI) → откат на config-снимок доступен.
+  process.env.WB_WAREHOUSES_FALLBACK_CONFIG = '1';
+  const e = await loadWarehouses(mockWb(async () => { throw new Error('no network'); }));
+  delete process.env.WB_WAREHOUSES_FALLBACK_CONFIG;
+  ok(e.source === 'config' && e.all.length > 0, 'opt-in WB_WAREHOUSES_FALLBACK_CONFIG=1 → config-снимок');
 } catch (e) {
   console.error('Ошибка теста:', e); failed++;
 }
