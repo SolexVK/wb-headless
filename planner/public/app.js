@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'color-daily-plans-in-table-2026-08-06a';
+const APP_BUILD = 'data-archive-colors-2026-08-06b';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -252,14 +252,15 @@ function renderFact() {
   const ws = state.workshops.find((w) => w.id === p.workshopId);
   p.factMatrix = p.factMatrix || {};
   const F = p.factMatrix, PM = p.planMatrix || {};
-  for (const c of a.colors) { F[c] = F[c] || {}; for (const s of a.sizes) if (F[c][s] == null) F[c][s] = 0; }
+  const cols = colsForMatrix(a, F, PM); // активные + архивные с данными (архивные-пустые скрыты)
+  for (const c of cols) { F[c] = F[c] || {}; for (const s of a.sizes) if (F[c][s] == null) F[c][s] = 0; }
   const planTotal = sumMatrix(PM), factTotal = sumMatrix(F);
   const diff = factTotal - planTotal;
 
-  const rows = a.sizes.map((s) => `<tr><th class="mx-size">${s}</th>${a.colors.map((c) => {
+  const rows = a.sizes.map((s) => `<tr><th class="mx-size">${s}</th>${cols.map((c) => {
     const pv = cell(PM, c, s);
     return `<td><input data-fact data-c="${encodeURIComponent(c)}" data-s="${encodeURIComponent(s)}" type="number" min="0" value="${cell(F, c, s)}" placeholder="${pv || 0}" title="план: ${pv}"></td>`;
-  }).join('')}<td class="num mx-rowtot" data-frowtot="${encodeURIComponent(s)}">${a.colors.reduce((n, c) => n + cell(F, c, s), 0)}</td></tr>`).join('');
+  }).join('')}<td class="num mx-rowtot" data-frowtot="${encodeURIComponent(s)}">${cols.reduce((n, c) => n + cell(F, c, s), 0)}</td></tr>`).join('');
 
   root.innerHTML = `
     <div class="panel">
@@ -279,10 +280,10 @@ function renderFact() {
         <div><div class="k">Факт</div><div class="v ${factTotal > 0 ? 'good' : ''}">${factTotal.toLocaleString('ru')} шт</div></div>
         <div><div class="k">Разница</div><div class="v ${diff < 0 ? 'bad' : ''}" id="fact-diff">${diff > 0 ? '+' : ''}${diff.toLocaleString('ru')} шт</div></div>
       </div>
-      ${a.colors.length && a.sizes.length ? `<div class="matrix-scroll" style="margin-top:12px"><table class="matrix-table">
-        <thead><tr><th class="mx-corner">Размер \\ Цвет</th>${a.colors.map((c) => `<th class="mx-color">${swatchTag(a, c, 60, 30)}<div>${c}</div></th>`).join('')}<th class="mx-rowtot-h">Факт Σ</th></tr></thead>
+      ${cols.length && a.sizes.length ? `<div class="matrix-scroll" style="margin-top:12px"><table class="matrix-table">
+        <thead><tr><th class="mx-corner">Размер \\ Цвет</th>${cols.map((c) => `<th class="mx-color">${swatchTag(a, c, 60, 30)}<div>${c}</div></th>`).join('')}<th class="mx-rowtot-h">Факт Σ</th></tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr><th class="mx-size mx-vsego">ВСЕГО</th>${a.colors.map((c) => `<td class="num mx-coltot" data-fcoltot="${encodeURIComponent(c)}">${a.sizes.reduce((n, s) => n + cell(F, c, s), 0)}</td>`).join('')}<td class="num mx-grand" data-fgrand>${factTotal.toLocaleString('ru')}</td></tr></tfoot>
+        <tfoot><tr><th class="mx-size mx-vsego">ВСЕГО</th>${cols.map((c) => `<td class="num mx-coltot" data-fcoltot="${encodeURIComponent(c)}">${a.sizes.reduce((n, s) => n + cell(F, c, s), 0)}</td>`).join('')}<td class="num mx-grand" data-fgrand>${factTotal.toLocaleString('ru')}</td></tr></tfoot>
       </table></div>` : '<div class="mini">У артикула нет цветов/размеров.</div>'}
     </div>`;
 
@@ -1031,9 +1032,10 @@ function buildPlanTemplate(articleIds) {
     lines.push('', ['ARTICLE', a.id, a.name].join('\t'));
     for (const st of stages) {
       lines.push(['STAGE', st.id, st.name + (st.salesMonths ? ' ' + st.salesMonths : '')].join('\t'));
-      lines.push(['', ...a.colors].join('\t'));
       const M = (partiasOf(a.id, st.id)[0] || {}).planMatrix || {};
-      for (const s of a.sizes) lines.push([s, ...a.colors.map((c) => cell(M, c, s) || '')].join('\t'));
+      const cols = colsForMatrix(a, M); // архивные-пустые не выгружаем; с данными — сохраняем round-trip
+      lines.push(['', ...cols].join('\t'));
+      for (const s of a.sizes) lines.push([s, ...cols.map((c) => cell(M, c, s) || '')].join('\t'));
     }
   }
   return lines.join('\n');
@@ -1100,9 +1102,10 @@ function planAoAForArticle(a) {
   const rows = [['ARTICLE', a.id, a.name]];
   for (const st of seasonStages()) {
     rows.push(['STAGE', st.id, st.name + (st.salesMonths ? ' ' + st.salesMonths : '')]);
-    rows.push(['', ...a.colors]);
     const M = (partiasOf(a.id, st.id)[0] || {}).planMatrix || {};
-    for (const s of a.sizes) rows.push([s, ...a.colors.map((c) => cell(M, c, s) || 0)]);
+    const cols = colsForMatrix(a, M); // архивные-пустые не выгружаем; с данными — сохраняем
+    rows.push(['', ...cols]);
+    for (const s of a.sizes) rows.push([s, ...cols.map((c) => cell(M, c, s) || 0)]);
     rows.push([]); // разделитель между этапами
   }
   return rows;
@@ -1210,14 +1213,15 @@ function spMiniTable(partia, a, cycles) {
   const M = partia.planMatrix || {};
   const total = sumMatrix(M);
   if (total <= 0) return '';
+  const cols = colsForMatrix(a, M); // архивные-пустые скрываем
   return `<div class="mini-card${cycles && cycles.length > 1 ? ' mini-split' : ''}${['done', 'shipped'].includes(partia.status) ? ' mini-done' : ''}">
     <div class="mini-head"><span class="partia-badge">Партия ${partia.no}</span> <b>${a.id}</b> — ${a.name} ${statusBadge(partia.status)}</div>
     ${a.comment ? `<div class="mini-comment">💬 ${a.comment}</div>` : ''}
     ${workshopLine(cycles)}
     <div class="matrix-scroll"><table class="matrix-table mini">
-      <thead><tr><th class="mx-corner">Размер</th>${a.colors.map((c) => `<th class="mx-color">${swatchTag(a, c, 60, 30)}<div>${c}</div></th>`).join('')}<th class="mx-rowtot-h">Σ</th></tr></thead>
-      <tbody>${a.sizes.map((s) => `<tr><th class="mx-size">${s}</th>${a.colors.map((c) => { const v = cell(M, c, s); return `<td class="num">${v || '<span class="mini">·</span>'}</td>`; }).join('')}<td class="num mx-rowtot">${a.colors.reduce((n, c) => n + cell(M, c, s), 0)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><th class="mx-vsego">ВСЕГО</th>${a.colors.map((c) => `<td class="num mx-coltot">${a.sizes.reduce((n, s) => n + cell(M, c, s), 0)}</td>`).join('')}<td class="num mx-grand">${total.toLocaleString('ru')}</td></tr></tfoot>
+      <thead><tr><th class="mx-corner">Размер</th>${cols.map((c) => `<th class="mx-color">${swatchTag(a, c, 60, 30)}<div>${c}</div></th>`).join('')}<th class="mx-rowtot-h">Σ</th></tr></thead>
+      <tbody>${a.sizes.map((s) => `<tr><th class="mx-size">${s}</th>${cols.map((c) => { const v = cell(M, c, s); return `<td class="num">${v || '<span class="mini">·</span>'}</td>`; }).join('')}<td class="num mx-rowtot">${cols.reduce((n, c) => n + cell(M, c, s), 0)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><th class="mx-vsego">ВСЕГО</th>${cols.map((c) => `<td class="num mx-coltot">${a.sizes.reduce((n, s) => n + cell(M, c, s), 0)}</td>`).join('')}<td class="num mx-grand">${total.toLocaleString('ru')}</td></tr></tfoot>
     </table></div>
   </div>`;
 }
@@ -1227,24 +1231,25 @@ function statusBadge(status) {
 }
 
 function matrixTable(a, M) {
+  const cols = colsForMatrix(a, M); // архивные-пустые скрываем, архивные с данными — показываем
   return `
   <div class="matrix-scroll">
   <table class="matrix-table">
     <thead>
       <tr><th class="mx-corner">Размер \\ Цвет</th>
-        ${a.colors.map((c) => `<th class="mx-color">${swatchTag(a, c, 72, 34)}<div>${c}</div></th>`).join('')}
+        ${cols.map((c) => `<th class="mx-color">${swatchTag(a, c, 72, 34)}<div>${c}</div></th>`).join('')}
         <th class="mx-rowtot-h">Итого по размеру</th></tr>
     </thead>
     <tbody>
       ${a.sizes.map((s) => `<tr>
         <th class="mx-size">${s}</th>
-        ${a.colors.map((c) => `<td><input data-mx data-c="${encodeURIComponent(c)}" data-s="${encodeURIComponent(s)}" type="number" min="0" value="${cell(M, c, s)}"></td>`).join('')}
-        <td class="num mx-rowtot" data-rowtot="${encodeURIComponent(s)}">${a.colors.reduce((n, c) => n + cell(M, c, s), 0)}</td>
+        ${cols.map((c) => `<td><input data-mx data-c="${encodeURIComponent(c)}" data-s="${encodeURIComponent(s)}" type="number" min="0" value="${cell(M, c, s)}"></td>`).join('')}
+        <td class="num mx-rowtot" data-rowtot="${encodeURIComponent(s)}">${cols.reduce((n, c) => n + cell(M, c, s), 0)}</td>
       </tr>`).join('')}
     </tbody>
     <tfoot>
       <tr><th class="mx-size mx-vsego">ВСЕГО</th>
-        ${a.colors.map((c) => `<td class="num mx-coltot" data-coltot="${encodeURIComponent(c)}">${a.sizes.reduce((n, s) => n + cell(M, c, s), 0)}</td>`).join('')}
+        ${cols.map((c) => `<td class="num mx-coltot" data-coltot="${encodeURIComponent(c)}">${a.sizes.reduce((n, s) => n + cell(M, c, s), 0)}</td>`).join('')}
         <td class="num mx-grand" data-grand>${sumMatrix(M)}</td>
       </tr>
     </tfoot>
@@ -2516,6 +2521,19 @@ function activeColors(a) {
   const arch = new Set((a && a.archivedColors) || []);
   return ((a && a.colors) || []).filter((c) => !arch.has(c));
 }
+// Цвета для показа на листах-таблицах (Факт/План по размерам/экспорт): активные ВСЕГДА +
+// архивные, В КОТОРЫХ ещё есть данные (план/факт) — чтобы архивация никогда молча не прятала
+// реальные количества. Архивные-пустые скрываются. Порядок — как в a.colors.
+function colsForMatrix(a, ...mats) {
+  const arch = new Set((a && a.archivedColors) || []);
+  return ((a && a.colors) || []).filter((c) =>
+    !arch.has(c) || mats.some((M) => M && M[c] && Object.values(M[c]).some((v) => (+v || 0) > 0)));
+}
+// Нужна ли ткань (нет ни образца, ни № планшета, ни № цвета) — для бейджа «заведи ткань».
+function colorNeedsFabric(a, c) {
+  const fi = (a && a.fabricInfo && a.fabricInfo[c]) || {};
+  return !fabricImgSrc(a, c) && !String(fi.plansheet || '').trim() && !String(fi.colorNo || '').trim();
+}
 
 // Поставки прогноза (приход на WB частями). Фолбэк — одна поставка на конец периода, если план
 // не разбит на довозы. Берём только объём>0. Из объёмов используем ТОЛЬКО доли по времени (Разв.1-A).
@@ -3748,14 +3766,17 @@ function dataArticlesPanel() {
         </select></div>
         <div class="field"><label>Размерный ряд (через запятую)</label><input data-art="${i}" data-f="sizes" value="${(a.sizes || []).join(', ')}"></div>
         <div class="field"><label>Цвета и образцы ткани (название · образец 80×40 · № планшета · № цвета)</label>
-          <div class="swatch-row">${(a.colors || []).map((c, ci) => { const fi = (a.fabricInfo && a.fabricInfo[c]) || {}; return `<div class="swatch-item" data-swatch-art="${i}" data-swatch-idx="${ci}">
+          <div class="swatch-row">${(a.colors || []).map((c, ci) => { const fi = (a.fabricInfo && a.fabricInfo[c]) || {}; const isArch = (a.archivedColors || []).includes(c); const needFab = !isArch && colorNeedsFabric(a, c); return `<div class="swatch-item${isArch ? ' swatch-archived' : ''}" data-swatch-art="${i}" data-swatch-idx="${ci}">
             <span class="swatch-drag" draggable="true" data-color-drag data-art="${i}" data-idx="${ci}" title="перетащи, чтобы изменить порядок">⠿</span>
             ${fabricImgSrc(a, c) ? `<img class="swatch" src="${fabricImgSrc(a, c)}" alt="">` : '<div class="swatch swatch-empty">нет образца</div>'}
             <input class="swatch-name-input" data-colorname data-art="${i}" data-idx="${ci}" value="${String(c).replace(/"/g, '&quot;')}" placeholder="цвет" title="переименование сохранит количества и образец">
             <input class="swatch-meta" data-fabmeta data-art="${i}" data-color="${encodeURIComponent(c)}" data-f="plansheet" value="${(fi.plansheet || '').replace(/"/g, '&quot;')}" placeholder="№ планшета">
             <input class="swatch-meta" data-fabmeta data-art="${i}" data-color="${encodeURIComponent(c)}" data-f="colorNo" value="${(fi.colorNo || '').replace(/"/g, '&quot;')}" placeholder="№ цвета">
+            ${isArch ? '<span class="swatch-badge arch" title="Цвет в архиве — скрыт на листах Факт/План по размерам/экспорт, не участвует в сопоставлении прогноза">🗄 в архиве</span>' : ''}
+            ${needFab ? '<span class="swatch-badge nofab" title="Нет ни образца, ни № планшета, ни № цвета — заполни, иначе цех не поймёт, какую ткань кроить">⚠ заведи ткань</span>' : ''}
             <div class="swatch-actions">
               <label class="fab-up">${fabricImgSrc(a, c) ? 'заменить' : '＋ образец'}<input type="file" accept="image/*" data-artimg data-art="${i}" data-color="${encodeURIComponent(c)}" hidden></label>
+              <button class="swatch-arch" data-color-archive data-art="${i}" data-idx="${ci}" title="${isArch ? 'вернуть цвет из архива на все листы' : 'убрать цвет в архив (скрыть на листах, но сохранить данные)'}">${isArch ? '↩ вернуть' : '🗄 в архив'}</button>
               <button class="swatch-del" data-color-del data-art="${i}" data-idx="${ci}" title="удалить цвет">✕</button>
             </div>
           </div>`; }).join('') || '<span class="mini">Цветов пока нет.</span>'}
@@ -3951,11 +3972,23 @@ function bindDataEvents() {
     const idx = +b.dataset.idx;
     const color = a.colors[idx];
     a.colors.splice(idx, 1);
+    a.archivedColors = (a.archivedColors || []).filter((x) => x !== color); // из архива тоже убрать
     for (const p of (state.partias || []).filter((x) => x.articleId === a.id)) {
       if (p.planMatrix) delete p.planMatrix[color];
       if (p.factMatrix) delete p.factMatrix[color];
     }
     if (a.fabricInfo) delete a.fabricInfo[color];
+    mark(); renderData();
+  }));
+  // Архив/возврат цвета: цвет остаётся в a.colors (данные целы), но помечается в archivedColors —
+  // тогда он скрыт на листах Факт/План по размерам/экспорт и не участвует в сопоставлении прогноза.
+  root.querySelectorAll('[data-color-archive]').forEach((b) => b.addEventListener('click', () => {
+    const a = state.articles[+b.dataset.art];
+    const color = a.colors[+b.dataset.idx];
+    if (!color) return;
+    a.archivedColors = a.archivedColors || [];
+    if (a.archivedColors.includes(color)) { a.archivedColors = a.archivedColors.filter((x) => x !== color); toast(`Цвет «${color}» возвращён из архива`); }
+    else { a.archivedColors.push(color); toast(`Цвет «${color}» убран в архив`); }
     mark(); renderData();
   }));
   root.querySelectorAll('[data-color-add]').forEach((b) => b.addEventListener('click', () => {

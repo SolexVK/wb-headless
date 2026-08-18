@@ -257,6 +257,13 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .swatch-meta:focus { outline: none; border-color: var(--accent); }
 .swatch-actions { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
 .swatch-del { background: var(--panel); border: 1px solid var(--line); color: var(--danger); border-radius: 50%; width: 18px; height: 18px; line-height: 1; font-size: 11px; padding: 0; }
+.swatch-arch { background: var(--panel); border: 1px solid var(--line); color: var(--muted); border-radius: 5px; font-size: 10px; line-height: 1; padding: 3px 5px; cursor: pointer; white-space: nowrap; }
+.swatch-arch:hover { border-color: var(--accent); color: var(--text); }
+.swatch-badge { font-size: 10px; line-height: 1.2; padding: 2px 6px; border-radius: 8px; white-space: nowrap; text-align: center; }
+.swatch-badge.arch { background: color-mix(in srgb, var(--muted) 22%, transparent); color: var(--muted); }
+.swatch-badge.nofab { background: color-mix(in srgb, #f59e0b 24%, transparent); color: #b45309; }
+.swatch-item.swatch-archived { opacity: 0.62; border-style: dashed; }
+.swatch-item.swatch-archived .swatch { filter: grayscale(0.7); }
 .swatch-drag { position: absolute; top: 3px; left: 5px; cursor: grab; color: var(--muted); font-size: 13px; line-height: 1; user-select: none; padding: 1px 3px; border-radius: 4px; }
 .swatch-drag:hover { color: var(--text); background: var(--panel); }
 .swatch-drag:active { cursor: grabbing; }
