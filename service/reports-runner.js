@@ -120,7 +120,7 @@ const replenishArgs = (params) => [
 ];
 
 // Фейковый снимок для тестов (PODSORT_FAKE=1) — без обращения к WB.
-function fakeSnapshot(params) {
+export function fakeSnapshot(params) {
   return {
     generatedAt: new Date().toISOString(),
     params: { velocityDays: params.velocityDays, leadMin: params.leadMin, leadMax: params.leadMax, coverDays: params.cover, horizonDays: params.leadMax + params.cover, seedMin: params.seedMin, historyDays: params.historyDays, articles: params.articles },
@@ -198,7 +198,7 @@ function buildStockSnapshot(raw) {
     totals: { grandTotal: raw.grandTotalQuantity || warehouses.reduce((s, w) => s + w.totalQuantity, 0), warehouseCount: warehouses.length, activeWarehouses: active.length, articleCount: articles.length },
   };
 }
-function fakeStock() {
+export function fakeStock() {
   return buildStockSnapshot({ grandTotalQuantity: 12, warehouses: [
     { id: 1, name: 'Тест-склад', totalQuantity: 12, skuInStock: 2, positions: [
       { sku: 'b1', nmID: 1, vendorCode: '002_чёрный', amount: 7 },
@@ -217,7 +217,7 @@ async function runStockPipeline(cabinet, token, meta, params, onLog) {
 }
 
 // ── Пайплайн «Движение заказов»: fbs-movement (заказы+поставки) ──────────────
-function fakeMovement(params) {
+export function fakeMovement(params) {
   const N = params.days || 14;
   const span = Math.min(88, 2 * N);
   const today = new Date();
@@ -256,7 +256,7 @@ export function normalizeGeo(body = {}) {
   const days = [7, 14, 30, 60, 90].includes(Number(body.days)) ? Number(body.days) : 30;
   return { days };
 }
-function fakeGeo(params) {
+export function fakeGeo(params) {
   const mk = (o, r, sc, rc) => ({ okrug: o, region: r, salesCount: sc, salesRub: sc * 1000, returnCount: rc, returnRub: rc * 1000, returnPct: sc ? Math.round(rc / sc * 1000) / 10 : 0 });
   const regions = [mk('Центральный федеральный округ', 'Москва', 100, 8), mk('Центральный федеральный округ', 'Московская область', 60, 3), mk('Сибирский федеральный округ', 'Омская область', 20, 4)];
   const okrugs = [mk('Центральный федеральный округ', '', 160, 11), mk('Сибирский федеральный округ', '', 20, 4)].map(({ region, ...x }) => x);
@@ -310,7 +310,7 @@ export function normalizeLogistics(body = {}) {
   const days = [7, 14, 30, 60, 90].includes(Number(body.days)) ? Number(body.days) : 30;
   return { days };
 }
-function fakeLogistics(params) {
+export function fakeLogistics(params) {
   const days = params.days || 30;
   const asmFF = [
     { ff: 'Мск зелёная зона', warehouseId: 1939911, made: 120, processed: 110, pending: 10, avgHours: 9.2, medianHours: 7.5, p90Hours: 20.1, maxHours: 51.3, criticalCount: 2 },
