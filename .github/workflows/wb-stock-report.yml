@@ -1,0 +1,64 @@
+name: Отчёт — остатки WB (FBO/FBS + в пути + возвраты)
+
+# Запуск вручную кнопкой «Run workflow». Токен берётся из секрета репозитория
+# (как MPSTATS_TOKEN). Ничего вписывать руками не нужно.
+on:
+  workflow_dispatch:
+
+jobs:
+  wb-stock:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Забрать код из репозитория
+        uses: actions/checkout@v4
+
+      - name: Установить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Установить Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Проверить, что WB-токен доступен в секретах
+        env:
+          # Поддерживаем несколько возможных имён секрета — резолвер возьмёт любой.
+          WB_API_TOKEN: ${{ secrets.WB_API_TOKEN }}
+          WB_TOKEN: ${{ secrets.WB_TOKEN }}
+          WILDBERRIES_TOKEN: ${{ secrets.WILDBERRIES_TOKEN }}
+        run: |
+          if [ -z "$WB_API_TOKEN$WB_TOKEN$WILDBERRIES_TOKEN" ]; then
+            echo "::error::Не найден секрет WB-токена."
+            echo "Добавьте: Settings → Secrets and variables → Actions → New repository"
+            echo "secret, имя WB_API_TOKEN (категории «Статистика», «Маркетплейс», «Контент»)."
+            exit 1
+          fi
+          echo "WB-токен получен ✓ (значение скрыто)"
+
+      - name: Собрать сводку (JSON + CSV)
+        env:
+          WB_API_TOKEN: ${{ secrets.WB_API_TOKEN }}
+          WB_TOKEN: ${{ secrets.WB_TOKEN }}
+          WILDBERRIES_TOKEN: ${{ secrets.WILDBERRIES_TOKEN }}
+          # При необходимости раздельные токены по категориям:
+          WB_STATS_TOKEN: ${{ secrets.WB_STATS_TOKEN }}
+          WB_MARKETPLACE_TOKEN: ${{ secrets.WB_MARKETPLACE_TOKEN }}
+          WB_CONTENT_TOKEN: ${{ secrets.WB_CONTENT_TOKEN }}
+        run: node report-wb-stock.js
+
+      - name: Построить Excel-книгу из JSON
+        run: |
+          python -m pip install --quiet openpyxl
+          JSON=$(ls -t reports-output/wb-stock-*.json | head -1)
+          python analytics/wb-stock-report/build_report.py "$JSON" "${JSON%.json}.xlsx"
+
+      - name: Приложить отчёт (CSV + JSON + XLSX) к запуску
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wb-stock-report
+          path: reports-output/*
+          if-no-files-found: warn
+          retention-days: 90

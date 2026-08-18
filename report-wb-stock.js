@@ -14,7 +14,7 @@
 //
 // Результат: reports-output/wb-stock-<дата>.csv и .json + сводка в консоль.
 
-import './lib/loadEnv.js'; // подхватить .env из корня (не перекрывая реальное окружение)
+import { resolveWbToken, tokenHint } from './lib/resolveWbToken.js'; // авто-поиск WB-токена (+ .env)
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -33,6 +33,20 @@ const log = (s) => process.stderr.write(s + '\n');
  */
 export async function collectWbStock() {
   const warnings = [];
+
+  // Авто-поиск токена (env / .env / файл / macOS Keychain) — без ручного ввода.
+  const tok = resolveWbToken();
+  if (!tok.found) {
+    const err = new Error(
+      'WB-токен не найден автоматически. Проверенные места:\n  - ' +
+      tok.checked.join('\n  - ') +
+      '\nЗадайте токен любым способом: переменная WB_API_TOKEN, файл ~/.wb_token, ' +
+      'запись в Keychain (security add-generic-password -a "$USER" -s wb_api_token -w ТОКЕН) ' +
+      'или .env в корне репозитория.'
+    );
+    throw err;
+  }
+  log(`• WB-токен: ${tok.source} (${tokenHint()})`);
 
   // 1) Карточки (Контент) — связка баркод ↔ артикул и полный список баркодов.
   let cardsByBarcode = new Map();

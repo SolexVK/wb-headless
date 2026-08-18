@@ -9,6 +9,12 @@ import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js'
 import { defaultPeriod, loadItems, selectItems, selectByGroup, writeOutputs } from './report-stock.js';
 import { collectWbStock } from './report-wb-stock.js';
 import { summaryToCSV } from './lib/wbStockSummary.js';
+import { resolveWbToken } from './lib/resolveWbToken.js';
+
+// При старте пытаемся найти WB-токен (env/.env/файл/Keychain) и положить его в
+// process.env.WB_API_TOKEN — чтобы эндпоинт /reports/wb-stock работал без ручной
+// правки окружения. Значение не логируем.
+resolveWbToken();
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));

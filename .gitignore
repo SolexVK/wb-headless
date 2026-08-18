@@ -2,4 +2,6 @@ node_modules/
 chrome/
 reports-output/
 .env
+.env.local
+.wb-token
 *.log

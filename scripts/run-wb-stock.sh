@@ -16,17 +16,10 @@ set -euo pipefail
 cd "$(cd "$(dirname "$0")/.." && pwd)"
 
 # 1) .env (значения из реального окружения имеют приоритет — их не трогаем).
+#    Токен искать вручную не нужно: это делает сам Node-резолвер
+#    (env / .env / .env.local / файл ~/.wb_token / macOS Keychain).
 if [ -f .env ]; then
   set -a; . ./.env; set +a
-fi
-
-if [ -z "${WB_API_TOKEN:-}" ] && [ -z "${WB_STATS_TOKEN:-}" ]; then
-  echo "❌ Не задан WB_API_TOKEN."
-  echo "   Впишите его в .env  (cp .env.example .env, затем WB_API_TOKEN=ваш_токен)"
-  echo "   или экспортируйте:  export WB_API_TOKEN=ваш_токен"
-  echo "   Токен: кабинет WB → Настройки → Доступ к API, категории"
-  echo "          «Статистика», «Маркетплейс», «Контент»."
-  exit 1
 fi
 
 # 2) Node 18+ (нужен встроенный fetch; внешние зависимости не требуются).

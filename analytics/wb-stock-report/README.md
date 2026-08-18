@@ -18,33 +18,54 @@
 | Остатки FBS | `POST /api/v3/stocks/{warehouseId}` (marketplace-api) | Маркетплейс |
 | Карточки (баркод ↔ артикул) | `POST /content/v2/get/cards/list` (content-api) | Контент |
 
-## Токены
+## Токены — вписывать руками не нужно
 
-Нужен WB API-токен. Достаточно одного `WB_API_TOKEN`, если у него есть все три
-категории. Иначе — раздельные `WB_STATS_TOKEN` / `WB_MARKETPLACE_TOKEN` /
-`WB_CONTENT_TOKEN` (см. `.env.example`). Токен берётся в кабинете WB:
-**Настройки → Доступ к API → создать токен** с нужными категориями.
+Токен ищется автоматически (`lib/resolveWbToken.js`), по очереди:
+
+1. Переменные окружения `WB_API_TOKEN` / `WB_STATS_TOKEN` /
+   `WB_MARKETPLACE_TOKEN` / `WB_CONTENT_TOKEN`.
+2. Любая «похоже названная» переменная окружения (`WB_TOKEN`,
+   `WILDBERRIES_TOKEN`, `WB_API_KEY` …) — кроме MPSTATS.
+3. `.env` / `.env.local` в корне репозитория.
+4. Файл-токен: путь из `WB_TOKEN_FILE`, либо `~/.wb_token`,
+   `~/.config/wb/token`, `<репо>/.wb-token`.
+5. **macOS Keychain** (на Mac mini) — по сервисам `wb_api_token`, `wildberries`, `wb`.
+
+Достаточно, чтобы токен лежал **в любом** из этих мест. Значение нигде не
+логируется — в консоль печатается только источник и длина. Токен создаётся в
+кабинете WB: **Настройки → Доступ к API** (категории «Статистика»,
+«Маркетплейс», «Контент»).
+
+Положить токен в Keychain один раз (тогда его нет ни в одном файле):
+
+```bash
+security add-generic-password -a "$USER" -s wb_api_token -w 'ВАШ_ТОКЕН'
+```
 
 FBS и карточки — best-effort: если токен не закрывает категорию, отчёт всё равно
 соберётся по FBO, а в поле `warnings` попадёт причина (FBS покажется как 0).
 
+**GitHub Actions:** токен берётся из секрета репозитория `WB_API_TOKEN`
+(Settings → Secrets and variables → Actions). Запуск — вкладка **Actions →
+«Отчёт — остатки WB» → Run workflow**; на выходе артефакт с CSV/JSON/XLSX.
+
 ## Быстрый старт на Mac mini (одна команда)
 
-```bash
-# 1) один раз: положить токен в .env
-cp .env.example .env
-#    открыть .env и вписать: WB_API_TOKEN=ваш_токен  (категории
-#    «Статистика», «Маркетплейс», «Контент» из кабинета WB → Доступ к API)
+Если токен уже есть на маке (переменная окружения, Keychain или файл — см. раздел
+«Токены»), вписывать ничего не нужно:
 
-# 2) запуск — соберёт данные, построит Excel и откроет его
+```bash
 npm run wb-stock
-#    (то же самое: ./scripts/run-wb-stock.sh)
+#   (то же самое: ./scripts/run-wb-stock.sh)
 ```
 
-Скрипт сам: подхватит `.env`, вызовет API WB, положит `reports-output/wb-stock-<дата>.json`
+Скрипт сам найдёт токен, вызовет API WB, положит `reports-output/wb-stock-<дата>.json`
 и `.csv`, соберёт `.xlsx` рядом и откроет его в Excel/Numbers. Внешних npm-зависимостей
-для сбора не нужно (используется встроенный `fetch` Node 18+); для Excel нужен
-`python3` + `openpyxl` (скрипт поставит `openpyxl` сам, если его нет).
+для сбора не нужно (встроенный `fetch` Node 18+); для Excel нужен `python3` + `openpyxl`
+(скрипт поставит `openpyxl` сам, если его нет).
+
+Если токен ещё нигде не лежит — положите его один раз любым способом, напр. в Keychain:
+`security add-generic-password -a "$USER" -s wb_api_token -w 'ВАШ_ТОКЕН'`.
 
 Требования: **Node.js 18+** (`brew install node`) и **Python 3** (`brew install python`).
 
