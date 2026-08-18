@@ -139,6 +139,7 @@ export function buildSchedule(state) {
     if (p.historical) continue;
     const article = articleById[p.articleId];
     if (!article) continue;
+    if (article.archived) continue; // архивный артикул не планируется
     const units = partiaPlanUnits(p);
     if (units <= 0) continue;
     const stage = stageById[p.stageId];

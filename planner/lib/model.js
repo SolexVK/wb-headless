@@ -242,6 +242,9 @@ export function normalizeState(input) {
     a.buyoutPct = (+a.buyoutPct > 0 && +a.buyoutPct <= 100) ? +a.buyoutPct : 40;
     a.colors = Array.isArray(a.colors) ? a.colors : [];
     a.sizes = Array.isArray(a.sizes) ? a.sizes : [];
+    // архивный артикул (мягкое удаление): скрыт на всех листах и НЕ планируется, но данные/партии
+    // сохранены — можно вернуть из «Архива» на листе «Данные».
+    a.archived = !!a.archived;
     // пер-артикул привязки цвета спроса → имя цвета карточки (Этап 3, слой примирения):
     // { канон-цвет → имя из a.colors }. Хранится только для валидных цветов ряда.
     { const cm = a.colorMap && typeof a.colorMap === 'object' ? a.colorMap : {};

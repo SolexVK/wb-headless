@@ -6,13 +6,17 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'data-archive-colors-2026-08-06b';
+const APP_BUILD = 'article-archive-and-plan-export-2026-08-06c';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 // сортировка артикулов по номеру, от меньшего к большему (числовая: 004 < 026)
 const cmpArticleId = (a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true, sensitivity: 'base' });
-const articlesSorted = () => [...state.articles].sort(cmpArticleId);
+// Активные (не архивные) артикулы — для всех листов и селекторов. Архивные скрыты везде,
+// кроме «Архива» на листе «Данные», откуда их можно вернуть.
+const activeArticles = () => (state.articles || []).filter((a) => !a.archived);
+const archivedArticles = () => (state.articles || []).filter((a) => a.archived);
+const articlesSorted = () => activeArticles().slice().sort(cmpArticleId);
 const fmt = (s) => { if (!s) return '—'; const [y, m, d] = s.slice(0, 10).split('-'); return `${+d} ${MONTHS[+m - 1]}`; };
 const uid = (p) => `${p}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -195,8 +199,10 @@ let factPartiaId = null;
 let factFilterStage = '', factFilterArticle = '', factFilterWs = '';
 function renderFact() {
   const root = document.getElementById('fact');
-  // база: только сохранённые партии со сформированным планом (сумма>0) в активном сезоне
-  const base = (state.partias || []).filter((p) => stageInSeason(p.stageId) && partiaPlanUnits(p) > 0);
+  // база: только сохранённые партии со сформированным планом (сумма>0) в активном сезоне;
+  // партии архивных артикулов исключаем (артикул убран в архив на листе «Данные»).
+  const archIds = new Set(archivedArticles().map((a) => a.id));
+  const base = (state.partias || []).filter((p) => !archIds.has(p.articleId) && stageInSeason(p.stageId) && partiaPlanUnits(p) > 0);
   if (!base.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет сформированных планов. Заполни количества на «План по размерам».</div></div>'; return; }
 
   // перекрёстное сужение: каждый список зависит от ВСЕХ остальных выбранных фильтров.
@@ -503,7 +509,7 @@ function stageShort(sid) {
 
 function renderFabricOrder() {
   const root = document.getElementById('fabric');
-  if (!state.stages.length || !state.articles.length) {
+  if (!state.stages.length || !activeArticles().length) {
     root.innerHTML = '<div class="panel"><div class="mini">Нет этапов или артикулов.</div></div>';
     return;
   }
@@ -624,21 +630,21 @@ let spStages = null, spArticles = null, spWorkshops = null; // выбранны�
 
 function renderSalesPlan() {
   const root = document.getElementById('salesplan');
-  if (!state.articles.length || !state.stages.length) {
+  if (!activeArticles().length || !state.stages.length) {
     root.innerHTML = '<div class="panel"><div class="mini">Нет артикулов или этапов. Заполни во вкладке «Данные».</div></div>';
     return;
   }
   if (!spStages) spStages = new Set(state.stages.map((s) => s.id));
-  if (!spArticles) spArticles = new Set(state.articles.map((a) => a.id));
+  if (!spArticles) spArticles = new Set(activeArticles().map((a) => a.id));
   if (!spWorkshops) spWorkshops = new Set(state.workshops.map((w) => w.id));
-  // подчистить от удалённых
+  // подчистить от удалённых и архивных
   spStages = new Set([...spStages].filter((id) => state.stages.some((s) => s.id === id)));
-  spArticles = new Set([...spArticles].filter((id) => state.articles.some((a) => a.id === id)));
+  spArticles = new Set([...spArticles].filter((id) => activeArticles().some((a) => a.id === id)));
   spWorkshops = new Set([...spWorkshops].filter((id) => state.workshops.some((w) => w.id === id)));
 
   const stageIndex = Object.fromEntries(state.stages.map((s, i) => [s.id, i + 1]));
   const stages = seasonStages().filter((s) => spStages.has(s.id));
-  const arts = state.articles.filter((a) => spArticles.has(a.id));
+  const arts = activeArticles().filter((a) => spArticles.has(a.id));
 
   // какие цеха отшивают каждый артикул на каждом этапе — из расписания
   const cycleMap = {};
@@ -654,7 +660,7 @@ function renderSalesPlan() {
         </div>
         <div class="sp-group">
           <div class="sp-title">Артикулы <button class="sp-all" data-all="articles">все</button> <button class="sp-all" data-none="articles">снять</button></div>
-          <div class="sp-chips">${state.articles.map((a) => `<label class="sp-chip${spArticles.has(a.id) ? ' on' : ''}"><input type="checkbox" data-sp-article="${a.id}"${spArticles.has(a.id) ? ' checked' : ''}> ${a.id}</label>`).join('')}</div>
+          <div class="sp-chips">${articlesSorted().map((a) => `<label class="sp-chip${spArticles.has(a.id) ? ' on' : ''}"><input type="checkbox" data-sp-article="${a.id}"${spArticles.has(a.id) ? ' checked' : ''}> ${a.id}</label>`).join('')}</div>
         </div>
         <div class="sp-group">
           <div class="sp-title">Цеха <button class="sp-all" data-all="ws">все</button> <button class="sp-all" data-none="ws">снять</button></div>
@@ -702,7 +708,7 @@ function renderSalesPlan() {
   root.querySelectorAll('.sp-all').forEach((b) => b.addEventListener('click', () => {
     if (b.dataset.all === 'stages') spStages = new Set(state.stages.map((s) => s.id));
     else if (b.dataset.none === 'stages') spStages = new Set();
-    else if (b.dataset.all === 'articles') spArticles = new Set(state.articles.map((a) => a.id));
+    else if (b.dataset.all === 'articles') spArticles = new Set(activeArticles().map((a) => a.id));
     else if (b.dataset.none === 'articles') spArticles = new Set();
     else if (b.dataset.all === 'ws') spWorkshops = new Set(state.workshops.map((w) => w.id));
     else if (b.dataset.none === 'ws') spWorkshops = new Set();
@@ -877,8 +883,9 @@ function splitMatrixClient(M, target, r) {
 
 function renderMatrix() {
   const root = document.getElementById('matrix');
-  if (!state.articles.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет артикулов. Добавь их во вкладке «Данные».</div></div>'; return; }
-  if (!matrixArticleId || !state.articles.find((a) => a.id === matrixArticleId)) matrixArticleId = state.articles[0].id;
+  const acts = articlesSorted(); // только активные (архивные не планируются и не показываются)
+  if (!acts.length) { root.innerHTML = '<div class="panel"><div class="mini">Нет активных артикулов. Добавь их во вкладке «Данные» (или верни из «Архива»).</div></div>'; return; }
+  if (!matrixArticleId || !acts.find((a) => a.id === matrixArticleId)) matrixArticleId = acts[0].id;
   const a = state.articles.find((x) => x.id === matrixArticleId);
   const allParts = partiasOfArticle(a.id); // все партии артикула (поставки + ручные + legacy-этапы)
   // фильтр по цеху: '' = все, '__auto__' = не распределённые (без цеха), иначе — id цеха
@@ -941,6 +948,11 @@ function renderMatrix() {
         <button id="mx-split-partia" class="btn btn-subtle" title="Разрезать эту партию надвое вручную (по правилам настила), без учёта мощностей">✂ разрезать вручную</button>
       </div>
       <div class="matrix-io">
+        <span class="mini"><b>Готовый план → Excel:</b></span>
+        <button id="mx-xlsx-partia" class="btn btn-accent" title="Скачать план этой партии в Excel (матрица цвет×размер + итоги)">⤓ эта партия</button>
+        <button id="mx-xlsx-article" class="btn btn-accent" title="Скачать все партии этого артикула — по листу на партию">⤓ все партии ${a.id}</button>
+      </div>
+      <div class="matrix-io">
         <span class="mini">Ввод: вручную · <b>вставка из буфера</b> (встань на ячейку и Ctrl+V — блок из Excel/Sheets) · через .xlsx-шаблон:</span>
         <button id="mx-tpl-one" class="btn">⤓ шаблон .xlsx: ${a.id}</button>
         <button id="mx-tpl-all" class="btn">⤓ шаблон .xlsx: все</button>
@@ -952,8 +964,10 @@ function renderMatrix() {
     </div>`;
 
   bindMatrixControls(a);
+  document.getElementById('mx-xlsx-partia').addEventListener('click', () => exportReadyPlanXlsx(a.id, p.id));
+  document.getElementById('mx-xlsx-article').addEventListener('click', () => exportReadyPlanXlsx(a.id, null));
   document.getElementById('mx-tpl-one').addEventListener('click', () => exportPlanXlsx([a.id], `plan_${a.id}.xlsx`));
-  document.getElementById('mx-tpl-all').addEventListener('click', () => exportPlanXlsx(state.articles.map((x) => x.id), 'plan_all.xlsx'));
+  document.getElementById('mx-tpl-all').addEventListener('click', () => exportPlanXlsx(activeArticles().map((x) => x.id), 'plan_all.xlsx'));
   document.getElementById('mx-import').addEventListener('change', (e) => importPlanAnyFile(e.target.files && e.target.files[0]));
   document.getElementById('mx-partia').addEventListener('change', (e) => { matrixPartiaId = e.target.value; renderMatrix(); });
   document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a));
@@ -1129,6 +1143,59 @@ function exportPlanXlsx(articleIds, filename) {
   }
   if (!added) { toast('Нет артикулов с заданными цветами и размерами', true); return; }
   XLSX.writeFile(wb, filename || 'plan.xlsx');
+}
+
+// ---- ГОТОВЫЙ план партии → .xlsx (человеко-читаемая выгрузка, не шаблон) ----
+// Лист одной партии: шапка (артикул/партия/цех/срок/статус) + матрица цвет×размер + итоги.
+function partiaReadyAoA(a, p) {
+  const M = p.planMatrix || {};
+  const cols = colsForMatrix(a, M);
+  const ws = state.workshops.find((w) => w.id === p.workshopId);
+  const rows = [];
+  rows.push([`Артикул ${a.id} — ${a.name}`]);
+  rows.push([`Партия ${p.no}${p.deliveryTag ? ' · ' + p.deliveryTag : ''}`, p.deadline ? `Срок WB: ${p.deadline}` : '', `Цех: ${ws ? ws.name : 'авто'}`, `Статус: ${PARTIA_STATUS_RU[p.status] || p.status || '—'}`]);
+  if (a.comment) rows.push([`Особенности: ${a.comment}`]);
+  rows.push([]);
+  rows.push(['Размер \\ Цвет', ...cols, 'Итого']);
+  for (const s of a.sizes) {
+    const row = [s]; let rt = 0;
+    for (const c of cols) { const v = cell(M, c, s); row.push(v || 0); rt += v; }
+    row.push(rt); rows.push(row);
+  }
+  const tot = ['ВСЕГО']; let grand = 0;
+  for (const c of cols) { const ct = a.sizes.reduce((n, s) => n + cell(M, c, s), 0); tot.push(ct); grand += ct; }
+  tot.push(grand); rows.push(tot);
+  return { rows, cols };
+}
+function readySheetName(p, used) {
+  let name = `Партия ${p.no}`.slice(0, 28);
+  let base = name, n = 2; while (used.has(name)) name = (base.slice(0, 25) + ' ' + n++);
+  used.add(name); return name;
+}
+function appendReadySheet(wb, a, p, used) {
+  const { rows, cols } = partiaReadyAoA(a, p);
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  sheet['!cols'] = [{ wch: 16 }, ...cols.map(() => ({ wch: 12 })), { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, sheet, readySheetName(p, used));
+}
+// Экспорт готового плана: одна партия (partia задан) или все партии артикула (лист на партию).
+function exportReadyPlanXlsx(articleId, partiaId) {
+  if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу (Cmd+Shift+R)', true); return; }
+  const a = state.articles.find((x) => x.id === articleId);
+  if (!a) { toast('Артикул не найден', true); return; }
+  const wb = XLSX.utils.book_new();
+  const used = new Set();
+  if (partiaId) {
+    const p = (state.partias || []).find((x) => x.id === partiaId);
+    if (!p) { toast('Партия не найдена', true); return; }
+    appendReadySheet(wb, a, p, used);
+    XLSX.writeFile(wb, `план_${a.id}_партия_${p.no}.xlsx`);
+    return;
+  }
+  const parts = partiasOfArticle(a.id).filter((p) => matrixSum(p.planMatrix) > 0);
+  if (!parts.length) { toast('У артикула нет партий с планом', true); return; }
+  for (const p of parts) appendReadySheet(wb, a, p, used);
+  XLSX.writeFile(wb, `план_${a.id}_все_партии.xlsx`);
 }
 // разобрать книгу .xlsx в структуру { articleId: { stageId: { color: { size: qty } } } }
 function parsePlanWorkbook(wb) {
@@ -1310,7 +1377,7 @@ function renderDashboard() {
 
   root.innerHTML = `
     <div class="cards">
-      <div class="card"><div class="k">Артикулов</div><div class="v">${state.articles.length}</div></div>
+      <div class="card"><div class="k">Артикулов</div><div class="v">${activeArticles().length}</div></div>
       <div class="card"><div class="k">Цехов</div><div class="v">${state.workshops.length}</div></div>
       <div class="card"><div class="k">Циклов производства</div><div class="v">${cy.length}</div></div>
       <div class="card"><div class="k">Всего к пошиву</div><div class="v">${totalUnits.toLocaleString('ru')} шт</div></div>
@@ -1336,7 +1403,7 @@ function renderDashboard() {
 
     <div class="panel"><h3>Артикулы и этапы (готовность / приход на WB)</h3>
       <table><thead><tr><th>Артикул</th><th>Цвета</th>${seasonStages().map((s) => `<th>${s.name}<div class="mini">${s.salesMonths}</div></th>`).join('')}</tr></thead>
-      <tbody>${state.articles.map((a) => `<tr>
+      <tbody>${articlesSorted().map((a) => `<tr>
         <td><b>${a.id}</b><div class="mini">${a.name}</div></td>
         <td class="mini">${(a.colors || []).length} цв.</td>
         ${seasonStages().map((s) => articleStageCell(a, s)).join('')}
@@ -3748,7 +3815,7 @@ async function loadResponsibles() {
 
 function dataArticlesPanel() {
   return `<div class="panel"><div class="subhead"><h3>Артикулы</h3><button class="btn" id="btn-add-article">+ Артикул</button></div>
-    <div class="form-grid">${state.articles.map((a, i) => `
+    <div class="form-grid">${state.articles.map((a, i) => ({ a, i })).filter(({ a }) => !a.archived).map(({ a, i }) => `
       <div class="card">
         <div class="row-flex">
           <div class="field"><label>Артикул</label><input data-art="${i}" data-f="id" value="${a.id}"></div>
@@ -3782,8 +3849,28 @@ function dataArticlesPanel() {
           </div>`; }).join('') || '<span class="mini">Цветов пока нет.</span>'}
           <button class="btn swatch-add" data-color-add="${i}">＋ цвет</button></div>
         </div>
-        <button class="btn btn-danger" data-del-art="${i}">Удалить</button>
-      </div>`).join('')}</div></div>`;
+        <button class="btn btn-subtle" data-archive-art="${i}" title="Убрать артикул в архив: он скроется со всех листов и не будет планироваться, но данные и партии сохранятся — можно вернуть из «Архива» ниже">🗄 В архив</button>
+      </div>`).join('') || '<div class="mini">Активных артикулов нет. Добавь новый или верни из «Архива» ниже.</div>'}</div></div>
+    ${dataArchivePanel()}`;
+}
+
+// Архив артикулов: мягко удалённые артикулы. Отсюда можно вернуть в активные или удалить навсегда.
+function dataArchivePanel() {
+  const arch = archivedArticles().slice().sort(cmpArticleId);
+  if (!arch.length) return '';
+  return `<details class="panel se-comp"><summary><h3 style="display:inline">🗄 Архив артикулов <span class="mini">(${arch.length})</span></h3></summary>
+    <div class="mini" style="margin:8px 0">Артикулы в архиве скрыты на всех листах и не планируются. Данные, цвета и партии сохранены — «Вернуть» возвращает всё как было.</div>
+    <table><thead><tr><th>Артикул</th><th>Название</th><th class="num">Цветов</th><th class="num">Партий</th><th></th></tr></thead>
+    <tbody>${arch.map((a) => `<tr>
+      <td><b>${seEsc(a.id)}</b></td>
+      <td>${seEsc(a.name || '')}</td>
+      <td class="num">${(a.colors || []).length}</td>
+      <td class="num">${partiasOfArticle(a.id).length}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-accent" data-restore-art="${seEsc(a.id)}" title="Вернуть артикул в активные — появится на всех листах">↩ Вернуть</button>
+        <button class="btn btn-danger" data-purge-art="${seEsc(a.id)}" title="Удалить артикул НАВСЕГДА вместе со всеми его партиями">✕ Удалить навсегда</button>
+      </td>
+    </tr>`).join('')}</tbody></table></details>`;
 }
 
 function dataSuppliersPanel() {
@@ -4006,7 +4093,23 @@ function bindDataEvents() {
     a.fabricInfo[c][e.target.dataset.f] = e.target.value.trim();
     mark();
   }));
-  root.querySelectorAll('[data-del-art]').forEach((b) => b.addEventListener('click', () => { state.articles.splice(+b.dataset.delArt, 1); mark(); renderData(); }));
+  // Мягкое удаление артикула → в архив (данные и партии сохраняются, можно вернуть).
+  root.querySelectorAll('[data-archive-art]').forEach((b) => b.addEventListener('click', () => {
+    const a = state.articles[+b.dataset.archiveArt]; if (!a) return;
+    a.archived = true; mark(); renderData(); toast(`Артикул «${a.id}» убран в архив`);
+  }));
+  root.querySelectorAll('[data-restore-art]').forEach((b) => b.addEventListener('click', () => {
+    const a = state.articles.find((x) => x.id === b.dataset.restoreArt); if (!a) return;
+    a.archived = false; mark(); renderData(); toast(`Артикул «${a.id}» возвращён из архива`);
+  }));
+  root.querySelectorAll('[data-purge-art]').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.purgeArt;
+    const parts = partiasOfArticle(id).length;
+    if (!confirm(`Удалить артикул «${id}» НАВСЕГДА${parts ? ` вместе с ${parts} партиями` : ''}? Это необратимо.`)) return;
+    state.articles = state.articles.filter((x) => x.id !== id);
+    state.partias = (state.partias || []).filter((x) => x.articleId !== id);
+    mark(); renderData(); toast(`Артикул «${id}» удалён навсегда`);
+  }));
   root.querySelector('#btn-add-article')?.addEventListener('click', () => {
     state.articles.push({ id: uid('art').slice(0, 6), name: 'Новый артикул', comment: '', fabricPerUnit: 1.6, fabricPricePerMeter: 0, colors: ['белый'], sizes: ['S', 'M', 'L', 'XL'], plan: {} }); mark(); renderData();
   });
