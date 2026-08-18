@@ -18,6 +18,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WbClient } from '../lib/wbClient.js';
 import { loadWarehouses } from './lib/warehouses.mjs';
+import { fetchOrders as wbFetchOrders, fetchSupplies as wbFetchSupplies, fetchSales as wbFetchSales } from './lib/wbFetch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -45,58 +46,19 @@ const ORD_DAYS = Math.min(88, Math.max(DAYS + 14, 45));
 // ── Заказы: rid → {ff, warehouseId, createdAt, supplyId, article} ─────────────
 async function fetchOrders() {
   const rid = new Map(); const orders = [];
-  const fromSec = nowSec - ORD_DAYS * 86400;
-  const CHUNK = 28 * 86400; const seen = new Set();
-  for (let end = nowSec; end > fromSec;) {
-    const start = Math.max(fromSec, end - CHUNK); let next = 0;
-    for (let p = 1; ; p++) {
-      const { data } = await wb.get('marketplace', '/api/v3/orders', { query: { limit: 1000, next, dateFrom: start, dateTo: end }, methodLimit: MP });
-      const b = data.orders || [];
-      for (const o of b) {
-        const id = String(o.rid); if (seen.has(id)) continue; seen.add(id);
-        const name = WH.nameOf(o.warehouseId);
-        const rec = { ff: name, warehouseId: o.warehouseId, createdAt: o.createdAt, supplyId: o.supplyId, article: parseArt(o.article), nmId: o.nmId };
-        rid.set(id, rec); orders.push(rec);
-      }
-      if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
-    }
-    end = start;
+  const raw = await wbFetchOrders(wb, { fromSec: nowSec - ORD_DAYS * 86400, toSec: nowSec, chunkDays: 28, dedupBy: 'rid', methodLimit: MP, onLog: (m) => log('  ' + m) });
+  for (const o of raw) {
+    const id = String(o.rid);
+    const name = WH.nameOf(o.warehouseId);
+    const rec = { ff: name, warehouseId: o.warehouseId, createdAt: o.createdAt, supplyId: o.supplyId, article: parseArt(o.article), nmId: o.nmId };
+    rid.set(id, rec); orders.push(rec);
   }
   return { rid, orders };
 }
 
-// ── Поставки: supplyId → {createdAt, closedAt, done} (список + точечный добор) ─
-async function fetchSupplies(neededIds) {
-  const map = new Map(); let next = 0;
-  for (let page = 1; ; page++) {
-    const { data } = await wb.get('marketplace', '/api/v3/supplies', { query: { limit: 1000, next }, methodLimit: MP });
-    const b = data.supplies || [];
-    for (const s of b) map.set(s.id, s);
-    if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
-  }
-  const missing = [...neededIds].filter((id) => id && !map.has(id));
-  if (missing.length) {
-    log(`  добираю ${missing.length} поставок точечно…`);
-    for (const id of missing) { try { const { data } = await wb.get('marketplace', `/api/v3/supplies/${id}`, { methodLimit: MP }); map.set(id, data); } catch { /* пропускаем */ } }
-  }
-  return map;
-}
-
-// ── Продажи (выкупы) с регионом покупателя, дедуп по srid ─────────────────────
-async function fetchSales() {
-  const seen = new Set(); const rows = []; let dateFrom = fromDate;
-  for (let page = 1; page <= 8; page++) {
-    const { data } = await wb.get('statistics', '/api/v1/supplier/sales', { query: { dateFrom }, methodLimit: STAT });
-    const b = Array.isArray(data) ? data : [];
-    let last = null;
-    // Дедуп по srid+saleID: у возврата «R…» тот же srid, что у продажи «S…» — дедуп по одному srid
-    // выбрасывал возвраты. Логистике важны только выкупы, но дубль-фикс держим единообразно с гео.
-    for (const s of b) { const k = s.srid ? s.srid + '|' + (s.saleID || '') : null; if (k && seen.has(k)) continue; if (k) seen.add(k); rows.push(s); last = s.lastChangeDate || last; }
-    log(`  sales стр.${page}: +${b.length} (всего ${rows.length})`);
-    if (b.length < 80000 || !last) break; dateFrom = last;
-  }
-  return rows;
-}
+// Поставки и продажи — через общие выборки (список+добор / дедуп srid+saleID).
+const fetchSupplies = (neededIds) => wbFetchSupplies(wb, { neededIds, methodLimit: MP, onLog: (m) => log('  ' + m) });
+const fetchSales = () => wbFetchSales(wb, { dateFrom: fromDate, methodLimit: STAT, onLog: (m) => log('  ' + m) });
 
 // ── Утилиты по времени ────────────────────────────────────────────────────────
 const hrs = (a, b) => (new Date(b) - new Date(a)) / 3600000;

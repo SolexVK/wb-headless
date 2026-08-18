@@ -28,6 +28,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WbClient } from '../lib/wbClient.js';
+import { fetchOrders as wbFetchOrders } from './lib/wbFetch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -96,29 +97,11 @@ for (const w of stock.warehouses || []) {
 }
 
 // ── Заказы: история 90 дн (chunks ≤30) — присутствие и скорость по штрихкоду ──
-async function fetchRange(fromSec, toSec) {
-  const out = []; let next = 0;
-  for (;;) {
-    const { data } = await wb.get('marketplace', '/api/v3/orders', { query: { limit: 1000, next, dateFrom: fromSec, dateTo: toSec }, methodLimit: MP });
-    const b = data.orders || []; out.push(...b);
-    if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
-  }
-  return out;
-}
+// Общая выборка сама чанкует окно и дедупит по id (границы WB инклюзивны, соседние
+// чанки делят границу → без дедупа заказ на стыке двоил бы скорость/дозаказ — фикс B4).
 const nowSec = Math.floor(Date.now() / 1000);
 const histStart = nowSec - HISTORY_DAYS * 86400;
-let allOrders = [];
-for (let end = nowSec; end > histStart;) {
-  const from = Math.max(histStart, end - 30 * 86400);
-  const part = await fetchRange(from, end);
-  allOrders.push(...part);
-  log(`  orders ${new Date(from * 1000).toISOString().slice(0, 10)}..${new Date(end * 1000).toISOString().slice(0, 10)}: +${part.length} (${allOrders.length})`);
-  end = from;
-}
-// Дедуп заказов на СТЫКАХ чанков: границы WB dateFrom/dateTo инклюзивны и соседние чанки
-// делят одну границу (from одного = end следующего), поэтому заказ, созданный ровно на
-// границе, попадал в оба чанка и двоил скорость → завышал perDay и дозаказ. Дедуп по id.
-{ const seen = new Set(); allOrders = allOrders.filter((o) => { const k = o.id ?? o.rid; if (k == null) return true; if (seen.has(k)) return false; seen.add(k); return true; }); }
+const allOrders = await wbFetchOrders(wb, { fromSec: histStart, toSec: nowSec, chunkDays: 30, dedupBy: 'id', methodLimit: MP, onLog: (m) => log('  ' + m) });
 const velCut = nowSec - VEL_DAYS * 86400;
 const everPlacedNm = new Set();          // nmID был хоть на одном FF
 const velWB = new Map();                  // "wid|barcode" → заказы за окно скорости

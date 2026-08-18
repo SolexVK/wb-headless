@@ -15,6 +15,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WbClient } from '../lib/wbClient.js';
 import { loadWarehouses } from './lib/warehouses.mjs';
+import { fetchOrders as wbFetchOrders, fetchSales as wbFetchSales } from './lib/wbFetch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -42,43 +43,19 @@ const ORD_DAYS = Math.min(88, Math.max(DAYS, 60));
 async function fetchOrders() {
   const rid = new Map(); const ordersByFF = {}; const moscowNm = new Set();
   const nowSec = Math.floor(Date.now() / 1000);
-  const fromSec = nowSec - ORD_DAYS * 86400;
-  const CHUNK = 28 * 86400; const seen = new Set();
-  for (let end = nowSec; end > fromSec;) {
-    const start = Math.max(fromSec, end - CHUNK); let next = 0;
-    for (let p = 1; ; p++) {
-      const { data } = await wb.get('marketplace', '/api/v3/orders', { query: { limit: 1000, next, dateFrom: start, dateTo: end }, methodLimit: MP });
-      const b = data.orders || [];
-      for (const o of b) {
-        const id = String(o.rid); if (seen.has(id)) continue; seen.add(id);
-        const name = WH.nameOf(o.warehouseId);
-        rid.set(id, { ff: name, mos: WH.isMoscow(o.warehouseId), article: parseArt(o.article), nm: o.nmId });
-        ordersByFF[name] = (ordersByFF[name] || 0) + 1;
-        if (WH.isMoscow(o.warehouseId) && o.nmId) moscowNm.add(o.nmId);
-      }
-      if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
-    }
-    end = start;
+  const orders = await wbFetchOrders(wb, { fromSec: nowSec - ORD_DAYS * 86400, toSec: nowSec, chunkDays: 28, dedupBy: 'rid', methodLimit: MP, onLog: (m) => log('  ' + m) });
+  for (const o of orders) {
+    const id = String(o.rid);
+    const name = WH.nameOf(o.warehouseId);
+    rid.set(id, { ff: name, mos: WH.isMoscow(o.warehouseId), article: parseArt(o.article), nm: o.nmId });
+    ordersByFF[name] = (ordersByFF[name] || 0) + 1;
+    if (WH.isMoscow(o.warehouseId) && o.nmId) moscowNm.add(o.nmId);
   }
   return { rid, ordersByFF, moscowNm };
 }
 
-// ── Продажи + возвраты (пагинация по lastChangeDate, дедуп по srid) ───────────
-async function fetchSales() {
-  const seen = new Set(); const rows = [];
-  let dateFrom = fromDate;
-  for (let page = 1; page <= 8; page++) {
-    const { data } = await wb.get('statistics', '/api/v1/supplier/sales', { query: { dateFrom }, methodLimit: STAT });
-    const b = Array.isArray(data) ? data : [];
-    let last = null;
-    // Дедуп по srid+saleID (не по одному srid!): у возврата «R…» тот же srid, что у продажи «S…»,
-    // и дедуп только по srid молча выбрасывал строку возврата → возвраты недосчитывались.
-    for (const s of b) { const k = s.srid ? s.srid + '|' + (s.saleID || '') : null; if (k && seen.has(k)) continue; if (k) seen.add(k); rows.push(s); last = s.lastChangeDate || last; }
-    log(`  sales стр.${page}: +${b.length} (всего ${rows.length})`);
-    if (b.length < 80000 || !last) break; dateFrom = last;
-  }
-  return rows;
-}
+// ── Продажи + возвраты (дедуп по srid+saleID — см. wbFetch/фикс B1) ───────────
+const fetchSales = () => wbFetchSales(wb, { dateFrom: fromDate, methodLimit: STAT, onLog: (m) => log('  ' + m) });
 
 const ord = await fetchOrders();
 log(`FBS-заказов (rid): ${ord.rid.size} · московские FF: ${MOSCOW_NAMES.join(', ') || '—'} (nmID ${ord.moscowNm.size})`);

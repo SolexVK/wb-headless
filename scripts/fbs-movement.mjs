@@ -16,6 +16,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WbClient } from '../lib/wbClient.js';
 import { loadWarehouses } from './lib/warehouses.mjs';
+import { fetchOrders as wbFetchOrders, fetchSupplies as wbFetchSupplies } from './lib/wbFetch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -52,37 +53,13 @@ const seriesDays = [];                               // от старых к н�
 for (let i = span - 1; i >= 0; i--) seriesDays.push(new Date(Date.parse(todayStr + 'T00:00:00Z') - i * 86400000).toISOString().slice(0, 10));
 const inWindow = new Set(seriesDays);
 
-// ── Заказы за окно+буфер (кусками ≤28 дней, дедуп по id) ─────────────────────
+// ── Заказы за окно+буфер (кусками ≤28 дней, дедуп по id) + поставки — через общие выборки
 async function fetchOrders() {
   const nowSec = Math.floor(Date.now() / 1000);
   const fromSec = Math.floor(Date.parse(seriesDays[0] + 'T00:00:00Z') / 1000) - BUFFER * 86400;
-  const CHUNK = 28 * 86400;
-  const byId = new Map();
-  for (let end = nowSec; end > fromSec;) {
-    const start = Math.max(fromSec, end - CHUNK);
-    let next = 0;
-    for (let p = 1; ; p++) {
-      const { data } = await wb.get('marketplace', '/api/v3/orders', { query: { limit: 1000, next, dateFrom: start, dateTo: end }, methodLimit: MP });
-      const b = data.orders || [];
-      for (const o of b) byId.set(o.id ?? `${o.rid}`, o);
-      log(`  orders ${new Date(start * 1000).toISOString().slice(0, 10)}..${new Date(end * 1000).toISOString().slice(0, 10)}: стр.${p} +${b.length} (${byId.size})`);
-      if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
-    }
-    end = start;
-  }
-  return [...byId.values()];
+  return wbFetchOrders(wb, { fromSec, toSec: nowSec, chunkDays: 28, dedupBy: 'id', methodLimit: MP, onLog: (m) => log('  ' + m) });
 }
-async function fetchSupplies(neededIds) {
-  const map = new Map(); let next = 0;
-  for (let p = 1; ; p++) {
-    const { data } = await wb.get('marketplace', '/api/v3/supplies', { query: { limit: 1000, next }, methodLimit: MP });
-    const b = data.supplies || []; for (const s of b) map.set(s.id, s);
-    if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
-  }
-  const missing = [...neededIds].filter((id) => id && !map.has(id));
-  for (const id of missing) { try { const { data } = await wb.get('marketplace', `/api/v3/supplies/${id}`, { methodLimit: MP }); map.set(id, data); } catch (e) { log(`  ! supply ${id}: ${e.message}`); } }
-  return map;
-}
+const fetchSupplies = (neededIds) => wbFetchSupplies(wb, { neededIds, methodLimit: MP, onLog: (m) => log('  ' + m) });
 
 // Средняя цена продажи (finishedPrice) по nmID за последние 7 дней из статистики.
 // Лимит метода — 1 запрос/мин. Возврат: {map: nmID→avg, overall, available, rows}.
