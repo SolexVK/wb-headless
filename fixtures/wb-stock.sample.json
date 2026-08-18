@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-08-18T10:00:00.000Z",
+  "cardsByBarcode": {
+    "2000001": { "seller": "001 РМК-твид бордовый", "nmId": 111, "techSize": "S" },
+    "2000002": { "seller": "001 РМК-твид бордовый", "nmId": 111, "techSize": "M" },
+    "2000003": { "seller": "016 МС голубой", "nmId": 222, "techSize": "L" },
+    "2000004": { "seller": "016 МС голубой", "nmId": 222, "techSize": "XL" }
+  },
+  "fboRows": [
+    { "seller": "001 РМК-твид бордовый", "nmId": 111, "barcode": "2000001", "techSize": "S", "warehouse": "Коледино", "available": 10, "full": 12, "inWayToClient": 2, "inWayFromClient": 1 },
+    { "seller": "001 РМК-твид бордовый", "nmId": 111, "barcode": "2000002", "techSize": "M", "warehouse": "Коледино", "available": 5, "full": 5, "inWayToClient": 1, "inWayFromClient": 0 },
+    { "seller": "001 РМК-твид бордовый", "nmId": 111, "barcode": "2000001", "techSize": "S", "warehouse": "Казань", "available": 3, "full": 3, "inWayToClient": 0, "inWayFromClient": 2 },
+    { "seller": "016 МС голубой", "nmId": 222, "barcode": "2000003", "techSize": "L", "warehouse": "Коледино", "available": 7, "full": 8, "inWayToClient": 3, "inWayFromClient": 0 }
+  ],
+  "fbsWarehouses": [
+    { "id": 1, "name": "Мой склад СПб" }
+  ],
+  "fbsStocksByWh": {
+    "1": { "2000001": 4, "2000003": 6, "2000004": 9 }
+  }
+}

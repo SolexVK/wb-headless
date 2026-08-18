@@ -7,6 +7,8 @@ import puppeteer from 'puppeteer';
 import { v4 as uuidv4 } from 'uuid';
 import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
 import { defaultPeriod, loadItems, selectItems, selectByGroup, writeOutputs } from './report-stock.js';
+import { collectWbStock } from './report-wb-stock.js';
+import { summaryToCSV } from './lib/wbStockSummary.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -205,6 +207,31 @@ app.get('/reports/stock-availability', requireKey, async (req, res) => {
     return res.json(report);
   } catch (err) {
     return res.status(500).json({ error: 'report_failed', detail: String(err?.message || err) });
+  }
+});
+
+// ---------- REPORT: сводка по остаткам WB (FBO/FBS + в пути + возвраты) ----------
+// GET /reports/wb-stock?format=json|csv
+// Данные — из официального API WB (см. report-wb-stock.js). Нужен WB_API_TOKEN
+// (или раздельные WB_STATS_TOKEN / WB_MARKETPLACE_TOKEN / WB_CONTENT_TOKEN).
+app.get('/reports/wb-stock', requireKey, async (req, res) => {
+  if (!process.env.WB_API_TOKEN && !process.env.WB_STATS_TOKEN) {
+    return res.status(500).json({
+      error: 'wb_token_missing',
+      detail: 'Не задан WB_API_TOKEN (категории «Статистика»/«Маркетплейс»/«Контент»). Впишите токен в .env.',
+    });
+  }
+  try {
+    const report = await collectWbStock();
+    if (String(req.query.format) === 'csv') {
+      const date = (report.generatedAt || '').slice(0, 10);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="wb-stock-${date}.csv"`);
+      return res.send(summaryToCSV(report));
+    }
+    return res.json(report);
+  } catch (err) {
+    return res.status(500).json({ error: 'wb_report_failed', detail: String(err?.message || err) });
   }
 });
 

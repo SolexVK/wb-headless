@@ -1,3 +1,14 @@
+# Отчёты
+
+В проекте два отчёта:
+
+1. **Наличие товара и упущенная выручка** (за период, из MPStats) — этот документ ниже.
+2. **Сводка по остаткам WB на текущий момент** (FBO/FBS + в пути + возвраты, из
+   официального API WB) — см. [`analytics/wb-stock-report/README.md`](analytics/wb-stock-report/README.md).
+   Запуск: `WB_API_TOKEN=xxx npm run report:wb-stock`; HTTP: `GET /reports/wb-stock`.
+
+---
+
 # Регулярный отчёт: наличие товара и упущенная выручка
 
 Отчёт показывает по каждому SKU:
