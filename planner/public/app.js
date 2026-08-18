@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'hide-empty-sizes-2026-08-06d';
+const APP_BUILD = 'excel-plan-styled-2026-08-06e';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1153,17 +1153,53 @@ function exportPlanXlsx(articleIds, filename) {
 }
 
 // ---- ГОТОВЫЙ план партии → .xlsx (человеко-читаемая выгрузка, не шаблон) ----
-// Лист одной партии: шапка (артикул/партия/цех/срок/статус) + матрица цвет×размер + итоги.
+// Палитра для Excel: имя цвета (рус/eng) → HEX (без #). Приближение к образцам тканей сервиса.
+const XLSX_COLOR_HEX = {
+  'белый': 'FFFFFF', white: 'FFFFFF', 'молочный': 'F5EFE0', 'кремовый': 'F3E9D2', 'слоновая кость': 'F5F0E1', 'айвори': 'F5F0E1',
+  'чёрный': '111111', 'черный': '111111', black: '111111', 'графит': '3A3F44', 'антрацит': '383B3E',
+  'серый': '9AA0A6', 'серая': '9AA0A6', gray: '9AA0A6', grey: '9AA0A6', 'светло-серый': 'C7CBD1', 'тёмно-серый': '5B6066', 'темно-серый': '5B6066', 'серебристый': 'C9CDD2', 'серебро': 'C9CDD2',
+  'голубой': '9FD4F0', 'голубая': '9FD4F0', 'небесный': 'ABD9F2', 'синий': '2E5AA8', 'синяя': '2E5AA8', blue: '2E5AA8', 'тёмно-синий': '23355F', 'темно-синий': '23355F', 'индиго': '3F4C8C', 'васильковый': '4C6FBF',
+  'красный': 'D33A3A', 'красная': 'D33A3A', red: 'D33A3A', 'бордовый': '7B2233', 'бордо': '7B2233', 'вишнёвый': '8E2233', 'вишневый': '8E2233', 'марсала': '7E3B3B',
+  'зелёный': '3FA34D', 'зеленый': '3FA34D', green: '3FA34D', 'хаки': '8A8B4C', 'оливковый': '6E7B3D', 'олива': '6E7B3D', 'изумрудный': '2E7D5B', 'мятный': 'B7E3C9', 'мята': 'B7E3C9', 'бирюзовый': '3FB6A8', 'бирюза': '3FB6A8',
+  'жёлтый': 'F2C744', 'желтый': 'F2C744', yellow: 'F2C744', 'горчичный': 'C9A227', 'золотой': 'C9A24B', 'золотистый': 'C9A24B',
+  'оранжевый': 'E8823B', 'оранж': 'E8823B', 'терракот': 'C1583B', 'терракотовый': 'C1583B', 'коралловый': 'F08475',
+  'коричневый': '6B4423', 'шоколад': '5B3A1E', 'шоколадный': '5B3A1E', 'кофейный': '6F4E37', 'бежевый': 'E3D5B8', 'беж': 'E3D5B8', 'капучино': 'B99A78', 'кэмел': 'C19A6B', 'кемел': 'C19A6B', 'песочный': 'D9C39A',
+  'розовый': 'E79CC2', 'розовая': 'E79CC2', pink: 'E79CC2', 'пудровый': 'E7C6C0', 'пудра': 'E7C6C0', 'фуксия': 'C2478A', 'малиновый': 'B83266',
+  'фиолетовый': '7B4FA3', 'сиреневый': 'B39DDB', 'лавандовый': 'C4B7E0', 'лаванда': 'C4B7E0', 'пурпурный': '8E3A80',
+};
+function xlsxColorHex(name) {
+  const k = String(name || '').trim().toLowerCase();
+  if (XLSX_COLOR_HEX[k]) return XLSX_COLOR_HEX[k];
+  let best = '', bestLen = 0; // по вхождению базового слова («тёмно-синий трикотаж» → синий), самое длинное
+  for (const key of Object.keys(XLSX_COLOR_HEX)) if (k.includes(key) && key.length > bestLen) { best = XLSX_COLOR_HEX[key]; bestLen = key.length; }
+  return best || 'E8E8E8'; // неизвестный цвет — нейтральный светло-серый
+}
+function xlsxTextOn(hex) { // чёрный/белый текст по яркости фона
+  const r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6 ? '111111' : 'FFFFFF';
+}
+function xlsxTint(hex, frac) { // подмешать белого (frac 0..1) — лёгкая заливка тела колонки
+  const mix = (c) => Math.round(parseInt(hex.slice(c, c + 2), 16) * (1 - frac) + 255 * frac);
+  const h = (n) => n.toString(16).padStart(2, '0').toUpperCase();
+  return h(mix(0)) + h(mix(2)) + h(mix(4));
+}
+const XLSX_BORDER = () => { const s = { style: 'thin', color: { rgb: 'C8CCD0' } }; return { top: s, bottom: s, left: s, right: s }; };
+
+// Лист одной партии: шапка по строкам (текст перетекает в пустые ячейки справа — читается целиком),
+// затем матрица цвет×размер: заголовки цветов жирные, залиты цветом, по центру; тело — по центру
+// с лёгкой заливкой своего цвета; пустые размеры скрыты.
 function partiaReadyAoA(a, p) {
   const M = p.planMatrix || {};
   const cols = colsForMatrix(a, M);
-  const sizes = rowsForMatrix(a, M); // пустые размеры не выгружаем
+  const sizes = rowsForMatrix(a, M);
   const ws = state.workshops.find((w) => w.id === p.workshopId);
-  const rows = [];
-  rows.push([`Артикул ${a.id} — ${a.name}`]);
-  rows.push([`Партия ${p.no}${p.deliveryTag ? ' · ' + p.deliveryTag : ''}`, p.deadline ? `Срок WB: ${p.deadline}` : '', `Цех: ${ws ? ws.name : 'авто'}`, `Статус: ${PARTIA_STATUS_RU[p.status] || p.status || '—'}`]);
-  if (a.comment) rows.push([`Особенности: ${a.comment}`]);
+  const meta = [`Артикул ${a.id} — ${a.name}`, `Партия ${p.no}${p.deliveryTag ? ' · ' + p.deliveryTag : ''}`];
+  if (p.deadline) meta.push(`Срок WB: ${p.deadline}`);
+  meta.push(`Цех: ${ws ? ws.name : 'авто'}`, `Статус: ${PARTIA_STATUS_RU[p.status] || p.status || '—'}`);
+  if (a.comment) meta.push(`Особенности: ${a.comment}`);
+  const rows = meta.map((t) => [t]); // каждый пункт — своя строка, только колонка A → текст перетекает вправо
   rows.push([]);
+  const headerRowIdx = rows.length;
   rows.push(['Размер \\ Цвет', ...cols, 'Итого']);
   for (const s of sizes) {
     const row = [s]; let rt = 0;
@@ -1173,7 +1209,7 @@ function partiaReadyAoA(a, p) {
   const tot = ['ВСЕГО']; let grand = 0;
   for (const c of cols) { const ct = a.sizes.reduce((n, s) => n + cell(M, c, s), 0); tot.push(ct); grand += ct; }
   tot.push(grand); rows.push(tot);
-  return { rows, cols };
+  return { rows, cols, sizes, headerRowIdx };
 }
 function readySheetName(p, used) {
   let name = `Партия ${p.no}`.slice(0, 28);
@@ -1181,9 +1217,28 @@ function readySheetName(p, used) {
   used.add(name); return name;
 }
 function appendReadySheet(wb, a, p, used) {
-  const { rows, cols } = partiaReadyAoA(a, p);
+  const { rows, cols, sizes, headerRowIdx } = partiaReadyAoA(a, p);
   const sheet = XLSX.utils.aoa_to_sheet(rows);
-  sheet['!cols'] = [{ wch: 16 }, ...cols.map(() => ({ wch: 12 })), { wch: 10 }];
+  sheet['!cols'] = [{ wch: 18 }, ...cols.map(() => ({ wch: 12 })), { wch: 10 }];
+  const set = (r, c, s) => { const cell = sheet[XLSX.utils.encode_cell({ r, c })]; if (cell) cell.s = s; };
+  set(0, 0, { font: { bold: true, sz: 13 } }); // заголовок артикула
+  // шапка матрицы
+  set(headerRowIdx, 0, { font: { bold: true }, alignment: { horizontal: 'left', vertical: 'center' }, border: XLSX_BORDER() });
+  for (let i = 0; i < cols.length; i++) {
+    const hex = xlsxColorHex(cols[i]);
+    set(headerRowIdx, i + 1, { font: { bold: true, color: { rgb: xlsxTextOn(hex) } }, alignment: { horizontal: 'center', vertical: 'center' }, fill: { patternType: 'solid', fgColor: { rgb: hex } }, border: XLSX_BORDER() });
+  }
+  set(headerRowIdx, cols.length + 1, { font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center' }, border: XLSX_BORDER() });
+  // тело + строка ВСЕГО
+  const firstData = headerRowIdx + 1, lastRow = firstData + sizes.length; // sizes строк + строка ВСЕГО
+  for (let r = firstData; r <= lastRow; r++) {
+    const isTot = r === lastRow;
+    set(r, 0, { font: { bold: isTot }, border: XLSX_BORDER() });
+    for (let i = 0; i < cols.length; i++) {
+      set(r, i + 1, { alignment: { horizontal: 'center' }, font: { bold: isTot }, fill: { patternType: 'solid', fgColor: { rgb: xlsxTint(xlsxColorHex(cols[i]), 0.72) } }, border: XLSX_BORDER() });
+    }
+    set(r, cols.length + 1, { alignment: { horizontal: 'center' }, font: { bold: true }, border: XLSX_BORDER() });
+  }
   XLSX.utils.book_append_sheet(wb, sheet, readySheetName(p, used));
 }
 // Экспорт готового плана: одна партия (partia задан) или все партии артикула (лист на партию).
