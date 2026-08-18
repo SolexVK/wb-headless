@@ -115,6 +115,10 @@ for (let end = nowSec; end > histStart;) {
   log(`  orders ${new Date(from * 1000).toISOString().slice(0, 10)}..${new Date(end * 1000).toISOString().slice(0, 10)}: +${part.length} (${allOrders.length})`);
   end = from;
 }
+// Дедуп заказов на СТЫКАХ чанков: границы WB dateFrom/dateTo инклюзивны и соседние чанки
+// делят одну границу (from одного = end следующего), поэтому заказ, созданный ровно на
+// границе, попадал в оба чанка и двоил скорость → завышал perDay и дозаказ. Дедуп по id.
+{ const seen = new Set(); allOrders = allOrders.filter((o) => { const k = o.id ?? o.rid; if (k == null) return true; if (seen.has(k)) return false; seen.add(k); return true; }); }
 const velCut = nowSec - VEL_DAYS * 86400;
 const everPlacedNm = new Set();          // nmID был хоть на одном FF
 const velWB = new Map();                  // "wid|barcode" → заказы за окно скорости
