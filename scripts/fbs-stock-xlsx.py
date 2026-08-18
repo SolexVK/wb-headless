@@ -5,7 +5,8 @@
 import os
 import json
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment
+from openpyxl.styles import Font
+from xlsx_kit import autofit, style_header
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.abspath(os.environ['REPORTS_OUTPUT_DIR']) if os.environ.get('REPORTS_OUTPUT_DIR') else os.path.join(REPO, 'reports-output')
@@ -16,15 +17,6 @@ with open(SNAP, encoding='utf-8') as f:
     s = json.load(f)
 
 t = s.get('totals', {})
-bold = Font(bold=True)
-center = Alignment(horizontal='center')
-
-
-def autofit(ws):
-    for col in ws.columns:
-        width = max((len(str(c.value)) for c in col if c.value is not None), default=8)
-        ws.column_dimensions[col[0].column_letter].width = min(40, max(9, width + 2))
-
 
 wb = Workbook()
 
@@ -40,22 +32,20 @@ ws.append(['Артикул+цвет', t.get('articleCount', 0)])
 ws.append([])
 ws.append(['Фулфилмент', 'Остаток, шт', 'Позиций (SKU)'])
 for c in ws[7]:
-    c.font = bold
+    c.font = Font(bold=True)
 for w in s.get('warehouses', []):
     ws.append([w.get('name'), w.get('totalQuantity', 0), w.get('skuInStock', 0)])
-autofit(ws)
+autofit(ws, cap=40)
 
 # Лист «Артикул+цвет × склад»
 ws2 = wb.create_sheet('Артикул+цвет × склад')
 cols = s.get('warehouseList', [])
 ws2.append(['Артикул', 'Цвет'] + list(cols) + ['Итого'])
-for c in ws2[1]:
-    c.font = bold
-    c.alignment = center
+style_header(ws2)
 for a in s.get('articles', []):
     bw = a.get('byWarehouse', {})
     ws2.append([a.get('articleNum'), a.get('variant')] + [bw.get(c, 0) for c in cols] + [a.get('total', 0)])
-autofit(ws2)
+autofit(ws2, cap=40)
 ws2.freeze_panes = 'A2'
 
 wb.save(OUT)

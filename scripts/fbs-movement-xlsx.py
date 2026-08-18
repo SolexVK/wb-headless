@@ -6,7 +6,7 @@
 import os
 import json
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment
+from xlsx_kit import autofit, style_header
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.abspath(os.environ['REPORTS_OUTPUT_DIR']) if os.environ.get('REPORTS_OUTPUT_DIR') else os.path.join(REPO, 'reports-output')
@@ -16,18 +16,10 @@ OUT = os.path.join(OUT_DIR, 'fbs-movement.xlsx')
 with open(SNAP, encoding='utf-8') as f:
     s = json.load(f)
 
-bold = Font(bold=True)
-center = Alignment(horizontal='center')
 fulfillments = s.get('fulfillments', [])
 N = int(s.get('days', 14))
 series = s.get('series', [])[-N:]  # период отображения
 COST = float(os.environ.get('COST_PER_UNIT', 620) or 620)
-
-
-def autofit(ws):
-    for col in ws.columns:
-        width = max((len(str(c.value)) for c in col if c.value is not None), default=8)
-        ws.column_dimensions[col[0].column_letter].width = min(40, max(9, width + 2))
 
 
 # basis: 'count' | 'money' (цена заказа) | 'moneyAvg' (ср. цена продажи) | 'cost' (count×COST)
@@ -40,9 +32,7 @@ def cellval(bf, name, basis):
 
 def sheet(ws, kind, basis):
     ws.append(['Дата'] + list(fulfillments) + ['Итого'])
-    for c in ws[1]:
-        c.font = bold
-        c.alignment = center
+    style_header(ws)
     for d in series:
         bf = (d.get(kind, {}) or {}).get('byFulfillment', {}) or {}
         row = [d.get('date')]
@@ -53,7 +43,7 @@ def sheet(ws, kind, basis):
             total += v
         row.append(total if basis == 'count' else round(total, 2))
         ws.append(row)
-    autofit(ws)
+    autofit(ws, cap=40)
     ws.freeze_panes = 'B2'
 
 
