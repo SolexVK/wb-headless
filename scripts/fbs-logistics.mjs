@@ -19,6 +19,7 @@ import { fileURLToPath } from 'url';
 import { WbClient } from '../lib/wbClient.js';
 import { loadWarehouses } from './lib/warehouses.mjs';
 import { fetchOrders as wbFetchOrders, fetchSupplies as wbFetchSupplies, fetchSales as wbFetchSales } from './lib/wbFetch.mjs';
+import { buildAssembly, buildDelivery } from './lib/agg/logistics.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -60,20 +61,6 @@ async function fetchOrders() {
 const fetchSupplies = (neededIds) => wbFetchSupplies(wb, { neededIds, methodLimit: MP, onLog: (m) => log('  ' + m) });
 const fetchSales = () => wbFetchSales(wb, { dateFrom: fromDate, methodLimit: STAT, onLog: (m) => log('  ' + m) });
 
-// ── Утилиты по времени ────────────────────────────────────────────────────────
-const hrs = (a, b) => (new Date(b) - new Date(a)) / 3600000;
-// Дата продажи из статистики WB идёт БЕЗ смещения (московское локальное время). На сервере
-// в UTC `new Date(s.date)` разобрался бы как UTC → диф с UTC-временами заказа съезжал бы на 3ч.
-// Явно проставляем +03:00, если смещения нет (Z или ±hh:mm — оставляем как есть).
-const mskDate = (d) => { const s = String(d || ''); return new Date(/(?:Z|[+-]\d{2}:?\d{2})$/.test(s) ? s : s + '+03:00'); };
-const median = (arr) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
-const pct = (arr, p) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); const i = Math.min(s.length - 1, Math.floor(p / 100 * s.length)); return s[i]; };
-const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
-const r2 = (x) => Math.round(x * 100) / 100;
-const isReturn = (s) => String(s.saleID || '').startsWith('R');
-const okrugOf = (s) => (s.oblastOkrugName || '—');
-const regionOf = (s) => (s.regionName || '—');
-
 const ord = await fetchOrders();
 log(`FBS-заказов (rid): ${ord.rid.size} за ${ORD_DAYS} дн.`);
 const supplyIds = new Set(ord.orders.map((o) => o.supplyId).filter(Boolean));
@@ -81,70 +68,13 @@ const supplies = await fetchSupplies(supplyIds);
 const closedOf = (o) => { const sup = o.supplyId ? supplies.get(o.supplyId) : null; return sup && (sup.done || sup.closedAt) ? sup.closedAt : null; };
 
 // ── 1) СБОРКА: createdAt → closedAt по ФФ (только заказы за окно DAYS) ────────
+// Агрегация вынесена в lib/agg/logistics.mjs (покрыта юнит-тестами smoke-agg.mjs).
 const asmFromSec = nowSec - DAYS * 86400;
-const asmByFF = new Map();
-const asmCrit = [];
-for (const o of ord.orders) {
-  const created = Math.floor(new Date(o.createdAt).getTime() / 1000);
-  if (created < asmFromSec) continue; // сборку считаем за запрошенное окно
-  if (!asmByFF.has(o.ff)) asmByFF.set(o.ff, { ff: o.ff, warehouseId: o.warehouseId, made: 0, processed: 0, pending: 0, times: [] });
-  const g = asmByFF.get(o.ff); g.made++;
-  const closed = closedOf(o);
-  if (closed) { const t = hrs(o.createdAt, closed); if (t >= 0) { g.processed++; g.times.push(t); if (t > CRIT_H) asmCrit.push({ ff: o.ff, article: o.article, hours: r2(t), createdAt: o.createdAt, closedAt: closed }); } }
-  else g.pending++;
-}
-const asmRows = [...asmByFF.values()].map((g) => ({
-  ff: g.ff, warehouseId: g.warehouseId, made: g.made, processed: g.processed, pending: g.pending,
-  avgHours: r2(avg(g.times)), medianHours: r2(median(g.times)), p90Hours: r2(pct(g.times, 90)),
-  maxHours: g.times.length ? r2(Math.max(...g.times)) : 0,
-  criticalCount: g.times.filter((t) => t > CRIT_H).length,
-})).sort((a, b) => b.made - a.made);
-const asmAll = [...asmByFF.values()].flatMap((g) => g.times);
-const asmBuckets = { '<6ч': 0, '6–24ч': 0, '24–48ч': 0, '>48ч': 0 };
-for (const t of asmAll) { if (t < 6) asmBuckets['<6ч']++; else if (t < 24) asmBuckets['6–24ч']++; else if (t < 48) asmBuckets['24–48ч']++; else asmBuckets['>48ч']++; }
-const assembly = {
-  totals: { orders: asmRows.reduce((s, r) => s + r.made, 0), processed: asmAll.length, pending: asmRows.reduce((s, r) => s + r.pending, 0),
-    avgHours: r2(avg(asmAll)), medianHours: r2(median(asmAll)), p90Hours: r2(pct(asmAll, 90)), criticalCount: asmCrit.length },
-  byFF: asmRows, buckets: asmBuckets,
-  critical: asmCrit.sort((a, b) => b.hours - a.hours).slice(0, 40),
-};
+const assembly = buildAssembly(ord.orders, closedOf, { critH: CRIT_H, asmFromSec });
 
 // ── 2) ДОСТАВКА: closedAt → sale.date по ФФ и по региону покупателя ──────────
 const sales = await fetchSales();
-const delByFF = new Map(); const delByReg = new Map(); const delByDay = new Map();
-const delAll = []; let joined = 0, noShip = 0;
-for (const s of sales) {
-  if (isReturn(s)) continue;              // доставку меряем по выкупам
-  const o = ord.rid.get(String(s.srid));  // привязка к ФФ отгрузки
-  if (!o) continue;
-  joined++;
-  const ship = closedOf(o) || o.createdAt; // момент ухода с ФФ (передача в доставку)
-  if (!ship) { noShip++; continue; }
-  const t = (mskDate(s.date) - new Date(ship)) / 3600000; // ship — UTC ISO; s.date нормализуем к МСК
-  if (!(t > 0) || t > 60 * 24) continue;  // отсекаем аномалии (отрицательные / > 60 сут)
-  delAll.push(t);
-  const day = String(s.date || '').slice(0, 10);
-  if (!delByFF.has(o.ff)) delByFF.set(o.ff, { ff: o.ff, times: [] });
-  delByFF.get(o.ff).times.push(t);
-  const rk = okrugOf(s) + '||' + regionOf(s);
-  if (!delByReg.has(rk)) delByReg.set(rk, { okrug: okrugOf(s), region: regionOf(s), times: [] });
-  delByReg.get(rk).times.push(t);
-  if (day) { if (!delByDay.has(day)) delByDay.set(day, { date: day, times: [] }); delByDay.get(day).times.push(t); }
-}
-const delFFRows = [...delByFF.values()].map((g) => ({
-  ff: g.ff, count: g.times.length, avgHours: r2(avg(g.times)), medianHours: r2(median(g.times)),
-  p90Hours: r2(pct(g.times, 90)), minHours: g.times.length ? r2(Math.min(...g.times)) : 0, maxHours: g.times.length ? r2(Math.max(...g.times)) : 0,
-})).sort((a, b) => b.count - a.count);
-const delRegRows = [...delByReg.values()].map((g) => ({ okrug: g.okrug, region: g.region, count: g.times.length, avgHours: r2(avg(g.times)), medianHours: r2(median(g.times)) }))
-  .sort((a, b) => b.count - a.count);
-const delBuckets = { '<2 сут': 0, '2–4 сут': 0, '4–7 сут': 0, '>7 сут': 0 };
-for (const t of delAll) { const d = t / 24; if (d < 2) delBuckets['<2 сут']++; else if (d < 4) delBuckets['2–4 сут']++; else if (d < 7) delBuckets['4–7 сут']++; else delBuckets['>7 сут']++; }
-const delivery = {
-  available: delAll.length > 0,
-  totals: { count: delAll.length, joined, avgHours: r2(avg(delAll)), medianHours: r2(median(delAll)), p90Hours: r2(pct(delAll, 90)) },
-  byFF: delFFRows, byRegion: delRegRows, buckets: delBuckets,
-  byDay: [...delByDay.values()].map((g) => ({ date: g.date, count: g.times.length, avgHours: r2(avg(g.times)) })).sort((a, b) => a.date.localeCompare(b.date)),
-};
+const delivery = buildDelivery(sales, ord.rid, closedOf);
 
 const snapshot = {
   generatedAt: new Date().toISOString(),
