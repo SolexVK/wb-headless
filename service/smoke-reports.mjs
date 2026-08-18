@@ -22,6 +22,7 @@ const goodToken = (() => {
 })();
 
 const { buildApp } = await import('./app.js');
+const { Cabinets, ReportRuns } = await import('./models.js'); // для инъекции «снимка по расписанию» (userId=null)
 const app = buildApp();
 const server = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -241,6 +242,12 @@ try {
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Логистика') && /сборка медиана/.test(r.text), 'Ф2: логистика видна в архиве');
 
+  // HTML-выгрузка из архива (новое: рядом с Excel/JSON).
+  r = await req('GET', `/org/${orgId}/reports/archive`);
+  ok(/\/archive\/\d+\/download\/html/.test(r.text), 'Ф2: в списке архива есть ссылка HTML');
+  const ah = await req('GET', `/org/${orgId}/reports/archive/${runIds[1]}/download/html`);
+  ok(ah.status === 200 && /<html/i.test(ah.text), 'Ф2: архивный запуск скачивается как HTML');
+
   // Автор удаляет СВОЙ запуск из архива.
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Удалить'), 'Ф2: автор видит кнопку удаления своего запуска');
@@ -265,6 +272,41 @@ try {
   ok(r.status === 200 && !/\/reports\/archive\/\d+\/delete/.test(r.text), 'Ф2: участник не видит кнопку удаления чужих запусков');
   r = await req('POST', `/org/${orgId}/reports/archive/${runIds[1]}/delete`, form({ _csrf: csrfOf(r.text) }));
   ok(r.status === 403, 'Ф2: участник не может удалить чужой запуск (403)');
+
+  // ── Массовая очистка архива + защита накопительного снимка ──────────────────
+  // Симулируем «снимок по расписанию» (userId=null), как это делает scheduler.js.
+  const cabId = Cabinets.firstOf(Number(orgId)).id;
+  const schedId = ReportRuns.add({
+    cabinetId: cabId, report: 'stock', paramsHash: 'sched', params: {}, userId: null,
+    summary: { grandTotal: 7, activeWarehouses: 1, articleCount: 1 },
+    snapshot: { generatedAt: new Date().toISOString(), totals: { grandTotal: 7 } },
+  });
+
+  // Возвращаемся владельцем (email/supersecret1 из начала теста).
+  cookie = '';
+  r = await req('GET', '/login');
+  r = await req('POST', '/login', form({ _csrf: csrfOf(r.text), email, password: 'supersecret1' }));
+
+  r = await req('GET', `/org/${orgId}/reports/archive`);
+  ok(r.text.includes('по расписанию'), 'Ф2: накопительный снимок помечен «по расписанию»');
+  ok(/Очистить все отчёты/.test(r.text), 'Ф2: владелец видит «Очистить все отчёты»');
+  const beforeClear = (r.text.match(/\/archive\/\d+"/g) || []).length;
+  ok(beforeClear >= 2, 'Ф2: в архиве есть авторские запуски + снимок по расписанию');
+
+  // Накопительный снимок по расписанию нельзя удалить даже владельцу (поштучно).
+  r = await req('POST', `/org/${orgId}/reports/archive/${schedId}/delete`, form({ _csrf: csrfOf(r.text) }));
+  ok(r.status === 403, 'Ф2: снимок по расписанию нельзя удалить поштучно (403)');
+
+  // Массовая очистка владельцем: авторские удаляются, снимок по расписанию сохраняется.
+  r = await req('GET', `/org/${orgId}/reports/archive`);
+  r = await req('POST', `/org/${orgId}/reports/archive/clear`, form({ _csrf: csrfOf(r.text) }));
+  ok(r.status === 302, 'Ф2: массовая очистка владельцем → 302');
+  r = await req('GET', `/org/${orgId}/reports/archive`);
+  const afterClear = (r.text.match(/\/archive\/\d+"/g) || []).length;
+  ok(afterClear < beforeClear && r.text.includes('по расписанию') && !/сборка медиана/.test(r.text),
+    'Ф2: очистка убрала авторские запуски, снимок по расписанию остался');
+  const sv = await req('GET', `/org/${orgId}/reports/archive/${schedId}`);
+  ok(sv.status === 200, 'Ф2: снимок по расписанию открывается после очистки');
 
   // Доступ: аноним не видит отчёты.
   cookie = '';

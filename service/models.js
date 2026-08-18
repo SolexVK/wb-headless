@@ -80,6 +80,12 @@ const q = {
     FROM report_runs r LEFT JOIN users u ON u.id = r.user_id
     WHERE r.cabinet_id = ? ORDER BY r.created_at DESC, r.id DESC LIMIT 200`),
   deleteRunByAuthor: db.prepare('DELETE FROM report_runs WHERE id = ? AND user_id = ?'),
+  // Владелец удаляет любой АВТОРСКИЙ запуск (кроме системных по расписанию — user_id IS NULL).
+  deleteRunAuthored: db.prepare('DELETE FROM report_runs WHERE id = ? AND user_id IS NOT NULL'),
+  // Массовая очистка. Свои — WHERE user_id = ? (системные с user_id IS NULL сюда не попадут);
+  // все авторские (для владельца) — WHERE user_id IS NOT NULL (системные по расписанию сохраняем).
+  clearOwnRuns: db.prepare('DELETE FROM report_runs WHERE cabinet_id = ? AND user_id = ?'),
+  clearAuthoredRuns: db.prepare('DELETE FROM report_runs WHERE cabinet_id = ? AND user_id IS NOT NULL'),
   purgeRuns: db.prepare("DELETE FROM report_runs WHERE created_at < datetime('now', ?)"),
 
   insertInvite: db.prepare('INSERT INTO invitations (org_id, email, role, token, expires_at) VALUES (?, ?, ?, ?, ?)'),
@@ -275,6 +281,11 @@ export const ReportRuns = {
   })),
   // Удалить может только автор запуска (проверка через user_id в запросе).
   deleteByAuthor: (id, userId) => q.deleteRunByAuthor.run(id, userId).changes > 0,
+  // Владелец: удалить любой авторский запуск (системные по расписанию не тронет).
+  deleteAuthored: (id) => q.deleteRunAuthored.run(id).changes > 0,
+  // Массовая очистка архива кабинета. Возвращает число удалённых.
+  clearOwn: (cabinetId, userId) => q.clearOwnRuns.run(cabinetId, userId).changes,
+  clearAllAuthored: (cabinetId) => q.clearAuthoredRuns.run(cabinetId).changes,
   purge: () => q.purgeRuns.run(`-${RETENTION_DAYS} days`),
 };
 const safeJson = (s) => { try { return JSON.parse(s || '{}'); } catch { return {}; } };

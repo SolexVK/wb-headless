@@ -934,26 +934,43 @@ export function archivePage({ user, csrf, base = '', org, role, runs, report = '
     if (r.report === 'logistics') return `сборка медиана ${fmtHrs(sm.asmMedianHours)} (${nf(sm.asmProcessed)}) · доставка медиана ${fmtHrs(sm.delMedianHours)} (${nf(sm.delCount)}) (${nf(sm.days)} дн)`;
     return `подсорт ${nf(sm.reorderUnits)} · риск ${nf(sm.riskRows)} · завоз ${nf(sm.seedUnits)}${(sm.articles && sm.articles.length) ? ` · арт: ${esc(sm.articles.join(', '))}` : ''}`;
   };
+  // Кто может удалить конкретный запуск: автор — свой; владелец — любой авторский.
+  // Накопительный по расписанию (authorId == null) не удаляется ни у кого.
+  const canDelete = (r) => r.authorId != null && (r.authorId === user.id || role === 'owner');
+  const dlLink = (r, kind, label, extra = '') => `<a class="dl" style="padding:5px 9px;font-size:12px;margin:${extra}" href="${u(`/org/${org.id}/reports/archive/${r.id}/download/${kind}`)}">${label}</a>`;
   const rows = (runs || []).map((r) => {
+    const who = r.authorId == null ? '<span class="pill">по расписанию</span>' : esc(r.userEmail || '—');
     return `<tr>
       <td class="tl"><a href="${u(`/org/${org.id}/reports/archive/${r.id}`)}">${dt(r.createdAt)}</a></td>
       <td>${esc(reportRu(r.report))}</td>
-      <td class="tl kv">${esc(r.userEmail || '—')}</td>
+      <td class="tl kv">${who}</td>
       <td class="tl kv">${summ(r)}</td>
       <td style="text-align:right;white-space:nowrap">
-        <a class="dl" style="padding:5px 9px;font-size:12px;margin:0 4px 0 0" href="${u(`/org/${org.id}/reports/archive/${r.id}/download/xlsx`)}">Excel</a>
-        <a class="dl" style="padding:5px 9px;font-size:12px;margin:0" href="${u(`/org/${org.id}/reports/archive/${r.id}/download/json`)}">JSON</a>
-        ${r.authorId === user.id ? formBtn(csrf, u(`/org/${org.id}/reports/archive/${r.id}/delete`), 'Удалить', 'mini btn-danger', 'Удалить этот отчёт из архива? Отменить нельзя.') : ''}
+        ${dlLink(r, 'html', 'HTML', '0 4px 0 0')}
+        ${dlLink(r, 'xlsx', 'Excel', '0 4px 0 0')}
+        ${dlLink(r, 'json', 'JSON', '0')}
+        ${canDelete(r) ? formBtn(csrf, u(`/org/${org.id}/reports/archive/${r.id}/delete`), 'Удалить', 'mini btn-danger', 'Удалить этот отчёт из архива? Отменить нельзя.') : ''}
       </td>
     </tr>`;
   }).join('');
+  // Массовая очистка: владелец — все авторские запуски; остальные — только свои.
+  // Накопительные по расписанию не в счёт (их нельзя удалить).
+  const clearable = (runs || []).filter(canDelete).length;
+  const clearBtn = clearable ? formBtn(
+    csrf, u(`/org/${org.id}/reports/archive/clear`),
+    role === 'owner' ? `Очистить все отчёты (${clearable})` : `Очистить мои отчёты (${clearable})`,
+    'btn-sm btn-danger',
+    role === 'owner'
+      ? 'Удалить ВСЕ отчёты компании из архива? Накопительные снимки по расписанию сохранятся. Отменить нельзя.'
+      : 'Удалить ВСЕ ваши отчёты из архива? Отменить нельзя.',
+  ) : '';
   return layout({
     title: `Архив отчётов — ${org.name}`, user, csrf, base,
     body: `<div class="wrap">
       <div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>
       <h1>Архив отчётов</h1>
-      <p class="sub">История запусков компании (хранится 90 дней). Откройте запуск, чтобы посмотреть содержимое или скачать. Удалить запуск может только тот, кто его создал.</p>
-      ${filter}
+      <p class="sub">История запусков компании (хранится 90 дней). Откройте запуск, чтобы посмотреть или скачать (HTML / Excel / JSON). Свой запуск может удалить автор, любой авторский — владелец компании. Накопительные снимки по расписанию (помечены «по расписанию») не удаляются.</p>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px">${filter}${clearBtn}</div>
       <div class="section"><div class="scroll"><table class="rt">
         <thead><tr>${thT('Дата', 'Когда запущен (UTC) — ссылка на просмотр')}${thT('Отчёт', 'Тип отчёта')}${thT('Кто', 'Кто запустил')}${thT('Итоги', 'Ключевые цифры запуска')}${thT('Выгрузки', 'Скачать этот запуск')}</tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="muted">Пока нет запусков. Соберите отчёт на странице отчётов.</td></tr>'}</tbody>

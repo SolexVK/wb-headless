@@ -212,16 +212,31 @@ reportsRouter.get('/org/:id/reports/archive/:runId', requireAuth, loadOrg, (req,
   }));
 });
 
-// Удалить архивный запуск — только автор (кто создал этот отчёт).
+// Массовая очистка архива. Владелец — все авторские запуски компании; остальные — только свои.
+// Накопительные снимки по расписанию (user_id IS NULL) не трогаем ни при какой роли.
+reportsRouter.post('/org/:id/reports/archive/clear', requireAuth, loadOrg, (req, res) => {
+  const cab = Cabinets.firstOf(req.org.id);
+  if (cab) {
+    const removed = req.role === 'owner'
+      ? ReportRuns.clearAllAuthored(cab.id)
+      : ReportRuns.clearOwn(cab.id, req.session.user.id);
+    logger.info({ cabinetId: cab.id, by: req.session.user.id, role: req.role, removed }, 'архив: массовая очистка');
+  }
+  res.redirect(`/org/${req.org.id}/reports/archive`);
+});
+
+// Удалить архивный запуск: автор — свой; владелец — любой авторский. Накопительный
+// (по расписанию, без автора) не удаляется ни у кого.
 reportsRouter.post('/org/:id/reports/archive/:runId/delete', requireAuth, loadOrg, (req, res) => {
   const cab = Cabinets.firstOf(req.org.id);
   const run = ReportRuns.byId(Number(req.params.runId));
   if (!run || !cab || run.cabinetId !== cab.id) return res.status(404).send('Запуск не найден');
-  if (run.authorId !== req.session.user.id) {
-    return res.status(403).send('Удалить отчёт может только тот пользователь, который его создал.');
-  }
-  ReportRuns.deleteByAuthor(run.id, req.session.user.id);
-  logger.info({ runId: run.id, by: req.session.user.id }, 'архив: автор удалил свой запуск');
+  if (run.authorId == null) return res.status(403).send('Накопительный отчёт (собирается по расписанию) удалять нельзя.');
+  const isAuthor = run.authorId === req.session.user.id;
+  const isOwner = req.role === 'owner';
+  if (!isAuthor && !isOwner) return res.status(403).send('Удалить отчёт может его автор или владелец компании.');
+  const ok = isAuthor ? ReportRuns.deleteByAuthor(run.id, req.session.user.id) : ReportRuns.deleteAuthored(run.id);
+  logger.info({ runId: run.id, by: req.session.user.id, asowner: isOwner && !isAuthor, ok }, 'архив: удалён запуск');
   res.redirect(`/org/${req.org.id}/reports/archive`);
 });
 
