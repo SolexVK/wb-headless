@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'article-archive-and-plan-export-2026-08-06c';
+const APP_BUILD = 'hide-empty-sizes-2026-08-06d';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -845,6 +845,7 @@ function recomputePartiaNumbers() {
 
 let matrixStageId = null, matrixArticleId = null, matrixPartiaId = null;
 let matrixWsFilter = ''; // фильтр списка партий по цеху ('' = все, '__auto__' = не распределённые)
+let mxAllSizes = false;  // «План по размерам»: показывать ВСЕ размеры ряда (иначе — только с данными)
 
 // ── настил (клиентские хелперы, зеркало lib/nesting.js) ──
 function nestingRules() { const n = state.settings.nesting || {}; return { minSizeQty: +n.minSizeQty || 20, minColorQty: +n.minColorQty || 400 }; }
@@ -960,10 +961,12 @@ function renderMatrix() {
       </div>
       <div class="mini" style="margin-bottom:12px">Введи количества и нажми <b>«Сохранить план»</b>. Номер партии — свой у каждого цеха. Статус производства и факт — на вкладке «Факт». Сейчас отшивает: <b>${cycInfo}</b>.</div>
       ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
+      ${hasGrid ? (() => { const hidden = a.sizes.length - rowsForMatrix(a, M).length; if (!hidden) return ''; return `<div class="mini" style="margin-top:6px">${mxAllSizes ? `Показаны все размеры ряда. ` : `Пустые размеры скрыты (${hidden}). `}<button id="mx-all-sizes" class="btn btn-subtle" type="button">${mxAllSizes ? '▲ скрыть пустые' : '▽ показать все размеры'}</button></div>`; })() : ''}
       ${(() => { const v = nestingViolations(M, nestingRules()); if (!v.length) return ''; const r = nestingRules(); return `<div style="margin-top:10px;padding:8px 10px;border:1px solid #d97706;border-radius:8px;background:rgba(245,158,11,.1)"><div class="mini"><b>Настил (ориентир):</b> ${v.map((x) => x.kind === 'color' ? `цвет «${x.color}» ${x.qty} шт (&lt;${r.minColorQty})` : `${x.color}/${x.size} ${x.qty} шт (&lt;${r.minSizeQty})`).join(' · ')}. Мягкое предупреждение — можно продолжать.</div></div>`; })()}
     </div>`;
 
   bindMatrixControls(a);
+  document.getElementById('mx-all-sizes')?.addEventListener('click', () => { mxAllSizes = !mxAllSizes; renderMatrix(); });
   document.getElementById('mx-xlsx-partia').addEventListener('click', () => exportReadyPlanXlsx(a.id, p.id));
   document.getElementById('mx-xlsx-article').addEventListener('click', () => exportReadyPlanXlsx(a.id, null));
   document.getElementById('mx-tpl-one').addEventListener('click', () => exportPlanXlsx([a.id], `plan_${a.id}.xlsx`));
@@ -1016,14 +1019,18 @@ function onMatrixPaste(e) {
   const a = state.articles.find((x) => x.id === matrixArticleId);
   const p = (state.partias || []).find((x) => x.id === matrixPartiaId);
   if (!a || !p) return;
-  const r0 = a.sizes.indexOf(decodeURIComponent(e.target.dataset.s));
-  const c0 = a.colors.indexOf(decodeURIComponent(e.target.dataset.c));
+  // Раскладка идёт по ВИДИМЫМ строкам/столбцам (скрытые пустые размеры и архивные цвета не в сетке),
+  // иначе вставка «съедет» на скрытые ячейки.
+  const visSizes = mxAllSizes ? a.sizes : rowsForMatrix(a, p.planMatrix || {});
+  const visCols = colsForMatrix(a, p.planMatrix || {});
+  const r0 = visSizes.indexOf(decodeURIComponent(e.target.dataset.s));
+  const c0 = visCols.indexOf(decodeURIComponent(e.target.dataset.c));
   const grid = text.replace(/\r/g, '').replace(/\n+$/, '').split('\n').map((r) => r.split('\t'));
   p.planMatrix = p.planMatrix || {};
   grid.forEach((cells, ri) => {
-    const s = a.sizes[r0 + ri]; if (!s) return;
+    const s = visSizes[r0 + ri]; if (!s) return;
     cells.forEach((val, ci) => {
-      const c = a.colors[c0 + ci]; if (!c) return;
+      const c = visCols[c0 + ci]; if (!c) return;
       p.planMatrix[c] = p.planMatrix[c] || {};
       p.planMatrix[c][s] = parseQty(val);
     });
@@ -1150,6 +1157,7 @@ function exportPlanXlsx(articleIds, filename) {
 function partiaReadyAoA(a, p) {
   const M = p.planMatrix || {};
   const cols = colsForMatrix(a, M);
+  const sizes = rowsForMatrix(a, M); // пустые размеры не выгружаем
   const ws = state.workshops.find((w) => w.id === p.workshopId);
   const rows = [];
   rows.push([`Артикул ${a.id} — ${a.name}`]);
@@ -1157,7 +1165,7 @@ function partiaReadyAoA(a, p) {
   if (a.comment) rows.push([`Особенности: ${a.comment}`]);
   rows.push([]);
   rows.push(['Размер \\ Цвет', ...cols, 'Итого']);
-  for (const s of a.sizes) {
+  for (const s of sizes) {
     const row = [s]; let rt = 0;
     for (const c of cols) { const v = cell(M, c, s); row.push(v || 0); rt += v; }
     row.push(rt); rows.push(row);
@@ -1281,13 +1289,14 @@ function spMiniTable(partia, a, cycles) {
   const total = sumMatrix(M);
   if (total <= 0) return '';
   const cols = colsForMatrix(a, M); // архивные-пустые скрываем
+  const sizes = rowsForMatrix(a, M); // пустые размеры скрываем
   return `<div class="mini-card${cycles && cycles.length > 1 ? ' mini-split' : ''}${['done', 'shipped'].includes(partia.status) ? ' mini-done' : ''}">
     <div class="mini-head"><span class="partia-badge">Партия ${partia.no}</span> <b>${a.id}</b> — ${a.name} ${statusBadge(partia.status)}</div>
     ${a.comment ? `<div class="mini-comment">💬 ${a.comment}</div>` : ''}
     ${workshopLine(cycles)}
     <div class="matrix-scroll"><table class="matrix-table mini">
       <thead><tr><th class="mx-corner">Размер</th>${cols.map((c) => `<th class="mx-color">${swatchTag(a, c, 60, 30)}<div>${c}</div></th>`).join('')}<th class="mx-rowtot-h">Σ</th></tr></thead>
-      <tbody>${a.sizes.map((s) => `<tr><th class="mx-size">${s}</th>${cols.map((c) => { const v = cell(M, c, s); return `<td class="num">${v || '<span class="mini">·</span>'}</td>`; }).join('')}<td class="num mx-rowtot">${cols.reduce((n, c) => n + cell(M, c, s), 0)}</td></tr>`).join('')}</tbody>
+      <tbody>${sizes.map((s) => `<tr><th class="mx-size">${s}</th>${cols.map((c) => { const v = cell(M, c, s); return `<td class="num">${v || '<span class="mini">·</span>'}</td>`; }).join('')}<td class="num mx-rowtot">${cols.reduce((n, c) => n + cell(M, c, s), 0)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><th class="mx-vsego">ВСЕГО</th>${cols.map((c) => `<td class="num mx-coltot">${a.sizes.reduce((n, s) => n + cell(M, c, s), 0)}</td>`).join('')}<td class="num mx-grand">${total.toLocaleString('ru')}</td></tr></tfoot>
     </table></div>
   </div>`;
@@ -1299,6 +1308,7 @@ function statusBadge(status) {
 
 function matrixTable(a, M) {
   const cols = colsForMatrix(a, M); // архивные-пустые скрываем, архивные с данными — показываем
+  const sizes = mxAllSizes ? a.sizes : rowsForMatrix(a, M); // пустые размеры прячем (если не «показать все»)
   return `
   <div class="matrix-scroll">
   <table class="matrix-table">
@@ -1308,7 +1318,7 @@ function matrixTable(a, M) {
         <th class="mx-rowtot-h">Итого по размеру</th></tr>
     </thead>
     <tbody>
-      ${a.sizes.map((s) => `<tr>
+      ${sizes.map((s) => `<tr>
         <th class="mx-size">${s}</th>
         ${cols.map((c) => `<td><input data-mx data-c="${encodeURIComponent(c)}" data-s="${encodeURIComponent(s)}" type="number" min="0" value="${cell(M, c, s)}"></td>`).join('')}
         <td class="num mx-rowtot" data-rowtot="${encodeURIComponent(s)}">${cols.reduce((n, c) => n + cell(M, c, s), 0)}</td>
@@ -2595,6 +2605,14 @@ function colsForMatrix(a, ...mats) {
   const arch = new Set((a && a.archivedColors) || []);
   return ((a && a.colors) || []).filter((c) =>
     !arch.has(c) || mats.some((M) => M && M[c] && Object.values(M[c]).some((v) => (+v || 0) > 0)));
+}
+// Размеры для показа: только те, в которых ЕСТЬ данные (ненулевые в любой из матриц). Если данных
+// нет вообще (пустая партия) — показываем весь ряд, чтобы было куда вводить. Порядок — как в a.sizes.
+function rowsForMatrix(a, ...mats) {
+  const sizes = (a && a.sizes) || [];
+  const has = (s) => mats.some((M) => M && Object.keys(M).some((c) => (+(M[c] && M[c][s]) || 0) > 0));
+  const used = sizes.filter(has);
+  return used.length ? used : sizes.slice(); // пустая матрица → весь ряд (иначе некуда вводить)
 }
 // Нужна ли ткань (нет ни образца, ни № планшета, ни № цвета) — для бейджа «заведи ткань».
 function colorNeedsFabric(a, c) {
