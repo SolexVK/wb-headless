@@ -62,6 +62,32 @@ export const paramsHash = (params) => crypto.createHash('sha1').update(JSON.stri
 
 const cabinetDir = (cabinetId) => path.join(DATA, 'cabinets', String(cabinetId));
 
+// Сборка артефакта (Excel/HTML) БЕЗ ГОНОК. Раньше все build*-функции писали ФИКСИРОВАННОЕ имя
+// (fbs-<report>-service.json → fbs-<report>.xlsx) в ОБЩИЙ каталог кабинета: два одновременных
+// скачивания по одному кабинету (архив+последний, или HTML+PDF+Excel подряд) перезаписывали файл
+// и могли отдать пользователю ЧУЖОЙ снимок. Теперь каждый вызов работает в СВОЁМ уникальном
+// temp-каталоге `gen-…` под каталогом кабинета; старые (>1 ч) подметаем при следующем вызове.
+function sweepTempDirs(base) {
+  try {
+    for (const d of fs.readdirSync(base)) {
+      if (!d.startsWith('gen-')) continue;
+      const p = path.join(base, d);
+      try { if (Date.now() - fs.statSync(p).mtimeMs > 3600_000) fs.rmSync(p, { recursive: true, force: true }); } catch { /* */ }
+    }
+  } catch { /* каталога ещё нет */ }
+}
+async function genArtifact({ cabinetId, snapshot, inName, cmd, script, outName, extraEnv = {}, timeoutMs = 10 * 60_000, errMsg }) {
+  const base = cabinetDir(cabinetId);
+  fs.mkdirSync(base, { recursive: true });
+  sweepTempDirs(base);
+  const dir = fs.mkdtempSync(path.join(base, 'gen-'));
+  fs.writeFileSync(path.join(dir, inName), JSON.stringify(snapshot, null, 2));
+  const r = await spawnCapture(cmd, [script], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir, ...extraEnv }, cwd: REPO, timeoutMs });
+  const out = path.join(dir, outName);
+  if (r.code !== 0 || !fs.existsSync(out)) throw new Error(errMsg + ':\n' + tail(r.err));
+  return out;
+}
+
 function tokenType(meta) {
   return ({ 1: 'base', 2: 'test', 3: 'personal', 4: 'service' })[meta?.acc] || 'personal';
 }
@@ -263,22 +289,10 @@ export function startGeo(cabinet, token, meta, params, userId) {
   return startRun({ cabinet, token, meta, params, userId, report: 'geo', pipeline: runGeoPipeline, summarize: geoSummary });
 }
 export async function buildGeoXlsx(cabinet, snapshot) {
-  const dir = cabinetDir(cabinet.id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'fbs-geo-service.json'), JSON.stringify(snapshot, null, 2));
-  const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-geo-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
-  const out = path.join(dir, 'fbs-geo.xlsx');
-  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать Excel географии:\n' + tail(r.err));
-  return out;
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-geo-service.json', cmd: 'python3', script: path.join(SCRIPTS, 'fbs-geo-xlsx.py'), outName: 'fbs-geo.xlsx', errMsg: 'Не удалось собрать Excel географии' });
 }
 export async function buildGeoDashboardHtml(cabinet, snapshot) {
-  const dir = cabinetDir(cabinet.id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'fbs-geo-service.json'), JSON.stringify(snapshot, null, 2));
-  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-geo-dashboard.mjs')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
-  const out = path.join(dir, 'fbs-geo-dashboard.html');
-  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать HTML-дашборд географии:\n' + tail(r.err));
-  return out;
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-geo-service.json', cmd: process.execPath, script: path.join(SCRIPTS, 'fbs-geo-dashboard.mjs'), outName: 'fbs-geo-dashboard.html', errMsg: 'Не удалось собрать HTML-дашборд географии' });
 }
 
 // ── Пайплайн «Логистика» (сроки сборки и доставки по ФФ) ─────────────────────
@@ -336,22 +350,10 @@ export function startLogistics(cabinet, token, meta, params, userId) {
   return startRun({ cabinet, token, meta, params, userId, report: 'logistics', pipeline: runLogisticsPipeline, summarize: logisticsSummary });
 }
 export async function buildLogisticsXlsx(cabinet, snapshot) {
-  const dir = cabinetDir(cabinet.id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'fbs-logistics-service.json'), JSON.stringify(snapshot, null, 2));
-  const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-logistics-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
-  const out = path.join(dir, 'fbs-logistics.xlsx');
-  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать Excel логистики:\n' + tail(r.err));
-  return out;
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-logistics-service.json', cmd: 'python3', script: path.join(SCRIPTS, 'fbs-logistics-xlsx.py'), outName: 'fbs-logistics.xlsx', errMsg: 'Не удалось собрать Excel логистики' });
 }
 export async function buildLogisticsDashboardHtml(cabinet, snapshot) {
-  const dir = cabinetDir(cabinet.id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'fbs-logistics-service.json'), JSON.stringify(snapshot, null, 2));
-  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-logistics-dashboard.mjs')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
-  const out = path.join(dir, 'fbs-logistics-dashboard.html');
-  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать HTML-дашборд логистики:\n' + tail(r.err));
-  return out;
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-logistics-service.json', cmd: process.execPath, script: path.join(SCRIPTS, 'fbs-logistics-dashboard.mjs'), outName: 'fbs-logistics-dashboard.html', errMsg: 'Не удалось собрать HTML-дашборд логистики' });
 }
 
 // ── Single-flight + фоновый статус (ключ = кабинет:отчёт) ────────────────────
@@ -395,76 +397,28 @@ export function startMovement(cabinet, token, meta, params, userId) {
   return startRun({ cabinet, token, meta, params, userId, report: 'movement', pipeline: runMovementPipeline, summarize: movementSummary });
 }
 
-// ── Артефакты для скачивания (по последнему снимку в каталоге кабинета) ──────
-// Гарантируем наличие fbs-replenishment.json в каталоге, затем запускаем генератор.
-function ensureSnapshotFile(cabinet, snapshot) {
-  const dir = cabinetDir(cabinet.id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'fbs-replenishment.json'), JSON.stringify(snapshot, null, 2));
-  return dir;
-}
-
+// ── Артефакты для скачивания (каждый — в своём temp-каталоге, см. genArtifact) ──
 export async function buildXlsx(cabinet, snapshot) {
-  const dir = ensureSnapshotFile(cabinet, snapshot);
-  const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
-  const out = path.join(dir, 'fbs-podsort.xlsx');
-  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать Excel:\n' + tail(r.err));
-  return out;
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-replenishment.json', cmd: 'python3', script: path.join(SCRIPTS, 'fbs-xlsx.py'), outName: 'fbs-podsort.xlsx', errMsg: 'Не удалось собрать Excel' });
 }
-
-// Excel по остаткам: пишем агрегированный снимок и запускаем python-генератор.
 export async function buildStockXlsx(cabinet, snapshot) {
-  const dir = cabinetDir(cabinet.id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'fbs-stock-service.json'), JSON.stringify(snapshot, null, 2));
-  const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-stock-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
-  const out = path.join(dir, 'fbs-stock.xlsx');
-  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать Excel остатков:\n' + tail(r.err));
-  return out;
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-stock-service.json', cmd: 'python3', script: path.join(SCRIPTS, 'fbs-stock-xlsx.py'), outName: 'fbs-stock.xlsx', errMsg: 'Не удалось собрать Excel остатков' });
 }
-
-// Excel по движению заказов: пишем снимок и запускаем python-генератор.
 export async function buildMovementXlsx(cabinet, snapshot, cost = 620) {
-  const dir = cabinetDir(cabinet.id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'fbs-movement-service.json'), JSON.stringify(snapshot, null, 2));
-  const r = await spawnCapture('python3', [path.join(SCRIPTS, 'fbs-movement-xlsx.py')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir, COST_PER_UNIT: String(cost) }, cwd: REPO });
-  const out = path.join(dir, 'fbs-movement.xlsx');
-  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать Excel движения:\n' + tail(r.err));
-  return out;
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-movement-service.json', cmd: 'python3', script: path.join(SCRIPTS, 'fbs-movement-xlsx.py'), outName: 'fbs-movement.xlsx', extraEnv: { COST_PER_UNIT: String(cost) }, errMsg: 'Не удалось собрать Excel движения' });
 }
-
 export async function buildDashboardHtml(cabinet, snapshot) {
-  const dir = ensureSnapshotFile(cabinet, snapshot);
-  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-replenishment-dashboard.mjs')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
-  const out = path.join(dir, 'fbs-replenishment-dashboard.html');
-  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать HTML-дашборд:\n' + tail(r.err));
-  return out;
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-replenishment.json', cmd: process.execPath, script: path.join(SCRIPTS, 'fbs-replenishment-dashboard.mjs'), outName: 'fbs-replenishment-dashboard.html', errMsg: 'Не удалось собрать HTML-дашборд' });
 }
-
-// HTML-дашборд остатков (тот же снимок, что и для Excel).
 export async function buildStockDashboardHtml(cabinet, snapshot) {
-  const dir = cabinetDir(cabinet.id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'fbs-stock-service.json'), JSON.stringify(snapshot, null, 2));
-  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-stock-dashboard.mjs')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir }, cwd: REPO });
-  const out = path.join(dir, 'fbs-stock-dashboard.html');
-  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать HTML-дашборд остатков:\n' + tail(r.err));
-  return out;
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-stock-service.json', cmd: process.execPath, script: path.join(SCRIPTS, 'fbs-stock-dashboard.mjs'), outName: 'fbs-stock-dashboard.html', errMsg: 'Не удалось собрать HTML-дашборд остатков' });
 }
-
-// HTML-дашборд движения заказов (cost — себестоимость ₽/шт для оценки).
 export async function buildMovementDashboardHtml(cabinet, snapshot, cost = 620) {
-  const dir = cabinetDir(cabinet.id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'fbs-movement-service.json'), JSON.stringify(snapshot, null, 2));
-  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-movement-dashboard.mjs')], { env: { ...process.env, REPORTS_OUTPUT_DIR: dir, COST_PER_UNIT: String(cost) }, cwd: REPO });
-  const out = path.join(dir, 'fbs-movement-dashboard.html');
-  if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать HTML-дашборд движения:\n' + tail(r.err));
-  return out;
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-movement-service.json', cmd: process.execPath, script: path.join(SCRIPTS, 'fbs-movement-dashboard.mjs'), outName: 'fbs-movement-dashboard.html', extraEnv: { COST_PER_UNIT: String(cost) }, errMsg: 'Не удалось собрать HTML-дашборд движения' });
 }
 
-// Рендер готовой HTML-страницы дашборда в PDF (встроенный Chromium).
+// Рендер готовой HTML-страницы дашборда в PDF (встроенный Chromium). htmlPath уже лежит в
+// уникальном temp-каталоге (см. genArtifact), поэтому .pdf рядом с ним тоже уникален — без гонок.
 export async function dashboardToPdf(htmlPath) {
   const out = htmlPath.replace(/\.html$/, '.pdf');
   // Альбомная — чтобы широкие таблицы (день × склад) не обрезались по правому краю.
