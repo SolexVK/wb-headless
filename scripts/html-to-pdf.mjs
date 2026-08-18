@@ -4,7 +4,6 @@
 //   node scripts/html-to-pdf.mjs <input.html> <output.pdf> [--landscape]
 // Ориентация/поля берутся из @media print самой страницы (@page size:A4 landscape).
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
 
@@ -59,30 +58,27 @@ if (!bin) {
 const abs = 'file://' + path.resolve(inHtml);
 fs.mkdirSync(path.dirname(path.resolve(outPdf)), { recursive: true });
 
-// Свой профиль на каждый запуск: без него параллельные headless-инстансы делят
-// профиль по умолчанию и виснут на SingletonLock. Каталог одноразовый — чистим в конце.
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-pdf-'));
+// ВАЖНО: НЕ задаём свой --user-data-dir. На macOS свежий профиль заставляет Chrome
+// лезть в Keychain, а под launchd (без UI) запрос доступа висит до таймаута — это и
+// было «зависание» на ~55с. Профиль по умолчанию уже имеет запись в Keychain и не
+// спрашивает. --use-mock-keychain — страховка от того же класса зависаний.
 const baseArgs = [
   '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--force-color-profile=srgb',
-  '--no-first-run', '--no-default-browser-check', `--user-data-dir=${userDataDir}`,
+  '--use-mock-keychain',
   '--no-pdf-header-footer', '--run-all-compositor-stages-before-draw', '--virtual-time-budget=6000',
   `--print-to-pdf=${path.resolve(outPdf)}`, abs,
 ];
 
-// Каждая попытка жёстко ограничена по времени и убивается SIGKILL (headless-Chrome
-// иногда игнорирует SIGTERM). Суммарно 2×55с < внешнего лимита раннера (180с) —
-// значит дочерний процесс успеет выйти сам и не оставит осиротевший Chrome.
+// Каждая попытка ограничена по времени и убивается SIGKILL (headless-Chrome иногда
+// игнорирует SIGTERM). 2×45с < внешнего лимита раннера (180с) — дочерний процесс
+// успеет выйти сам, не оставив осиротевший Chrome. В норме сборка занимает ~2–3с.
 let ok = false, lastErr = '';
-try {
-  for (const hl of ['--headless=new', '--headless']) { // новые и старые сборки Chrome
-    try { fs.rmSync(outPdf, { force: true }); } catch { /* */ }
-    const r = spawnSync(bin, [hl, ...baseArgs], { timeout: 55000, killSignal: 'SIGKILL', encoding: 'utf8' });
-    lastErr = (r.stderr || '') + (r.error ? r.error.message : '');
-    if (r.error && r.error.code === 'ETIMEDOUT') lastErr += ' [превышен лимит 55с — Chrome снят по таймауту]';
-    if (fs.existsSync(outPdf) && fs.statSync(outPdf).size > 800) { ok = true; break; }
-  }
-} finally {
-  try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* */ }
+for (const hl of ['--headless=new', '--headless']) { // новые и старые сборки Chrome
+  try { fs.rmSync(outPdf, { force: true }); } catch { /* */ }
+  const r = spawnSync(bin, [hl, ...baseArgs], { timeout: 45000, killSignal: 'SIGKILL', encoding: 'utf8' });
+  lastErr = (r.stderr || '') + (r.error ? r.error.message : '');
+  if (r.error && r.error.code === 'ETIMEDOUT') lastErr += ' [превышен лимит 45с — Chrome снят по таймауту]';
+  if (fs.existsSync(outPdf) && fs.statSync(outPdf).size > 800) { ok = true; break; }
 }
 if (!ok) { process.stderr.write('Chrome не смог собрать PDF (' + bin + '):\n' + lastErr.slice(-1500) + '\n'); process.exit(4); }
 process.stderr.write(`→ PDF: ${outPdf} (${(fs.statSync(outPdf).size / 1024).toFixed(1)} КБ, ${path.basename(bin)})\n`);

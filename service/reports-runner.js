@@ -438,7 +438,7 @@ export async function buildMovementDashboardHtml(cabinet, snapshot, cost = 620) 
 export async function dashboardToPdf(htmlPath) {
   const out = htmlPath.replace(/\.html$/, '.pdf');
   // Альбомная — чтобы широкие таблицы (день × склад) не обрезались по правому краю.
-  // Внешний лимит 180с > внутреннего (html-to-pdf.mjs: 2×55с): дочерний node успеет
+  // Внешний лимит 180с > внутреннего (html-to-pdf.mjs: 2×45с): дочерний node успеет
   // выйти сам и снять свой Chrome, поэтому этот SIGKILL — лишь страховка, а не норма.
   const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'html-to-pdf.mjs'), htmlPath, out, '--landscape'], { env: process.env, cwd: REPO, timeoutMs: 3 * 60_000 });
   if (r.code !== 0 || !fs.existsSync(out)) throw new Error('Не удалось собрать PDF:\n' + tail(r.err));
