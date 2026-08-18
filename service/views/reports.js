@@ -79,8 +79,8 @@ export function reportsPage(p) {
           'Продажи и возвраты по регионам и округам России + процент возврата. Возвраты привязаны к исходному фулфилменту отгрузки (откуда товар уехал).',
           'управление возвратами и выбор регионов/складов', !!active)}
         ${card(`/org/${org.id}/reports/logistics`, 'Логистика',
-          'Сроки на каждом этапе: сборка на фулфилменте (создание → отгрузка) и скорость доставки от фулфилмента до клиента, по ФФ, регионам и дням.',
-          'контроль SLA сборки и скорости доставки по направлениям', !!active)}
+          'Сроки на каждом этапе жизни товара: сборка на ФФ (создание → отгрузка), доставка до клиента (отгрузка → выкуп) и путь возврата — из какого ФФ уехал, где продан, откуда и в какой склад WB вернулся, сколько пробыл у клиента.',
+          'контроль SLA сборки/доставки и разбор возвратов (куда и почему)', !!active)}
       </div>
       <p style="margin-top:16px"><a class="dl" href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив отчётов</a></p>
     </div>`,
@@ -773,7 +773,7 @@ export function geoPage(p) {
 // ── Логистика (сроки сборки и доставки по ФФ) ────────────────────────────────
 export function logisticsView(q = {}) {
   const one = (v, a, d) => (a.includes(String(v)) ? String(v) : d);
-  return { tab: one(q.tab, ['assembly', 'delivery'], 'assembly') };
+  return { tab: one(q.tab, ['assembly', 'delivery', 'return'], 'assembly') };
 }
 const logiSeg = (view, nav) => (lab, key, opts) => (nav ? `<div class="mv-seg"><span class="lab">${esc(lab)}</span>${opts.map((o) => `<a class="mv-chip${view[key] === o.v ? ' on' : ''}" href="${nav({ [key]: o.v })}">${esc(o.label)}</a>`).join('')}</div>` : '');
 
@@ -872,11 +872,59 @@ function logisticsDelivery(snap) {
       ${rTable}`;
 }
 
+// Разрез «Путь возврата»: цепочка жизни единицы — ФФ отгрузки → регион продажи →
+// регион возврата → склад возврата WB, кол-во по этапам и времена этапов.
+function logisticsReturnPath(snap) {
+  const rp = snap.returnPath || { available: false, funnel: {}, stageTimes: {}, byFF: [], routes: [], byReturnWarehouse: [] };
+  const f = rp.funnel || {}; const st = rp.stageTimes || {};
+  const days = (v) => (v == null ? '—' : `${nf(v)} сут`);
+  const tiles = [
+    dkKpi(nf(f.shipped), 'отгружено (заказов)', { icon: '🚀', accent: DKAC.blue }),
+    dkKpi(nf(f.sold), 'выкуплено', { icon: '📬', accent: DKAC.green }),
+    dkKpi(`${nf(f.returned)} (${f.returnPct || 0}%)`, 'возвращено', { icon: '↩️', accent: DKAC.red }),
+    dkKpi(fmtHrs(st.deliver?.medianHours), 'медиана доставки до выкупа', { icon: '🚚', accent: DKAC.teal }),
+    dkKpi(days(st.hold?.medianDays), 'медиана «у клиента»', { icon: '⏳', accent: DKAC.amber }),
+  ].join('');
+  const note = `<p class="kv" style="margin:0 0 12px">Цепочка жизни единицы: из какого <b>ФФ отгрузки</b> уехал товар → в каком <b>регионе продан</b> → из какого <b>региона возвращён</b> → в какой <b>склад возврата WB</b> попал; плюс время «отгрузка → выкуп» и «у клиента: выкуп → возврат» (по общему srid). За ${snap.days} дн.</p>`;
+  if (!rp.available) {
+    return `${note}<div class="dk-kpis">${tiles}</div>
+      <div class="dk-insights"><div class="dk-insight" style="--kc:var(--c-green)"><span class="ic">✅</span><span class="tx">За период нет возвратов FBS, привязанных к ФФ отгрузки, — цепочка появится автоматически при первых возвратах. Привязка проверена: srid = rid.</span></div></div>`;
+  }
+  const funnelLine = `<div class="section" style="padding:12px 14px;margin:0 0 14px"><b>Воронка:</b> отгружено <b>${nf(f.shipped)}</b> → выкуплено <b>${nf(f.sold)}</b> → возвращено <b>${nf(f.returned)}</b> <span class="pill">${f.returnPct || 0}% возврата</span></div>`;
+  const topFF = (rp.byFF || [])[0];
+  const topWh = (rp.byReturnWarehouse || [])[0];
+  const slowHold = [...(rp.byFF || [])].filter((r) => r.holdDays != null).sort((a, b) => b.holdDays - a.holdDays)[0];
+  const insightRow = dkInsights([
+    topFF ? { icon: '↩️', accent: DKAC.red, text: `Больше всего возвратов из ФФ: <b>${esc(topFF.ff)}</b> — ${nf(topFF.count)} шт` } : null,
+    topWh ? { icon: '🏬', accent: DKAC.violet, text: `Чаще всего возвращают на склад WB: <b>${esc(topWh.warehouse)}</b> — ${nf(topWh.count)} шт` } : null,
+    slowHold ? { icon: '⏳', accent: DKAC.amber, text: `Дольше всего «у клиента»: <b>${esc(slowHold.ff)}</b> — медиана ${nf(slowHold.holdDays)} сут` } : null,
+  ]);
+  const ffHead = `<tr>${thT('ФФ отгрузки', 'Наш склад, откуда уехал товар', 'tl')}${thT('Возвратов', 'Сколько единиц вернулось', 'num')}${thT('У клиента', 'Медиана: выкуп → возврат', 'num')}${thT('Доставка', 'Медиана: отгрузка → выкуп', 'num')}</tr>`;
+  const ffRows = (rp.byFF || []).map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="num" data-v="${r.count}">${nf(r.count)}</td><td class="num" data-v="${r.holdDays ?? -1}">${days(r.holdDays)}</td><td class="num" data-v="${r.deliverHours ?? -1}">${r.deliverHours == null ? '—' : fmtHrs(r.deliverHours)}</td></tr>`).join('');
+  const ffTable = (rp.byFF || []).length ? `<div class="scroll"><table class="rt sortable"><thead>${ffHead}</thead><tbody>${ffRows}</tbody></table></div>` : '<p class="muted">Нет данных.</p>';
+  const rtHead = `<tr>${thT('ФФ отгрузки', '', 'tl')}${thT('Регион продажи', 'Где товар был продан', 'tl')}${thT('Регион возврата', 'Откуда покупатель вернул', 'tl')}${thT('Склад возврата WB', 'Куда физически вернулся (склад WB)', 'tl')}${thT('Возвратов', '', 'num')}${thT('У клиента', 'Медиана: выкуп → возврат', 'num')}${thT('Доставка', 'Медиана: отгрузка → выкуп', 'num')}</tr>`;
+  const rtRows = (rp.routes || []).map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="tl kv">${esc(r.regionSale)}</td><td class="tl kv">${esc(r.regionReturn)}</td><td class="tl kv">${esc(r.returnWarehouse)}</td><td class="num" data-v="${r.count}">${nf(r.count)}</td><td class="num" data-v="${r.holdDays ?? -1}">${days(r.holdDays)}</td><td class="num" data-v="${r.deliverHours ?? -1}">${r.deliverHours == null ? '—' : fmtHrs(r.deliverHours)}</td></tr>`).join('');
+  const rtTable = (rp.routes || []).length ? `<div class="scroll"><table class="rt sortable"><thead>${rtHead}</thead><tbody>${rtRows}</tbody></table></div>` : '<p class="muted">Нет маршрутов возврата за период.</p>';
+  const whBars = logiBars((rp.byReturnWarehouse || []).map((w) => ({ label: w.warehouse, value: w.count })), 'var(--c-violet)', nf);
+  return `${note}
+      <div class="dk-kpis">${tiles}</div>
+      ${funnelLine}
+      ${insightRow}
+      ${ph('🏭', 'Возвраты по ФФ отгрузки', 'откуда уехало → сколько вернулось · клик по заголовку — сортировка', DKAC.red)}
+      ${ffTable}
+      <div style="margin-top:22px"></div>
+      ${ph('🧭', 'Полный маршрут возврата', 'ФФ отгрузки → регион продажи → регион возврата → склад возврата WB', DKAC.blue)}
+      ${rtTable}
+      <div style="margin-top:22px"></div>
+      ${ph('🏬', 'Склады возврата WB', `куда физически возвращают · ${nf((rp.byReturnWarehouse || []).length)} складов`, DKAC.violet)}
+      ${whBars}`;
+}
+
 function logisticsResults(snap, { view, nav = null, downloadHref, whenLabel }) {
   const seg = logiSeg(view, nav);
-  const tabBar = nav ? `<div class="mv-bar">${seg('Разрез', 'tab', [{ v: 'assembly', label: 'Сборка' }, { v: 'delivery', label: 'Доставка' }])}</div>` : '';
+  const tabBar = nav ? `<div class="mv-bar">${seg('Разрез', 'tab', [{ v: 'assembly', label: 'Сборка' }, { v: 'delivery', label: 'Доставка' }, { v: 'return', label: 'Путь возврата' }])}</div>` : '';
   const dl = `<div style="margin-bottom:12px">${downloadBar(downloadHref)}</div>`;
-  const content = view.tab === 'delivery' ? logisticsDelivery(snap) : logisticsAssembly(snap);
+  const content = view.tab === 'delivery' ? logisticsDelivery(snap) : view.tab === 'return' ? logisticsReturnPath(snap) : logisticsAssembly(snap);
   return `<div class="section">
       <p class="kv" style="margin:0 0 10px">Данные за ${snap.days} дн, с ${esc(snap.from || '')}.${whenLabel ? ` <b>${esc(whenLabel)}</b>` : ''}</p>
       ${dl}
@@ -917,8 +965,8 @@ export function logisticsPage(p) {
   return layout({
     title: `Логистика — ${org.name}`, user, csrf, base, head,
     body: `<div class="wrap">${back}
-      <h1>Логистика — сроки сборки и доставки <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
-      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Среднее время сборки по каждому ФФ и скорость доставки от фулфилмента до конечного клиента. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
+      <h1>Логистика — сроки сборки, доставки и путь возврата <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
+      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Время сборки по каждому ФФ, скорость доставки до клиента и полный путь возврата (ФФ отгрузки → регион продажи → регион возврата → склад возврата WB) с временем на каждом этапе. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
       ${statusBox}
       ${formSection}
       <div id="logi" style="scroll-margin-top:14px">${results}</div>

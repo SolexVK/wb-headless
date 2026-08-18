@@ -16,7 +16,7 @@ process.env.TOKEN_ENC_KEY = '00112233445566778899aabbccddeeff0011223344556677889
 process.env.DB_PATH = path.join(os.tmpdir(), `fbs-contract-${process.pid}.sqlite`);
 
 const { fakeSnapshot, fakeStock, fakeMovement, fakeGeo, fakeLogistics, normalizePodsort, normalizeMovement, geoDefaults, logisticsDefaults } = await import('./reports-runner.js');
-const { buildAssembly, buildDelivery } = await import('../scripts/lib/agg/logistics.mjs');
+const { buildAssembly, buildDelivery, buildReturnPath } = await import('../scripts/lib/agg/logistics.mjs');
 const { aggregateRegions, aggregateFbs } = await import('../scripts/lib/agg/geo.mjs');
 
 let failed = 0;
@@ -85,6 +85,14 @@ const logisticsSpec = {
     byFF: ['array', { ff: 'string', count: 'number', avgHours: 'number', medianHours: 'number' }],
     byRegion: ['array'], buckets: {}, byDay: ['array', { date: 'string', count: 'number' }],
   },
+  returnPath: {
+    available: 'boolean',
+    funnel: { shipped: 'number', sold: 'number', returned: 'number', returnPct: 'number' },
+    stageTimes: { deliver: { count: 'number', medianHours: 'number' }, hold: { count: 'number', medianDays: 'number' } },
+    byFF: ['array', { ff: 'string', count: 'number' }],
+    routes: ['array', { ff: 'string', regionSale: 'string', regionReturn: 'string', returnWarehouse: 'string', count: 'number' }],
+    byReturnWarehouse: ['array', { warehouse: 'string', count: 'number' }],
+  },
 };
 
 // ── fake-снимки (демо/тестовый путь) ────────────────────────────────────────────
@@ -105,11 +113,15 @@ contract('география (агрегатор)', geoLive, geoSpec);
 
 const lord = [{ ff: 'A', warehouseId: 1, createdAt: '2026-08-01T00:00:00Z', closedAt: '2026-08-01T10:00:00Z', article: '001' }];
 const lClosedOf = (o) => o.closedAt || null;
-const lsales = [{ srid: 'r1', saleID: 'S1', date: '2026-08-12T00:00:00', regionName: 'Москва', oblastOkrugName: 'Центральный' }];
+const lsales = [
+  { srid: 'r1', saleID: 'S1', date: '2026-08-12T00:00:00', regionName: 'Москва', oblastOkrugName: 'Центральный' },
+  { srid: 'r1', saleID: 'R1', date: '2026-08-15T00:00:00', regionName: 'Москва', oblastOkrugName: 'Центральный', warehouseName: 'Подольск' },
+];
 const lridMap = new Map([['r1', { ff: 'A', createdAt: '2026-08-10T00:00:00Z', closedAt: '2026-08-10T00:00:00Z' }]]);
 const logiLive = {
   assembly: buildAssembly(lord, lClosedOf, { critH: 48, asmFromSec: Math.floor(Date.parse('2026-01-01') / 1000) }),
   delivery: buildDelivery(lsales, lridMap, () => '2026-08-10T00:00:00Z'),
+  returnPath: buildReturnPath(lsales, lridMap, () => '2026-08-10T00:00:00Z'),
 };
 contract('логистика (агрегатор)', logiLive, logisticsSpec);
 

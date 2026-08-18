@@ -19,12 +19,13 @@ const D = s.delivery || { available: false, totals: {}, byFF: [], byRegion: [], 
 const at = A.totals || {}; const dt = D.totals || {};
 
 // ── KPI-шапка ────────────────────────────────────────────────────────────────
+const rpf = (s.returnPath || {}).funnel || {};
 const kpis = [
   kpi(fmtH(at.medianHours), 'медиана сборки', { icon: '📊', accent: AC.teal }),
-  kpi(fmtH(at.avgHours), 'среднее сборки', { icon: '⏱️', accent: AC.green }),
   kpi(nf(at.processed), 'собрано заданий', { icon: '📦', accent: AC.blue }),
   kpi(D.available ? fmtH(dt.medianHours) : '—', 'медиана доставки', { icon: '🚚', accent: AC.indigo }),
   kpi(D.available ? nf(dt.count) : '0', 'выкупов измерено', { icon: '📬', accent: AC.violet }),
+  kpi(`${nf(rpf.returned || 0)} (${rpf.returnPct || 0}%)`, 'возвращено', { icon: '↩️', accent: AC.red }),
 ].join('');
 
 // ── Сборка ─────────────────────────────────────────────────────────────────
@@ -107,12 +108,50 @@ if (!D.available) {
   </section>`;
 }
 
+// ── Путь возврата ──────────────────────────────────────────────────────────────
+const RP = s.returnPath || { available: false, funnel: {}, stageTimes: {}, byFF: [], routes: [], byReturnWarehouse: [] };
+const fmtD = (v) => (v == null ? '—' : nf1(v) + ' сут');
+let retPanel;
+if (!RP.available) {
+  retPanel = `<section class="panel">
+    ${panelHead('↩️', 'Путь возврата', 'ФФ отгрузки → регион продажи → регион возврата → склад возврата WB', AC.red)}
+    <p class="note">За период нет возвратов FBS, привязанных к ФФ отгрузки. Цепочка появится при первых возвратах (привязка srid = rid).</p>
+  </section>`;
+} else {
+  const f = RP.funnel || {}; const stt = RP.stageTimes || {};
+  const topFF = (RP.byFF || [])[0]; const topWh = (RP.byReturnWarehouse || [])[0];
+  const slowHold = [...(RP.byFF || [])].filter((r) => r.holdDays != null).sort((a, b) => b.holdDays - a.holdDays)[0];
+  const rpInsights = insights([
+    topFF ? { icon: '↩️', accent: AC.red, text: `Больше всего возвратов из ФФ: <b>${esc(topFF.ff)}</b> — ${nf(topFF.count)} шт` } : null,
+    topWh ? { icon: '🏬', accent: AC.violet, text: `Чаще всего возвращают на склад WB: <b>${esc(topWh.warehouse)}</b> — ${nf(topWh.count)} шт` } : null,
+    slowHold ? { icon: '⏳', accent: AC.amber, text: `Дольше всего «у клиента»: <b>${esc(slowHold.ff)}</b> — медиана ${fmtD(slowHold.holdDays)}` } : null,
+  ].filter(Boolean));
+  const ffBars = hbars((RP.byFF || []).map((r) => ({ label: r.ff, value: r.count, sub: r.holdDays != null ? `${nf1(r.holdDays)} сут у клиента` : '', color: 'var(--c-red)' })), { fmt: nf });
+  const whBars = hbars((RP.byReturnWarehouse || []).slice(0, 12).map((w) => ({ label: w.warehouse, value: w.count, color: 'var(--c-violet)' })), { fmt: nf });
+  const rtRows = (RP.routes || []).slice(0, 60).map((r) => `<tr>
+    <td class="tl">${esc(r.ff)}</td><td class="tl">${esc(r.regionSale)}</td><td class="tl">${esc(r.regionReturn)}</td><td class="tl">${esc(r.returnWarehouse)}</td>
+    <td class="cellnum" data-v="${r.count}">${nf(r.count)}</td>
+    <td class="cellnum" data-v="${r.holdDays ?? -1}">${fmtD(r.holdDays)}</td>
+    <td class="cellnum" data-v="${r.deliverHours ?? -1}">${r.deliverHours == null ? '—' : fmtH(r.deliverHours)}</td></tr>`).join('');
+  retPanel = `<section class="panel">
+    ${panelHead('↩️', 'Путь возврата', `ФФ отгрузки → регион продажи → регион возврата → склад возврата WB · за ${s.days} дн`, AC.red)}
+    <p class="note"><b>Воронка:</b> отгружено ${nf(f.shipped)} → выкуплено ${nf(f.sold)} → возвращено ${nf(f.returned)} (${f.returnPct || 0}%). Медиана «у клиента» ${fmtD(stt.hold?.medianDays)}; доставка до выкупа ${fmtH(stt.deliver?.medianHours)}.</p>
+    ${rpInsights}
+    <div class="cols cols-2" style="margin-top:14px">
+      <div><div class="panel-sub" style="margin-bottom:8px">Возвраты по ФФ отгрузки</div><div class="chart-wrap">${ffBars}</div></div>
+      <div><div class="panel-sub" style="margin-bottom:8px">Склады возврата WB</div><div class="chart-wrap">${whBars}</div></div>
+    </div>
+    <div class="panel-sub" style="margin:18px 0 8px">Полный маршрут возврата</div>
+    <div class="table-scroll"><table class="sortable"><thead><tr><th class="tl">ФФ отгрузки</th><th class="tl">Регион продажи</th><th class="tl">Регион возврата</th><th class="tl">Склад возврата WB</th><th class="ta-r">Возвратов</th><th class="ta-r">У клиента</th><th class="ta-r">Доставка</th></tr></thead><tbody>${rtRows}</tbody></table></div>
+  </section>`;
+}
+
 const body = `<div class="wrap">
   <header class="head">
     <div>
       <p class="eyebrow">Wildberries · FBS · логистика</p>
-      <h1>Логистика — сроки сборки и доставки</h1>
-      <p class="sub">Среднее время сборки по каждому фулфилменту (createdAt → передача в доставку) и скорость доставки от ФФ до конечного клиента (уход с ФФ → выкуп) за ${s.days} дней, с ${esc(s.from || '')}. Выкупы привязаны к исходному складу отгрузки (srid = rid).</p>
+      <h1>Логистика — сроки сборки, доставки и путь возврата</h1>
+      <p class="sub">Время сборки по каждому фулфилменту (createdAt → передача в доставку), скорость доставки от ФФ до клиента (уход с ФФ → выкуп) и полный путь возврата (ФФ отгрузки → регион продажи → регион возврата → склад возврата WB) за ${s.days} дней, с ${esc(s.from || '')}. Продажи и возвраты привязаны к исходному складу отгрузки (srid = rid).</p>
     </div>
     <div class="stamp">Снимок<br><b>${stamp}</b></div>
   </header>
@@ -120,7 +159,8 @@ const body = `<div class="wrap">
   ${asmInsights}
   ${asmPanel}
   ${delPanel}
-  <footer class="foot">Источник: marketplace /api/v3/orders + /api/v3/supplies (createdAt, closedAt по ФФ) и statistics /api/v1/supplier/sales (дата выкупа, регион покупателя, srid). FBS-заказы хранятся ~90 дней.</footer>
+  ${retPanel}
+  <footer class="foot">Источник: marketplace /api/v3/orders + /api/v3/supplies (createdAt, closedAt по ФФ) и statistics /api/v1/supplier/sales (дата и регион выкупа/возврата, склад возврата, srid). FBS-заказы хранятся ~90 дней.</footer>
 </div>`;
 
 fs.writeFileSync(R('fbs-logistics-dashboard.html'), page('Логистика FBS — дашборд', body));

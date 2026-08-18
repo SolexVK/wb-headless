@@ -19,7 +19,7 @@ import { fileURLToPath } from 'url';
 import { WbClient } from '../lib/wbClient.js';
 import { loadWarehouses } from './lib/warehouses.mjs';
 import { fetchOrders as wbFetchOrders, fetchSupplies as wbFetchSupplies, fetchSales as wbFetchSales } from './lib/wbFetch.mjs';
-import { buildAssembly, buildDelivery } from './lib/agg/logistics.mjs';
+import { buildAssembly, buildDelivery, buildReturnPath } from './lib/agg/logistics.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -76,10 +76,14 @@ const assembly = buildAssembly(ord.orders, closedOf, { critH: CRIT_H, asmFromSec
 const sales = await fetchSales();
 const delivery = buildDelivery(sales, ord.rid, closedOf);
 
+// ── 3) ПУТЬ ВОЗВРАТА: ФФ отгрузки → регион продажи → регион возврата → склад
+//       возврата WB; кол-во по этапам + времена «отгрузка→выкуп» и «у клиента».
+const returnPath = buildReturnPath(sales, ord.rid, closedOf);
+
 const snapshot = {
   generatedAt: new Date().toISOString(),
   days: DAYS, from: fromDate, ordDays: ORD_DAYS, critAssemblyH: CRIT_H,
-  assembly, delivery,
+  assembly, delivery, returnPath,
 };
 
 // Человекочитаемый вывод.
@@ -89,6 +93,10 @@ for (const r of assembly.byFF) log(`   ${r.ff.padEnd(18)} сделано ${Strin
 log(`\nДОСТАВКА (ФФ → клиент): выкупов с привязкой ${delivery.totals.joined} · измерено ${delivery.totals.count} · среднее ${fmtH(delivery.totals.avgHours)} · медиана ${fmtH(delivery.totals.medianHours)}`);
 for (const r of delivery.byFF) log(`   ${r.ff.padEnd(18)} выкупов ${String(r.count).padStart(5)} · среднее ${fmtH(r.avgHours).padStart(9)} · медиана ${fmtH(r.medianHours).padStart(9)}`);
 if (!delivery.available) log('Доставка: за период нет выкупов, привязанных к ФФ (появится при первых продажах FBS).');
+const rp = returnPath;
+log(`\nПУТЬ ВОЗВРАТА: отгружено ${rp.funnel.shipped} · выкуплено ${rp.funnel.sold} · возвращено ${rp.funnel.returned} (${rp.funnel.returnPct}%)`);
+if (rp.available) log(`   у клиента: медиана ${rp.stageTimes.hold.medianDays} сут · доставка до выкупа: медиана ${fmtH(rp.stageTimes.deliver.medianHours)}`);
+for (const r of rp.byFF) log(`   ${r.ff.padEnd(18)} возвратов ${String(r.count).padStart(5)}${r.holdDays != null ? ` · у клиента ${r.holdDays} сут` : ''}`);
 
 if (!jsonOnly) {
   fs.mkdirSync(OUT_DIR, { recursive: true });

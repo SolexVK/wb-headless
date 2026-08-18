@@ -85,3 +85,61 @@ export function buildDelivery(sales, ridMap, closedOf) {
     byDay: [...byDay.values()].map((g) => ({ date: g.date, count: g.times.length, avgHours: r2(avg(g.times)) })).sort((a, b) => a.date.localeCompare(b.date)),
   };
 }
+
+// ПУТЬ ВОЗВРАТА: цепочка жизни единицы — ФФ отгрузки → регион продажи → регион
+// возврата → склад возврата WB. Кол-во по этапам (отгружено/выкуплено/возвращено)
+// и времена: «отгрузка → выкуп» (closedAt → S.date) и «у клиента: выкуп → возврат»
+// (S.date → R.date, по общему srid). warehouseName R-строки = склад возврата WB.
+//   sales   — строки статистики (S…/R…) с srid, date, regionName, warehouseName;
+//   ridMap  — Map(srid → order{ ff, createdAt, ... }); closedOf(order) → closedAt|null.
+export function buildReturnPath(sales, ridMap, closedOf) {
+  // Выкупы (S) по srid — к возврату (R) подтягиваем дату и регион исходной продажи.
+  const saleBySrid = new Map();
+  let soldJoined = 0;
+  for (const s of sales) {
+    if (isReturn(s)) continue;
+    const key = String(s.srid);
+    if (!ridMap.has(key)) continue;
+    if (!saleBySrid.has(key)) { saleBySrid.set(key, s); soldJoined++; }
+  }
+  const byFF = new Map(); const byRoute = new Map(); const byReturnWh = new Map();
+  const holdAll = []; const deliverAll = []; let returned = 0;
+  for (const s of sales) {
+    if (!isReturn(s)) continue;
+    const o = ridMap.get(String(s.srid));
+    if (!o) continue;                       // возврат вне окна заказов — к ФФ не привязать
+    returned++;
+    const sale = saleBySrid.get(String(s.srid));
+    const ship = closedOf(o) || o.createdAt;
+    let deliverH = null;                    // отгрузка → выкуп
+    if (sale && ship) { const t = (mskDate(sale.date) - new Date(ship)) / 3600000; if (t > 0 && t <= 60 * 24) deliverH = t; }
+    let holdH = null;                       // выкуп → возврат («у клиента»)
+    if (sale) { const t = (mskDate(s.date) - mskDate(sale.date)) / 3600000; if (t >= 0 && t <= 180 * 24) holdH = t; }
+    const ff = o.ff, regSale = sale ? regionOf(sale) : '—', regRet = regionOf(s), wh = s.warehouseName || '—';
+    const bump = (map, key, extra) => {
+      if (!map.has(key)) map.set(key, { ...extra, count: 0, hold: [], deliver: [] });
+      const g = map.get(key); g.count++; if (holdH != null) g.hold.push(holdH); if (deliverH != null) g.deliver.push(deliverH);
+    };
+    bump(byFF, ff, { ff });
+    bump(byRoute, [ff, regSale, regRet, wh].join(' ▸ '), { ff, regionSale: regSale, regionReturn: regRet, returnWarehouse: wh });
+    byReturnWh.set(wh, (byReturnWh.get(wh) || 0) + 1);
+    if (holdH != null) holdAll.push(holdH);
+    if (deliverH != null) deliverAll.push(deliverH);
+  }
+  const fmt = (map, keep) => [...map.values()].map((g) => ({
+    ...keep(g), count: g.count,
+    holdDays: g.hold.length ? r2(median(g.hold) / 24) : null,
+    deliverHours: g.deliver.length ? r2(median(g.deliver)) : null,
+  })).sort((a, b) => b.count - a.count);
+  return {
+    available: returned > 0,
+    funnel: { shipped: ridMap.size, sold: soldJoined, returned, returnPct: soldJoined ? r2((returned / soldJoined) * 100) : 0 },
+    stageTimes: {
+      deliver: { count: deliverAll.length, avgHours: r2(avg(deliverAll)), medianHours: r2(median(deliverAll)) },
+      hold: { count: holdAll.length, avgDays: r2(avg(holdAll) / 24), medianDays: r2(median(holdAll) / 24) },
+    },
+    byFF: fmt(byFF, (g) => ({ ff: g.ff })),
+    routes: fmt(byRoute, (g) => ({ ff: g.ff, regionSale: g.regionSale, regionReturn: g.regionReturn, returnWarehouse: g.returnWarehouse })).slice(0, 60),
+    byReturnWarehouse: [...byReturnWh.entries()].map(([warehouse, count]) => ({ warehouse, count })).sort((a, b) => b.count - a.count),
+  };
+}

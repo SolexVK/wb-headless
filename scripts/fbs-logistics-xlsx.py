@@ -65,5 +65,23 @@ sheet(wb.create_sheet('Доставка по дням'), ['Дата отгруз
       lambda r: [r.get('date', ''), r.get('count', 0), r.get('avgHours', 0)],
       hour_cols=(3,))
 
+# ── Путь возврата: цепочка ФФ отгрузки → регион продажи → регион возврата → склад WB
+RP = s.get('returnPath', {}) or {}
+sheet(wb.create_sheet('Возвраты по ФФ'), ['ФФ отгрузки', 'Возвратов', 'У клиента, сут', 'Доставка, ч'],
+      RP.get('byFF', []),
+      lambda r: [r.get('ff', ''), r.get('count', 0), r.get('holdDays'), r.get('deliverHours')],
+      hour_cols=(3, 4))
+
+sheet(wb.create_sheet('Путь возврата'),
+      ['ФФ отгрузки', 'Регион продажи', 'Регион возврата', 'Склад возврата WB', 'Возвратов', 'У клиента, сут', 'Доставка, ч'],
+      RP.get('routes', []),
+      lambda r: [r.get('ff', ''), r.get('regionSale', ''), r.get('regionReturn', ''), r.get('returnWarehouse', ''),
+                 r.get('count', 0), r.get('holdDays'), r.get('deliverHours')],
+      hour_cols=(6, 7))
+
+sheet(wb.create_sheet('Склады возврата WB'), ['Склад возврата WB', 'Возвратов'],
+      RP.get('byReturnWarehouse', []),
+      lambda r: [r.get('warehouse', ''), r.get('count', 0)])
+
 wb.save(OUT)
 print('OK', OUT)

@@ -4,7 +4,7 @@
 //
 //   node smoke-agg.mjs
 import { avg, median, pct, r2, mskDate } from '../scripts/lib/agg/stats.mjs';
-import { buildAssembly, buildDelivery } from '../scripts/lib/agg/logistics.mjs';
+import { buildAssembly, buildDelivery, buildReturnPath } from '../scripts/lib/agg/logistics.mjs';
 import { aggregateRegions, aggregateFbs } from '../scripts/lib/agg/geo.mjs';
 
 let failed = 0;
@@ -121,6 +121,34 @@ eq(fbs.byFF.map((r) => [r.ff, r.returnCount]), [['A', 1], ['B', 0]], 'гео FBS
 eq(fbs.byFF[0], { ff: 'A', salesCount: 1, salesRub: 1000, returnCount: 1, returnRub: 1000, returnPct: 100, shipped: 2 }, 'гео FBS: строка ФФ «A» точная');
 eq(fbs.byDay.map((d) => d.date), ['2026-08-10', '2026-08-11', '2026-08-12'], 'гео FBS: дни по возрастанию');
 eq(fbs.unattributed, { salesCount: 1, returnCount: 1 }, 'гео FBS: непривязанные (rX/rY «Склад продавца»)');
+
+// ── ПУТЬ ВОЗВРАТА: ФФ отгрузки → регион продажи → регион возврата → склад WB ─────
+// r1(A) продан в Москве, возвращён из Москвы на «Подольск»; r2(A) — СПб/«Коледино»;
+// r3(B) продан без возврата; rX — чужой srid (не привязан).
+const rpRid = new Map([
+  ['r1', { ff: 'A', createdAt: '2026-08-10T00:00:00Z', closedAt: '2026-08-10T00:00:00Z' }],
+  ['r2', { ff: 'A', createdAt: '2026-08-10T00:00:00Z', closedAt: '2026-08-10T00:00:00Z' }],
+  ['r3', { ff: 'B', createdAt: '2026-08-10T00:00:00Z', closedAt: null }],
+]);
+const rpClosedOf = (o) => o.closedAt || null;
+const rpSales = [
+  { srid: 'r1', saleID: 'S1', date: '2026-08-12T00:00:00', regionName: 'Москва' },              // выкуп +45ч
+  { srid: 'r1', saleID: 'R1', date: '2026-08-15T00:00:00', regionName: 'Москва', warehouseName: 'Подольск' },  // возврат +72ч у клиента
+  { srid: 'r2', saleID: 'S2', date: '2026-08-11T00:00:00', regionName: 'СПб' },                 // выкуп +21ч
+  { srid: 'r2', saleID: 'R2', date: '2026-08-13T00:00:00', regionName: 'СПб', warehouseName: 'Коледино' },     // возврат +48ч у клиента
+  { srid: 'r3', saleID: 'S3', date: '2026-08-11T00:00:00', regionName: 'Казань' },              // продан, без возврата
+  { srid: 'rX', saleID: 'R9', date: '2026-08-14T00:00:00', regionName: 'Тула', warehouseName: 'Электросталь' }, // чужой srid
+];
+const rp = buildReturnPath(rpSales, rpRid, rpClosedOf);
+eq(rp.available, true, 'путь возврата: есть данные');
+eq(rp.funnel, { shipped: 3, sold: 3, returned: 2, returnPct: 66.67 }, 'путь возврата: воронка (отгружено/выкуплено/возвращено/%)');
+eq(rp.stageTimes.hold.medianDays, 2.5, 'путь возврата: медиана «у клиента» = 2.5 сут ([48,72]ч)');
+eq(rp.stageTimes.deliver.medianHours, 33, 'путь возврата: медиана доставки до выкупа = 33 ч ([21,45])');
+eq(rp.byFF[0], { ff: 'A', count: 2, holdDays: 2.5, deliverHours: 33 }, 'путь возврата: ФФ «A» точный');
+eq(rp.byReturnWarehouse.map((w) => [w.warehouse, w.count]), [['Подольск', 1], ['Коледино', 1]], 'путь возврата: склады возврата WB');
+eq(rp.routes[0], { ff: 'A', regionSale: 'Москва', regionReturn: 'Москва', returnWarehouse: 'Подольск', count: 1, holdDays: 3, deliverHours: 45 }, 'путь возврата: маршрут r1 точный');
+const rpEmpty = buildReturnPath([], new Map(), () => null);
+eq(rpEmpty.available, false, 'путь возврата: пусто → available=false');
 
 console.log(`\nАгрегаторы (agg): ${failed ? failed + ' ПРОВАЛ(ов)' : 'все проверки зелёные'}`);
 process.exit(failed ? 1 : 0);

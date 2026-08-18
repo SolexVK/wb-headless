@@ -338,6 +338,20 @@ export function fakeLogistics(params) {
       byFF: delFF, byRegion: delReg, buckets: { '<2 сут': 40, '2–4 сут': 60, '4–7 сут': 20, '>7 сут': 10 },
       byDay: [{ date: '2026-08-12', count: 45, avgHours: 66.0 }, { date: '2026-08-13', count: 48, avgHours: 70.0 }, { date: '2026-08-14', count: 37, avgHours: 74.0 }],
     },
+    returnPath: {
+      available: true,
+      funnel: { shipped: 180, sold: 130, returned: 13, returnPct: 10 },
+      stageTimes: { deliver: { count: 13, avgHours: 66.0, medianHours: 60.0 }, hold: { count: 12, avgDays: 5.4, medianDays: 5.0 } },
+      byFF: [
+        { ff: 'Мск зелёная зона', count: 8, holdDays: 4.5, deliverHours: 58.0 },
+        { ff: 'Казань', count: 5, holdDays: 6.2, deliverHours: 84.0 },
+      ],
+      routes: [
+        { ff: 'Казань', regionSale: 'Москва', regionReturn: 'Москва', returnWarehouse: 'Подольск', count: 5, holdDays: 6.0, deliverHours: 84.0 },
+        { ff: 'Мск зелёная зона', regionSale: 'Московская область', regionReturn: 'Московская область', returnWarehouse: 'Коледино', count: 8, holdDays: 4.5, deliverHours: 58.0 },
+      ],
+      byReturnWarehouse: [{ warehouse: 'Подольск', count: 7 }, { warehouse: 'Коледино', count: 6 }],
+    },
   };
 }
 async function runLogisticsPipeline(cabinet, token, meta, params, onLog) {
