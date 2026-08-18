@@ -5,6 +5,7 @@
 //   node smoke-agg.mjs
 import { avg, median, pct, r2, mskDate } from '../scripts/lib/agg/stats.mjs';
 import { buildAssembly, buildDelivery } from '../scripts/lib/agg/logistics.mjs';
+import { aggregateRegions, aggregateFbs } from '../scripts/lib/agg/geo.mjs';
 
 let failed = 0;
 const ok = (cond, msg) => { console.log(`${cond ? '✓' : '✗'}  ${msg}`); if (!cond) failed++; };
@@ -79,6 +80,47 @@ eq(del.byDay.map((r) => r.date), ['2026-08-11', '2026-08-12', '2026-08-15'], 'д
 const delEmpty = buildDelivery([], new Map(), () => null);
 eq(delEmpty.available, false, 'доставка: пусто → available=false');
 eq(delEmpty.totals.count, 0, 'доставка: пусто → 0 измерений');
+
+// ── ГЕОГРАФИЯ: регионы/округа + FBS-привязка ────────────────────────────────────
+const geoSales = [
+  { saleID: 'S1', finishedPrice: 1000, regionName: 'Москва', oblastOkrugName: 'Центральный', nmId: 100 },
+  { saleID: 'S2', finishedPrice: 500, regionName: 'Тула', oblastOkrugName: 'Центральный', nmId: 100 },
+  { saleID: 'R3', finishedPrice: 300, regionName: 'Москва', oblastOkrugName: 'Центральный', nmId: 100 }, // возврат
+  { saleID: 'S4', finishedPrice: 2000, regionName: 'СПб', oblastOkrugName: 'Северо-Западный', nmId: 200 },
+];
+const regAll = aggregateRegions(geoSales, () => true);
+eq(regAll.totals, { salesCount: 3, returnCount: 1, salesRub: 3500, returnRub: 300, regions: 3, returnPct: 33.3 }, 'гео регионы: итоги «Вся РФ»');
+eq(regAll.byRegion.map((r) => [r.region, r.salesCount, r.returnCount]), [['Москва', 1, 1], ['Тула', 1, 0], ['СПб', 1, 0]], 'гео регионы: по регионам');
+eq(regAll.byOkrug.find((o) => o.okrug === 'Центральный').returnPct, 50, 'гео округа: % возврата Центрального = 50');
+// Фильтр по nmId (товары московских FF) — только nm 100.
+const regMos = aggregateRegions(geoSales, (s) => s.nmId === 100);
+eq(regMos.totals, { salesCount: 2, returnCount: 1, salesRub: 1500, returnRub: 300, regions: 2, returnPct: 50 }, 'гео регионы: фильтр по nmId');
+
+// FBS-привязка: srid==rid → ФФ отгрузки; чужие srid попадают в unattributed (только «Склад продавца»).
+const geoOrd = {
+  rid: new Map([
+    ['r1', { ff: 'A', mos: false, article: '001', nm: 100 }],
+    ['r3', { ff: 'B', mos: false, article: '002', nm: 200 }],
+  ]),
+  ordersByFF: { A: 2, B: 1 },
+};
+const fbsSales = [
+  { srid: 'r1', saleID: 'S1', finishedPrice: 1000, date: '2026-08-10T00:00:00', regionName: 'Москва', oblastOkrugName: 'Центральный', warehouseType: 'Склад продавца' },
+  { srid: 'r1', saleID: 'R1', finishedPrice: 1000, date: '2026-08-12T00:00:00', regionName: 'Москва', oblastOkrugName: 'Центральный', warehouseType: 'Склад продавца' }, // возврат A
+  { srid: 'r3', saleID: 'S3', finishedPrice: 2000, date: '2026-08-11T00:00:00', regionName: 'СПб', oblastOkrugName: 'Северо-Западный', warehouseType: 'Склад продавца' },
+  { srid: 'rX', saleID: 'S9', finishedPrice: 700, date: '2026-08-11T00:00:00', warehouseType: 'Склад продавца' }, // не привязан
+  { srid: 'rY', saleID: 'R9', finishedPrice: 400, date: '2026-08-11T00:00:00', warehouseType: 'Склад продавца' }, // не привязан (возврат)
+];
+const fbs = aggregateFbs(fbsSales, geoOrd);
+eq(fbs.totals.salesCount, 2, 'гео FBS: продаж привязано 2');
+eq(fbs.totals.returnCount, 1, 'гео FBS: возвратов привязано 1');
+eq(fbs.totals.salesRub, 3000, 'гео FBS: сумма продаж 3000');
+eq(fbs.totals.returnPct, 50, 'гео FBS: % возврата 50 (1/2)');
+eq(fbs.totals.shipped, 3, 'гео FBS: отгружено 3 (A2+B1)');
+eq(fbs.byFF.map((r) => [r.ff, r.returnCount]), [['A', 1], ['B', 0]], 'гео FBS: ФФ по возвратам');
+eq(fbs.byFF[0], { ff: 'A', salesCount: 1, salesRub: 1000, returnCount: 1, returnRub: 1000, returnPct: 100, shipped: 2 }, 'гео FBS: строка ФФ «A» точная');
+eq(fbs.byDay.map((d) => d.date), ['2026-08-10', '2026-08-11', '2026-08-12'], 'гео FBS: дни по возрастанию');
+eq(fbs.unattributed, { salesCount: 1, returnCount: 1 }, 'гео FBS: непривязанные (rX/rY «Склад продавца»)');
 
 console.log(`\nАгрегаторы (agg): ${failed ? failed + ' ПРОВАЛ(ов)' : 'все проверки зелёные'}`);
 process.exit(failed ? 1 : 0);
