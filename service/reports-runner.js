@@ -159,6 +159,15 @@ async function runPodsortPipeline(cabinet, token, meta, params, onLog) {
   return snap;
 }
 const tail = (s, n = 1200) => String(s || '').slice(-n);
+// Ошибка джоба показывается пользователю в браузере, а её текст может содержать хвост stderr
+// пайплайна. Если скрипт когда-нибудь напечатает WB-токен (JWT вида a.b.c) или Bearer/заголовок —
+// он не должен утечь в UI. Вырезаем токен-подобные строки перед сохранением в job.error.
+function redactSecrets(s) {
+  return String(s || '')
+    .replace(/\b[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}\b/g, '[token]') // JWT-подобный токен (3 base64-сегмента через точки)
+    .replace(/\b(bearer|token|authorization)\b\s*[:=]?\s*[A-Za-z0-9._\-]{12,}/gi, '$1 [redacted]')
+    .replace(/\bWB_API_TOKEN\s*=\s*\S+/gi, 'WB_API_TOKEN=[redacted]');
+}
 
 // ── Пайплайн «Остатки»: fbs-stock → агрегация по артикулу+цвету ──────────────
 function parseArt(vc) {
@@ -360,9 +369,16 @@ export async function buildLogisticsDashboardHtml(cabinet, snapshot) {
 const jobs = new Map();
 const jobKey = (cabinetId, report) => `${Number(cabinetId)}:${report}`;
 export function getJob(cabinetId, report = 'podsort') { return jobs.get(jobKey(cabinetId, report)) || null; }
+// Завершённые (done/error) джобы держим 10 минут (чтобы UI показал статус после пересчёта),
+// затем убираем — иначе Map растёт неограниченно за время жизни процесса. running не трогаем.
+function pruneJobs() {
+  const cutoff = Date.now() - 10 * 60_000;
+  for (const [k, j] of jobs) if (j.state !== 'running' && (j.finishedAt || 0) < cutoff) jobs.delete(k);
+}
 
 // Обобщённый фоновый запуск отчёта с сохранением в архив.
 function startRun({ cabinet, token, meta, params, userId, report, pipeline, summarize }) {
+  pruneJobs();
   const id = Number(cabinet.id);
   const key = jobKey(id, report);
   const cur = jobs.get(key);
@@ -378,7 +394,7 @@ function startRun({ cabinet, token, meta, params, userId, report, pipeline, summ
       job.state = 'done'; job.finishedAt = Date.now(); job.log = 'готово';
       logger.info({ cabinetId: id, report }, 'отчёт: готово, сохранено в архив');
     } catch (e) {
-      job.state = 'error'; job.finishedAt = Date.now(); job.error = e.message; job.log = 'ошибка';
+      job.state = 'error'; job.finishedAt = Date.now(); job.error = redactSecrets(e.message); job.log = 'ошибка';
       logger.error({ cabinetId: id, report, err: e.message }, 'отчёт: ошибка');
     }
   })();
