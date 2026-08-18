@@ -100,6 +100,10 @@ async function fetchSales() {
 
 // ── Утилиты по времени ────────────────────────────────────────────────────────
 const hrs = (a, b) => (new Date(b) - new Date(a)) / 3600000;
+// Дата продажи из статистики WB идёт БЕЗ смещения (московское локальное время). На сервере
+// в UTC `new Date(s.date)` разобрался бы как UTC → диф с UTC-временами заказа съезжал бы на 3ч.
+// Явно проставляем +03:00, если смещения нет (Z или ±hh:mm — оставляем как есть).
+const mskDate = (d) => { const s = String(d || ''); return new Date(/(?:Z|[+-]\d{2}:?\d{2})$/.test(s) ? s : s + '+03:00'); };
 const median = (arr) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 const pct = (arr, p) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); const i = Math.min(s.length - 1, Math.floor(p / 100 * s.length)); return s[i]; };
 const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
@@ -154,7 +158,7 @@ for (const s of sales) {
   joined++;
   const ship = closedOf(o) || o.createdAt; // момент ухода с ФФ (передача в доставку)
   if (!ship) { noShip++; continue; }
-  const t = hrs(ship, s.date);
+  const t = (mskDate(s.date) - new Date(ship)) / 3600000; // ship — UTC ISO; s.date нормализуем к МСК
   if (!(t > 0) || t > 60 * 24) continue;  // отсекаем аномалии (отрицательные / > 60 сут)
   delAll.push(t);
   const day = String(s.date || '').slice(0, 10);
