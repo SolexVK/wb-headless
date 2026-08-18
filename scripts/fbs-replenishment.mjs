@@ -101,7 +101,7 @@ async function fetchRange(fromSec, toSec) {
   for (;;) {
     const { data } = await wb.get('marketplace', '/api/v3/orders', { query: { limit: 1000, next, dateFrom: fromSec, dateTo: toSec }, methodLimit: MP });
     const b = data.orders || []; out.push(...b);
-    if (b.length < 1000) break; next = data.next;
+    if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
   }
   return out;
 }

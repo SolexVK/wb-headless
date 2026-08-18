@@ -85,7 +85,7 @@ async function fetchOrders() {
     const batch = data.orders || [];
     orders.push(...batch);
     log(`  orders: страница ${page}, +${batch.length} (всего ${orders.length})`);
-    if (batch.length < 1000) break;
+    if (batch.length < 1000 || data.next == null || data.next === next) break;
     next = data.next;
   }
   return orders;
@@ -102,7 +102,7 @@ async function fetchSupplies(neededIds) {
     const batch = data.supplies || [];
     for (const s of batch) map.set(s.id, s);
     log(`  supplies: страница ${page}, +${batch.length} (всего ${map.size})`);
-    if (batch.length < 1000) break;
+    if (batch.length < 1000 || data.next == null || data.next === next) break;
     next = data.next;
   }
   // Доводим недостающие поставки точечными запросами.

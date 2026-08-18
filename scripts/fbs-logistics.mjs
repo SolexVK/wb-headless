@@ -58,7 +58,7 @@ async function fetchOrders() {
         const rec = { ff: name, warehouseId: o.warehouseId, createdAt: o.createdAt, supplyId: o.supplyId, article: parseArt(o.article), nmId: o.nmId };
         rid.set(id, rec); orders.push(rec);
       }
-      if (b.length < 1000) break; next = data.next;
+      if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
     }
     end = start;
   }
@@ -72,7 +72,7 @@ async function fetchSupplies(neededIds) {
     const { data } = await wb.get('marketplace', '/api/v3/supplies', { query: { limit: 1000, next }, methodLimit: MP });
     const b = data.supplies || [];
     for (const s of b) map.set(s.id, s);
-    if (b.length < 1000) break; next = data.next;
+    if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
   }
   const missing = [...neededIds].filter((id) => id && !map.has(id));
   if (missing.length) {

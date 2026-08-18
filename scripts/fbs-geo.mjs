@@ -56,7 +56,7 @@ async function fetchOrders() {
         ordersByFF[name] = (ordersByFF[name] || 0) + 1;
         if (WH.isMoscow(o.warehouseId) && o.nmId) moscowNm.add(o.nmId);
       }
-      if (b.length < 1000) break; next = data.next;
+      if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
     }
     end = start;
   }

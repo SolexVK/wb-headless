@@ -63,7 +63,7 @@ async function fetchOrders() {
       const b = data.orders || [];
       for (const o of b) byId.set(o.id ?? `${o.rid}`, o);
       log(`  orders ${new Date(start * 1000).toISOString().slice(0, 10)}..${new Date(end * 1000).toISOString().slice(0, 10)}: стр.${p} +${b.length} (${byId.size})`);
-      if (b.length < 1000) break; next = data.next;
+      if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
     }
     end = start;
   }
@@ -74,7 +74,7 @@ async function fetchSupplies(neededIds) {
   for (let p = 1; ; p++) {
     const { data } = await wb.get('marketplace', '/api/v3/supplies', { query: { limit: 1000, next }, methodLimit: MP });
     const b = data.supplies || []; for (const s of b) map.set(s.id, s);
-    if (b.length < 1000) break; next = data.next;
+    if (b.length < 1000 || data.next == null || data.next === next) break; next = data.next;
   }
   const missing = [...neededIds].filter((id) => id && !map.has(id));
   for (const id of missing) { try { const { data } = await wb.get('marketplace', `/api/v3/supplies/${id}`, { methodLimit: MP }); map.set(id, data); } catch (e) { log(`  ! supply ${id}: ${e.message}`); } }
