@@ -57,7 +57,12 @@ def gsheet(ws, head, rows, cells):
         rr = ws.max_row
         for j, h in enumerate(head, 1):
             if '%' in str(h):
-                ws.cell(rr, j).number_format = '0.0"%"'
+                # Как на листах регионов: храним ДОЛЮ (0.333), формат '0.0%' сам умножит
+                # на 100. Раньше тут лежало сырое 33.3 с литеральным «%» — визуально то же,
+                # но значение в ячейке было в 100× другого масштаба (ломало сортировку/формулы).
+                cell = ws.cell(rr, j)
+                cell.value = (cell.value or 0) / 100.0
+                cell.number_format = '0.0%'
     ws.freeze_panes = 'A2'
     if ws.max_row > 1:
         ws.auto_filter.ref = f'A1:{ws.cell(1, ws.max_column).column_letter}{ws.max_row}'
