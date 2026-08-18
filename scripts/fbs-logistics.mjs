@@ -89,7 +89,9 @@ async function fetchSales() {
     const { data } = await wb.get('statistics', '/api/v1/supplier/sales', { query: { dateFrom }, methodLimit: STAT });
     const b = Array.isArray(data) ? data : [];
     let last = null;
-    for (const s of b) { if (s.srid && seen.has(s.srid)) continue; if (s.srid) seen.add(s.srid); rows.push(s); last = s.lastChangeDate || last; }
+    // Дедуп по srid+saleID: у возврата «R…» тот же srid, что у продажи «S…» — дедуп по одному srid
+    // выбрасывал возвраты. Логистике важны только выкупы, но дубль-фикс держим единообразно с гео.
+    for (const s of b) { const k = s.srid ? s.srid + '|' + (s.saleID || '') : null; if (k && seen.has(k)) continue; if (k) seen.add(k); rows.push(s); last = s.lastChangeDate || last; }
     log(`  sales стр.${page}: +${b.length} (всего ${rows.length})`);
     if (b.length < 80000 || !last) break; dateFrom = last;
   }
