@@ -8,12 +8,23 @@ import { requireAuth } from './security.js';
 import { reportsPage, podsortPage, stockPage, movementPage, movementView, geoPage, geoView, logisticsPage, logisticsView, archivePage, archiveViewPage } from './views.js';
 import { podsortDefaults, normalizePodsort, movementDefaults, normalizeMovement, geoDefaults, normalizeGeo, logisticsDefaults, normalizeLogistics, startPodsort, startStock, startMovement, startGeo, startLogistics, getJob, buildXlsx, buildStockXlsx, buildMovementXlsx, buildGeoXlsx, buildLogisticsXlsx, buildDashboardHtml, buildStockDashboardHtml, buildMovementDashboardHtml, buildGeoDashboardHtml, buildLogisticsDashboardHtml, dashboardToPdf } from './reports-runner.js';
 import { logger } from './logger.js';
+import { REPORT_RU } from './report-names.js';
 
 export const reportsRouter = express.Router();
 
 // Имя файла выгрузки: «Название отчёта дата» (напр. «Подсорт 2026-08-14»).
-const RU_REPORT = { podsort: 'Подсорт', stock: 'Остатки', movement: 'Движение заказов', geo: 'География', logistics: 'Логистика' };
-const fileStem = (report, date) => `${RU_REPORT[report] || report} ${(date && String(date).slice(0, 10)) || new Date().toISOString().slice(0, 10)}`;
+const fileStem = (report, date) => `${REPORT_RU[report] || report} ${(date && String(date).slice(0, 10)) || new Date().toISOString().slice(0, 10)}`;
+
+// Реестр отчётов: как нормализовать форму, чем запускать пересчёт и чем собирать
+// выгрузки. Из него генерятся одинаковые маршруты refresh/download и диспетчер
+// sendDownload — раньше это были 5× копипастных триплетов и вложенные тернарии.
+const REG = {
+  podsort: { normalize: normalizePodsort, start: startPodsort, xlsx: buildXlsx, html: buildDashboardHtml },
+  stock: { normalize: () => ({}), start: startStock, xlsx: buildStockXlsx, html: buildStockDashboardHtml },
+  movement: { normalize: normalizeMovement, start: startMovement, xlsx: buildMovementXlsx, html: buildMovementDashboardHtml, cost: true },
+  geo: { normalize: normalizeGeo, start: startGeo, xlsx: buildGeoXlsx, html: buildGeoDashboardHtml },
+  logistics: { normalize: normalizeLogistics, start: startLogistics, xlsx: buildLogisticsXlsx, html: buildLogisticsDashboardHtml },
+};
 
 function loadOrg(req, res, next) {
   const orgId = Number(req.params.id);
@@ -47,20 +58,16 @@ async function sendDownload(res, kind, cabId, snapshot, stem, report = 'podsort'
     res.attachment(`${stem}.json`); // корректно кодирует кириллицу (filename*)
     return res.send(JSON.stringify(snapshot, null, 2));
   }
+  const reg = REG[report];
+  if (!reg) return res.status(404).send('Для этого отчёта такой формат недоступен.');
+  // Смету (cost) принимают только те сборщики, у которых reg.cost === true (движение).
+  const extra = reg.cost ? [opts.cost || 620] : [];
   if (kind === 'xlsx') {
-    const file = report === 'stock' ? await buildStockXlsx({ id: cabId }, snapshot)
-      : report === 'movement' ? await buildMovementXlsx({ id: cabId }, snapshot, opts.cost || 620)
-        : report === 'geo' ? await buildGeoXlsx({ id: cabId }, snapshot)
-          : report === 'logistics' ? await buildLogisticsXlsx({ id: cabId }, snapshot)
-            : await buildXlsx({ id: cabId }, snapshot);
+    const file = await reg.xlsx({ id: cabId }, snapshot, ...extra);
     return res.download(file, `${stem}.xlsx`);
   }
   if (kind === 'html' || kind === 'pdf') {
-    const html = report === 'stock' ? await buildStockDashboardHtml({ id: cabId }, snapshot)
-      : report === 'movement' ? await buildMovementDashboardHtml({ id: cabId }, snapshot, opts.cost || 620)
-        : report === 'geo' ? await buildGeoDashboardHtml({ id: cabId }, snapshot)
-          : report === 'logistics' ? await buildLogisticsDashboardHtml({ id: cabId }, snapshot)
-            : await buildDashboardHtml({ id: cabId }, snapshot);
+    const html = await reg.html({ id: cabId }, snapshot, ...extra);
     if (kind === 'html') return res.download(html, `${stem}.html`);
     return res.download(await dashboardToPdf(html), `${stem}.pdf`);
   }
@@ -89,28 +96,7 @@ reportsRouter.get('/org/:id/reports/podsort', requireAuth, loadOrg, (req, res) =
   }));
 });
 
-// ── Подсорт: запустить пересчёт (фоново, single-flight) ─────────────────────
-reportsRouter.post('/org/:id/reports/podsort/refresh', requireAuth, loadOrg, (req, res) => {
-  const cab = Cabinets.activeOf(req.org.id);
-  if (!cab) return res.redirect(`/org/${req.org.id}/reports/podsort`);
-  const token = Cabinets.decryptedToken(cab);
-  if (!token) return res.redirect(`/org/${req.org.id}/reports/podsort`);
-  const params = normalizePodsort(req.body);
-  const { already } = startPodsort({ id: cab.id }, token, Cabinets.meta(cab), params, req.session.user.id);
-  if (already) logger.info({ cabinetId: cab.id }, 'подсорт: пересчёт уже идёт — пропускаю');
-  res.redirect(`/org/${req.org.id}/reports/podsort`);
-});
-
-// ── Подсорт: выгрузки последнего запуска ─────────────────────────────────────
-reportsRouter.get('/org/:id/reports/podsort/download/:kind', requireAuth, loadOrg, async (req, res) => {
-  const cab = Cabinets.activeOf(req.org.id);
-  const latest = cab ? ReportRuns.latest(cab.id, 'podsort') : null;
-  if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
-  try { await sendDownload(res, req.params.kind, cab.id, latest.data, fileStem('podsort'), 'podsort'); }
-  catch (e) { logger.error({ err: e.message }, 'подсорт: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
-});
-
-// ── Остатки: страница + пересчёт + выгрузка ─────────────────────────────────
+// ── Остатки: страница ────────────────────────────────────────────────────────
 reportsRouter.get('/org/:id/reports/stock', requireAuth, loadOrg, (req, res) => {
   const cab = Cabinets.activeOf(req.org.id);
   const latest = cab ? ReportRuns.latest(cab.id, 'stock') : null;
@@ -130,25 +116,7 @@ reportsRouter.get('/org/:id/reports/stock', requireAuth, loadOrg, (req, res) => 
   }));
 });
 
-reportsRouter.post('/org/:id/reports/stock/refresh', requireAuth, loadOrg, (req, res) => {
-  const cab = Cabinets.activeOf(req.org.id);
-  if (!cab) return res.redirect(`/org/${req.org.id}/reports/stock`);
-  const token = Cabinets.decryptedToken(cab);
-  if (!token) return res.redirect(`/org/${req.org.id}/reports/stock`);
-  const { already } = startStock({ id: cab.id }, token, Cabinets.meta(cab), {}, req.session.user.id);
-  if (already) logger.info({ cabinetId: cab.id }, 'остатки: пересчёт уже идёт — пропускаю');
-  res.redirect(`/org/${req.org.id}/reports/stock`);
-});
-
-reportsRouter.get('/org/:id/reports/stock/download/:kind', requireAuth, loadOrg, async (req, res) => {
-  const cab = Cabinets.activeOf(req.org.id);
-  const latest = cab ? ReportRuns.latest(cab.id, 'stock') : null;
-  if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
-  try { await sendDownload(res, req.params.kind, cab.id, latest.data, fileStem('stock'), 'stock'); }
-  catch (e) { logger.error({ err: e.message }, 'остатки: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
-});
-
-// ── Движение заказов: страница + пересчёт + выгрузка ─────────────────────────
+// ── Движение заказов: страница ───────────────────────────────────────────────
 reportsRouter.get('/org/:id/reports/movement', requireAuth, loadOrg, (req, res) => {
   const cab = Cabinets.activeOf(req.org.id);
   const latest = cab ? ReportRuns.latest(cab.id, 'movement') : null;
@@ -164,27 +132,7 @@ reportsRouter.get('/org/:id/reports/movement', requireAuth, loadOrg, (req, res) 
   }));
 });
 
-reportsRouter.post('/org/:id/reports/movement/refresh', requireAuth, loadOrg, (req, res) => {
-  const cab = Cabinets.activeOf(req.org.id);
-  if (!cab) return res.redirect(`/org/${req.org.id}/reports/movement`);
-  const token = Cabinets.decryptedToken(cab);
-  if (!token) return res.redirect(`/org/${req.org.id}/reports/movement`);
-  const params = normalizeMovement(req.body);
-  const { already } = startMovement({ id: cab.id }, token, Cabinets.meta(cab), params, req.session.user.id);
-  if (already) logger.info({ cabinetId: cab.id }, 'движение: пересчёт уже идёт — пропускаю');
-  res.redirect(`/org/${req.org.id}/reports/movement`);
-});
-
-reportsRouter.get('/org/:id/reports/movement/download/:kind', requireAuth, loadOrg, async (req, res) => {
-  const cab = Cabinets.activeOf(req.org.id);
-  const latest = cab ? ReportRuns.latest(cab.id, 'movement') : null;
-  if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
-  const cost = Math.min(100000, Math.max(0, Math.round(Number(req.query.cost)) || 620));
-  try { await sendDownload(res, req.params.kind, cab.id, latest.data, fileStem('movement'), 'movement', { cost }); }
-  catch (e) { logger.error({ err: e.message }, 'движение: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
-});
-
-// ── География продаж и возвратов: страница + пересчёт + выгрузка ─────────────
+// ── География продаж и возвратов: страница ──────────────────────────────────
 reportsRouter.get('/org/:id/reports/geo', requireAuth, loadOrg, (req, res) => {
   const cab = Cabinets.activeOf(req.org.id);
   const latest = cab ? ReportRuns.latest(cab.id, 'geo') : null;
@@ -198,25 +146,7 @@ reportsRouter.get('/org/:id/reports/geo', requireAuth, loadOrg, (req, res) => {
   }));
 });
 
-reportsRouter.post('/org/:id/reports/geo/refresh', requireAuth, loadOrg, (req, res) => {
-  const cab = Cabinets.activeOf(req.org.id);
-  if (!cab) return res.redirect(`/org/${req.org.id}/reports/geo`);
-  const token = Cabinets.decryptedToken(cab);
-  if (!token) return res.redirect(`/org/${req.org.id}/reports/geo`);
-  const { already } = startGeo({ id: cab.id }, token, Cabinets.meta(cab), normalizeGeo(req.body), req.session.user.id);
-  if (already) logger.info({ cabinetId: cab.id }, 'география: пересчёт уже идёт — пропускаю');
-  res.redirect(`/org/${req.org.id}/reports/geo`);
-});
-
-reportsRouter.get('/org/:id/reports/geo/download/:kind', requireAuth, loadOrg, async (req, res) => {
-  const cab = Cabinets.activeOf(req.org.id);
-  const latest = cab ? ReportRuns.latest(cab.id, 'geo') : null;
-  if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
-  try { await sendDownload(res, req.params.kind, cab.id, latest.data, fileStem('geo'), 'geo'); }
-  catch (e) { logger.error({ err: e.message }, 'география: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
-});
-
-// ── Логистика (сроки сборки и доставки): страница + пересчёт + выгрузка ───────
+// ── Логистика (сроки сборки и доставки): страница ────────────────────────────
 reportsRouter.get('/org/:id/reports/logistics', requireAuth, loadOrg, (req, res) => {
   const cab = Cabinets.activeOf(req.org.id);
   const latest = cab ? ReportRuns.latest(cab.id, 'logistics') : null;
@@ -230,23 +160,33 @@ reportsRouter.get('/org/:id/reports/logistics', requireAuth, loadOrg, (req, res)
   }));
 });
 
-reportsRouter.post('/org/:id/reports/logistics/refresh', requireAuth, loadOrg, (req, res) => {
-  const cab = Cabinets.activeOf(req.org.id);
-  if (!cab) return res.redirect(`/org/${req.org.id}/reports/logistics`);
-  const token = Cabinets.decryptedToken(cab);
-  if (!token) return res.redirect(`/org/${req.org.id}/reports/logistics`);
-  const { already } = startLogistics({ id: cab.id }, token, Cabinets.meta(cab), normalizeLogistics(req.body), req.session.user.id);
-  if (already) logger.info({ cabinetId: cab.id }, 'логистика: пересчёт уже идёт — пропускаю');
-  res.redirect(`/org/${req.org.id}/reports/logistics`);
-});
+// ── Пересчёт и выгрузки для всех отчётов — единообразно из реестра REG ────────
+// Страницы (GET .../report) остаются раздельными: у каждой свой шаблон и view.
+// А «запустить пересчёт» и «скачать последний запуск» устроены одинаково —
+// генерируем их в цикле, вместо пяти копипастных пар роутов.
+for (const report of Object.keys(REG)) {
+  const reg = REG[report];
+  const pageUrl = (org) => `/org/${org}/reports/${report}`;
 
-reportsRouter.get('/org/:id/reports/logistics/download/:kind', requireAuth, loadOrg, async (req, res) => {
-  const cab = Cabinets.activeOf(req.org.id);
-  const latest = cab ? ReportRuns.latest(cab.id, 'logistics') : null;
-  if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
-  try { await sendDownload(res, req.params.kind, cab.id, latest.data, fileStem('logistics'), 'logistics'); }
-  catch (e) { logger.error({ err: e.message }, 'логистика: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
-});
+  reportsRouter.post(`/org/:id/reports/${report}/refresh`, requireAuth, loadOrg, (req, res) => {
+    const cab = Cabinets.activeOf(req.org.id);
+    if (!cab) return res.redirect(pageUrl(req.org.id));
+    const token = Cabinets.decryptedToken(cab);
+    if (!token) return res.redirect(pageUrl(req.org.id));
+    const { already } = reg.start({ id: cab.id }, token, Cabinets.meta(cab), reg.normalize(req.body), req.session.user.id);
+    if (already) logger.info({ cabinetId: cab.id, report }, 'пересчёт уже идёт — пропускаю');
+    res.redirect(pageUrl(req.org.id));
+  });
+
+  reportsRouter.get(`/org/:id/reports/${report}/download/:kind`, requireAuth, loadOrg, async (req, res) => {
+    const cab = Cabinets.activeOf(req.org.id);
+    const latest = cab ? ReportRuns.latest(cab.id, report) : null;
+    if (!latest?.data) return res.status(404).send('Нет данных — сначала обновите отчёт.');
+    const cost = Math.min(100000, Math.max(0, Math.round(Number(req.query.cost)) || 620));
+    try { await sendDownload(res, req.params.kind, cab.id, latest.data, fileStem(report), report, { cost }); }
+    catch (e) { logger.error({ err: e.message, report }, 'ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
+  });
+}
 
 // ── Архив отчётов компании (общий): список запусков ──────────────────────────
 reportsRouter.get('/org/:id/reports/archive', requireAuth, loadOrg, (req, res) => {

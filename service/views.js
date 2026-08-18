@@ -1,6 +1,7 @@
 // service/views.js — минимальный серверный рендер (без шаблонизатора).
 // Утилитарные страницы авторизации + заглушка кабинета. Экранируем весь ввод.
 import { INTERACTIVE_CSS, INTERACTIVE_JS } from '../scripts/lib/report-interactive.mjs';
+import { reportRu } from './report-names.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // Палитра как токены. Тёмная тема применяется двумя способами: по системной
@@ -717,8 +718,6 @@ export function podsortPage(p) {
     </div>`,
   });
 }
-
-const reportRu = (r) => ({ podsort: 'Подсорт', stock: 'Остатки', movement: 'Движение заказов', geo: 'География', logistics: 'Логистика' }[r] || r);
 
 // Рендер результатов подсорта из снимка (переиспользуется на странице отчёта и в архиве).
 // downloadHref(kind) → URL выгрузки; whenLabel — подпись «обновлено …».
