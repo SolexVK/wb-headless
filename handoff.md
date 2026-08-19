@@ -7,7 +7,17 @@
 меняется только JSON-конфиг.
 
 ## Текущее состояние
-Работает end-to-end, всё закоммичено. Ветка `claude/wildberries-competitor-analysis-u4ftu1`, PR #11.
+Работает end-to-end, всё закоммичено и запушено. Ветка `claude/wildberries-competitor-analysis-u4ftu1`,
+PR #11, tip = `eb0f67b`.
+
+> **ВНИМАНИЕ (важно для следующей сессии).** Наша ветка **независима** и НЕ основана на текущем `main`.
+> Пока мы работали, в `main` влили чужие PR (#10 MPStats-прокси, #12 «Анализ ниши» — node.js `lib/`,
+> #13 deploy-гайд). Свежий эфемерный контейнер может подняться на `main` (коммит `6e34e81`): тогда на
+> диске НЕ будет `wb_analytics/`, а `handoff.md` будет ЧУЖОЙ (про niche-analysis). Это НЕ потеря работы —
+> наш код цел на remote. Восстановление: `git fetch origin claude/wildberries-competitor-analysis-u4ftu1
+> && git reset --hard origin/claude/wildberries-competitor-analysis-u4ftu1`. Мержить/ребейзить на `main`
+> — только по явному запросу пользователя (там другой проект в `lib/`, конфликтов по файлам нет —
+> наш код в `wb_analytics/`, их в `lib/`).
 
 **Единая система `wb_analytics/`** (заменила прежние разрозненные пайплайны):
 ```
