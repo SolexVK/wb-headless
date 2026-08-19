@@ -120,14 +120,20 @@ export function buildSchedule(state) {
     return { cycles, warnings, fabricOrders: aggregateFabric(cycles, state), generatedFor: [] };
   }
 
-  // старт конвейера — самый ранний рабочий день среди месяцев отшива этапов
+  // старт конвейера (точка отсчёта). Приоритет — явная настройка productionStartDate; иначе
+  // самый ранний рабочий день среди месяцев отшива этапов; иначе сегодня.
   let seasonStart = null;
-  for (const s of state.stages) {
-    if (!s.productionMonth) continue;
-    const d = cal.nextWorkingDay(monthStartISO(s.productionMonth));
-    if (seasonStart === null || d < seasonStart) seasonStart = d;
+  const psd = state.settings && state.settings.productionStartDate;
+  if (psd && /^\d{4}-\d{2}-\d{2}$/.test(String(psd).slice(0, 10))) {
+    seasonStart = cal.nextWorkingDay(String(psd).slice(0, 10)); // явная точка отсчёта производства
+  } else {
+    for (const s of state.stages) {
+      if (!s.productionMonth) continue;
+      const d = cal.nextWorkingDay(monthStartISO(s.productionMonth));
+      if (seasonStart === null || d < seasonStart) seasonStart = d;
+    }
+    if (!seasonStart) seasonStart = cal.nextWorkingDay(toISO(new Date()));
   }
-  if (!seasonStart) seasonStart = cal.nextWorkingDay(toISO(new Date()));
 
   const ownWs = pickOwnWorkshop(state.workshops);
   const ownId = ownWs ? ownWs.id : null;

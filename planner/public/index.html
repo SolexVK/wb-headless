@@ -40,6 +40,10 @@
         <label>Масштаб:
           <input type="range" id="zoom" min="6" max="40" value="14" />
         </label>
+        <label title="Точка отсчёта расписания — с этой даты планируется производство. Пусто = как раньше (ранний месяц этапов / сегодня).">Старт производства:
+          <input type="date" id="prod-start" />
+          <button id="prod-start-clear" class="btn btn-icon" title="Сбросить (авто)">✕</button>
+        </label>
         <span class="legend">
           <i class="mark deadline"></i>Дедлайн WB · блок = этап (крой→ОТК) · ⏱ отставание
         </span>

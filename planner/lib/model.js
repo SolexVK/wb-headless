@@ -48,6 +48,9 @@ export function defaultSettings() {
     // контроль отставания (Фаза 3): дата «сегодня» ('' = реальная сегодня) и
     // порог отставания в днях, при котором система бьёт тревогу
     planningDate: '',
+    // старт производства (точка отсчёта расписания). '' = самый ранний месяц отшива этапов
+    // или сегодня. Задаётся вручную, если план надо считать не от абстрактной данной этапов.
+    productionStartDate: '',
     delayThresholdDays: 6,
     // переброска части партии + ткани в другой цех (все в одном городе), дней —
     // закладывается при переносе в «спасателе сроков» (3b/3c)
@@ -187,6 +190,7 @@ export function normalizeState(input) {
   const s = { ...base, ...input };
   s.settings = deepMergeSettings(base.settings, input.settings || {});
   s.settings.planningDate = /^\d{4}-\d{2}-\d{2}$/.test(s.settings.planningDate) ? s.settings.planningDate : '';
+  s.settings.productionStartDate = /^\d{4}-\d{2}-\d{2}$/.test(String(s.settings.productionStartDate || '').slice(0, 10)) ? String(s.settings.productionStartDate).slice(0, 10) : '';
   s.settings.delayThresholdDays = Math.max(0, Math.round(+s.settings.delayThresholdDays || 6));
   s.settings.transferDays = Math.max(0, Math.round(+s.settings.transferDays || 2));
   { const n = s.settings.nesting && typeof s.settings.nesting === 'object' ? s.settings.nesting : {};

@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'monthly-load-dashboard-2026-08-06l';
+const APP_BUILD = 'production-start-date-2026-08-06m';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -48,8 +48,13 @@ async function recalc(persist = false) {
   }
   const r = await api('/api/schedule', { method: 'POST', body: JSON.stringify(state) });
   schedule = r.schedule;
+  syncProdStart();
   renderCurrent();
   setStatus();
+}
+function syncProdStart() {
+  const el = document.getElementById('prod-start');
+  if (el) el.value = (state.settings && state.settings.productionStartDate) || '';
 }
 
 // ---------- права доступа (RBAC) ----------
@@ -4404,6 +4409,7 @@ function dataSettingsPanel() {
     </div>
     <div class="card"><div class="mini" style="margin-bottom:8px">Контроль сроков</div>
       <div class="field"><label title="«Сегодня» для контроля отставания. Пусто = реальная текущая дата. Отставание считается для партий в статусе «крой»/«пошив».">Дата планирования (YYYY-MM-DD, пусто = сегодня)</label><input data-set="planningDate" value="${state.settings.planningDate || ''}" placeholder="сегодня"></div>
+      <div class="field"><label title="Точка отсчёта расписания: с этой даты начинается производство на Ганте. Пусто = самый ранний месяц этапов или сегодня. Дублирует поле «Старт производства» на Ганте.">Старт производства (YYYY-MM-DD, пусто = авто)</label><input data-set="productionStartDate" value="${state.settings.productionStartDate || ''}" placeholder="авто"></div>
       <div class="field"><label title="Если активная партия (крой/пошив) отстаёт от плана больше чем на столько дней — тревога в «Рисках» с прогнозом срыва.">Порог отставания, дней</label><input data-set="delayThresholdDays" value="${state.settings.delayThresholdDays}"></div>
       <div class="field"><label title="Спасатель сроков: сколько дней заложить на переброску части партии и ткани в другой цех (все цеха в одном городе).">Переброска в др. цех, дней</label><input data-set="transferDays" value="${state.settings.transferDays}"></div>
     </div>
@@ -4723,6 +4729,16 @@ async function init() {
   document.getElementById('settings-close')?.addEventListener('click', () => { document.getElementById('settings-modal').hidden = true; });
   document.getElementById('settings-modal')?.addEventListener('click', (e) => { if (e.target.id === 'settings-modal') e.target.hidden = true; });
   document.getElementById('zoom').addEventListener('input', (e) => { pxPerDay = +e.target.value; if (activeTab === 'gantt') renderCurrent(); });
+  // Старт производства (точка отсчёта расписания) — прямо на Ганте, применяется сразу.
+  const prodStart = document.getElementById('prod-start');
+  prodStart?.addEventListener('change', () => {
+    state.settings.productionStartDate = prodStart.value || ''; dirty = true;
+    recalc(true).then(() => toast(prodStart.value ? ('Старт производства: ' + prodStart.value) : 'Старт производства сброшен (авто)')).catch((e) => toast('Ошибка: ' + e.message, true));
+  });
+  document.getElementById('prod-start-clear')?.addEventListener('click', () => {
+    state.settings.productionStartDate = ''; dirty = true;
+    recalc(true).then(() => toast('Старт производства сброшен (авто)')).catch((e) => toast('Ошибка: ' + e.message, true));
+  });
   document.getElementById('season-filter').addEventListener('change', (e) => {
     activeSeasonId = e.target.value;
     matrixStageId = null; fabricStageId = null; factFilterStage = '';
@@ -4746,6 +4762,7 @@ async function init() {
     await loadPerms();
     applyAccessUI();
     await loadAll();
+    syncProdStart();
     switchTab(firstAllowedTab());
     setStatus();
   } catch (e) {
