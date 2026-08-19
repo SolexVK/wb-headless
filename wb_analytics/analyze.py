@@ -43,9 +43,15 @@ CENTRAL_REGIONS = ['Москва/ЦФО', 'Санкт-Петербург', 'Ка
 
 
 def token():
+    # приоритет: переменная окружения → локальный git-ignored файл wb_analytics/.mpstats_token.
+    # Токен НЕ хардкодится в коде и НЕ попадает в git (см. .gitignore).
     t = os.environ.get('MPSTATS_TOKEN')
-    if not t: sys.exit('ОШИБКА: не задан MPSTATS_TOKEN')
-    return t
+    if t: return t.strip()
+    p = os.path.join(_HERE, '.mpstats_token')
+    if os.path.exists(p):
+        v = open(p, encoding='utf-8').read().strip()
+        if v: return v
+    sys.exit('ОШИБКА: не задан MPSTATS_TOKEN (env или wb_analytics/.mpstats_token)')
 
 def api(path, method='GET', body=None, q=None, retries=3):
     url = BASE + path + ('?' + urllib.parse.urlencode(q) if q else '')

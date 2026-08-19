@@ -4,10 +4,11 @@
 market.py — рыночный (нишевый) отчёт системы wb_analytics: анализ рынка/сегмента
 БЕЗ конкретного продавца. Страницы:
     1. Сводка рынка/сегмента (объём, цены, концентрация, игроки, выводы)
-    2. ТОП-20 карточек — таблица с фото (в HTML фото увеличивается ×3 по наведению
+    2. Прогноз продаж по целевой ценовой зоне (напр. средний + выше-среднего):
+       сценарии для сильной карточки, подсегменты, ёмкость по полосам
+    3. ТОП-20 карточек — таблица с фото (в HTML фото увеличивается ×3 по наведению
        модальным окном), кликабельный артикул → карточка WB, бренд, метрики
-    3. Цвета — доля расцветок в продажах (семейства + точные цвета)
-    4. Размеры — распределение продаж по размерному ряду
+    4. Цвета и размеры на одном листе — доля расцветок и распределение по размерам
 
 Данные готовит market_collect.py (или любой сборщик в схему market_data.json).
 Рендер — theme.render_pdf (Chromium --print-to-pdf). Hover-зум работает только в
@@ -79,6 +80,7 @@ MARKET_CSS = r"""
 .hbt { flex:1; height:14px; background:#eef0f4; border-radius:5px; overflow:hidden; }
 .hbf { height:100%; border-radius:5px; display:flex; align-items:center; justify-content:flex-end;
   padding-right:5px; color:#fff; font-size:8.5px; font-weight:800; }
+.hbv2 { width:40px; text-align:right; font-size:9px; font-weight:800; color:#141a26; flex:0 0 auto; }
 .szbar { display:flex; align-items:flex-end; gap:8px; height:150px; margin:14px 0 4px; padding:0 4px; }
 .szcol { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; }
 .szfill { width:100%; border-radius:6px 6px 0 0; background:var(--accent); min-height:3px; position:relative; }
@@ -87,6 +89,7 @@ MARKET_CSS = r"""
 .szsub { font-size:8px; color:#9aa2b3; }
 .note { background:var(--soft); border-radius:9px; padding:11px 13px; font-size:10px; color:#33405a; line-height:1.5; }
 .note b { color:var(--accent2); }
+.secttl { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
 /* high-segment scenarios */
 .scn { display:flex; gap:11px; margin-top:4px; }
 .scnbox { flex:1; border:1px solid #e6e9f0; border-radius:11px; padding:13px; border-top:5px solid var(--c);
@@ -150,12 +153,13 @@ def build_html(D):
 
     # ---------- COVER ----------
     def cover():
-        s = SEG; HS = D.get('high_segment') or {}
+        s = SEG; FC = D.get('forecast') or {}
+        zlo, zhi = (FC.get('zone') or [1700, 3500])
         kc = KPI_COLORS
         kpis = ''.join([
             kpi('Объём рынка (вся категория)', f"{money_short(MK['revenue'])} <small>₽</small>", f"{nf(MK['n_sku'])} SKU · {nf(MK['sales'])} продаж за {per['days']} дн", True, kc[0]),
             kpi('Объём сегмента', f"{money_short(s['revenue'])} <small>₽</small>", f"{nf(s['n_sku'])} SKU · {nf(s['sales'])} продаж · {s['share_rev']}% рынка", True, kc[1]),
-            kpi('Высокий сегмент (≥ ' + nf(HS.get('threshold', 2500)) + ' ₽)', f"{money_short(HS.get('revenue',0))} <small>₽</small>", f"{HS.get('share_rev',0)}% выручки сегмента · медиана {nf(HS.get('price_median',0))} ₽", True, kc[5]),
+            kpi(f'Целевая зона {nf(zlo)}–{nf(zhi)} ₽', f"{money_short(FC.get('revenue',0))} <small>₽</small>", f"{FC.get('share_rev',0)}% выручки сегмента · медиана {nf(FC.get('price_median',0))} ₽", True, kc[5]),
             kpi('Медианная цена сегмента', f"{nf(s['price_median'])} <small>₽</small>", f"коридор {nf(s['p25'])}–{nf(s['p75'])} ₽ (p25–p75)", False, kc[2]),
             kpi('Концентрация ТОП-100', f"{s['top100']}%", f"ТОП-10 {s['top10']}% · ТОП-50 {s['top50']}% выручки", False, kc[3]),
             kpi('Игроки', f"{nf(s['n_brands'])} <small>брендов</small>", f"{nf(s['n_sellers'])} продавцов — рынок раздроблен", False, kc[4]),
@@ -170,7 +174,7 @@ def build_html(D):
         <div class="wide-kpis">{kpis}</div>
         <div class="tak" style="margin-top:16px"><h3>Главные выводы</h3><ul>
           <li><b>Крупный, но раздроблённый рынок.</b> Сегмент — <b>{money_short(s['revenue'])} ₽</b> за {per['days']} дней ({s['share_rev']}% всей категории рубашек), но ТОП-100 карточек держат лишь <b>{s['top100']}%</b> выручки. Место для входа есть.</li>
-          <li><b>Высокий ценовой сегмент — живой.</b> На цены <b>≥ {nf(HS.get('threshold',2500))} ₽</b> приходится <b>{HS.get('share_rev',0)}%</b> выручки сегмента ({money_short(HS.get('revenue',0))} ₽, {nf(HS.get('n_sku',0))} SKU, медиана {nf(HS.get('price_median',0))} ₽). Прогноз продаж — на стр. «Высокий сегмент».</li>
+          <li><b>Деньги — в среднем и выше-среднем.</b> Ценовая зона <b>{nf(zlo)}–{nf(zhi)} ₽</b> даёт <b>{FC.get('share_rev',0)}%</b> выручки сегмента ({money_short(FC.get('revenue',0))} ₽, {nf(FC.get('n_sku',0))} SKU, медиана {nf(FC.get('price_median',0))} ₽) — и лучшую скорость продаж. Прогноз — на стр. «Прогноз продаж».</li>
           <li><b>Цвет решает.</b> В продажах доминирует <b>{topc[0].lower()} — {topc[2]:.0f}%</b>, затем {topc2[0].lower()} {topc2[2]:.0f}%. Базовые светлые цвета — ядро ассортимента.</li>
           <li><b>Размерное ядро — {size_core(D)}</b> (см. стр. «Размеры»): на них приходится основная масса продаж; крайние размеры чаще затоварены.</li>
         </ul></div>
@@ -208,38 +212,21 @@ def build_html(D):
         <div class="foot"><span>Источник: MPStats API · {per['d1']}–{per['d2']}</span><span>Продажи — за 90 дней; шт/дн — среднесуточные</span></div>"""
         return page('market', P_TOP, inner, 'p3')
 
-    # ---------- COLORS ----------
-    def colors():
+    # ---------- COLORS + SIZES (combined) ----------
+    def combo():
+        # --- colors ---
         fams = D['colors_family']
         legend = ''.join(
             f'<div class="lgrow"><span class="lgsw" style="background:{FAM_COLORS.get(n,"#ccc")}"></span>'
             f'<span class="lgnm">{n}</span><span class="lgpc">{p:.0f}%</span></div>' for n, _, p in fams)
         mxc = max([p for _, _, p in D['colors_top']] + [1])
         cbars = ''.join(
-            f'<div class="hbar"><span class="hbl">{c}</span><div class="hbt"><div class="hbf" style="width:{max(4,p/mxc*100):.0f}%;background:{P_COLOR[0]}">{p:.1f}%</div></div></div>'
-            for c, n, p in D['colors_top'][:10])
+            f'<div class="hbar"><span class="hbl">{c}</span><div class="hbt"><div class="hbf" style="width:{max(2,p/mxc*100):.0f}%;background:{P_COLOR[0]}"></div></div><span class="hbv2">{p:.1f}%</span></div>'
+            for c, n, p in D['colors_top'][:8])
         top = fams[0]
-        inner = f"""
-        <div class="eyebrow">Структура продаж · цвета</div>
-        <h1 style="font-size:21px;margin:4px 0 6px">Какие расцветки покупают</h1>
-        <div class="chips"><span class="chip">Выборка {nf(D['colors_sample'])} SKU сегмента</span><span class="chip">Доли взвешены по продажам</span></div>
-        <div class="chartwrap">
-          <div class="card"><h3>Семейства цветов <span>доля в продажах</span></h3>
-            <div style="display:flex;gap:16px;align-items:center;margin-top:6px">
-              <div style="flex:0 0 auto">{donut_svg(fams)}</div>
-              <div class="donut-legend" style="flex:1">{legend}</div>
-            </div>
-          </div>
-          <div class="card"><h3>ТОП-10 точных цветов <span>% продаж сегмента</span></h3>{cbars}</div>
-        </div>
-        <div class="note" style="margin-top:14px"><b>Вывод.</b> Ядро ассортимента — базовые светлые тона: <b>{top[0].lower()} ({top[2]:.0f}%)</b> плюс синяя гамма. Тёмные и цветные — нишевые. Для входа приоритет — белый и голубой/синий однотон; яркие цвета держать точечно под спрос.</div>
-        <div class="foot"><span>Источник: MPStats API · поле «цвет» карточек · {per['d1']}–{per['d2']}</span><span>Доли — сумма продаж по цвету / все продажи сегмента</span></div>"""
-        return page('market', P_COLOR, inner, 'p4')
-
-    # ---------- SIZES ----------
-    def sizes():
+        # --- sizes ---
         sz = D['sizes']; mx = max([p for _, _, p in sz] + [1])
-        core = size_core(D)  # напр. "XS–XL"
+        core = size_core(D)
         labels = [l for l, _, _ in sz]
         core_set = set()
         if '–' in core:
@@ -249,45 +236,49 @@ def build_html(D):
         elif core in labels:
             core_set = {core}
         def fill(b, p):
-            if b in core_set:
-                bg = f'background:linear-gradient(180deg,{P_SIZE[0]},{P_SIZE[1]})'
-            else:
-                bg = f'background:{P_SIZE[0]}55'
+            bg = (f'background:linear-gradient(180deg,{P_SIZE[0]},{P_SIZE[1]})' if b in core_set
+                  else f'background:{P_SIZE[0]}55')
             return f'<div class="szfill" style="height:{max(3,p/mx*100):.0f}%;{bg}"></div>'
-        cols = ''.join(
+        scols = ''.join(
             f'<div class="szcol"><div class="szpc"{" style=color:"+P_SIZE[1] if b in core_set else ""}>{p:.0f}%</div>'
-            f'{fill(b,p)}'
-            f'<div class="szlb">{b}{"  ●" if b in core_set else ""}</div></div>' for b, s, p in sz)
-        # таблица деталей
-        trows = ''.join(f'<tr><td style="text-align:left;font-weight:700">{b}</td><td class="num">{p:.1f}%</td><td class="num">{nf(s)}</td></tr>' for b, s, p in sz)
-        core = size_core(D)
+            f'{fill(b,p)}<div class="szlb">{b}{"  ●" if b in core_set else ""}</div></div>' for b, s, p in sz)
         inner = f"""
-        <div class="eyebrow">Структура продаж · размерный ряд</div>
-        <h1 style="font-size:21px;margin:4px 0 6px">Как продаются размеры</h1>
-        <div class="chips"><span class="chip">Выборка {nf(D['sizes_sample'])} карточек ТОП по выручке</span><span class="chip">{nf(D['sizes_total'])} продаж по размерам</span><span class="chip">размеры сведены к S–4XL+</span></div>
-        <div class="card" style="margin-top:12px"><h3>Распределение продаж по размерам <span>доля продаж, %</span></h3>
-          <div class="szbar" style="--accent:{P_SIZE[0]}">{cols}</div>
+        <div class="eyebrow">Структура продаж · цвета и размеры</div>
+        <h1 style="font-size:21px;margin:4px 0 6px">Что покупают: цвета и размеры</h1>
+        <div class="chips"><span class="chip">Цвета — {nf(D['colors_sample'])} SKU сегмента</span><span class="chip">Размеры — {nf(D['sizes_sample'])} карточек ТОП</span><span class="chip">доли взвешены по продажам</span></div>
+
+        <div class="secttl" style="color:{P_COLOR[1]}">Цвета — доля расцветок в продажах</div>
+        <div class="chartwrap" style="margin-top:6px">
+          <div class="card"><h3>Семейства цветов <span>доля в продажах</span></h3>
+            <div style="display:flex;gap:14px;align-items:center;margin-top:4px">
+              <div style="flex:0 0 auto">{donut_svg(fams, size=128, stroke=22)}</div>
+              <div class="donut-legend" style="flex:1">{legend}</div>
+            </div>
+          </div>
+          <div class="card"><h3>ТОП-8 точных цветов <span>% продаж</span></h3>{cbars}
+            <div class="note" style="margin-top:8px;font-size:9.2px">Ядро — <b>{top[0].lower()} ({top[2]:.0f}%)</b> + синяя гамма. Тёмные и яркие — нишевые.</div></div>
         </div>
-        <div class="chartwrap">
-          <div class="card"><h3>Детали по размерам <span>доля и штуки</span></h3>
-            <table class="lt"><tr><th style="text-align:left">Размер</th><th>Доля продаж</th><th>Штук</th></tr>{trows}</table></div>
-          <div class="card"><h3>Вывод</h3>
-            <div class="note"><b>Размерное ядро — {core}.</b> На него приходится основная масса заказов. Крайние размеры (XXS/XS и 4XL+) продаются заметно хуже и чаще лежат в остатках — заводить их малыми партиями. Базовую матрицу закупки строить вокруг {core}, обеспечивая по ним стабильное наличие.</div></div>
+
+        <div class="secttl" style="color:{P_SIZE[1]};margin-top:13px">Размеры — распределение продаж</div>
+        <div class="card" style="margin-top:6px"><h3>Доля продаж по размерам <span>● — размерное ядро {core}</span></h3>
+          <div class="szbar" style="--accent:{P_SIZE[0]};height:118px">{scols}</div>
+          <div class="note" style="margin-top:8px"><b>Размерное ядро — {core}.</b> На него приходится основная масса заказов; крайние размеры (XXS/XS и 4XL+) идут хуже и чаще лежат в остатке — заводить малыми партиями. Базовую матрицу закупки строить вокруг {core}.</div>
         </div>
-        <div class="foot"><span>Источник: MPStats API · разбивка продаж по размерам карточек · {per['d1']}–{per['d2']}</span><span>Размерные сетки нормализованы к единой лестнице S–4XL+</span></div>"""
-        return page('market', P_SIZE, inner, 'p5')
+        <div class="foot"><span>Источник: MPStats API · поле «цвет» + разбивка продаж по размерам · {per['d1']}–{per['d2']}</span><span>Доли по продажам · размеры сведены к S–4XL+</span></div>"""
+        return page('market', P_COLOR, inner, 'p4')
 
     # ---------- HIGH PRICE SEGMENT ----------
-    def high():
-        HS = D.get('high_segment') or {}
-        if not HS:
+    def forecast():
+        FC = D.get('forecast') or {}
+        if not FC:
             return ''
+        zlo, zhi = FC['zone']
         kc = KPI_COLORS
         kpis = ''.join([
-            kpi('Объём высокого сегмента', f"{money_short(HS['revenue'])} <small>₽</small>", f"{nf(HS['n_sku'])} SKU · {nf(HS['sales'])} продаж за {per['days']} дн", True, kc[5]),
-            kpi('Доля в выручке сегмента', f"{HS['share_rev']}%", f"каждый третий рубль сегмента — в дорогих карточках", True, kc[0]),
-            kpi('Медианная цена', f"{nf(HS['price_median'])} <small>₽</small>", f"коридор {nf(HS['price_p25'])}–{nf(HS['price_p75'])} ₽ · до {nf(HS['price_p90'])} ₽", False, kc[2]),
-            kpi('Продаж на карточку', f"{nf(HS['card_sales_median'])}–{nf(HS['card_sales_p90'])} <small>шт</small>", f"медиана→p90 за {per['days']} дн среди активных дорогих", False, kc[1]),
+            kpi(f'Объём зоны {nf(zlo)}–{nf(zhi)} ₽', f"{money_short(FC['revenue'])} <small>₽</small>", f"{nf(FC['n_sku'])} SKU · {nf(FC['sales'])} продаж за {per['days']} дн", True, kc[5]),
+            kpi('Доля в выручке сегмента', f"{FC['share_rev']}%", "средний и выше-среднего — ядро денег ниши", True, kc[1]),
+            kpi('Медианная цена зоны', f"{nf(FC['price_median'])} <small>₽</small>", f"коридор {nf(FC['price_p25'])}–{nf(FC['price_p75'])} ₽", False, kc[2]),
+            kpi('Продаж на карточку', f"{nf(FC['card_sales_median'])}–{nf(FC['card_sales_p90'])} <small>шт</small>", f"медиана→p90 за {per['days']} дн среди активных", False, kc[0]),
         ])
         cols = ['#8a93a6', '#3B5BDB', '#0E9F6E']
         scn = ''.join(
@@ -295,35 +286,42 @@ def build_html(D):
             f'<div class="n">{money_short(s["revenue_mo"])} <small>₽/мес</small></div>'
             f'<div class="u">{nf(s["units_mo"])} шт/мес · цена {nf(s["price"])} ₽</div>'
             f'<div class="d">{s["note"]}</div></div>'
-            for i, s in enumerate(HS['scenarios']))
+            for i, s in enumerate(FC['scenarios']))
+        # сравнение подсегментов: строки — сценарии, столбцы — Средний / Выше среднего
+        subs = FC.get('subs', [])
+        sc_names = ['Осторожный', 'Реалистичный', 'Амбициозный']
+        subhdr = ''.join(f'<th>{x["name"]}<br><small style="font-weight:600;color:#9aa2b3">медиана {nf(x["price_median"])} ₽</small></th>' for x in subs)
+        subrows = ''
+        for i, nmv in enumerate(sc_names):
+            cells = ''.join(f'<td><b>{nf(x["scenarios"][i]["units_mo"])}</b> шт → {money_short(x["scenarios"][i]["revenue_mo"])} ₽</td>' for x in subs)
+            subrows += f'<tr><td style="text-align:left">{nmv}</td>{cells}</tr>'
+        # контекст-полосы
         brows = ''
-        for b in HS['bands']:
-            hl = ' class="hl"' if b['label'].startswith('2 500') else ''
-            brows += (f'<tr{hl}><td>{b["label"]} ₽</td><td>{nf(b["sku"])}</td><td><b>{nf(b["sales"])}</b></td>'
+        for b in FC['context']:
+            hl = ' class="hl"' if b['target'] else ''
+            brows += (f'<tr{hl}><td>{b["name"]}<br><small style="color:#9aa2b3;font-weight:600">{b["range"]}</small></td>'
+                      f'<td>{nf(b["sku"])}</td><td><b>{nf(b["sales"])}</b></td>'
                       f'<td>{money_short(b["revenue"])}</td><td>{nf(b["avg_card"])}</td></tr>')
         inner = f"""
-        <div class="eyebrow">Высокий ценовой сегмент · прогноз продаж</div>
-        <h1 style="font-size:22px;margin:4px 0 6px">Сколько можно продавать в высоком сегменте</h1>
-        <div class="chips"><span class="chip">Порог «дорогих» — от {nf(HS['threshold'])} ₽</span><span class="chip">Прогноз — по фактическим продажам дорогих карточек</span><span class="chip">Продажи 90д → в месяц</span></div>
+        <div class="eyebrow">Средний и выше-среднего сегмент · прогноз продаж</div>
+        <h1 style="font-size:22px;margin:4px 0 6px">Сколько можно продавать: средний и выше среднего</h1>
+        <div class="chips"><span class="chip">Целевая зона {nf(zlo)}–{nf(zhi)} ₽</span><span class="chip">Прогноз — по фактическим продажам карточек зоны</span><span class="chip">Продажи 90д → в месяц</span></div>
         <div class="wide-kpis" style="grid-template-columns:repeat(4,1fr)">{kpis}</div>
-        <div class="card" style="margin-top:13px"><h3>Прогноз для сильной карточки в высоком сегменте <span>выручка/мес при цене ≈ {nf(HS['price_median'])} ₽</span></h3>
+        <div class="card" style="margin-top:12px"><h3>Прогноз для сильной карточки в целевой зоне <span>выручка/мес при цене ≈ {nf(FC['price_median'])} ₽</span></h3>
           <div class="scn">{scn}</div>
-          <div class="ceil"><div class="big">{nf(HS['top10_units_mo'])} шт/мес · {money_short(HS['top10_rev_mo'])} ₽</div>
-            <div class="tx"><b>Потолок сегмента</b> — средний уровень ТОП-10 дорогих карточек (ср. цена {nf(HS['top10_price'])} ₽). Это ориентир «лидера», а не типовой вход.</div></div>
         </div>
-        <div class="chartwrap" style="margin-top:13px">
-          <div class="card"><h3>Ёмкость по ценовым полосам <span>где деньги внутри высокого сегмента</span></h3>
-            <table class="bandtbl"><tr><th>Полоса цены</th><th>SKU</th><th>Продажи 90д</th><th>Выручка</th><th>Ср. шт/карт</th></tr>{brows}</table>
-            <div class="note" style="margin-top:9px">Ядро высокого сегмента — <b>2 500–3 500 ₽</b> (максимум продаж и активных карточек). Выше 3 500 ₽ объём быстро тает — туда заходить точечно, сильным контентом и брендом.</div></div>
-          <div class="card"><h3>Как считали <span>прогноз грунтован на факте</span></h3>
-            <div class="note" style="margin-bottom:9px"><b>База.</b> Взяты все активные карточки сегмента с ценой ≥ {nf(HS['threshold'])} ₽ ({nf(HS['active'])} шт). Их фактические продажи за {per['days']} дней приведены к месяцу.</div>
-            <div class="note" style="margin-bottom:9px"><b>Сценарии.</b> Осторожный = медиана продаж таких карточек; реалистичный = уровень сильной карточки (p75); амбициозный = уровень топовой (p90). Выручка = штуки × медианная цена высокого сегмента.</div>
-            <div class="note"><b>Важно.</b> Это ориентир достижимого при хорошем контенте, отзывах и наличии, а не гарантия. Точный прогноз под ваши карточки посчитаем, когда добавите артикулы.</div></div>
+        <div class="chartwrap" style="margin-top:12px">
+          <div class="card"><h3>Прогноз по подсегментам <span>средний vs выше среднего · шт/мес → ₽/мес</span></h3>
+            <table class="bandtbl"><tr><th style="text-align:left">Сценарий</th>{subhdr}</tr>{subrows}</table>
+            <div class="note" style="margin-top:9px"><b>Средний</b> ({nf(subs[0]['price_median']) if subs else '—'} ₽) даёт бóльшую скорость продаж, <b>выше среднего</b> ({nf(subs[1]['price_median']) if len(subs)>1 else '—'} ₽) — выше чек при чуть меньшем спросе. Оптимум — карточки в верхней части зоны с сильным контентом.</div></div>
+          <div class="card"><h3>Ёмкость по ценовым полосам <span>зелёным — целевая зона</span></h3>
+            <table class="bandtbl"><tr><th>Полоса</th><th>SKU</th><th>Прод. 90д</th><th>Выручка</th><th>Ср/карт</th></tr>{brows}</table>
+            <div class="note" style="margin-top:9px"><b>Средний (1 700–2 500 ₽)</b> — лучшая скорость (ср. продаж на карточку максимальна). Ниже 1 700 ₽ — демпинг с низкой маржой; выше 3 500 ₽ спрос быстро тает.</div></div>
         </div>
-        <div class="foot"><span>Источник: MPStats API · сегмент, цена ≥ {nf(HS['threshold'])} ₽ · {per['d1']}–{per['d2']}</span><span>Оценочный прогноз · допущения в тексте</span></div>"""
+        <div class="foot"><span>Источник: MPStats API · сегмент, цена {nf(zlo)}–{nf(zhi)} ₽ · {per['d1']}–{per['d2']}</span><span>Прогноз: осторожный=медиана / реалистичный=p75 / амбициозный=p90 продаж карточек зоны · оценочно</span></div>"""
         return page('market', P_HIGH, inner, 'p2')
 
-    pages = [cover(), high(), top20(), colors(), sizes()]
+    pages = [cover(), forecast(), top20(), combo()]
     return ("<!doctype html><html><head><meta charset='utf-8'><style>@page{size:A4;margin:0}"
             + T.CSS + MARKET_CSS + "</style></head><body>" + "\n".join(pages) + "</body></html>")
 

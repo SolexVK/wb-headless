@@ -12,5 +12,9 @@
   },
   "top_n": 20,
   "sizes_sample": 150,
+  "forecast": {
+    "zone": [1700, 3500],
+    "sub_bands": [["Средний", 1700, 2500], ["Выше среднего", 2500, 3500]]
+  },
   "out": "reports-output/shirts_market_data.json"
 }

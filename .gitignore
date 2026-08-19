@@ -5,3 +5,7 @@ reports-output/
 *.log
 __pycache__/
 *.pyc
+
+# local secrets (never commit)
+.mpstats_token
+wb_analytics/.mpstats_token
