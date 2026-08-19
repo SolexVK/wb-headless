@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'data-articles-dropdown-2026-08-06i';
+const APP_BUILD = 'global-distribute-workshops-2026-08-06j';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -805,6 +805,98 @@ function distributePartiaByCapacity(p, articleId) {
   }
   return pieces.length;
 }
+// ── Глобальное распределение ВСЕХ артикулов по цехам (равномерно/свой-первым) ──
+let distMode = 'even';  // 'even' — равномерно по всем; 'own-first' — свой цех сначала, аутсорс перелив
+let distWs = null;      // Set выбранных цехов (null = все с мощностью пошива)
+let gdistOpen = false;  // раскрыт ли блок глобального распределения (переживает ре-рендер)
+
+// Слить plan-партии одного артикула по одной поставке обратно в одну — чтобы повторное глобальное
+// распределение не плодило осколки осколков. Группа = (артикул, метка поставки, дедлайн, этап, происх.).
+function mergePlanPartiasForRedistribute(articleIds) {
+  const set = new Set(articleIds);
+  const groups = new Map();
+  for (const p of (state.partias || [])) {
+    if (p.status !== 'plan' || !set.has(p.articleId)) continue;
+    const key = `${p.articleId}|${p.deliveryTag || ''}|${p.deadline || ''}|${p.stageId || ''}|${p.origin || ''}`;
+    (groups.get(key) || groups.set(key, []).get(key)).push(p);
+  }
+  const removeIds = new Set();
+  for (const arr of groups.values()) {
+    if (arr.length < 2) continue;
+    const keep = arr[0]; keep.planMatrix = keep.planMatrix || {};
+    for (let i = 1; i < arr.length; i++) {
+      const M = arr[i].planMatrix || {};
+      for (const c in M) { keep.planMatrix[c] = keep.planMatrix[c] || {}; for (const s in M[c]) keep.planMatrix[c][s] = (keep.planMatrix[c][s] || 0) + (+M[c][s] || 0); }
+      removeIds.add(arr[i].id);
+    }
+    keep.workshopId = '';
+  }
+  if (removeIds.size) state.partias = state.partias.filter((p) => !removeIds.has(p.id));
+}
+
+// Разложить партии ВСЕХ активных артикулов по выбранным цехам, балансируя накопленную загрузку
+// (штук ÷ мощность = раб.дни) и укладываясь в дедлайны. even — на наименее загруженный цех;
+// own-first — свой цех сначала, аутсорс подключаем при нехватке. Крупную партию дробим между цехами.
+function distributeAllAcrossWorkshops(wsIds, mode) {
+  const wss = state.workshops.filter((w) => wsIds.includes(w.id) && (w.capacities && w.capacities.sew) > 0);
+  if (!wss.length) { toast('Не выбрано ни одного цеха с мощностью пошива', true); return null; }
+  const artIds = activeArticles().map((a) => a.id);
+  mergePlanPartiasForRedistribute(artIds); // старт с чистых поставок (без осколков прошлых распределений)
+  const buffer = state.settings.riskBufferDays || 0;
+  const stageDl = {}; state.stages.forEach((st) => { stageDl[st.id] = st.deadline || ''; });
+  const dlOf = (p) => p.deadline || stageDl[p.stageId] || '9999-12-31';
+  const load = {}; wss.forEach((w) => { load[w.id] = 0; }); // накопленная загрузка цеха, раб.дни
+  const arch = new Set(archivedArticles().map((a) => a.id));
+  const parts = (state.partias || []).filter((p) => p.status === 'plan' && !arch.has(p.articleId) && matrixSum(p.planMatrix) >= 2);
+  // порядок: по дедлайну (раньше — первыми), затем крупные первыми
+  parts.sort((a, b) => dlOf(a).localeCompare(dlOf(b)) || (matrixSum(b.planMatrix) - matrixSum(a.planMatrix)));
+  const rules = nestingRules();
+  let touched = 0, created = 0, tight = 0;
+  for (const p of parts) {
+    const total = matrixSum(p.planMatrix);
+    const avail = Math.max(1, workingDaysUntil(p.deadline) - buffer);
+    const pool = [...wss].sort((a, b) => mode === 'own-first'
+      ? (roleRankClient(a) - roleRankClient(b) || load[a.id] - load[b.id])
+      : (load[a.id] - load[b.id] || roleRankClient(a) - roleRankClient(b)));
+    // набрать цеха, пока их СВОБОДНАЯ ёмкость (до дедлайна) не покроет объём партии
+    const chosen = []; let freeSum = 0;
+    for (const w of pool) {
+      const free = Math.max(0, (avail - load[w.id]) * w.capacities.sew);
+      if (free <= 0) continue;
+      chosen.push({ w, free }); freeSum += free;
+      if (freeSum >= total) break;
+    }
+    if (freeSum < total) tight++; // не хватает мощности к дедлайну — планировщик покажет «впритык/срыв»
+    if (!chosen.length) chosen.push({ w: pool[0], free: pool[0].capacities.sew * avail });
+    // разложить объём пропорционально свободной ёмкости выбранных цехов (целыми цветами — настил)
+    let rem = JSON.parse(JSON.stringify(p.planMatrix || {}));
+    const pieces = [];
+    if (chosen.length === 1) pieces.push({ ws: chosen[0].w, matrix: rem });
+    else {
+      const fSum = chosen.reduce((s, c) => s + c.free, 0) || 1;
+      for (let i = 0; i < chosen.length - 1; i++) {
+        const target = Math.round(total * chosen[i].free / fSum);
+        const { chunk, remainder } = splitMatrixClient(rem, target, rules);
+        if (matrixSum(chunk) > 0) pieces.push({ ws: chosen[i].w, matrix: chunk });
+        rem = remainder;
+        if (matrixSum(rem) <= 0) break;
+      }
+      if (matrixSum(rem) > 0) pieces.push({ ws: chosen[chosen.length - 1].w, matrix: rem });
+    }
+    // первый кусок — в исходную партию, остальные — новые (наследуют срок/метку/происхождение)
+    p.planMatrix = pieces[0].matrix; p.workshopId = pieces[0].ws.id;
+    load[pieces[0].ws.id] += matrixSum(pieces[0].matrix) / pieces[0].ws.capacities.sew;
+    for (let i = 1; i < pieces.length; i++) {
+      const np = newPartia(p.articleId, p.stageId, pieces[i].ws.id, { deadline: p.deadline, deliveryTag: p.deliveryTag, origin: p.origin });
+      np.planMatrix = pieces[i].matrix; state.partias.push(np); created++;
+      load[pieces[i].ws.id] += matrixSum(pieces[i].matrix) / pieces[i].ws.capacities.sew;
+    }
+    touched++;
+  }
+  recomputePartiaNumbers(); dirty = true;
+  return { touched, created, tight };
+}
+
 function partiaPlanUnits(p) { return sumMatrix(p.planMatrix); }
 function partiaFactUnits(p) { return sumMatrix(p.factMatrix); }
 function partiaEffMatrix(p) { return partiaFactUnits(p) > 0 ? p.factMatrix : (p.planMatrix || {}); }
@@ -882,6 +974,53 @@ function splitMatrixClient(M, target, r) {
   return { chunk: c2, remainder: r2 };
 }
 
+// Блок глобального распределения — над «Планом по размерам» (свёрнут по умолчанию).
+function globalDistHTML() {
+  const wss = state.workshops.filter((w) => (w.capacities && w.capacities.sew) > 0);
+  const isSel = (id) => !distWs || distWs.has(id);
+  const planCount = (state.partias || []).filter((p) => p.status === 'plan' && matrixSum(p.planMatrix) >= 2).length;
+  const chips = wss.map((w) => `<label class="sp-chip${isSel(w.id) ? ' on' : ''}"><input type="checkbox" data-gdist-ws="${w.id}"${isSel(w.id) ? ' checked' : ''}> ${seEsc(w.name)}${w.own ? ' <span class="mini">свой</span>' : ''} <span class="mini">${w.capacities.sew}/дн</span></label>`).join('');
+  return `<details class="panel"${gdistOpen ? ' open' : ''} id="mx-gdist">
+    <summary class="data-art-sum"><h3 style="display:inline;margin:0">⚙ Распределить ВСЕ артикулы по цехам <span class="mini">(${planCount} партий в плане)</span></h3></summary>
+    <div style="margin-top:10px">
+      <div class="mini" style="margin-bottom:10px">Один клик разложит партии <b>всех</b> артикулов по выбранным цехам с учётом мощности и дедлайнов — чтобы всё шилось <b>параллельно и равномерно</b>, а не по очереди по мере загрузки. Крупные партии дробятся между цехами; осколки прошлых распределений сначала сливаются обратно по поставкам.</div>
+      <div class="row-flex" style="gap:16px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field"><label>Режим</label>
+          <select id="gdist-mode"><option value="even"${distMode === 'even' ? ' selected' : ''}>равномерно по всем цехам</option><option value="own-first"${distMode === 'own-first' ? ' selected' : ''}>свой цех сначала, аутсорс — перелив</option></select></div>
+        <div class="field" style="flex:1;min-width:240px"><label>Цеха (участвуют в распределении)</label><div class="sp-chips">${chips || '<span class="mini">нет цехов с мощностью пошива — задай в «Данные → Цеха»</span>'}</div></div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-accent" id="gdist-run">⚙ Распределить всё по цехам</button>
+        <button class="btn btn-danger" id="gdist-reset" title="Снять привязку к цехам со всех плановых партий (вернуть в «авто»)">↺ Сбросить привязки</button>
+      </div>
+    </div>
+  </details>`;
+}
+function bindGlobalDist() {
+  document.getElementById('mx-gdist')?.addEventListener('toggle', (e) => { gdistOpen = e.target.open; });
+  document.getElementById('gdist-mode')?.addEventListener('change', (e) => { distMode = e.target.value === 'own-first' ? 'own-first' : 'even'; });
+  document.querySelectorAll('[data-gdist-ws]').forEach((cb) => cb.addEventListener('change', () => {
+    const boxes = [...document.querySelectorAll('[data-gdist-ws]')];
+    distWs = new Set(boxes.filter((b) => b.checked).map((b) => b.dataset.gdistWs));
+    boxes.forEach((b) => b.closest('.sp-chip')?.classList.toggle('on', b.checked));
+  }));
+  document.getElementById('gdist-run')?.addEventListener('click', () => {
+    const wss = state.workshops.filter((w) => (w.capacities && w.capacities.sew) > 0);
+    const ids = wss.filter((w) => !distWs || distWs.has(w.id)).map((w) => w.id);
+    if (!ids.length) { toast('Выбери хотя бы один цех', true); return; }
+    const res = distributeAllAcrossWorkshops(ids, distMode);
+    if (!res) return;
+    recalc(true).then(() => { renderMatrix();
+      toast(`Распределено и сохранено: ${res.touched} партий по ${ids.length} цехам${res.created ? ` (+${res.created} новых от дробления)` : ''}${res.tight ? `. ⚠ ${res.tight} впритык к дедлайну — см. «Контроль сроков»` : ''}.`, !!res.tight);
+    }).catch((err) => toast('Ошибка: ' + err.message, true));
+  });
+  document.getElementById('gdist-reset')?.addEventListener('click', () => {
+    let n = 0;
+    for (const p of (state.partias || [])) if (p.status === 'plan' && p.workshopId) { p.workshopId = ''; n++; }
+    recomputePartiaNumbers(); dirty = true;
+    recalc(true).then(() => { renderMatrix(); toast(`Сброшены привязки у ${n} партий (авто)`); }).catch((err) => toast('Ошибка: ' + err.message, true));
+  });
+}
 function renderMatrix() {
   const root = document.getElementById('matrix');
   const acts = articlesSorted(); // только активные (архивные не планируются и не показываются)
@@ -919,9 +1058,10 @@ function renderMatrix() {
     </div>`;
 
   if (!p) {
-    root.innerHTML = `<div class="panel">${controls}
+    root.innerHTML = `${globalDistHTML()}<div class="panel">${controls}
       <div class="mini" style="margin:10px 0">На этот артикул партий пока нет. Заполни «🧩 План по размерам из прогноза» в разделе «Ранг сезонности» — оттуда перенесутся партии-поставки. Или нажми <b>«＋ партия (ручная)»</b> для срочной внеплановой партии.</div></div>`;
     bindMatrixControls(a);
+    bindGlobalDist();
     document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a));
     applyCollapsibles();
     return;
@@ -933,7 +1073,7 @@ function renderMatrix() {
   const cyc = (schedule?.cycles || []).filter((c) => c.partiaId === p.id);
   const cycInfo = cyc.length ? cyc.map((c) => `${c.workshopName} — ${c.units.toLocaleString('ru')} шт`).join(' · ') : 'не назначено (сохрани и пересчитай)';
 
-  root.innerHTML = `
+  root.innerHTML = `${globalDistHTML()}
     <div class="panel">
       ${controls}
       <div class="partia-bar">
@@ -966,6 +1106,7 @@ function renderMatrix() {
     </div>`;
 
   bindMatrixControls(a);
+  bindGlobalDist();
   document.getElementById('mx-all-sizes')?.addEventListener('click', () => { mxAllSizes = !mxAllSizes; renderMatrix(); });
   document.getElementById('mx-xlsx-partia').addEventListener('click', () => exportReadyPlanXlsx(a.id, p.id));
   document.getElementById('mx-xlsx-article').addEventListener('click', () => exportReadyPlanXlsx(a.id, null));
