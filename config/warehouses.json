@@ -1,0 +1,79 @@
+{
+  "_comment": "Снимок складов продавца (FBS), полученный из WB API GET /api/v3/warehouses. Обновить: npm run wb:warehouses. Коды deliveryType/cargoType — см. docs/wb-api/fbs.md.",
+  "source": "GET https://marketplace-api.wildberries.ru/api/v3/warehouses",
+  "count": 8,
+  "warehouses": [
+    {
+      "name": "Мск желтая зона",
+      "officeId": 14017,
+      "id": 1939900,
+      "cargoType": 1,
+      "deliveryType": 1,
+      "isDeleting": false,
+      "isProcessing": false
+    },
+    {
+      "name": "Мск зеленая зона",
+      "officeId": 10109,
+      "id": 1939911,
+      "cargoType": 1,
+      "deliveryType": 1,
+      "isDeleting": false,
+      "isProcessing": false
+    },
+    {
+      "name": "Мск фиолет зона",
+      "officeId": 218,
+      "id": 1939921,
+      "cargoType": 1,
+      "deliveryType": 1,
+      "isDeleting": false,
+      "isProcessing": false
+    },
+    {
+      "name": "Казань",
+      "officeId": 3087386,
+      "id": 1959186,
+      "cargoType": 1,
+      "deliveryType": 1,
+      "isDeleting": false,
+      "isProcessing": false
+    },
+    {
+      "name": "Ред Экспресс",
+      "officeId": 209,
+      "id": 2005673,
+      "cargoType": 1,
+      "deliveryType": 1,
+      "isDeleting": false,
+      "isProcessing": false
+    },
+    {
+      "name": "Краснодар",
+      "officeId": 204,
+      "id": 1983301,
+      "cargoType": 1,
+      "deliveryType": 1,
+      "isDeleting": false,
+      "isProcessing": false
+    },
+    {
+      "name": "Санкт Петербург",
+      "officeId": 10999,
+      "id": 2005780,
+      "cargoType": 1,
+      "deliveryType": 1,
+      "isDeleting": false,
+      "isProcessing": false
+    },
+    {
+      "name": "Екат",
+      "officeId": 10100,
+      "id": 2017404,
+      "cargoType": 1,
+      "deliveryType": 1,
+      "isDeleting": false,
+      "isProcessing": false
+    }
+  ]
+}

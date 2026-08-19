@@ -1,0 +1,35 @@
+{
+  "comment": "Страницы документации WB API, которые перечитываются и сохраняются снимками. Добавляйте сюда страницы методов, которые реально используете, чтобы отслеживать изменения их лимитов.",
+  "pages": [
+    {
+      "comment": "Первоисточник правил: статус-коды, token bucket, заголовки X-Ratelimit-*, типы токенов и их базовые лимиты.",
+      "url": "https://dev.wildberries.ru/docs/openapi/api-information",
+      "out": "docs/wb-api/limits.md"
+    },
+    {
+      "comment": "Аналитика и данные: воронка, поисковые запросы, история остатков, Джем CSV.",
+      "url": "https://dev.wildberries.ru/docs/openapi/analytics",
+      "out": "docs/wb-api/analytics.md"
+    },
+    {
+      "comment": "Отчёты: основные (orders/sales), остатки, ОТЧЁТЫ ОБ УДЕРЖАНИЯХ (measurement-penalties, warehouse-measurements, deductions, самовыкупы, маркировка), операции при приёмке (incomeId), платное хранение, возвраты и перемещения.",
+      "url": "https://dev.wildberries.ru/docs/openapi/reports",
+      "out": "docs/wb-api/reports-statistics.md"
+    },
+    {
+      "comment": "Финансовые отчёты: детализация к отчёту о реализации (POST /api/finance/v1/sales-reports/detailed) — здесь строки штрафов (penalty, bonusTypeName), номер поставки giId, склад officeName, srid/shkId/orderId.",
+      "url": "https://dev.wildberries.ru/docs/openapi/financial-reports-and-accounting",
+      "out": "docs/wb-api/finance-reports.md"
+    },
+    {
+      "comment": "Заказы FBS: /api/v3/orders даёт warehouseId — наш склад-фулфилмент, откуда отгружен товар. Ключ атрибуции штрафа к ФФ.",
+      "url": "https://dev.wildberries.ru/docs/openapi/orders-fbs",
+      "out": "docs/wb-api/orders-fbs.md"
+    },
+    {
+      "comment": "Поставки FBW: номера поставок (incomeId), склад приёмки WB. Нужен для атрибуции штрафов по FBW-поставкам.",
+      "url": "https://dev.wildberries.ru/docs/openapi/orders-fbw",
+      "out": "docs/wb-api/supplies-fbw.md"
+    }
+  ]
+}
