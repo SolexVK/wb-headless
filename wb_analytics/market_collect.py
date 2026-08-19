@@ -51,6 +51,55 @@ def pctile(v, p):
     return v[max(0, min(len(v) - 1, round(p / 100 * (len(v) - 1))))] if v else 0
 
 
+HIGH_BANDS = [('2 500–3 500', 2500, 3500), ('3 500–5 000', 3500, 5000), ('5 000+', 5000, 10 ** 9)]
+
+
+def high_segment_stats(SEG, threshold, days):
+    """Ёмкость и прогноз высокого ценового сегмента (цена >= threshold).
+    Прогноз на карточку — по перцентилям фактических продаж активных дорогих карточек
+    (90-дн. продажи приводятся к месяцу). Без обращения к сети — из категорийных строк."""
+    import statistics as st
+    rev = lambda r: r.get('revenue') or 0
+    sl = lambda r: r.get('sales') or 0
+    seg_rev = sum(rev(r) for r in SEG) or 1
+    HI = [r for r in SEG if (r.get('final_price') or 0) >= threshold]
+    HIa = [r for r in HI if sl(r) > 0]
+    if not HIa:
+        return None
+    hp = [r.get('final_price') for r in HIa]
+    hs = [sl(r) for r in HIa]
+    hi_rev = sum(rev(r) for r in HI); hi_sales = sum(sl(r) for r in HI)
+    price_ref = round(st.median(hp))
+    mo = max(1, days / 30.0)   # делитель 90д→месяц
+    def scen(name, units90, price, note):
+        u = round(units90 / mo)
+        return {'name': name, 'units_mo': u, 'price': price, 'revenue_mo': round(u * price), 'note': note}
+    top10 = sorted(HI, key=lambda r: -rev(r))[:10]
+    top10_sales = round(st.mean([sl(r) for r in top10])) if top10 else 0
+    top10_price = round(st.mean([r.get('final_price') for r in top10])) if top10 else price_ref
+    scenarios = [
+        scen('Осторожный', pctile(hs, 50), price_ref, 'медиана продаж активной дорогой карточки'),
+        scen('Реалистичный', pctile(hs, 75), price_ref, 'уровень сильной карточки (p75 сегмента)'),
+        scen('Амбициозный', pctile(hs, 90), price_ref, 'уровень топовой карточки (p90 сегмента)'),
+    ]
+    bands = []
+    for lbl, a, b in HIGH_BANDS:
+        cs = [r for r in SEG if a <= (r.get('final_price') or 0) < b]
+        act = [r for r in cs if sl(r) > 0]
+        bands.append({'label': lbl, 'sku': len(cs), 'active': len(act),
+                      'sales': sum(sl(r) for r in cs), 'revenue': sum(rev(r) for r in cs),
+                      'avg_card': round(sum(sl(r) for r in act) / len(act)) if act else 0})
+    return {'threshold': threshold, 'n_sku': len(HI), 'active': len(HIa),
+            'sales': hi_sales, 'revenue': hi_rev, 'share_rev': round(hi_rev / seg_rev * 100),
+            'price_median': price_ref, 'price_p25': pctile(hp, 25), 'price_p75': pctile(hp, 75),
+            'price_p90': pctile(hp, 90),
+            'card_sales_median': pctile(hs, 50), 'card_sales_p75': pctile(hs, 75), 'card_sales_p90': pctile(hs, 90),
+            'top10_sales': top10_sales, 'top10_price': top10_price,
+            'top10_units_mo': round(top10_sales / mo),
+            'top10_rev_mo': round(top10_sales / mo * top10_price),
+            'scenarios': scenarios, 'bands': bands, 'days': days}
+
+
 def collect(cfg):
     per = cfg.get('period', {}) or {}
     days = per.get('days', 90)
@@ -66,6 +115,7 @@ def collect(cfg):
     solid_by_color = seg.get('solid_by_color', True)
     top_n = cfg.get('top_n', 20)
     n_sizes = cfg.get('sizes_sample', 150)
+    high_threshold = cfg.get('high_price_threshold', 2500)
 
     rev = lambda r: r.get('revenue') or 0
     sl = lambda r: r.get('sales') or 0
@@ -151,7 +201,8 @@ def collect(cfg):
                     'top50': round(sum(rev(r) for r in SEG[:50]) / seg_rev * 100) if seg_rev else 0,
                     'top100': round(sum(rev(r) for r in SEG[:100]) / seg_rev * 100) if seg_rev else 0},
         'top20': top, 'colors_family': colors_family, 'colors_top': colors_top, 'colors_sample': len(SEG),
-        'sizes': sizes, 'sizes_sample': nsz, 'sizes_total': tot_sz}
+        'sizes': sizes, 'sizes_sample': nsz, 'sizes_total': tot_sz,
+        'high_segment': high_segment_stats(SEG, high_threshold, days)}
 
 
 def main(argv):

@@ -21,10 +21,13 @@ import theme as T
 nf, money_short, wb_item, wb_brand, a_item, a_brand = (
     T.nf, T.money_short, T.wb_item, T.wb_brand, T.a_item, T.a_brand)
 
-P_COVER = ['#1F3A5F', '#12263F', '#E7EDF5', '#F4F7FB']
-P_TOP   = ['#0E7C86', '#0A5A62', '#E2F3F4', '#F1FAFB']
-P_COLOR = ['#7C3AED', '#5B21B6', '#EFE9FB', '#F8F5FE']
-P_SIZE  = ['#C7891B', '#9A6A10', '#FBF2DF', '#FDF9F0']
+P_COVER = ['#3B5BDB', '#2942B8', '#E8ECFF', '#F3F5FF']
+P_TOP   = ['#0DAB9A', '#0A7C72', '#DEF6F2', '#F0FBF9']
+P_COLOR = ['#8B2FE0', '#6A1FB0', '#F0E7FE', '#F9F5FF']
+P_SIZE  = ['#F97316', '#C2560B', '#FFEEDD', '#FFF7F0']
+P_HIGH  = ['#0E9F6E', '#0A7350', '#E1F6EE', '#F0FBF6']
+# палитра для разноцветных KPI-плиток (добавляет живости)
+KPI_COLORS = ['#3B5BDB', '#0DAB9A', '#F97316', '#8B2FE0', '#E8517A', '#0E9F6E']
 
 # палитра семейств цветов (для доната/легенды)
 FAM_COLORS = {
@@ -84,14 +87,44 @@ MARKET_CSS = r"""
 .szsub { font-size:8px; color:#9aa2b3; }
 .note { background:var(--soft); border-radius:9px; padding:11px 13px; font-size:10px; color:#33405a; line-height:1.5; }
 .note b { color:var(--accent2); }
+/* high-segment scenarios */
+.scn { display:flex; gap:11px; margin-top:4px; }
+.scnbox { flex:1; border:1px solid #e6e9f0; border-radius:11px; padding:13px; border-top:5px solid var(--c);
+  background:linear-gradient(180deg, var(--c)0C, #fff 60%); }
+.scnbox .t { font-size:10px; font-weight:800; color:var(--c); text-transform:uppercase; letter-spacing:.04em; }
+.scnbox .n { font-size:24px; font-weight:800; color:#141a26; margin-top:7px; line-height:1; }
+.scnbox .n small { font-size:11px; color:#6b7488; font-weight:700; }
+.scnbox .u { font-size:11px; color:#3a445a; font-weight:700; margin-top:5px; }
+.scnbox .d { font-size:8.6px; color:#9aa2b3; margin-top:5px; line-height:1.35; }
+.ceil { display:flex; align-items:center; gap:12px; margin-top:12px; background:var(--soft);
+  border-radius:10px; padding:11px 14px; border-left:5px solid var(--accent); }
+.ceil .big { font-size:20px; font-weight:800; color:var(--accent2); white-space:nowrap; }
+.ceil .tx { font-size:9.6px; color:#33405a; line-height:1.4; }
+.bandtbl { width:100%; border-collapse:collapse; margin-top:4px; }
+.bandtbl th { font-size:8.4px; text-transform:uppercase; color:#9aa2b3; text-align:right; padding:5px 6px; border-bottom:2px solid #e6e9f0; }
+.bandtbl th:first-child { text-align:left; }
+.bandtbl td { font-size:9.6px; padding:6px 6px; border-bottom:1px solid #f2f3f7; text-align:right; }
+.bandtbl td:first-child { text-align:left; font-weight:700; }
+.bandtbl tr.hl td { background:var(--soft); }
+/* medal rank badges */
+.medal { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px;
+  border-radius:50%; font-size:9px; font-weight:800; color:#fff; }
+.m1 { background:linear-gradient(135deg,#F5C542,#D9A400); } .m2 { background:linear-gradient(135deg,#C6CCD6,#9AA2B3); }
+.m3 { background:linear-gradient(135deg,#E0995C,#B06B36); }
 """
 
 
 def page(cls, pal, inner, anchor=''):
     v = f"--accent:{pal[0]};--accent2:{pal[1]};--tint:{pal[2]};--soft:{pal[3]}"
     return f'<div class="page {cls}" id="{anchor}" style="{v}"><div class="accbar"></div>{inner}</div>'
-def kpi(lbl, val, sub, hero=False):
-    return f'<div class="kpi{" hero" if hero else ""}"><div class="lbl">{lbl}</div><div class="val">{val}</div><div class="sub">{sub}</div></div>'
+def kpi(lbl, val, sub, hero=False, c=None):
+    """KPI-плитка; c — акцентный цвет плитки (верхняя рамка/значение) для «живости»."""
+    style = ''
+    if c:
+        style = f' style="border-top-color:{c};background:{c}0F"'
+    lblc = f' style="color:{c}"' if c else ''
+    return (f'<div class="kpi{" hero" if hero else ""}"{style}><div class="lbl"{lblc}>{lbl}</div>'
+            f'<div class="val">{val}</div><div class="sub">{sub}</div></div>')
 
 
 def donut_svg(fams, size=150, stroke=26):
@@ -117,14 +150,15 @@ def build_html(D):
 
     # ---------- COVER ----------
     def cover():
-        s = SEG
+        s = SEG; HS = D.get('high_segment') or {}
+        kc = KPI_COLORS
         kpis = ''.join([
-            kpi('Объём рынка (вся категория)', f"{money_short(MK['revenue'])} <small>₽</small>", f"{nf(MK['n_sku'])} SKU · {nf(MK['sales'])} продаж за {per['days']} дн", True),
-            kpi('Объём сегмента', f"{money_short(s['revenue'])} <small>₽</small>", f"{nf(s['n_sku'])} SKU · {nf(s['sales'])} продаж · {s['share_rev']}% рынка", True),
-            kpi('Медианная цена', f"{nf(s['price_median'])} <small>₽</small>", f"коридор {nf(s['p25'])}–{nf(s['p75'])} ₽ (p25–p75)"),
-            kpi('Концентрация ТОП-100', f"{s['top100']}%", f"ТОП-10 {s['top10']}% · ТОП-50 {s['top50']}% выручки", ),
-            kpi('Игроки', f"{nf(s['n_brands'])} <small>брендов</small>", f"{nf(s['n_sellers'])} продавцов — рынок раздроблен"),
-            kpi('Ценовой размах', f"{nf(s['p10'])}–{nf(s['p90'])} <small>₽</small>", "p10–p90 активных карточек"),
+            kpi('Объём рынка (вся категория)', f"{money_short(MK['revenue'])} <small>₽</small>", f"{nf(MK['n_sku'])} SKU · {nf(MK['sales'])} продаж за {per['days']} дн", True, kc[0]),
+            kpi('Объём сегмента', f"{money_short(s['revenue'])} <small>₽</small>", f"{nf(s['n_sku'])} SKU · {nf(s['sales'])} продаж · {s['share_rev']}% рынка", True, kc[1]),
+            kpi('Высокий сегмент (≥ ' + nf(HS.get('threshold', 2500)) + ' ₽)', f"{money_short(HS.get('revenue',0))} <small>₽</small>", f"{HS.get('share_rev',0)}% выручки сегмента · медиана {nf(HS.get('price_median',0))} ₽", True, kc[5]),
+            kpi('Медианная цена сегмента', f"{nf(s['price_median'])} <small>₽</small>", f"коридор {nf(s['p25'])}–{nf(s['p75'])} ₽ (p25–p75)", False, kc[2]),
+            kpi('Концентрация ТОП-100', f"{s['top100']}%", f"ТОП-10 {s['top10']}% · ТОП-50 {s['top50']}% выручки", False, kc[3]),
+            kpi('Игроки', f"{nf(s['n_brands'])} <small>брендов</small>", f"{nf(s['n_sellers'])} продавцов — рынок раздроблен", False, kc[4]),
         ])
         topc = D['colors_family'][0]; topc2 = D['colors_family'][1]
         inner = f"""
@@ -136,7 +170,7 @@ def build_html(D):
         <div class="wide-kpis">{kpis}</div>
         <div class="tak" style="margin-top:16px"><h3>Главные выводы</h3><ul>
           <li><b>Крупный, но раздроблённый рынок.</b> Сегмент — <b>{money_short(s['revenue'])} ₽</b> за {per['days']} дней ({s['share_rev']}% всей категории рубашек), но ТОП-100 карточек держат лишь <b>{s['top100']}%</b> выручки. Место для входа есть.</li>
-          <li><b>Рабочий ценовой коридор — {nf(s['p25'])}–{nf(s['p75'])} ₽</b> (медиана {nf(s['price_median'])} ₽). Массовый спрос — средний ценовой сегмент, не премиум.</li>
+          <li><b>Высокий ценовой сегмент — живой.</b> На цены <b>≥ {nf(HS.get('threshold',2500))} ₽</b> приходится <b>{HS.get('share_rev',0)}%</b> выручки сегмента ({money_short(HS.get('revenue',0))} ₽, {nf(HS.get('n_sku',0))} SKU, медиана {nf(HS.get('price_median',0))} ₽). Прогноз продаж — на стр. «Высокий сегмент».</li>
           <li><b>Цвет решает.</b> В продажах доминирует <b>{topc[0].lower()} — {topc[2]:.0f}%</b>, затем {topc2[0].lower()} {topc2[2]:.0f}%. Базовые светлые цвета — ядро ассортимента.</li>
           <li><b>Размерное ядро — {size_core(D)}</b> (см. стр. «Размеры»): на них приходится основная масса продаж; крайние размеры чаще затоварены.</li>
         </ul></div>
@@ -152,7 +186,8 @@ def build_html(D):
             ph = (f'<div class="thumb"><img class="tmb" src="{img}"/><img class="zoom" src="{img}"/></div>'
                   if img else '<span style="color:#ccc">—</span>')
             brand = a_brand(t['brand'], (t['brand'] or '—')[:20]) if t.get('brand') else '—'
-            rows += (f'<tr><td class="rk">{i+1}</td><td class="ph">{ph}</td>'
+            rkcell = (f'<span class="medal m{i+1}">{i+1}</span>' if i < 3 else str(i+1))
+            rows += (f'<tr><td class="rk">{rkcell}</td><td class="ph">{ph}</td>'
                      f'<td class="nm"><span class="l1"><span class="art">{a_item(t["id"], cls="lnk b")}</span> · <span class="br">{brand}</span></span>'
                      f'<span class="nml">{nm}</span></td>'
                      f'<td class="big">{nf(t["price"])}</td>'
@@ -171,7 +206,7 @@ def build_html(D):
           {rows}
         </table>
         <div class="foot"><span>Источник: MPStats API · {per['d1']}–{per['d2']}</span><span>Продажи — за 90 дней; шт/дн — среднесуточные</span></div>"""
-        return page('market', P_TOP, inner, 'p2')
+        return page('market', P_TOP, inner, 'p3')
 
     # ---------- COLORS ----------
     def colors():
@@ -199,15 +234,30 @@ def build_html(D):
         </div>
         <div class="note" style="margin-top:14px"><b>Вывод.</b> Ядро ассортимента — базовые светлые тона: <b>{top[0].lower()} ({top[2]:.0f}%)</b> плюс синяя гамма. Тёмные и цветные — нишевые. Для входа приоритет — белый и голубой/синий однотон; яркие цвета держать точечно под спрос.</div>
         <div class="foot"><span>Источник: MPStats API · поле «цвет» карточек · {per['d1']}–{per['d2']}</span><span>Доли — сумма продаж по цвету / все продажи сегмента</span></div>"""
-        return page('market', P_COLOR, inner, 'p3')
+        return page('market', P_COLOR, inner, 'p4')
 
     # ---------- SIZES ----------
     def sizes():
         sz = D['sizes']; mx = max([p for _, _, p in sz] + [1])
+        core = size_core(D)  # напр. "XS–XL"
+        labels = [l for l, _, _ in sz]
+        core_set = set()
+        if '–' in core:
+            a, b = core.split('–')
+            if a in labels and b in labels:
+                core_set = set(labels[labels.index(a): labels.index(b) + 1])
+        elif core in labels:
+            core_set = {core}
+        def fill(b, p):
+            if b in core_set:
+                bg = f'background:linear-gradient(180deg,{P_SIZE[0]},{P_SIZE[1]})'
+            else:
+                bg = f'background:{P_SIZE[0]}55'
+            return f'<div class="szfill" style="height:{max(3,p/mx*100):.0f}%;{bg}"></div>'
         cols = ''.join(
-            f'<div class="szcol"><div class="szpc">{p:.0f}%</div>'
-            f'<div class="szfill" style="height:{max(3,p/mx*100):.0f}%"></div>'
-            f'<div class="szlb">{b}</div></div>' for b, s, p in sz)
+            f'<div class="szcol"><div class="szpc"{" style=color:"+P_SIZE[1] if b in core_set else ""}>{p:.0f}%</div>'
+            f'{fill(b,p)}'
+            f'<div class="szlb">{b}{"  ●" if b in core_set else ""}</div></div>' for b, s, p in sz)
         # таблица деталей
         trows = ''.join(f'<tr><td style="text-align:left;font-weight:700">{b}</td><td class="num">{p:.1f}%</td><td class="num">{nf(s)}</td></tr>' for b, s, p in sz)
         core = size_core(D)
@@ -225,9 +275,55 @@ def build_html(D):
             <div class="note"><b>Размерное ядро — {core}.</b> На него приходится основная масса заказов. Крайние размеры (XXS/XS и 4XL+) продаются заметно хуже и чаще лежат в остатках — заводить их малыми партиями. Базовую матрицу закупки строить вокруг {core}, обеспечивая по ним стабильное наличие.</div></div>
         </div>
         <div class="foot"><span>Источник: MPStats API · разбивка продаж по размерам карточек · {per['d1']}–{per['d2']}</span><span>Размерные сетки нормализованы к единой лестнице S–4XL+</span></div>"""
-        return page('market', P_SIZE, inner, 'p4')
+        return page('market', P_SIZE, inner, 'p5')
 
-    pages = [cover(), top20(), colors(), sizes()]
+    # ---------- HIGH PRICE SEGMENT ----------
+    def high():
+        HS = D.get('high_segment') or {}
+        if not HS:
+            return ''
+        kc = KPI_COLORS
+        kpis = ''.join([
+            kpi('Объём высокого сегмента', f"{money_short(HS['revenue'])} <small>₽</small>", f"{nf(HS['n_sku'])} SKU · {nf(HS['sales'])} продаж за {per['days']} дн", True, kc[5]),
+            kpi('Доля в выручке сегмента', f"{HS['share_rev']}%", f"каждый третий рубль сегмента — в дорогих карточках", True, kc[0]),
+            kpi('Медианная цена', f"{nf(HS['price_median'])} <small>₽</small>", f"коридор {nf(HS['price_p25'])}–{nf(HS['price_p75'])} ₽ · до {nf(HS['price_p90'])} ₽", False, kc[2]),
+            kpi('Продаж на карточку', f"{nf(HS['card_sales_median'])}–{nf(HS['card_sales_p90'])} <small>шт</small>", f"медиана→p90 за {per['days']} дн среди активных дорогих", False, kc[1]),
+        ])
+        cols = ['#8a93a6', '#3B5BDB', '#0E9F6E']
+        scn = ''.join(
+            f'<div class="scnbox" style="--c:{cols[i]}"><div class="t">{s["name"]}</div>'
+            f'<div class="n">{money_short(s["revenue_mo"])} <small>₽/мес</small></div>'
+            f'<div class="u">{nf(s["units_mo"])} шт/мес · цена {nf(s["price"])} ₽</div>'
+            f'<div class="d">{s["note"]}</div></div>'
+            for i, s in enumerate(HS['scenarios']))
+        brows = ''
+        for b in HS['bands']:
+            hl = ' class="hl"' if b['label'].startswith('2 500') else ''
+            brows += (f'<tr{hl}><td>{b["label"]} ₽</td><td>{nf(b["sku"])}</td><td><b>{nf(b["sales"])}</b></td>'
+                      f'<td>{money_short(b["revenue"])}</td><td>{nf(b["avg_card"])}</td></tr>')
+        inner = f"""
+        <div class="eyebrow">Высокий ценовой сегмент · прогноз продаж</div>
+        <h1 style="font-size:22px;margin:4px 0 6px">Сколько можно продавать в высоком сегменте</h1>
+        <div class="chips"><span class="chip">Порог «дорогих» — от {nf(HS['threshold'])} ₽</span><span class="chip">Прогноз — по фактическим продажам дорогих карточек</span><span class="chip">Продажи 90д → в месяц</span></div>
+        <div class="wide-kpis" style="grid-template-columns:repeat(4,1fr)">{kpis}</div>
+        <div class="card" style="margin-top:13px"><h3>Прогноз для сильной карточки в высоком сегменте <span>выручка/мес при цене ≈ {nf(HS['price_median'])} ₽</span></h3>
+          <div class="scn">{scn}</div>
+          <div class="ceil"><div class="big">{nf(HS['top10_units_mo'])} шт/мес · {money_short(HS['top10_rev_mo'])} ₽</div>
+            <div class="tx"><b>Потолок сегмента</b> — средний уровень ТОП-10 дорогих карточек (ср. цена {nf(HS['top10_price'])} ₽). Это ориентир «лидера», а не типовой вход.</div></div>
+        </div>
+        <div class="chartwrap" style="margin-top:13px">
+          <div class="card"><h3>Ёмкость по ценовым полосам <span>где деньги внутри высокого сегмента</span></h3>
+            <table class="bandtbl"><tr><th>Полоса цены</th><th>SKU</th><th>Продажи 90д</th><th>Выручка</th><th>Ср. шт/карт</th></tr>{brows}</table>
+            <div class="note" style="margin-top:9px">Ядро высокого сегмента — <b>2 500–3 500 ₽</b> (максимум продаж и активных карточек). Выше 3 500 ₽ объём быстро тает — туда заходить точечно, сильным контентом и брендом.</div></div>
+          <div class="card"><h3>Как считали <span>прогноз грунтован на факте</span></h3>
+            <div class="note" style="margin-bottom:9px"><b>База.</b> Взяты все активные карточки сегмента с ценой ≥ {nf(HS['threshold'])} ₽ ({nf(HS['active'])} шт). Их фактические продажи за {per['days']} дней приведены к месяцу.</div>
+            <div class="note" style="margin-bottom:9px"><b>Сценарии.</b> Осторожный = медиана продаж таких карточек; реалистичный = уровень сильной карточки (p75); амбициозный = уровень топовой (p90). Выручка = штуки × медианная цена высокого сегмента.</div>
+            <div class="note"><b>Важно.</b> Это ориентир достижимого при хорошем контенте, отзывах и наличии, а не гарантия. Точный прогноз под ваши карточки посчитаем, когда добавите артикулы.</div></div>
+        </div>
+        <div class="foot"><span>Источник: MPStats API · сегмент, цена ≥ {nf(HS['threshold'])} ₽ · {per['d1']}–{per['d2']}</span><span>Оценочный прогноз · допущения в тексте</span></div>"""
+        return page('market', P_HIGH, inner, 'p2')
+
+    pages = [cover(), high(), top20(), colors(), sizes()]
     return ("<!doctype html><html><head><meta charset='utf-8'><style>@page{size:A4;margin:0}"
             + T.CSS + MARKET_CSS + "</style></head><body>" + "\n".join(pages) + "</body></html>")
 
