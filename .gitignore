@@ -3,3 +3,4 @@ chrome/
 reports-output/
 .env
 *.log
+.cache/
