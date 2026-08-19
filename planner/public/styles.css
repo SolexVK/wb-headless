@@ -612,6 +612,9 @@ html { overflow-x: hidden; }
 .se-cc-row select:focus, .se-cc-row input:focus { outline: none; border-color: var(--accent); }
 .se-cc-del { background: var(--panel); border: 1px solid var(--line); color: var(--danger); border-radius: 50%; width: 20px; height: 20px; line-height: 1; font-size: 12px; padding: 0; cursor: pointer; }
 .se-cc-del:hover { border-color: var(--danger); }
+.se-cx-btn { margin-left: 6px; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 4px; font-size: 10px; line-height: 1.4; padding: 0 5px; cursor: pointer; }
+.se-cx-btn:hover { border-color: var(--danger); color: var(--danger); }
+.se-seg-table tbody tr.se-cx-off td { opacity: 0.5; }
 /* Планы продаж по цветам: чипы-фильтр + сворачиваемые карточки */
 .se-cp-wrap { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--line); }
 .se-cp-card > summary .mini { font-weight: normal; }
