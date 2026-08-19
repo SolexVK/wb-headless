@@ -161,6 +161,12 @@ input, select { font: inherit; }
 .panel.collapsed > *:not(h3):not(.subhead) { display: none; }
 .panel.collapsed { padding-bottom: 12px; }
 .panel.collapsible > h3:hover, .panel.collapsible > .subhead:hover { color: var(--accent); }
+/* Блок «Артикулы» через нативный <details> — свёрнут по умолчанию, треугольник как у .se-comp */
+details.panel > summary.data-art-sum { cursor: pointer; user-select: none; list-style: none; padding: 2px 0; }
+details.panel > summary.data-art-sum::-webkit-details-marker { display: none; }
+details.panel > summary.data-art-sum::before { content: '▸'; color: var(--muted); font-size: 12px; margin-right: 6px; }
+details.panel[open] > summary.data-art-sum::before { content: '▾'; }
+details.panel > summary.data-art-sum:hover { color: var(--accent); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 600; }

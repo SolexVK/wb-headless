@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'exclude-colors-2026-08-06h';
+const APP_BUILD = 'data-articles-dropdown-2026-08-06i';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -4014,10 +4014,30 @@ async function loadResponsibles() {
   }));
 }
 
+// Блок «Артикулы»: свёрнут по умолчанию (нативный <details>), внутри — выпадающий список.
+// Выбор артикула открывает ТОЛЬКО его карточку; смена выбора закрывает прежнюю. Не загромождает лист.
+let dataSelArticle = null; // выбранный в «Данные» артикул (id)
+let dataArtOpen = false;   // раскрыт ли блок «Артикулы» (переживает ре-рендер)
 function dataArticlesPanel() {
-  return `<div class="panel"><div class="subhead"><h3>Артикулы</h3><button class="btn" id="btn-add-article">+ Артикул</button></div>
-    <div class="form-grid">${state.articles.map((a, i) => ({ a, i })).filter(({ a }) => !a.archived).map(({ a, i }) => `
-      <div class="card">
+  const active = state.articles.map((a, i) => ({ a, i })).filter(({ a }) => !a.archived);
+  if (dataSelArticle && !active.some(({ a }) => a.id === dataSelArticle)) dataSelArticle = null;
+  const sel = active.find(({ a }) => a.id === dataSelArticle);
+  const options = `<option value="">— выбери артикул —</option>` + active.map(({ a }) => `<option value="${seEsc(a.id)}"${a.id === dataSelArticle ? ' selected' : ''}>${seEsc(a.id)}${a.name ? ' — ' + seEsc(a.name) : ''}</option>`).join('');
+  return `<details class="panel"${dataArtOpen ? ' open' : ''} id="data-art-panel">
+    <summary class="data-art-sum"><h3 style="display:inline;margin:0">Артикулы <span class="mini">(${active.length})</span></h3></summary>
+    <div style="margin-top:12px">
+      <div class="row-flex" style="align-items:flex-end;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+        <div class="field" style="flex:1;min-width:220px"><label>Выбери артикул для настройки</label>
+          <select id="data-art-sel">${options}</select></div>
+        <button class="btn" id="btn-add-article">+ Артикул</button>
+      </div>
+      <div id="data-art-card">${sel ? dataArticleCard(sel.a, sel.i) : '<div class="mini">Выбери артикул из списка выше — откроется его карточка для настройки. Или создай новый кнопкой «+ Артикул».</div>'}</div>
+      ${dataArchivePanel()}
+    </div>
+  </details>`;
+}
+function dataArticleCard(a, i) {
+  return `<div class="card">
         <div class="row-flex">
           <div class="field"><label>Артикул</label><input data-art="${i}" data-f="id" value="${a.id}"></div>
           <div class="field" style="flex:2"><label>Название</label><input data-art="${i}" data-f="name" value="${a.name}"></div>
@@ -4051,8 +4071,7 @@ function dataArticlesPanel() {
           <button class="btn swatch-add" data-color-add="${i}">＋ цвет</button></div>
         </div>
         <button class="btn btn-subtle" data-archive-art="${i}" title="Убрать артикул в архив: он скроется со всех листов и не будет планироваться, но данные и партии сохранятся — можно вернуть из «Архива» ниже">🗄 В архив</button>
-      </div>`).join('') || '<div class="mini">Активных артикулов нет. Добавь новый или верни из «Архива» ниже.</div>'}</div></div>
-    ${dataArchivePanel()}`;
+      </div>`;
 }
 
 // Архив артикулов: мягко удалённые артикулы. Отсюда можно вернуть в активные или удалить навсегда.
@@ -4217,6 +4236,7 @@ function bindDataEvents() {
     else if (f === 'fabricPerUnit') a.fabricPerUnit = +e.target.value || 1.6;
     else if (f === 'fabricPricePerMeter') a.fabricPricePerMeter = Math.max(0, +e.target.value || 0);
     else if (f === 'buyoutPct') a.buyoutPct = Math.max(1, Math.min(100, +e.target.value || 40));
+    else if (f === 'id') { if (dataSelArticle === a.id) dataSelArticle = e.target.value; a.id = e.target.value; } // синхронизировать выбор при смене id
     else a[f] = e.target.value; mark();
   }));
   root.querySelectorAll('input[data-artimg]').forEach((inp) => inp.addEventListener('change', (e) => {
@@ -4312,8 +4332,13 @@ function bindDataEvents() {
     mark(); renderData(); toast(`Артикул «${id}» удалён навсегда`);
   }));
   root.querySelector('#btn-add-article')?.addEventListener('click', () => {
-    state.articles.push({ id: uid('art').slice(0, 6), name: 'Новый артикул', comment: '', fabricPerUnit: 1.6, fabricPricePerMeter: 0, colors: ['белый'], sizes: ['S', 'M', 'L', 'XL'], plan: {} }); mark(); renderData();
+    const na = { id: uid('art').slice(0, 6), name: 'Новый артикул', comment: '', fabricPerUnit: 1.6, fabricPricePerMeter: 0, colors: ['белый'], sizes: ['S', 'M', 'L', 'XL'], plan: {} };
+    state.articles.push(na); dataSelArticle = na.id; dataArtOpen = true; mark(); renderData(); // сразу открыть новую карточку
   });
+  // Выпадающий список артикулов: выбор открывает карточку выбранного (прежняя закрывается).
+  root.querySelector('#data-art-sel')?.addEventListener('change', (e) => { dataSelArticle = e.target.value || null; renderData(); });
+  // Запомнить раскрыт/свёрнут блок «Артикулы» (нативный <details>) — переживает ре-рендер.
+  root.querySelector('#data-art-panel')?.addEventListener('toggle', (e) => { dataArtOpen = e.target.open; });
 
   root.querySelectorAll('input[data-ws],select[data-ws]').forEach((inp) => inp.addEventListener('change', (e) => {
     const w = state.workshops[+e.target.dataset.ws];
