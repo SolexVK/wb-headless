@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'size-base-50-2026-08-06f';
+const APP_BUILD = 'my-colors-off-market-2026-08-06g';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2250,6 +2250,7 @@ async function renderSeasonView(articleId) {
   }));
   bindSeasonView(rep, p);
   bindReconcile(rep, p, articleId); // Этап 3: слой примирения прогноз↔карточка → План по размерам
+  bindSeasonCustomColors(rep, p, articleId); // «мои цвета» — добавить/править/убрать
   // Пересборка в один клик прямо из баннера (тем же cfg, что сохранён у плана).
   if (canRebuild) {
     document.getElementById('se-rebuild')?.addEventListener('click', async (e) => {
@@ -2502,26 +2503,63 @@ function seasonColorQuantities(colors, forecast, minRelPct, minCount, minColors)
   };
 }
 
+// «Мои цвета» — расцветки, которых НЕТ в рыночной выборке, но которые продавец уже продаёт/шьёт.
+// Хранятся в article.customColors = [{name, mode:'pct'|'qty', value}] (только валидные активные
+// цвета артикула). Кол-во: mode 'qty' → абсолют (шт), 'pct' → доля от лидера (forecast).
+function customColorRows(article, forecast, existingNames) {
+  const list = (article && Array.isArray(article.customColors)) ? article.customColors : [];
+  const active = new Set(activeColors(article));
+  const F = Math.max(0, +forecast || 0);
+  const seen = new Set(); const out = [];
+  for (const cc of list) {
+    const name = String((cc && cc.name) || '').trim();
+    if (!name || seen.has(name) || (existingNames && existingNames.has(name)) || !active.has(name)) continue;
+    seen.add(name);
+    const mode = cc.mode === 'qty' ? 'qty' : 'pct';
+    const value = Math.max(0, +cc.value || 0);
+    const qty = mode === 'qty' ? Math.round(value) : Math.round(F * value / 100);
+    const rel = F > 0 ? Math.round(qty / F * 1000) / 10 : 0;
+    out.push({ name, units: qty, avgPerSku: null, skus: null, normShare: null, rel, qty, lowData: false, efficient: false, custom: true, mode, value });
+  }
+  return out;
+}
+// Дополнить результат долей по цветам «моими цветами» (в ядро ассортимента, пересчёт тиража).
+function mergeCustomColors(cq, article, forecast) {
+  if (!cq) return cq;
+  const existing = new Set([...cq.core, ...cq.weak].map((r) => r.name));
+  const extra = customColorRows(article, forecast, existing);
+  if (!extra.length) return cq;
+  const core = [...cq.core, ...extra];
+  return { ...cq, core, custom: extra, grandTotal: core.reduce((s, r) => s + r.qty, 0) };
+}
+
 // Доли спроса по ЦВЕТАМ + количество к пошиву. Нормализованная доля = среднее на 1 артикул
 // (÷ Σсредних) — убирает перекос «белого больше выкладывают». Кол-во считается относительно
-// лучшего цвета (см. seasonColorQuantities).
+// лучшего цвета (см. seasonColorQuantities). «Мои цвета» добавляются сверх выборки.
 function seasonColorsBlock(rep, p) {
   const ca = rep.colorAnalysis;
   if (!ca || !Array.isArray(ca.colors) || !ca.colors.length) return '';
   const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
   const forecast = Math.round(((p && p.forecastDaily) || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
-  const cq = seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount);
+  const article = (state.articles || []).find((x) => x.id === seasonSelArticle) || null;
+  const cqBase = seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount);
+  const analyzedNames = new Set(cqBase ? [...cqBase.core, ...cqBase.weak].map((r) => r.name) : ca.colors.map((c) => c.name));
+  const cq = mergeCustomColors(cqBase, article, forecast); // + «мои цвета» в ядро
+  const customRows = (cq && cq.custom) ? cq.custom : [];
   const qtyByName = new Map();
   const bestName = cq ? cq.best.name : null;
-  if (cq) { cq.core.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: true, lowData: r.lowData, efficient: r.efficient })); cq.weak.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: false, lowData: r.lowData, efficient: r.efficient })); }
+  if (cq) { cq.core.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: true, lowData: r.lowData, efficient: r.efficient, custom: !!r.custom })); cq.weak.forEach((r) => qtyByName.set(r.name, { qty: r.qty, rel: r.rel, core: false, lowData: r.lowData, efficient: r.efficient, custom: false })); }
 
+  // Псевдо-цвета для «моих цветов» (их нет в ca.colors) — чтобы показать в таблице.
+  const customCells = customRows.map((r) => ({ name: r.name, skus: null, units: r.qty, rawShare: null, avgPerSku: null, lowConfidence: false, custom: true }));
   // Отображение — строго по «Доле объёма» убыв. (что просил пользователь). Значки ⚑ добор / ⚠ мало
   // остаются на своих строках, но не ломают порядок: лидер (макс. доля) естественно оказывается сверху.
   const ordered = (cq
     ? [...cq.core, ...cq.weak].map((r) => ca.colors.find((c) => c.name === r.name)).filter(Boolean)
       .concat(ca.colors.filter((c) => !qtyByName.has(c.name)))
     : ca.colors.slice())
-    .slice().sort((x, y) => (y.rawShare || 0) - (x.rawShare || 0) || (y.units || 0) - (x.units || 0));
+    .slice().sort((x, y) => (y.rawShare || 0) - (x.rawShare || 0) || (y.units || 0) - (x.units || 0))
+    .concat(customCells); // «мои цвета» — в конце списка
   const maxRaw = Math.max(1, ...ca.colors.map((c) => c.rawShare || 0)); // масштаб полоски доли объёма
   // Ячейка «число + подпись»: число прижато к правому краю фикс-колонки, подпись (▲ эфф / ⚑ добор /
   // · доп.) — в отдельной колонке справа. Так цифры Ср/арт и Кол-во стоят строго друг под другом,
@@ -2530,17 +2568,18 @@ function seasonColorsBlock(rep, p) {
   const rows = ordered.map((c) => {
     const q = qtyByName.get(c.name);
     const isBest = c.name === bestName;
+    const isCustom = !!c.custom;
     const qtyVal = q ? (q.core ? `<b>${fmt(q.qty)}</b>` : fmt(q.qty)) : '—';
-    const qtyNote = q ? (q.core ? (q.lowData ? '⚑ добор' : '') : '· доп.') : '';
-    const cls = isBest ? 'se-color-best' : ((!q || q.core) ? '' : 'se-seg-thin');
+    const qtyNote = isCustom ? '🧵 мой' : (q ? (q.core ? (q.lowData ? '⚑ добор' : '') : '· доп.') : '');
+    const cls = isBest ? 'se-color-best' : (isCustom ? 'se-cc-line' : ((!q || q.core) ? '' : 'se-seg-thin'));
     const effNote = q && q.efficient ? '▲ эфф' : '';
-    const nameCell = `${isBest ? '★ <b>' : ''}${seEsc(c.name)}${isBest ? '</b> <span class="mini">лидер</span>' : ''}${c.lowConfidence ? ' <span class="mini">⚠ мало</span>' : ''}`;
+    const nameCell = `${isBest ? '★ <b>' : ''}${isCustom ? '🧵 ' : ''}${seEsc(c.name)}${isBest ? '</b> <span class="mini">лидер</span>' : ''}${isCustom ? ' <span class="mini">мой цвет (нет в выборке)</span>' : ''}${c.lowConfidence ? ' <span class="mini">⚠ мало</span>' : ''}`;
     return `<tr class="${cls}"${isBest ? ' style="background:rgba(255,196,0,.16)"' : ''}>
       <td>${nameCell}</td>
-      <td class="num">${c.skus}</td>
-      <td class="num">${fmt(c.units)}</td>
-      <td class="num se-share-cell"><span class="se-share-bar" style="width:${Math.round((c.rawShare || 0) / maxRaw * 90)}px"></span>${c.rawShare != null ? c.rawShare + '%' : '—'}</td>
-      <td class="num">${numCell(fmt(c.avgPerSku), effNote, effNote ? 'Ср/арт выше, чем у лидера — цвет продаётся лучше на карточку при меньшем объёме: возможная недооценённая ниша' : '')}</td>
+      <td class="num">${c.skus == null ? '—' : c.skus}</td>
+      <td class="num">${c.units != null ? fmt(c.units) : '—'}</td>
+      <td class="num se-share-cell">${c.rawShare != null ? `<span class="se-share-bar" style="width:${Math.round((c.rawShare || 0) / maxRaw * 90)}px"></span>${c.rawShare}%` : '—'}</td>
+      <td class="num">${c.avgPerSku == null ? '—' : numCell(fmt(c.avgPerSku), effNote, effNote ? 'Ср/арт выше, чем у лидера — цвет продаётся лучше на карточку при меньшем объёме: возможная недооценённая ниша' : '')}</td>
       <td class="num">${numCell(qtyVal, qtyNote)}</td>
     </tr>`;
   }).join('');
@@ -2553,6 +2592,30 @@ function seasonColorsBlock(rep, p) {
         <label class="mini" style="margin-left:8px">цветов в ассортименте: <input id="se-color-count" type="number" min="1" max="20" step="1" value="${seasonColorMinCount}" style="width:52px" title="Гарантированный минимум расцветок — движок добирает даже слабые"></label>
         <label class="mini" style="margin-left:8px">порог силы: <input id="se-color-thr" type="number" min="5" max="100" step="5" value="${seasonColorMinRel}" style="width:52px" title="Цвета сильнее этого % от лучшего входят сверх минимума"> %</label></div>`
     : '';
+  // Редактор «моих цветов» (нет в рыночной выборке, но есть у продавца).
+  const ccList = (article && Array.isArray(article.customColors)) ? article.customColors : [];
+  const usedCustom = new Set(ccList.map((cc) => String((cc && cc.name) || '')));
+  const availForNew = article ? activeColors(article).filter((nm) => !analyzedNames.has(nm) && !usedCustom.has(nm)) : [];
+  const ccRowsHtml = ccList.map((cc, i) => {
+    const name = String((cc && cc.name) || '');
+    const mode = cc.mode === 'qty' ? 'qty' : 'pct';
+    const value = Math.max(0, +cc.value || 0);
+    const qty = mode === 'qty' ? Math.round(value) : Math.round(forecast * value / 100);
+    const valid = article && activeColors(article).includes(name);
+    const opts = [...new Set([name, ...availForNew].filter(Boolean))];
+    return `<div class="se-cc-row">
+      <select class="se-cc-name" data-cc-idx="${i}">${name ? '' : '<option value="" selected>— выбери цвет —</option>'}${opts.map((nm) => `<option value="${seEsc(nm)}"${nm === name ? ' selected' : ''}>${seEsc(nm)}</option>`).join('')}</select>
+      <select class="se-cc-mode" data-cc-idx="${i}"><option value="pct"${mode === 'pct' ? ' selected' : ''}>% от лидера</option><option value="qty"${mode === 'qty' ? ' selected' : ''}>штук</option></select>
+      <input class="se-cc-value" type="number" min="0" step="${mode === 'pct' ? '5' : '50'}" data-cc-idx="${i}" value="${value}" style="width:80px">
+      <span class="mini">= <b>${fmt(qty)}</b> шт${!valid ? ' <span style="color:var(--danger)">цвет не найден у артикула</span>' : ''}</span>
+      <button class="se-cc-del" data-cc-idx="${i}" title="убрать">✕</button>
+    </div>`;
+  }).join('');
+  const customEditor = article ? `<div class="se-custom">
+      <div class="mini"><b>🧵 Мои цвета</b> — расцветки, которых нет в рыночной выборке, но которые ты уже продаёшь/шьёшь. Задай объём (доля от лидера или штуки) — цвет войдёт в «План по размерам», партии и поставки наравне с остальными. Список цветов берётся из карточки артикула («Данные»).</div>
+      ${ccRowsHtml || '<div class="mini">Пока нет. Нажми «＋ добавить свой цвет».</div>'}
+      <button class="btn btn-subtle" id="se-cc-add" type="button"${availForNew.length ? '' : ' disabled title="Нет свободных цветов артикула — добавь новый цвет в «Данные»"'}>＋ добавить свой цвет</button>
+    </div>` : '';
   const poolNote = ca.poolSize
     ? `по <b>${ca.poolSize}</b> артикулам выдачи${ca.planSize && ca.poolSize > ca.planSize ? ` (план — по ТОП-${ca.planSize})` : ''}${ca.serpTotal ? ` из ${ca.serpTotal} найденных` : ''} · продаж ${fmt(ca.total.units)}`
     : `конкурентов ${ca.total.skus}, продаж ${fmt(ca.total.units)}`;
@@ -2573,6 +2636,7 @@ function seasonColorsBlock(rep, p) {
         ${footRow}
       </table></div>
       ${totalLine}
+      ${customEditor}
     </div>
   </details>`;
 }
@@ -2734,12 +2798,13 @@ function resolveChoices(result, sr) {
 }
 
 // Вход движка из отчёта: кол-во по цветам (ядро ассортимента) + доли размеров (ядро сетки).
-function reconcileInputs(rep, p) {
+function reconcileInputs(rep, p, articleId) {
   const ca = rep.colorAnalysis, sa = rep.sizeAnalysis;
   if (!ca || !Array.isArray(ca.colors) || !ca.colors.length) return null;
   if (!sa || !Array.isArray(sa.sizes) || !sa.sizes.length) return null;
   const forecast = Math.round(((p && p.forecastDaily) || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
-  const cq = seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount);
+  const article = (state.articles || []).find((x) => x.id === (articleId || seasonSelArticle)) || null;
+  const cq = mergeCustomColors(seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount), article, forecast);
   if (!cq) return null;
   const core = sa.sizes.filter((s) => s.core);
   return {
@@ -2764,13 +2829,18 @@ function reconcileEffectiveArticle(article, choices, newNames) {
       if (nm) { if (!colors.includes(nm)) colors.push(nm); colorMap[demand] = nm; }
     } else if (colors.includes(choice)) colorMap[demand] = choice;
   }
+  // «Мои цвета» = сразу цвет карточки: само-привязка, чтобы reconcilePlan сматчил их напрямую.
+  for (const cc of (article.customColors || [])) {
+    const nm = String((cc && cc.name) || '').trim();
+    if (nm && colors.includes(nm)) colorMap[nm] = nm;
+  }
   return { colors, sizes: article.sizes || [], colorMap };
 }
 
 // Прогнать движок. Два прохода: 1) узнать статусы; 2) с дефолтами (новые цвета → создать).
 // Возвращает { result, inp, article, eff, choices } (choices — с заполненными дефолтами) или null.
 function runReconcile(rep, p, articleId) {
-  const inp = reconcileInputs(rep, p);
+  const inp = reconcileInputs(rep, p, articleId);
   const article = state.articles.find((x) => x.id === articleId);
   if (!inp || !article) return null;
   const sr = (seasonReconcile && seasonReconcile.articleId === articleId) ? seasonReconcile : { choices: {}, newNames: {} };
@@ -2785,7 +2855,7 @@ function runReconcile(rep, p, articleId) {
 // Блок-обёртка: кнопка + (если открыто) панель предпросмотра. Или объяснение, почему недоступно.
 function seasonReconcileBlock(rep, p, articleId) {
   const article = state.articles.find((x) => x.id === articleId);
-  const inp = reconcileInputs(rep, p);
+  const inp = reconcileInputs(rep, p, articleId);
   if (!article || !inp) {
     const why = !article ? 'нет карточки артикула в «Данные»'
       : (!(article.colors || []).length || !(article.sizes || []).length) ? 'в «Данные» не заданы цвета и/или размеры ряда'
@@ -2893,6 +2963,35 @@ function reconcilePanelHTML(rep, p, articleId) {
       <div style="flex:1;min-width:220px"><div class="mini"><b>Размеры</b> (диапазон → ряд, поровну)</div>${sizesTbl}</div>
     </div>
     ${archBox}${unBox}${dvTbl}${applyRow}`;
+}
+
+// «Мои цвета»: добавить / сменить цвет / режим / значение / убрать. Каждое действие пишет в
+// article.customColors, помечает dirty и перерисовывает сезонку (кол-ва, reconcile и планы —
+// с учётом новых цветов). Сохранение — общей кнопкой «Сохранить» (state PUT).
+function bindSeasonCustomColors(rep, p, articleId) {
+  const article = state.articles.find((x) => x.id === articleId);
+  if (!article) return;
+  const list = () => (article.customColors = Array.isArray(article.customColors) ? article.customColors : []);
+  const rerender = () => { dirty = true; setStatus(); renderSeasonView(articleId); };
+  document.getElementById('se-cc-add')?.addEventListener('click', () => {
+    const analyzed = new Set(((rep.colorAnalysis && rep.colorAnalysis.colors) || []).map((c) => c.name));
+    const used = new Set(list().map((cc) => String((cc && cc.name) || '')));
+    const avail = activeColors(article).filter((nm) => !analyzed.has(nm) && !used.has(nm));
+    list().push({ name: avail[0] || '', mode: 'pct', value: 50 });
+    rerender();
+  });
+  document.querySelectorAll('.se-cc-name').forEach((el) => el.addEventListener('change', (e) => {
+    const i = +e.target.dataset.ccIdx; if (list()[i]) { list()[i].name = e.target.value; rerender(); }
+  }));
+  document.querySelectorAll('.se-cc-mode').forEach((el) => el.addEventListener('change', (e) => {
+    const i = +e.target.dataset.ccIdx; if (list()[i]) { list()[i].mode = e.target.value === 'qty' ? 'qty' : 'pct'; rerender(); }
+  }));
+  document.querySelectorAll('.se-cc-value').forEach((el) => el.addEventListener('change', (e) => {
+    const i = +e.target.dataset.ccIdx; if (list()[i]) { list()[i].value = Math.max(0, +e.target.value || 0); rerender(); }
+  }));
+  document.querySelectorAll('.se-cc-del').forEach((el) => el.addEventListener('click', (e) => {
+    const i = +e.target.dataset.ccIdx; if (list()[i] != null) { list().splice(i, 1); rerender(); }
+  }));
 }
 
 // Навесить события панели (вызывается и при первом рендере сезонки, и при ре-рендере панели).
@@ -3169,7 +3268,8 @@ function seasonColorPlansData(rep, p) {
   const ca = rep.colorAnalysis;
   if (!ca || !Array.isArray(ca.colors) || !ca.colors.length) return null;
   const forecast = Math.round((p.forecastDaily || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
-  const cq = seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount);
+  const article = (state.articles || []).find((x) => x.id === seasonSelArticle) || null;
+  const cq = mergeCustomColors(seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount), article, forecast);
   if (!cq || !forecast) return null;
   // помесячная форма кривой (одинаковая для всех цветов, масштаб — по доле цвета)
   const byMonth = {};

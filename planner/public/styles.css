@@ -604,6 +604,14 @@ html { overflow-x: hidden; }
 .se-seg-table td.se-seg-ok, .se-seg-table tr.se-seg-ok td:first-child { color: var(--ok, #16a34a); }
 .se-seg-table td.se-seg-thin, .se-seg-table tr.se-seg-thin td:first-child { color: var(--warn, #d97706); }
 .se-seg-table td.se-seg-loss, .se-seg-table tr.se-seg-loss td:first-child { color: var(--bad, #dc2626); }
+/* «Мои цвета» — расцветки продавца вне рыночной выборки */
+.se-seg-table tbody tr.se-cc-line { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.se-custom { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.se-cc-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+.se-cc-row select, .se-cc-row input { padding: 3px 6px; background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 5px; font-size: 12px; }
+.se-cc-row select:focus, .se-cc-row input:focus { outline: none; border-color: var(--accent); }
+.se-cc-del { background: var(--panel); border: 1px solid var(--line); color: var(--danger); border-radius: 50%; width: 20px; height: 20px; line-height: 1; font-size: 12px; padding: 0; cursor: pointer; }
+.se-cc-del:hover { border-color: var(--danger); }
 /* Планы продаж по цветам: чипы-фильтр + сворачиваемые карточки */
 .se-cp-wrap { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--line); }
 .se-cp-card > summary .mini { font-weight: normal; }
