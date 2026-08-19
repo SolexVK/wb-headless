@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'mpstats-token-ui-2026-08-06k';
+const APP_BUILD = 'monthly-load-dashboard-2026-08-06l';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1570,6 +1570,91 @@ async function onProgress(partiaId, op, date) {
 }
 
 // ---------- ДАШБОРД ----------
+// ── Помесячная загрузка производства (из расписания) ──
+// Рабочие дни (пн–пт) периода [start..end] по месяцам: {month: кол-во} + всего.
+function weekdaysByMonth(startISO, endISO) {
+  const out = {}; let total = 0;
+  if (!startISO) return { out, total: 0 };
+  const s = new Date(startISO + 'T00:00:00Z');
+  const e = new Date((endISO || startISO) + 'T00:00:00Z');
+  if (e < s) return { out: { [startISO.slice(0, 7)]: 1 }, total: 1 };
+  for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+    const dow = d.getUTCDay(); if (dow === 0 || dow === 6) continue; // выходные — не шьём
+    const m = d.toISOString().slice(0, 7); out[m] = (out[m] || 0) + 1; total++;
+  }
+  if (total === 0) { const m = startISO.slice(0, 7); return { out: { [m]: 1 }, total: 1 }; }
+  return { out, total };
+}
+function weekdaysInMonth(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  let n = 0; for (let d = 1; d <= days; d++) { const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); if (dow !== 0 && dow !== 6) n++; }
+  return n;
+}
+// Разложить целое total по весам (largest remainder) — сумма точно = total.
+function apportionByWeights(total, weights) {
+  const T = Math.max(0, Math.round(total));
+  const W = weights.reduce((s, w) => s + Math.max(0, w), 0);
+  if (T === 0 || W <= 0) return weights.map(() => 0);
+  const raw = weights.map((w) => T * Math.max(0, w) / W);
+  const out = raw.map((x) => Math.floor(x));
+  let used = out.reduce((s, x) => s + x, 0);
+  const rema = raw.map((x, i) => ({ i, f: x - Math.floor(x) })).sort((a, b) => b.f - a.f);
+  for (let k = 0; k < T - used && rema.length; k++) out[rema[k % rema.length].i]++;
+  return out;
+}
+function dashMonthlyLoad() {
+  const cy = (schedule?.cycles || []).filter((c) => !c.historical && c.units > 0);
+  if (!cy.length) return '';
+  const artUnits = {}; const wsDays = {}; const months = new Set();
+  const artInfo = new Map(); const wsInfo = new Map();
+  for (const c of cy) {
+    const s = (c.ops && c.ops.sew && c.ops.sew.start) || c.sewStart;
+    const e = (c.ops && c.ops.sew && c.ops.sew.end) || c.sewStart;
+    const { out: wd } = weekdaysByMonth(s, e);
+    const entries = Object.entries(wd);
+    const alloc = apportionByWeights(c.units, entries.map(([, n]) => n)); // объём по месяцам ∝ рабочим дням
+    entries.forEach(([m, n], i) => {
+      months.add(m);
+      (artUnits[m] = artUnits[m] || {})[c.articleId] = (artUnits[m][c.articleId] || 0) + alloc[i];
+      (wsDays[m] = wsDays[m] || {})[c.workshopId] = (wsDays[m][c.workshopId] || 0) + n;
+    });
+    if (!artInfo.has(c.articleId)) artInfo.set(c.articleId, { name: c.articleName, total: 0 });
+    artInfo.get(c.articleId).total += c.units;
+    if (!wsInfo.has(c.workshopId)) wsInfo.set(c.workshopId, { name: c.workshopName, sew: (state.workshops.find((w) => w.id === c.workshopId)?.capacities?.sew) || 0 });
+  }
+  const monthList = [...months].sort();
+  const artList = [...artInfo.entries()].sort((a, b) => cmpArticleId({ id: a[0] }, { id: b[0] }));
+  const wsList = [...wsInfo.entries()];
+  const f2 = (n) => Math.round(+n || 0).toLocaleString('ru');
+  const monLbl = (ym) => `${MONTHS[+ym.slice(5, 7) - 1] || ym.slice(5, 7)} ${ym.slice(2, 4)}`;
+  const curMonth = ((state.settings.planningDate && /^\d{4}-\d{2}/.test(state.settings.planningDate)) ? state.settings.planningDate : new Date().toISOString()).slice(0, 7);
+  const monthTotals = monthList.map((m) => artList.reduce((s, [id]) => s + ((artUnits[m] || {})[id] || 0), 0));
+  const grand = artList.reduce((s, [, info]) => s + info.total, 0);
+  const th = (m) => `<th class="num${m === curMonth ? ' dash-cur' : ''}">${monLbl(m)}</th>`;
+  const artRows = artList.map(([id, info]) => `<tr>
+      <td><b>${seEsc(id)}</b> <span class="mini">${seEsc(info.name)}</span></td>
+      ${monthList.map((m) => { const u = (artUnits[m] || {})[id] || 0; return `<td class="num${m === curMonth ? ' dash-cur' : ''}">${u ? f2(u) : '<span class="mini">·</span>'}</td>`; }).join('')}
+      <td class="num"><b>${f2(info.total)}</b></td></tr>`).join('');
+  const wsRows = wsList.map(([id, info]) => `<tr>
+      <td>${seEsc(info.name)} <span class="mini">${info.sew}/дн</span></td>
+      ${monthList.map((m) => { const busy = Math.round((wsDays[m] || {})[id] || 0); const avail = weekdaysInMonth(m); const pct = avail ? Math.round(busy / avail * 100) : 0; return `<td class="num${m === curMonth ? ' dash-cur' : ''}">${busy ? `${busy}/${avail}<div class="mini ${pct > 100 ? 'bad' : ''}">${pct}%</div>` : '<span class="mini">·</span>'}</td>`; }).join('')}
+    </tr>`).join('');
+  return `<div class="panel"><h3>📅 Месячная загрузка производства (пошив)</h3>
+    <div class="mini" style="margin-bottom:8px">Сколько единиц каждого артикула шьётся в каждом месяце (по календарю пошива из расписания; объём партии, идущей через границу месяца, делится по рабочим дням). Текущий месяц подсвечен.</div>
+    <div class="matrix-scroll"><table class="matrix-table">
+      <thead><tr><th>Артикул</th>${monthList.map(th).join('')}<th class="num">Итого</th></tr></thead>
+      <tbody>${artRows}</tbody>
+      <tfoot><tr><th>ВСЕГО, шт</th>${monthList.map((m, i) => `<th class="num${m === curMonth ? ' dash-cur' : ''}">${f2(monthTotals[i])}</th>`).join('')}<th class="num">${f2(grand)}</th></tr></tfoot>
+    </table></div>
+    <div class="mini" style="margin:12px 0 6px"><b>Загрузка цехов по месяцам</b> — занято рабочих дней ÷ доступно в месяце (>100% = перегруз, не успевает):</div>
+    <div class="matrix-scroll"><table class="matrix-table">
+      <thead><tr><th>Цех</th>${monthList.map(th).join('')}</tr></thead>
+      <tbody>${wsRows}</tbody>
+    </table></div>
+  </div>`;
+}
+
 function renderDashboard() {
   const root = document.getElementById('dashboard');
   const cy = schedule.cycles;
@@ -1594,6 +1679,8 @@ function renderDashboard() {
     ${warns.length || errs.length ? `<div class="panel"><h3>Риски и предупреждения</h3>
       ${[...errs, ...warns].map((w) => `<div class="warn-item ${w.level}">${w.level === 'error' ? '⛔' : '⚠️'} ${w.message}</div>`).join('')}
     </div>` : '<div class="panel"><h3>Риски</h3><div class="mini">Срывов и предупреждений нет ✓</div></div>'}
+
+    ${dashMonthlyLoad()}
 
     <div class="panel"><h3>Загрузка цехов</h3>
       <table><thead><tr><th>Цех</th><th>Роль</th><th class="num">Пошив, шт/дн</th><th class="num">Занято дней</th><th class="num">Циклов</th><th style="width:220px">Загрузка</th></tr></thead>

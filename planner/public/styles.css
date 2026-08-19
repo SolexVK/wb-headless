@@ -320,6 +320,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .modal-head h3 { margin: 0; font-size: 16px; }
 .settings-row { font-size: 14px; }
 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+/* Помесячная загрузка — подсветка текущего месяца */
+.matrix-table td.dash-cur, .matrix-table th.dash-cur { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .toast.err { border-color: var(--danger); }
 
 /* ---------- Ранг сезонности ---------- */
