@@ -26,6 +26,7 @@
     <div class="actions">
       <label class="season-pick">Сезон: <select id="season-filter"></select></label>
       <span id="status" class="status"></span>
+      <button id="btn-settings" class="btn btn-icon" title="Настройки: токен MPStats">⚙</button>
       <button id="btn-theme" class="btn btn-icon" title="Светлая / тёмная тема">🌙</button>
       <button id="btn-recalc" class="btn">Пересчитать</button>
       <button id="btn-save" class="btn btn-primary">Сохранить</button>
@@ -93,6 +94,12 @@
   </main>
 
   <div id="toast" class="toast"></div>
+  <div id="settings-modal" class="modal-overlay" hidden>
+    <div class="modal-card">
+      <div class="modal-head"><h3>⚙ Настройки — токен MPStats</h3><button id="settings-close" class="btn btn-icon" title="Закрыть">✕</button></div>
+      <div id="settings-body"><div class="mini">Загрузка…</div></div>
+    </div>
+  </div>
   <button id="scroll-top" class="scroll-top" title="Наверх" aria-label="Прокрутить наверх">↑</button>
   <script src="vendor/xlsx-js-style.min.js"></script>
   <script type="module" src="app.js"></script>

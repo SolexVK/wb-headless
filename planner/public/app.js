@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'global-distribute-workshops-2026-08-06j';
+const APP_BUILD = 'mpstats-token-ui-2026-08-06k';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1827,7 +1827,7 @@ function seasonBuilderPanel() {
   const startMode = f.salesStartMode === 'manual' ? 'manual' : 'auto';
   const leadVal = (f.launchLeadDays != null && f.launchLeadDays !== '') ? f.launchLeadDays : leadDefault;
   const warn = seasonHasToken ? ''
-    : '<div class="season-warn">⚠ Не задан <b>MPSTATS_TOKEN</b> в окружении службы — построение недоступно. Добавь токен в <code>planner/data/.env</code> на Mac mini (см. DEPLOY.md) и перезапусти службу.</div>';
+    : '<div class="season-warn">⚠ Не задан <b>токен MPStats</b> — построение недоступно. Задай его в шапке: кнопка <b>⚙</b> → «Токен MPStats» (применяется сразу, без перезапуска).</div>';
   return `<div class="panel season-builder">
     <div class="subhead"><h3>Часть 1 — Построение плана продаж (по конкурентам)</h3>${seasonBudgetBadge()}</div>
     ${warn}
@@ -4567,6 +4567,44 @@ function applyTheme(t) {
   if (btn) btn.textContent = theme === 'light' ? '🌙' : '☀️';
   if (activeTab === 'gantt' && schedule) renderCurrent(); // перерисовать SVG под тему
 }
+// ── Настройки: токен MPStats (шапка → ⚙) ──
+async function openSettingsModal() {
+  const modal = document.getElementById('settings-modal');
+  const body = document.getElementById('settings-body');
+  if (!modal || !body) return;
+  modal.hidden = false;
+  body.innerHTML = '<div class="mini">Загрузка…</div>';
+  await renderSettingsBody();
+}
+async function renderSettingsBody() {
+  const body = document.getElementById('settings-body');
+  if (!body) return;
+  let st;
+  try { st = await api('/api/settings/mpstats'); }
+  catch (e) { body.innerHTML = `<div class="season-warn">Не удалось получить статус: ${seEsc(e.message)}. Нужно право на раздел «Ранг сезонности».</div>`; return; }
+  const srcTxt = st.source === 'ui' ? 'задан из интерфейса' : st.source === 'env' ? 'из .env на сервере' : 'не задан';
+  body.innerHTML = `
+    <div class="mini" style="margin-bottom:10px">Токен нужен разделу «Ранг сезонности» для доступа к MPStats (аналоги, размеры). Хранится в БД сервиса и переопределяет <code>.env</code>. Секрет не показывается целиком.</div>
+    <div class="settings-row"><b>Текущий токен:</b> ${st.hasToken ? `<span class="mono">${seEsc(st.masked)}</span> <span class="mini">(${srcTxt})</span>` : '<span style="color:var(--danger)">не задан</span>'}</div>
+    <div class="field" style="margin-top:12px"><label>Новый токен MPStats</label>
+      <input id="settings-token" type="text" autocomplete="off" spellcheck="false" placeholder="вставь токен из кабинета MPStats" style="width:100%"></div>
+    <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+      <button id="settings-save" class="btn btn-primary">Сохранить и применить</button>
+      ${st.envAvailable && st.source === 'ui' ? '<button id="settings-reset" class="btn btn-danger" title="Вернуть токен из .env на сервере">↺ Вернуть из .env</button>' : ''}
+    </div>
+    <div class="mini" style="margin-top:10px">Применяется <b>сразу</b>, перезапуск сервера не нужен. Проверка: «Ранг сезонности» → «Построить план».</div>`;
+  document.getElementById('settings-save').addEventListener('click', async () => {
+    const token = (document.getElementById('settings-token').value || '').trim();
+    if (!token) { toast('Вставь токен', true); return; }
+    try { await api('/api/settings/mpstats', { method: 'PUT', body: JSON.stringify({ token }) }); toast('Токен MPStats сохранён и применён'); await renderSettingsBody(); }
+    catch (e) { toast('Ошибка: ' + e.message, true); }
+  });
+  document.getElementById('settings-reset')?.addEventListener('click', async () => {
+    if (!confirm('Вернуть токен из .env на сервере?')) return;
+    try { await api('/api/settings/mpstats', { method: 'DELETE' }); toast('Возвращён токен из .env'); await renderSettingsBody(); }
+    catch (e) { toast('Ошибка: ' + e.message, true); }
+  });
+}
 function initTheme() {
   let saved = 'light';
   try { saved = localStorage.getItem('planner-theme') || 'light'; } catch (e) {}
@@ -4594,6 +4632,9 @@ async function init() {
   document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
   document.getElementById('btn-recalc').addEventListener('click', () => recalc(false).then(() => toast('Пересчитано')));
   document.getElementById('btn-save').addEventListener('click', () => recalc(true).then(() => toast('Сохранено и пересчитано')).catch((e) => toast('Ошибка: ' + e.message, true)));
+  document.getElementById('btn-settings')?.addEventListener('click', openSettingsModal);
+  document.getElementById('settings-close')?.addEventListener('click', () => { document.getElementById('settings-modal').hidden = true; });
+  document.getElementById('settings-modal')?.addEventListener('click', (e) => { if (e.target.id === 'settings-modal') e.target.hidden = true; });
   document.getElementById('zoom').addEventListener('input', (e) => { pxPerDay = +e.target.value; if (activeTab === 'gantt') renderCurrent(); });
   document.getElementById('season-filter').addEventListener('change', (e) => {
     activeSeasonId = e.target.value;

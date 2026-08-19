@@ -12,7 +12,7 @@ import { findRescues } from './lib/rescue.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates, getSubjectPhrases, budgetStatus } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
-import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList } from './lib/db.js';
+import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList, metaGet, metaSet } from './lib/db.js';
 import { installAuth, requireView, requireEdit } from './lib/authMiddleware.js';
 import { applyWritePolicy, filterStateForRead, canEditAnything } from './lib/permissions.js';
 
@@ -22,7 +22,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'size-base-50-broad-pool-2026-08-06f';
+const BACKEND_BUILD = 'mpstats-token-ui-2026-08-06g';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -51,6 +51,20 @@ function loadDotenv() {
   } catch { /* ignore */ }
 }
 loadDotenv();
+// Токен MPStats можно задать из интерфейса (шапка → ⚙). Он хранится в БД и ПЕРЕОПРЕДЕЛЯЕТ .env.
+// Исходный из .env запоминаем как фолбэк (кнопка «сбросить к .env»).
+const ENV_MPSTATS_TOKEN = process.env.MPSTATS_TOKEN || '';
+function loadMpstatsTokenFromDb() {
+  try { const m = metaGet('mpstats_token'); if (m && m.value) process.env.MPSTATS_TOKEN = m.value; } catch { /* нет БД — остаётся .env */ }
+}
+loadMpstatsTokenFromDb();
+const maskToken = (t) => { t = String(t || ''); return t.length > 12 ? t.slice(0, 6) + '…' + t.slice(-4) : (t ? '…' : ''); };
+function mpstatsTokenStatus() {
+  const cur = process.env.MPSTATS_TOKEN || '';
+  let dbSet = false;
+  try { const m = metaGet('mpstats_token'); dbSet = !!(m && m.value); } catch { /* ignore */ }
+  return { hasToken: !!cur, source: dbSet ? 'ui' : (ENV_MPSTATS_TOKEN ? 'env' : 'none'), masked: maskToken(cur), envAvailable: !!ENV_MPSTATS_TOKEN };
+}
 
 const IMG_EXT = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg',
@@ -296,6 +310,20 @@ app.get('/api/season/status', (req, res) => {
   let extra = {};
   try { extra = budgetStatus(req.query.path || null); } catch { /* без БД — без бюджета */ }
   res.json({ ok: true, hasToken: !!process.env.MPSTATS_TOKEN, ...extra });
+});
+// ── Токен MPStats из интерфейса (шапка → ⚙). Хранится в БД, переопределяет .env ──
+app.get('/api/settings/mpstats', requireView('season'), (req, res) => res.json({ ok: true, ...mpstatsTokenStatus() }));
+app.put('/api/settings/mpstats', requireEdit('season'), (req, res) => {
+  const token = String((req.body && req.body.token) || '').trim();
+  if (!token || token.length < 8) return res.status(400).json({ ok: false, error: 'Пустой или слишком короткий токен' });
+  try { metaSet('mpstats_token', token); } catch (e) { return res.status(500).json({ ok: false, error: 'БД недоступна, токен не сохранён: ' + String(e.message || e) }); }
+  process.env.MPSTATS_TOKEN = token; // сразу подхватят все клиенты (читают process.env при вызове)
+  res.json({ ok: true, ...mpstatsTokenStatus() });
+});
+app.delete('/api/settings/mpstats', requireEdit('season'), (req, res) => {
+  try { metaSet('mpstats_token', ''); } catch { /* ignore */ }
+  process.env.MPSTATS_TOKEN = ENV_MPSTATS_TOKEN; // вернуть исходный из .env (или пусто)
+  res.json({ ok: true, ...mpstatsTokenStatus() });
 });
 // фразы предмета (category/by_keywords) для выбора галочками; кэш в БД на 7 дней
 app.post('/api/season/phrases', requireView('season'), async (req, res) => {
