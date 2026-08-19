@@ -163,6 +163,9 @@ export async function runForecast(cfg = {}) {
   // «построено старым движком»). Бросаем понятную ошибку с реальной причиной; прежний сохранённый
   // план при этом НЕ перезаписывается (savePlan идёт после runForecast в маршруте).
   if (!(report.itemsWithData > 0)) {
+    // выгружаем диагностику сбора (по фразам: «ошибка SERP — …» / «лимит») в planner.log,
+    // т.к. дальше бросаем ошибку и report.log до фронта не дойдёт.
+    try { (report.log || []).forEach((l) => console.warn('[season/build]', typeof l === 'string' ? l : JSON.stringify(l))); } catch { /* лог не критичен */ }
     if (report.dailyLimit) {
       throw new Error(`Суточный лимит MPStats исчерпан — аналоги не собраны (${report.dailyLimit}). Попробуйте позже (лимит сбрасывается раз в сутки) или поднимите лимит и нажмите «Построить план» снова.`);
     }
