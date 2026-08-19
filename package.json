@@ -19,7 +19,8 @@
     "docs:limits": "node scripts/fetch-wb-docs.mjs https://dev.wildberries.ru/docs/openapi/api-information docs/wb-api/limits.md",
     "docs:refresh": "node scripts/refresh-wb-docs.mjs",
     "penalties:probe": "node scripts/wb-penalties-probe.mjs",
-    "fines:attr": "node scripts/wb-fines-attribution.mjs"
+    "fines:attr": "node scripts/wb-fines-attribution.mjs",
+    "fines:pdf": "node scripts/wb-fines-pdf.mjs"
   },
   "engines": {
     "node": ">=18"
