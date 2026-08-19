@@ -32,7 +32,8 @@ const lcName = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
 // TTL). Экономно к квоте: перед батчем читаем остаток, при нехватке не лезем. Возвращает
 // объект с diag даже при пустоте — блок покажет причину, а не исчезнет.
 const SIZE_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;   // кэш размерного спроса — 7 дней
-async function gatherSizeCurve(perItemMeta, { d1, d2, topN = 10, enabled = true } = {}) {
+const SIZE_QUOTA_SAFETY = 5;                       // резерв суточной квоты MPStats (не выгребаем «в ноль»)
+async function gatherSizeCurve(perItemMeta, { d1, d2, topN = 50, enabled = true } = {}) {
   if (!enabled) return null;
   // Окно спроса: свежие ~90 дней до конца истории (а не 2 года — иначе мешаем сезоны).
   const w2 = String(d2 || new Date().toISOString().slice(0, 10));
@@ -43,17 +44,27 @@ async function gatherSizeCurve(perItemMeta, { d1, d2, topN = 10, enabled = true 
 
   const live = (perItemMeta || []).filter((m) => (m.unitsSoldLY || m.unitsSold || 0) > 0)
     .sort((a, b) => (b.unitsSoldLY || b.unitsSold || 0) - (a.unitsSoldLY || a.unitsSold || 0)).slice(0, topN);
-  const skus = live.map((m) => Number(m.wb)).filter((n) => Number.isFinite(n) && n > 0);
+  let skus = live.map((m) => Number(m.wb)).filter((n) => Number.isFinite(n) && n > 0);
+  diag.candidates = skus.length; // сколько живых конкурентов претендует на размерную базу
   if (!skus.length) return empty('no-live-nm');
 
-  // Сколько карточек уже в свежем кэше — на столько квота не нужна.
+  // Карточки уже в свежем кэше — бесплатны; живой запрос нужен только для остальных.
   const needFetch = skus.filter((s) => !mpSizeSalesLoad(s, w1, w2, SIZE_CACHE_TTL_MS));
-  // Квота-гард: если требуется живой запрос, но остаток меньше нужного — не тратим совсем.
+  // Квота-гард «взять, сколько можно»: если суточного остатка не хватает на ВСЕХ — не режем всё
+  // (прежнее all-or-nothing), а берём столько живых запросов, сколько влезает (минус резерв),
+  // в порядке приоритета по продажам. Кэшированные используем всегда.
   if (needFetch.length) {
     const quota = await fetchApiLimit();
     diag.quota = quota;
-    if (quota && quota.remaining < needFetch.length) return empty('low-quota');
+    const remaining = quota && Number.isFinite(quota.remaining) ? quota.remaining : Infinity;
+    const affordable = Math.max(0, remaining === Infinity ? needFetch.length : remaining - SIZE_QUOTA_SAFETY);
+    if (affordable < needFetch.length) {
+      const drop = new Set(needFetch.slice(affordable)); // отбрасываем самые низкоприоритетные не-кэш.
+      skus = skus.filter((s) => !drop.has(s));           // остаются кэшированные + доступные к запросу
+      diag.trimmed = needFetch.length - affordable;      // сколько не добрали из-за суточного лимита
+    }
   }
+  if (!skus.length) return empty('low-quota'); // ни кэша, ни доступной квоты
 
   const perCompetitor = [];
   try {
@@ -933,10 +944,12 @@ export async function buildSeasonPlanReport({
   colorAnalysis.poolSize = colorPool.length;         // сколько артикулов ушло в доли по цветам
   colorAnalysis.planSize = perItemMeta.length;       // сколько в ТОП-N плана (для сравнения)
   colorAnalysis.serpTotal = collected.serpTotal || 0; // вся выдача SERP (диагностика охвата)
-  // Размерный спрос из MPStats sales/sizes по строгому ТОП-N конкурентов (cache-first, TTL,
-  // квота-гард). Отключается plan.withSizes=false. Объект с diag даже при пустоте.
-  const sizeAnalysis = await gatherSizeCurve(perItemMeta, {
-    d1, d2, topN: Number(plan.sizeTopN) || 10, enabled: plan.withSizes !== false,
+  // Размерный спрос из MPStats sales/sizes. База — та же ШИРОКАЯ выборка сегмента, что и у цветов
+  // (colorPool, не узкий ТОП-N плана): берём ТОП-50 живых конкурентов по продажам. Cache-first, TTL,
+  // мягкий квота-гард («сколько влезет в суточный остаток»). Отключается plan.withSizes=false.
+  const sizeBasePool = (colorPool && colorPool.length) ? colorPool : perItemMeta;
+  const sizeAnalysis = await gatherSizeCurve(sizeBasePool, {
+    d1, d2, topN: Number(plan.sizeTopN) || 50, enabled: plan.withSizes !== false,
   });
   const errors = collected.errors || [];
   LP(`Сбор аналогов завершён: в выборке ${perItemMeta.length}, с дневными данными ${perItemMeta.filter((m) => m.days > 0).length}. Строю уровень/ранг/фазы и план.`);

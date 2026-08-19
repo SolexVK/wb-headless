@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'excel-plan-styled-2026-08-06e';
+const APP_BUILD = 'size-base-50-2026-08-06f';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2591,7 +2591,7 @@ function seasonSizesBlock(rep) {
     const q = dg.quota ? ` Остаток квоты MPStats: ${dg.quota.remaining} из ${dg.quota.available}.` : '';
     const why = {
       'no-live-nm': 'Среди конкурентов нет карточек с продажами — не с кого брать размеры.',
-      'low-quota': `Не хватает квоты MPStats на запрос ТОП-${dg.topN || 10}.${q} Раздел не строился, чтобы не жечь лимит. Повтори завтра или подними тариф.`,
+      'low-quota': `Не хватает квоты MPStats даже на несколько карточек из ТОП-${dg.topN || 50}.${q} Раздел не строился. Повтори завтра (кэш сохранится) или подними тариф.`,
       'fetch-throw': `Запрос к MPStats упал${err ? `: ${seEsc(err)}` : ''}.`,
       'all-one-size': 'Все конкуренты ТОПа продаются как ONE SIZE — размерного сплита нет.',
       'empty': 'MPStats не вернул продажи по размерам для этих карточек за период.',
@@ -2600,7 +2600,7 @@ function seasonSizesBlock(rep) {
       <summary>📏 Размерная сетка и спрос <span class="mini">(нет данных)</span></summary>
       <div class="se-comp-body">
         <div class="mini">${why}</div>
-        <div class="mini">Диагностика: источник MPStats sales/sizes, окно ${win || '—'}, ТОП-${dg.topN || 10}, запрошено ${dg.requested || 0}, из кэша ${dg.fromCache || 0}, живых вызовов ${dg.fetched || 0}${(dg.errors || []).length ? `, ошибки: ${seEsc((dg.errors || []).slice(0, 2).join('; '))}` : ''}.</div>
+        <div class="mini">Диагностика: источник MPStats sales/sizes, окно ${win || '—'}, ТОП-${dg.topN || 50}, живых конкурентов ${dg.candidates ?? '—'}, запрошено ${dg.requested || 0}, из кэша ${dg.fromCache || 0}, живых вызовов ${dg.fetched || 0}${dg.trimmed ? `, урезано лимитом ${dg.trimmed}` : ''}${(dg.errors || []).length ? `, ошибки: ${seEsc((dg.errors || []).slice(0, 2).join('; '))}` : ''}.</div>
       </div>
     </details>`;
   }
@@ -2623,7 +2623,8 @@ function seasonSizesBlock(rep) {
       <td class="num se-share-cell"><b>${ex.share}%</b></td>
     </tr>` : '';
   const oneNote = sa.oneSizeCount ? ` <span class="mini">(+${sa.oneSizeCount} карточек ONE SIZE — вне размерного сплита)</span>` : '';
-  const cacheNote = dg.fetched != null ? `Вызовов MPStats: ${dg.fetched} (из кэша ${dg.fromCache || 0}).` : '';
+  const trimNote = dg.trimmed ? ` <span style="color:#d97706">Суточный лимит: не добрали ${dg.trimmed} конкурентов — база уже цели; повтори завтра, кэш подтянет остальных.</span>` : '';
+  const cacheNote = dg.fetched != null ? `Вызовов MPStats: ${dg.fetched} (из кэша ${dg.fromCache || 0}).${trimNote}` : '';
   return `<details class="se-comp" open>
     <summary>📏 Размерная сетка и спрос <span class="mini">(MPStats · продажи по размерам · ТОП-${sa.sizedCompetitors || sa.nmCount || ''} конкурентов)</span></summary>
     <div class="se-comp-body">
