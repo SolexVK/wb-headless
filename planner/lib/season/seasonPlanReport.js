@@ -139,6 +139,9 @@ async function gatherSerp({ phrases = [], minusWords = [], priceMin, priceMax, m
   for (const phrase of phr) {
     const key = `${phrase}|${d1}|${d2}`;
     let res = serpLoad(key, SERP_TTL_MS);
+    // Пустой кэш (0 товаров) НЕ держим: иначе разовый пустой ответ (или неудачная фраза) на 3 дня
+    // «залипает» и пересборка молча даёт 0 без запроса. Считаем промахом → перезапрашиваем.
+    if (res && (!res.items || res.items.length === 0)) { res = null; }
     // Самоочистка кэша старой схемы: если в сохранённых товарах нет поля color (кэш записан
     // до добавления цвета) — считаем промахом и перезапрашиваем (разово, +1 запрос на фразу).
     if (res && res.items && res.items.length && !('color' in res.items[0])) { res = null; }
@@ -146,7 +149,8 @@ async function gatherSerp({ phrases = [], minusWords = [], priceMin, priceMax, m
     else {
       try {
         res = await fetchSerp(phrase, { d1, d2 });
-        serpSave(key, res); requests += 1;
+        if (res.items && res.items.length) serpSave(key, res); // пустую выдачу не кэшируем
+        requests += 1;
         L(`Фраза «${phrase}»: SERP вернул ${res.items.length} товаров (доступно ${res.rowCount}). Запрос к MPStats.`);
       } catch (e) {
         if (e instanceof SerpLimitError) { dailyLimit = String(e.message || e); L(`Достигнут суточный лимит MPStats на фразе «${phrase}».`); break; }
