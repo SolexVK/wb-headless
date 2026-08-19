@@ -144,6 +144,12 @@ export function renderGantt(container, schedule, state, opts = {}) {
     b.textContent = r.ws.role === 'main' ? 'основной' : 'вспомог.';
   });
 
+  // горизонтальные разделители между цехами (на всю ширину, включая колонку названий) —
+  // чтобы сразу видеть, какой ряд-артикул к какому цеху относится.
+  const rowBottom = rows.length ? rows[rows.length - 1]._y + rows[rows.length - 1]._h : totalH;
+  rows.forEach((r) => { el('line', { x1: 0, y1: r._y, x2: totalW, y2: r._y, stroke: 'var(--line)', 'stroke-width': 1.2, class: 'g-ws-sep' }, svg); });
+  el('line', { x1: 0, y1: rowBottom, x2: totalW, y2: rowBottom, stroke: 'var(--line)', 'stroke-width': 1.2, class: 'g-ws-sep' }, svg);
+
   // блоки-циклы
   for (const r of rows) {
     for (const c of r.items) {
