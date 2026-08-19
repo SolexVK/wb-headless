@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'gantt-workshop-separators-2026-08-06o';
+const APP_BUILD = 'seasonal-colors-by-delivery-2026-08-19a';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1143,6 +1143,7 @@ function renderMatrix() {
         <label class="btn">⤒ загрузить (.xlsx)<input type="file" accept=".xlsx,.xls,.tsv,.txt,.csv" id="mx-import" hidden></label>
       </div>
       <div class="mini" style="margin-bottom:12px">Введи количества и нажми <b>«Сохранить план»</b>. Номер партии — свой у каждого цеха. Статус производства и факт — на вкладке «Факт». Сейчас отшивает: <b>${cycInfo}</b>.</div>
+      ${hasGrid ? seasonColorChipsHTML(a, p) : ''}
       ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
       ${hasGrid ? (() => { const hidden = a.sizes.length - rowsForMatrix(a, M).length; if (!hidden) return ''; return `<div class="mini" style="margin-top:6px">${mxAllSizes ? `Показаны все размеры ряда. ` : `Пустые размеры скрыты (${hidden}). `}<button id="mx-all-sizes" class="btn btn-subtle" type="button">${mxAllSizes ? '▲ скрыть пустые' : '▽ показать все размеры'}</button></div>`; })() : ''}
       ${(() => { const v = nestingViolations(M, nestingRules()); if (!v.length) return ''; const r = nestingRules(); return `<div style="margin-top:10px;padding:8px 10px;border:1px solid #d97706;border-radius:8px;background:rgba(245,158,11,.1)"><div class="mini"><b>Настил (ориентир):</b> ${v.map((x) => x.kind === 'color' ? `цвет «${x.color}» ${x.qty} шт (&lt;${r.minColorQty})` : `${x.color}/${x.size} ${x.qty} шт (&lt;${r.minSizeQty})`).join(' · ')}. Мягкое предупреждение — можно продолжать.</div></div>`; })()}
@@ -1192,6 +1193,9 @@ function renderMatrix() {
     recalc(true).then(() => { renderMatrix(); toast('План сохранён и пересчитан'); }).catch((err) => toast('Ошибка: ' + err.message, true));
   });
   root.querySelectorAll('input[data-mx]').forEach((inp) => { inp.addEventListener('input', onMatrixInput); inp.addEventListener('paste', onMatrixPaste); });
+  root.querySelectorAll('input[data-cc]').forEach((inp) => inp.addEventListener('change', (e) => {
+    toggleColorInPartia(a.id, p.id, decodeURIComponent(e.target.dataset.cc), e.target.checked);
+  }));
   applyCollapsibles();
 }
 
@@ -1543,6 +1547,84 @@ function spMiniTable(partia, a, cycles) {
 function statusBadge(status) {
   const cls = { plan: 'st-plan', cutting: 'st-prog', sewing: 'st-prog', done: 'st-done', shipped: 'st-ship' }[status] || 'st-plan';
   return `<span class="st-badge ${cls}">${PARTIA_STATUS_RU[status] || status}</span>`;
+}
+
+// ── Сезонные цвета по довозам (Этап 3) ──
+// Каждый довоз (партия) может нести свой набор цветов: осень — одни, зима/весна — другие.
+// Весь тираж цвета c (сумма Q_{c,s} по всем plan-партиям артикула) делится ТОЛЬКО между теми
+// довозами, где цвет включён, пропорционально устойчивому весу довоза (deliveryShare).
+// deliveryShare фиксируется ЛЕНИВО из объёма партии при первом использовании (до правок цветов
+// объём партии = доля по времени из прогноза) и дальше не пересчитывается — иначе вес «плыл» бы
+// при каждом выключении цвета (объём партии менялся бы) и восстановить цвет было бы нечем.
+function articlePlanPartias(articleId) {
+  return (state.partias || []).filter((p) => p.articleId === articleId && p.status === 'plan');
+}
+function ensureDeliveryShares(partias) {
+  for (const p of partias) {
+    if (!(+p.deliveryShare > 0)) {
+      const u = matrixSum(p.planMatrix);
+      p.deliveryShare = u > 0 ? u : 1; // пустую партию не теряем из деления — минимальный вес
+    }
+  }
+}
+function colorOnInPartia(p, color) {
+  return !(Array.isArray(p.colorOff) && p.colorOff.includes(color));
+}
+// Перераспределить весь тираж цвета между ВКЛЮЧёнными довозами. Сохраняет Q_{c,s} (ноль потерь):
+// база = сумма по всем plan-партиям (включая ту, где цвет только что выключили).
+function redistributeArticleColor(articleId, color) {
+  const a = state.articles.find((x) => x.id === articleId);
+  const P = articlePlanPartias(articleId);
+  if (!P.length) return;
+  ensureDeliveryShares(P);
+  const sizes = (a && a.sizes) || [];
+  const Q = {}; // суммарный тираж цвета по размерам (по всем партиям)
+  for (const s of sizes) { let t = 0; for (const p of P) t += +(p.planMatrix && p.planMatrix[color] && p.planMatrix[color][s]) || 0; Q[s] = t; }
+  const ON = P.filter((p) => colorOnInPartia(p, color));
+  const weights = ON.map((p) => +p.deliveryShare || 0);
+  const alloc = {}; // alloc[size] = массив по ON (∝ deliveryShare, Хэмилтон)
+  for (const s of sizes) alloc[s] = apportionByWeights(Q[s], weights);
+  for (const p of P) {
+    p.planMatrix = p.planMatrix || {};
+    if (colorOnInPartia(p, color)) {
+      const j = ON.indexOf(p);
+      p.planMatrix[color] = {};
+      for (const s of sizes) p.planMatrix[color][s] = alloc[s][j] || 0;
+    } else {
+      delete p.planMatrix[color]; // цвет не едет в этом довозе
+    }
+  }
+}
+// Клик по чипу цвета в довозе: вкл/выкл + пересчёт раскладки цвета по включённым довозам.
+function toggleColorInPartia(articleId, partiaId, color, on) {
+  const P = articlePlanPartias(articleId);
+  const p = P.find((x) => x.id === partiaId);
+  if (!p) return;
+  const off = new Set(Array.isArray(p.colorOff) ? p.colorOff : []);
+  if (on) {
+    off.delete(color);
+  } else {
+    const onCount = P.filter((x) => colorOnInPartia(x, color)).length;
+    if (onCount <= 1 && colorOnInPartia(p, color)) { toast(`Цвет «${color}» должен остаться хотя бы в одном довозе`, true); renderMatrix(); return; }
+    off.add(color);
+  }
+  p.colorOff = [...off];
+  redistributeArticleColor(articleId, color);
+  recomputePartiaNumbers(); dirty = true;
+  recalc(true).then(() => renderMatrix()).catch((err) => { renderMatrix(); toast('Ошибка пересчёта: ' + err.message, true); });
+}
+// Ряд чипов цветов для выбранного довоза (показываем, когда у артикула ≥2 plan-партий).
+function seasonColorChipsHTML(a, p) {
+  const plans = articlePlanPartias(a.id);
+  if (plans.length < 2) return '';
+  const cols = activeColors(a);
+  if (!cols.length) return '';
+  return `<div class="mx-seasoncolors">
+    <div class="mini" style="margin-bottom:6px"><b>Цвета этого довоза.</b> Отметь, какие цвета едут в этой партии. Тираж каждого цвета делится <b>только</b> между отмеченными довозами (по времени), суммы сохраняются — так можно везти осенью одни цвета, а зимой/весной другие.</div>
+    <div class="mx-cc-chips">
+      ${cols.map((c) => { const on = colorOnInPartia(p, c); return `<label class="mx-cc ${on ? 'on' : 'off'}"><input type="checkbox" data-cc="${encodeURIComponent(c)}"${on ? ' checked' : ''}>${swatchTag(a, c, 16, 16)}<span>${seEsc(c)}</span></label>`; }).join('')}
+    </div>
+  </div>`;
 }
 
 function matrixTable(a, M) {

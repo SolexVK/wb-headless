@@ -240,6 +240,17 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .mini-card.mini-done .mini-head { background: rgba(52,211,153,.14); }
 #mx-add-partia, .swatch-add { align-self: center; }
 
+/* сезонные цвета по довозам (чипы вкл/выкл в «План по размерам») */
+.mx-seasoncolors { margin: 2px 0 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.mx-cc-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.mx-cc { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; user-select: none; background: var(--panel); font-size: 12px; font-weight: 600; }
+.mx-cc input { margin: 0; cursor: pointer; }
+.mx-cc .swatch { width: 18px; height: 18px; border-radius: 50%; }
+.mx-cc.on { border-color: var(--accent); color: var(--text); }
+.mx-cc.off { opacity: .55; color: var(--muted); }
+.mx-cc.off .swatch { filter: grayscale(0.7); }
+.mx-cc:hover { border-color: var(--accent); }
+
 /* заказ ткани */
 .fab-summary { display: flex; gap: 32px; flex-wrap: wrap; }
 .fab-summary .k { color: var(--muted); font-size: 12px; }
