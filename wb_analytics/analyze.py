@@ -59,7 +59,9 @@ def api(path, method='GET', body=None, q=None, retries=3):
     for attempt in range(retries + 1):
         try:
             req = urllib.request.Request(url, data=data, method=method, headers={
-                'X-Mpstats-TOKEN': token(), 'Accept': 'application/json', 'Content-Type': 'application/json'})
+                'X-Mpstats-TOKEN': token(), 'Accept': 'application/json', 'Content-Type': 'application/json',
+                # MPStats троттлит дефолтный UA python-urllib как бота (429); нужен «браузерный» UA.
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'})
             with urllib.request.urlopen(req, timeout=90, context=CTX) as r:
                 raw = r.read().decode(); return json.loads(raw) if raw.strip() else None
         except Exception as e:
@@ -67,9 +69,11 @@ def api(path, method='GET', body=None, q=None, retries=3):
                 print(f'  ! {method} {path}: {e}', file=sys.stderr); return None
             time.sleep(2 * (2 ** attempt))
 
+_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 def fetch_url_json(url, timeout=60):
     try:
-        with urllib.request.urlopen(url, timeout=timeout, context=CTX) as x:
+        req = urllib.request.Request(url, headers={'User-Agent': _UA})
+        with urllib.request.urlopen(req, timeout=timeout, context=CTX) as x:
             return json.loads(x.read().decode())
     except Exception as e:
         print(f'  ! fetch {url}: {e}', file=sys.stderr); return None
