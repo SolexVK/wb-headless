@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'production-start-date-2026-08-06m';
+const APP_BUILD = 'workshop-article-constraints-2026-08-06n';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -856,11 +856,16 @@ function distributeAllAcrossWorkshops(wsIds, mode) {
   // порядок: по дедлайну (раньше — первыми), затем крупные первыми
   parts.sort((a, b) => dlOf(a).localeCompare(dlOf(b)) || (matrixSum(b.planMatrix) - matrixSum(a.planMatrix)));
   const rules = nestingRules();
-  let touched = 0, created = 0, tight = 0;
+  const artById = new Map((state.articles || []).map((a) => [a.id, a]));
+  let touched = 0, created = 0, tight = 0, blocked = 0;
   for (const p of parts) {
     const total = matrixSum(p.planMatrix);
     const avail = Math.max(1, workingDaysUntil(p.deadline) - buffer);
-    const pool = [...wss].sort((a, b) => mode === 'own-first'
+    // ручное закрепление артикула за цехами (какой цех умеет шить эту модель): пусто = любой.
+    const allow = (artById.get(p.articleId) || {}).allowedWorkshops;
+    const base = (Array.isArray(allow) && allow.length) ? wss.filter((w) => allow.includes(w.id)) : wss;
+    if (!base.length) { blocked++; continue; } // разрешённые цеха не входят в выборку — оставляем «авто»
+    const pool = [...base].sort((a, b) => mode === 'own-first'
       ? (roleRankClient(a) - roleRankClient(b) || load[a.id] - load[b.id])
       : (load[a.id] - load[b.id] || roleRankClient(a) - roleRankClient(b)));
     // набрать цеха, пока их СВОБОДНАЯ ёмкость (до дедлайна) не покроет объём партии
@@ -899,7 +904,7 @@ function distributeAllAcrossWorkshops(wsIds, mode) {
     touched++;
   }
   recomputePartiaNumbers(); dirty = true;
-  return { touched, created, tight };
+  return { touched, created, tight, blocked };
 }
 
 function partiaPlanUnits(p) { return sumMatrix(p.planMatrix); }
@@ -998,11 +1003,44 @@ function globalDistHTML() {
         <button class="btn btn-accent" id="gdist-run">⚙ Распределить всё по цехам</button>
         <button class="btn btn-danger" id="gdist-reset" title="Снять привязку к цехам со всех плановых партий (вернуть в «авто»)">↺ Сбросить привязки</button>
       </div>
+      ${globalDistAllowHTML(wss)}
     </div>
   </details>`;
 }
+// Матрица «какой цех умеет шить какой артикул». Снятая галочка = этот цех НЕ берёт эту модель.
+// Пусто (все галочки) = любой цех. Распределение и планировщик это учитывают.
+function globalDistAllowHTML(wss) {
+  if (!wss.length) return '';
+  const arts = activeArticles().slice().sort(cmpArticleId);
+  if (!arts.length) return '';
+  const rows = arts.map((a) => {
+    const allow = Array.isArray(a.allowedWorkshops) ? a.allowedWorkshops : [];
+    const isAllowed = (wsId) => !allow.length || allow.includes(wsId); // пусто = все
+    const constrained = allow.length && allow.length < wss.length;
+    return `<tr><td><b>${seEsc(a.id)}</b> <span class="mini">${seEsc(a.name)}</span>${constrained ? ' <span class="mini" style="color:var(--accent)">🎯</span>' : ''}</td>${wss.map((w) => `<td class="num"><input type="checkbox" data-aw-art="${seEsc(a.id)}" data-aw-ws="${w.id}"${isAllowed(w.id) ? ' checked' : ''}></td>`).join('')}</tr>`;
+  }).join('');
+  return `<details class="se-comp" style="margin-top:12px"><summary>🎯 Кто что шьёт — закрепить артикулы за цехами <span class="mini">(пусто = любой цех)</span></summary>
+    <div class="se-comp-body">
+      <div class="mini" style="margin:8px 0">Отметь, какие цеха <b>умеют</b> шить каждый артикул (специфика: не все модели все цеха берут). Снятая галочка — цех эту модель не шьёт. Распределение и планировщик это соблюдают. Если у артикула все галочки сняты — трактуется как «любой». <b>«Распределить»</b> раскладывает уже внутри этих ограничений.</div>
+      <div class="matrix-scroll"><table class="matrix-table">
+        <thead><tr><th>Артикул</th>${wss.map((w) => `<th class="num">${seEsc(w.name)}${w.own ? ' <span class="mini">свой</span>' : ''}</th>`).join('')}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div></details>`;
+}
 function bindGlobalDist() {
   document.getElementById('mx-gdist')?.addEventListener('toggle', (e) => { gdistOpen = e.target.open; });
+  // Матрица «цех умеет шить артикул»: пересобираем allowedWorkshops из галочек строки.
+  document.querySelectorAll('[data-aw-art]').forEach((cb) => cb.addEventListener('change', () => {
+    const artId = cb.dataset.awArt;
+    const a = state.articles.find((x) => x.id === artId); if (!a) return;
+    const row = [...document.querySelectorAll('[data-aw-art]')].filter((b) => b.dataset.awArt === artId);
+    const checked = row.filter((b) => b.checked).map((b) => b.dataset.awWs);
+    if (!checked.length) { cb.checked = true; toast('Оставь хотя бы один цех для артикула', true); return; }
+    const wssAll = state.workshops.filter((w) => (w.capacities && w.capacities.sew) > 0);
+    a.allowedWorkshops = (checked.length >= wssAll.length) ? [] : checked; // все отмечены = любой
+    dirty = true; setStatus();
+  }));
   document.getElementById('gdist-mode')?.addEventListener('change', (e) => { distMode = e.target.value === 'own-first' ? 'own-first' : 'even'; });
   document.querySelectorAll('[data-gdist-ws]').forEach((cb) => cb.addEventListener('change', () => {
     const boxes = [...document.querySelectorAll('[data-gdist-ws]')];
@@ -1016,7 +1054,7 @@ function bindGlobalDist() {
     const res = distributeAllAcrossWorkshops(ids, distMode);
     if (!res) return;
     recalc(true).then(() => { renderMatrix();
-      toast(`Распределено и сохранено: ${res.touched} партий по ${ids.length} цехам${res.created ? ` (+${res.created} новых от дробления)` : ''}${res.tight ? `. ⚠ ${res.tight} впритык к дедлайну — см. «Контроль сроков»` : ''}.`, !!res.tight);
+      toast(`Распределено и сохранено: ${res.touched} партий по ${ids.length} цехам${res.created ? ` (+${res.created} новых от дробления)` : ''}${res.tight ? `. ⚠ ${res.tight} впритык к дедлайну` : ''}${res.blocked ? `. ⚠ ${res.blocked} партий без разрешённого цеха в выборке — оставлены авто` : ''}.`, !!(res.tight || res.blocked));
     }).catch((err) => toast('Ошибка: ' + err.message, true));
   });
   document.getElementById('gdist-reset')?.addEventListener('click', () => {

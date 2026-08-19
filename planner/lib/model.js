@@ -258,6 +258,11 @@ export function normalizeState(input) {
     // a.colors (данные/образцы не теряются), но на прочих листах скрыты и не считаются. Только валидные.
     { const arch = Array.isArray(a.archivedColors) ? a.archivedColors : [];
       a.archivedColors = [...new Set(arch.filter((c) => a.colors.includes(c)))]; }
+    // разрешённые цеха для артикула (ручное закрепление «какой цех умеет шить эту модель»).
+    // Пусто = любой цех. Только валидные id цехов. Учитывается в распределении и планировщике.
+    { const wsIds = new Set((s.workshops || []).map((w) => w.id));
+      const allow = Array.isArray(a.allowedWorkshops) ? a.allowedWorkshops.filter((id) => wsIds.has(id)) : [];
+      a.allowedWorkshops = [...new Set(allow)]; }
     // метаданные ткани по цвету: { цвет: { plansheet, colorNo, image(dataURL) } }
     a.fabricInfo = a.fabricInfo && typeof a.fabricInfo === 'object' ? a.fabricInfo : {};
     // конфиг фильтра аналогов для раздела «Ранг сезонности» (путь предмета, слова, ценовой коридор…)

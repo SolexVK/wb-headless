@@ -173,6 +173,8 @@ export function buildSchedule(state) {
     for (const j of jobs) {
       if (j.done) continue;
       if (j.lockedWs && j.lockedWs !== w.id) continue; // закреплён за другим цехом
+      const allow = j.article.allowedWorkshops; // ручное закрепление «цех умеет шить эту модель»
+      if (Array.isArray(allow) && allow.length && !allow.includes(w.id)) continue; // цех не шьёт этот артикул
       if (best === null) { best = j; continue; }
       const c = cmp(dl(j), dl(best))
         || ((startedUnits[j.article.id] || 0) - (startedUnits[best.article.id] || 0))
