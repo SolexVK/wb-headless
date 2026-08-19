@@ -166,36 +166,52 @@ export function buildSchedule(state) {
 
   const cmp = (a, b) => (a === b ? 0 : a < b ? -1 : 1);
   const dl = (j) => j.deadline || '9999-12-31';
+  // «Не начинать раньше» (пер-партия) — производственная пауза/окно из «Ритма производства».
+  // Пустое/невалидное = нет ограничения (старт с seasonStart). Клампим к рабочему дню.
+  const esOf = (j) => {
+    const s = j.partia && j.partia.earliestStart;
+    if (s && /^\d{4}-\d{2}-\d{2}$/.test(String(s).slice(0, 10))) {
+      const d = cal.nextWorkingDay(String(s).slice(0, 10));
+      return d > seasonStart ? d : seasonStart; // раньше старта сезона всё равно нельзя
+    }
+    return seasonStart;
+  };
+  // фактический старт цикла в цехе w для задания j = позже из {цех свободен, «не раньше»}
+  const effStartOf = (w, j) => { const es = esOf(j); const fd = freeDate[w.id]; return fd > es ? fd : es; };
 
-  // лучший (самый срочный) job для цеха w среди доступных
+  // лучший job для цеха w: сперва по РАННОСТИ реального старта (готов к работе), затем срочность.
+  // Так простой цеха возникает ТОЛЬКО когда нет готового задания (это и есть пауза), а не когда
+  // есть что шить прямо сейчас.
   const bestJobFor = (w) => {
-    let best = null;
+    let best = null, bestEff = null;
     for (const j of jobs) {
       if (j.done) continue;
       if (j.lockedWs && j.lockedWs !== w.id) continue; // закреплён за другим цехом
       const allow = j.article.allowedWorkshops; // ручное закрепление «цех умеет шить эту модель»
       if (Array.isArray(allow) && allow.length && !allow.includes(w.id)) continue; // цех не шьёт этот артикул
-      if (best === null) { best = j; continue; }
-      const c = cmp(dl(j), dl(best))
+      const eff = effStartOf(w, j);
+      if (best === null) { best = j; bestEff = eff; continue; }
+      const c = cmp(eff, bestEff)
+        || cmp(dl(j), dl(best))
         || ((startedUnits[j.article.id] || 0) - (startedUnits[best.article.id] || 0))
         || (best.units - j.units);
-      if (c < 0) best = j;
+      if (c < 0) { best = j; bestEff = eff; }
     }
-    return best;
+    return best ? { job: best, eff: bestEff } : null;
   };
 
   // событийная очередь: пока есть нераспределённые — назначаем по одному
   let remaining = jobs.length;
   let guard = 0;
   while (remaining > 0 && guard++ < jobs.length + 5) {
-    let bw = null, bj = null;
+    let bw = null, bj = null, bEff = null;
     for (const w of state.workshops) {
-      const j = bestJobFor(w);
-      if (!j) continue;
+      const r = bestJobFor(w);
+      if (!r) continue;
       if (bw === null
-        || cmp(freeDate[w.id], freeDate[bw.id]) < 0
-        || (freeDate[w.id] === freeDate[bw.id] && roleRank(w) < roleRank(bw))) {
-        bw = w; bj = j;
+        || cmp(r.eff, bEff) < 0
+        || (r.eff === bEff && roleRank(w) < roleRank(bw))) {
+        bw = w; bj = r.job; bEff = r.eff;
       }
     }
     if (!bw || !bj) break; // не осталось доступных пар (напр., все закреплены на несуществующие)
@@ -205,7 +221,7 @@ export function buildSchedule(state) {
     const cid = cycleId(job.partia.id, w.id, i);
     const ovr = (state.overrides || {})[cid];
 
-    let anchorFirstWork = freeDate[w.id];
+    let anchorFirstWork = bEff; // старт с учётом «не раньше» (паузы) — уже ≥ freeDate[w.id]
     if (ovr && ovr.cutStart) anchorFirstWork = cal.nextWorkingDay(ovr.cutStart); // ручной сдвиг
 
     const wsOffsets = resolveFlowOffsets(w, flow);

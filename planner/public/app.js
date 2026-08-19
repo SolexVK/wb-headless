@@ -6,7 +6,7 @@ import { canonColor, aliasKey } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'seasonal-colors-by-delivery-2026-08-19a';
+const APP_BUILD = 'prod-rhythm-pause-restart-2026-08-19b';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2582,7 +2582,9 @@ async function renderSeasonView(articleId) {
   const staleBanner = stale
     ? `<div class="se-stale">⚠ Этот план построен предыдущей версией движка — новые периоды, вехи, лента благоприятного периода и поставки частями появятся только после пересборки.${canRebuild ? ' <button class="btn btn-primary" id="se-rebuild" type="button">↻ Построить заново</button>' : ' Откройте конструктор выше, выберите этот артикул и нажмите «▶ Построить план».'}</div>`
     : '';
-  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep, p) + seasonSizesBlock(rep) + seasonReconcileBlock(rep, p, articleId) + seasonPlanChecks(rep, p) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(rep, p)}</div>`;
+  box.innerHTML = staleBanner + seasonSummary(rep, p) + seasonSegmentsBlock(rep) + seasonColorsBlock(rep, p) + seasonSizesBlock(rep) + seasonReconcileBlock(rep, p, articleId) + seasonPlanChecks(rep, p) + seasonRhythmBlock(rep, p, articleId) + seasonAttributesBlock(rep) + seasonCompetitorsBlock(rep, articleId) + seasonChartsBlock(rep, p) + `<div id="se-table">${seasonTableBlock(rep, p)}</div>`;
+  box.querySelector('#se-rh-apply')?.addEventListener('click', () => applyProdRhythm(articleId, p, false));
+  box.querySelector('#se-rh-reset')?.addEventListener('click', () => applyProdRhythm(articleId, p, true));
   installSeasonZoom();
   // Чекбоксы ТОП-15: отжатие → исключить конкурента и пересобрать план (дебаунс, кэш SERP).
   box.querySelectorAll('.se-comp-cb').forEach((cb) => {
@@ -3544,6 +3546,109 @@ function seasonPlanChecks(rep, p) {
     ${deliv}
     ${checks ? `<div class="se-chk-head">Самопроверка плана</div><div class="se-chk-grid">${checks}</div>` : ''}
   </div>`;
+}
+
+// ── РИТМ ПРОИЗВОДСТВА (Этап 3): окно пошива → пауза → рестарт к следующему сезону ──
+// Идея: не шить сезонный товар месяцами вперёд, а стартовать вплотную к сроку прихода на WB
+// (окно пошива), после чего — пауза в межсезонье, и рестарт к следующему всплеску спроса.
+// Скорость пошива = суммарная мощность цехов, доступных артикулу (allowedWorkshops или все).
+function rhythmDate(iso, deltaDays) { const d = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + deltaDays); return d.toISOString().slice(0, 10); }
+function rhythmDiff(aIso, bIso) { return Math.round((new Date(String(bIso).slice(0, 10)) - new Date(String(aIso).slice(0, 10))) / 86400000); }
+function eligibleSewWorkshops(a) {
+  const allow = (a && Array.isArray(a.allowedWorkshops) && a.allowedWorkshops.length) ? new Set(a.allowedWorkshops) : null;
+  return (state.workshops || []).filter((w) => (w.capacities && +w.capacities.sew > 0) && (!allow || allow.has(w.id)));
+}
+function dailySewCap(a) { return eligibleSewWorkshops(a).reduce((s, w) => s + (+w.capacities.sew || 0), 0); }
+// Длительность производства партии в КАЛЕНДАРНЫХ днях: пошив (units/мощность, раб.дни)
+// + хвост потока (крой→…→ОТК) → перевод в календарные (6-дневка ≈ ×7/6).
+function prodDaysCal(units, cap) { if (cap <= 0 || units <= 0) return 0; const wd = Math.ceil(units / cap) + 6; return Math.round(wd * 7 / 6); }
+// Логистика ready→WB (кал. дни): ожидание карго (≤7) + средний транзит.
+function transitLeadCal() { const l = state.settings.logistics || {}; return Math.round(((+l.minDays || 10) + (+l.maxDays || 15)) / 2) + 7; }
+function riskBufCal() { return Math.round((state.settings.riskBufferDays || 0) * 7 / 6); }
+
+// Посчитать ритм для артикула из его plan-партий (+ прогноза p для типа/мини-сезонов).
+function computeProdRhythm(articleId, p) {
+  const a = (state.articles || []).find((x) => x.id === articleId);
+  const cap = dailySewCap(a);
+  const parts = articlePlanPartias(articleId).filter((x) => matrixSum(x.planMatrix) > 0 && x.deadline);
+  if (!a || cap <= 0 || !parts.length) return { ok: false, cap, parts: [], hasDeadlines: parts.length > 0 };
+  const transit = transitLeadCal(), buf = riskBufCal();
+  const rows = parts.map((x) => {
+    const units = matrixSum(x.planMatrix);
+    const prod = prodDaysCal(units, cap);
+    const finish = rhythmDate(x.deadline, -transit);           // «пошив готов» (до логистики)
+    const sewStart = rhythmDate(x.deadline, -(transit + prod + buf)); // «не начинать раньше»
+    return { id: x.id, no: x.no, tag: x.deliveryTag || (x.origin === 'forecast' ? 'из прогноза' : 'ручная'), deadline: x.deadline, units, prod, finish, sewStart, applied: x.earliestStart || '' };
+  }).sort((r1, r2) => r1.sewStart.localeCompare(r2.sewStart));
+  const sewFrom = rows[0].sewStart;
+  const sewFinish = rows.reduce((m, r) => (r.finish > m ? r.finish : m), rows[0].finish);
+  const firstNeed = rows.reduce((m, r) => (r.deadline < m ? r.deadline : m), rows[0].deadline);
+  const vTotal = rows.reduce((s, r) => s + r.units, 0);
+  const isAllseason = p && p.miniSeasons != null;
+  // следующий всплеск: круглогодичный → ближайший мини-сезон после окончания пошива; иначе +год
+  let nextNeed = rhythmDate(firstNeed, 365);
+  if (isAllseason) {
+    const ms = (p.miniSeasons || []).map((m) => String(m.peakDate || '').slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+    const ahead = ms.find((d) => d > sewFinish);
+    if (ahead) nextNeed = ahead;
+  }
+  const restart = rhythmDate(nextNeed, -(transitLeadCal() + prodDaysCal(vTotal, cap) + riskBufCal()));
+  const pauseDays = rhythmDiff(sewFinish, restart);
+  const appliedCount = rows.filter((r) => r.applied).length;
+  return { ok: true, cap, ws: eligibleSewWorkshops(a), rows, sewFrom, sewFinish, firstNeed, nextNeed, restart, pauseDays, vTotal, isAllseason, appliedAll: appliedCount === rows.length && rows.length > 0, appliedCount };
+}
+
+function seasonRhythmBlock(rep, p, articleId) {
+  const r = computeProdRhythm(articleId, p);
+  const df = (d) => (d ? `${String(d).slice(8, 10)}.${String(d).slice(5, 7)}.${String(d).slice(2, 4)}` : '—');
+  if (!r.ok) {
+    const why = !r.hasDeadlines
+      ? 'У партий этого артикула нет срока прихода на WB — сначала перенеси «🧩 План по размерам из прогноза», чтобы появились довозы со сроками.'
+      : (r.cap <= 0 ? 'Не задана мощность пошива у доступных цехов (проверь «Данные → Цеха» и закрепление артикула за цехами).' : 'Недостаточно данных для расчёта.');
+    return `<div class="se-rhythm"><div class="se-chk-head">🌀 Ритм производства (окно → пауза → рестарт)</div><div class="mini">${why}</div></div>`;
+  }
+  const wsNames = r.ws.map((w) => w.name).join(', ');
+  const steps = r.rows.map((row) => `<tr>
+      <td><b>${seEsc(row.tag)}</b>${row.applied ? ' <span class="se-rh-on" title="Пауза применена: не начинать раньше ' + df(row.applied) + '">⏸</span>' : ''}</td>
+      <td class="num">${row.units.toLocaleString('ru')}</td>
+      <td>${df(row.sewStart)}</td>
+      <td>${df(row.finish)}</td>
+      <td>${df(row.deadline)}</td>
+    </tr>`).join('');
+  const pause = r.pauseDays > 6
+    ? `<div class="se-rh-pause"><b>⏸ Пауза в межсезонье:</b> ${df(r.sewFinish)} → ${df(r.restart)} <span class="mini">(≈ ${r.pauseDays} дн можно не шить этот артикул — цеха свободны под другие модели)</span></div>`
+    : `<div class="se-rh-pause mini">Паузы почти нет: следующий цикл начинается сразу за текущим (${df(r.restart)}). Спрос плотный — производство идёт без простоя.</div>`;
+  const restart = `<div class="se-rh-restart"><b>▶ Рестарт к следующему ${r.isAllseason ? 'всплеску' : 'сезону'}:</b> начать шить ≈ <b>${df(r.restart)}</b> <span class="mini">(нужно на WB ~${df(r.nextNeed)}${r.isAllseason ? '' : ', сезон через год'})</span></div>`;
+  const applied = r.appliedAll;
+  return `<div class="se-rhythm">
+    <div class="se-chk-head">🌀 Ритм производства (окно → пауза → рестарт)</div>
+    <div class="mini" style="margin-bottom:8px">Скорость пошива берём по цехам артикула: <b>${r.cap.toLocaleString('ru')} шт/день</b> (${seEsc(wsNames)}). Ниже — предпросмотр: система предлагает стартовать пошив каждого довоза вплотную к сроку, а межсезонье оставить свободным. Проверь даты и, если ок, применяй — это сдвинет производство на Ганте.</div>
+    <div class="matrix-scroll"><table class="matrix-table se-rh-table">
+      <thead><tr><th>Довоз</th><th class="num">Объём, шт</th><th>Шить с</th><th>Готово</th><th>На WB (срок)</th></tr></thead>
+      <tbody>${steps}</tbody>
+    </table></div>
+    ${pause}
+    ${restart}
+    <div class="se-rh-actions">
+      <button class="btn ${applied ? 'btn-subtle' : 'btn-primary'}" id="se-rh-apply" type="button" title="Записать «не начинать раньше» в каждый довоз этого артикула и пересчитать Гант">${applied ? '↻ Обновить ритм в плане' : '▶ Применить ритм к плану'}</button>
+      ${r.appliedCount ? '<button class="btn btn-danger" id="se-rh-reset" type="button" title="Убрать ограничения «не начинать раньше» у довозов этого артикула">✖ Сбросить ритм</button>' : ''}
+      ${applied ? '<span class="se-rh-badge">✓ применён — открой «Диаграмму Ганта», чтобы проверить</span>' : ''}
+    </div>
+  </div>`;
+}
+// Записать/снять earliestStart у plan-партий артикула по расчёту ритма, затем пересчитать.
+function applyProdRhythm(articleId, p, clear) {
+  const r = computeProdRhythm(articleId, p);
+  if (!clear && !r.ok) { toast('Нечего применять — проверь сроки и мощность цехов', true); return; }
+  const byId = {}; if (r.ok) for (const row of r.rows) byId[row.id] = row.sewStart;
+  for (const x of articlePlanPartias(articleId)) {
+    if (clear) x.earliestStart = '';
+    else if (byId[x.id]) x.earliestStart = byId[x.id];
+  }
+  dirty = true;
+  recalc(true)
+    .then(() => { renderSeasonView(articleId); toast(clear ? 'Ритм сброшен, план пересчитан' : 'Ритм применён — проверь «Диаграмму Ганта»'); })
+    .catch((err) => toast('Ошибка пересчёта: ' + err.message, true));
 }
 
 // Подпись к «Выкупам»: объём прибит к фактическим продажам ТОП-1/ТОП-3 финальной
