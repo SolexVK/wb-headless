@@ -252,7 +252,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .mx-cm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .mx-cm-ul { height: 4px; border-radius: 3px; margin-top: 3px; background: var(--line); }
 .mx-cm-row.tier-g .mx-cm-ul { background: #22c55e; }
-.mx-cm-row.tier-o .mx-cm-ul { background: #f59e0b; }
+.mx-cm-row.tier-o .mx-cm-ul { background: #facc15; }
 .mx-cm-row.tier-r .mx-cm-ul { background: #ef4444; }
 .mx-cm-pct { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; font-weight: 600; }
 .mx-cm-weak { margin-top: 8px; }
