@@ -46,6 +46,29 @@ export function computeColorShares(items, { minCount = 3 } = {}) {
 }
 
 /**
+ * Помесячные доли спроса по цветам (Этап 3). Тот же расчёт, что computeColorShares, но по
+ * КАЛЕНДАРНЫМ месяцам (01..12): продажи цвета агрегированы по месяцу года через все годы окна
+ * → устойчивый ответ «какие цвета актуальны в этом месяце». Данные (цвет + помесячные продажи)
+ * уже собраны из дневных графиков — доп. сети нет.
+ * @param {Array<{color:string, monthly:Object<string,number>}>} pool — по каждому конкуренту:
+ *        цвет + карта {'MM': продажи за этот месяц года}.
+ * @returns {{months:string[], byMonth:Object<string,Object>, poolSize:number}}
+ *          byMonth['03'] = результат computeColorShares за март.
+ */
+export function computeColorSharesByMonth(pool, opts = {}) {
+  if (!Array.isArray(pool) || !pool.length) return { months: [], byMonth: {}, poolSize: 0 };
+  const monthsSet = new Set();
+  for (const it of pool) for (const mm of Object.keys((it && it.monthly) || {})) monthsSet.add(mm);
+  const months = [...monthsSet].filter((m) => /^\d{2}$/.test(m)).sort();
+  const byMonth = {};
+  for (const mm of months) {
+    const items = pool.map((it) => ({ color: it.color, sales: (it.monthly && it.monthly[mm]) || 0 }));
+    byMonth[mm] = computeColorShares(items, opts);
+  }
+  return { months, byMonth, poolSize: pool.length };
+}
+
+/**
  * Кол-во к пошиву по цветам. БАЗА — СУММАРНЫЙ ОБЪЁМ продаж цвета (units), т.е. реальный
  * рыночный спрос (белого продаётся больше всего → он лидер, как и в жизни). НЕ по Ср/арт:
  * средняя на карточку задирается у цветов с малым числом карточек (1-2 хита) и даёт

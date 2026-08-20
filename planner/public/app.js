@@ -2,11 +2,11 @@
 import { renderGantt } from './gantt.js';
 import { unitParams, analyze } from './unitCalc.js';
 import { reconcilePlan, splitMatrixByShares } from './reconcile.js';
-import { canonColor, aliasKey } from './colorNorm.js';
+import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'prod-rhythm-pause-restart-2026-08-19b';
+const APP_BUILD = 'color-analysis-by-month-2026-08-20a';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1143,6 +1143,7 @@ function renderMatrix() {
         <label class="btn">⤒ загрузить (.xlsx)<input type="file" accept=".xlsx,.xls,.tsv,.txt,.csv" id="mx-import" hidden></label>
       </div>
       <div class="mini" style="margin-bottom:12px">Введи количества и нажми <b>«Сохранить план»</b>. Номер партии — свой у каждого цеха. Статус производства и факт — на вкладке «Факт». Сейчас отшивает: <b>${cycInfo}</b>.</div>
+      ${hasGrid ? colorMonthPanelHTML(a, p) : ''}
       ${hasGrid ? seasonColorChipsHTML(a, p) : ''}
       ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
       ${hasGrid ? (() => { const hidden = a.sizes.length - rowsForMatrix(a, M).length; if (!hidden) return ''; return `<div class="mini" style="margin-top:6px">${mxAllSizes ? `Показаны все размеры ряда. ` : `Пустые размеры скрыты (${hidden}). `}<button id="mx-all-sizes" class="btn btn-subtle" type="button">${mxAllSizes ? '▲ скрыть пустые' : '▽ показать все размеры'}</button></div>`; })() : ''}
@@ -1196,6 +1197,8 @@ function renderMatrix() {
   root.querySelectorAll('input[data-cc]').forEach((inp) => inp.addEventListener('change', (e) => {
     toggleColorInPartia(a.id, p.id, decodeURIComponent(e.target.dataset.cc), e.target.checked);
   }));
+  document.getElementById('mx-cmonth-sel')?.addEventListener('change', (e) => { mxColorMonth = e.target.value; renderMatrix(); });
+  ensureColorMonthly(a.id); // ленивая подгрузка помесячного анализа цветов (из плана «Ранга сезонности»)
   applyCollapsibles();
 }
 
@@ -1613,6 +1616,63 @@ function toggleColorInPartia(articleId, partiaId, color, on) {
   recomputePartiaNumbers(); dirty = true;
   recalc(true).then(() => renderMatrix()).catch((err) => { renderMatrix(); toast('Ошибка пересчёта: ' + err.message, true); });
 }
+// ── Помесячный анализ цветов на «Плане по размерам» (Этап 3) ──
+// Данные считаются на «Ранге сезонности» (report.colorAnalysisByMonth) из дневных графиков
+// конкурентов. Здесь — ленивая подгрузка + панель с выпадающим месяцем: видно, какие цвета
+// актуальны в выбранном месяце, чтобы точечно отключать неактуальные чипами довоза ниже.
+let matrixColorMonthly = {};       // articleId → {months, byMonth} | null (загружено, данных нет)
+let matrixColorMonthLoading = {};  // articleId → bool
+let mxColorMonth = null;           // выбранный месяц 'MM' (переживает ре-рендер)
+const MX_MON_RU = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+
+async function ensureColorMonthly(articleId) {
+  if (articleId in matrixColorMonthly || matrixColorMonthLoading[articleId]) return;
+  matrixColorMonthLoading[articleId] = true;
+  try {
+    const rec = await api('/api/season/plan?articleId=' + encodeURIComponent(articleId));
+    const cam = rec && rec.report && rec.report.colorAnalysisByMonth;
+    matrixColorMonthly[articleId] = (cam && Array.isArray(cam.months) && cam.months.length) ? cam : null;
+  } catch { matrixColorMonthly[articleId] = null; }
+  matrixColorMonthLoading[articleId] = false;
+  if (activeTab === 'matrix' && matrixArticleId === articleId) renderMatrix();
+}
+
+function colorMonthPanelHTML(a, p) {
+  const cam = matrixColorMonthly[a.id];
+  if (cam === undefined) return `<div class="mx-cmonth"><div class="se-chk-head">🎨 Анализ цветов по месяцам</div><div class="mini">Загрузка помесячного анализа цветов…</div></div>`;
+  if (!cam || !cam.months.length) return ''; // плана нет / не по SERP — панель не показываем
+  const months = cam.months;
+  if (!mxColorMonth || !months.includes(mxColorMonth)) mxColorMonth = months[0];
+  const cur = cam.byMonth[mxColorMonth] || { colors: [] };
+  const colors = (cur.colors || []).filter((c) => c.name !== 'не указан' && c.units > 0);
+  const maxU = Math.max(1, ...colors.map((c) => c.units));
+  const artByCanon = new Map(activeColors(a).map((c) => [normColor(c), c]));
+  const shareByCanon = new Map(colors.map((c) => [c.name, c.rawShare]));
+  const rows = colors.slice(0, 30).map((c) => {
+    const artName = artByCanon.get(c.name);
+    const sw = artName ? swatchTag(a, artName, 16, 16) : '';
+    return `<div class="mx-cm-row ${artName ? 'in' : 'out'}">
+      <div class="mx-cm-sw">${sw || '<span class="mx-cm-dot"></span>'}</div>
+      <div class="mx-cm-name">${seEsc(artName || c.name)}${artName ? '' : ' <span class="mini">(нет в артикуле)</span>'}</div>
+      <div class="mx-cm-bar"><i style="width:${Math.round(c.units / maxU * 100)}%"></i></div>
+      <div class="mx-cm-u">${c.units.toLocaleString('ru')}<span class="mini"> · ${c.rawShare}%</span></div>
+    </div>`;
+  }).join('');
+  // Цвета артикула, слабые в этом месяце (доля < 3% или отсутствуют) — кандидаты выключить в довозе.
+  const weak = activeColors(a).filter((c) => (shareByCanon.get(normColor(c)) || 0) < 3);
+  const weakLine = weak.length
+    ? `<div class="mx-cm-weak mini">Слабы в «${MX_MON_RU[+mxColorMonth]}»: <b>${weak.map(seEsc).join(', ')}</b> — кандидаты выключить в довозах этого месяца (чипами ниже).</div>`
+    : `<div class="mx-cm-weak mini">Все цвета артикула заметны в этом месяце.</div>`;
+  const opts = months.map((m) => `<option value="${m}"${m === mxColorMonth ? ' selected' : ''}>${MX_MON_RU[+m] || m}</option>`).join('');
+  return `<div class="mx-cmonth">
+    <div class="se-chk-head">🎨 Анализ цветов по месяцам <span class="mini">(рынок: ${cam.poolSize || 0} конкурентов)</span></div>
+    <div class="mx-cm-ctrl"><label>Месяц: <select id="mx-cmonth-sel">${opts}</select></label>
+      <span class="mini">Спрос по цветам в выбранном месяце (по продажам конкурентов). Свои цвета — со свотчем, рыночные без свотча — «нет в артикуле».</span></div>
+    <div class="mx-cm-list">${rows || '<div class="mini">В этом месяце продаж по цветам не зафиксировано.</div>'}</div>
+    ${weakLine}
+  </div>`;
+}
+
 // Ряд чипов цветов для выбранного довоза (показываем, когда у артикула ≥2 plan-партий).
 function seasonColorChipsHTML(a, p) {
   const plans = articlePlanPartias(a.id);
@@ -2502,6 +2562,7 @@ function bindSeasonBuilder() {
     seasonBuilding = true; renderSeason();
     try {
       const built = await api('/api/season/build', { method: 'POST', body: JSON.stringify(cfg) });
+      delete matrixColorMonthly[cfg.articleId]; // пересобрали план → сбросить кэш помесячного анализа цветов
       const blog = (built && built.report && built.report.log) || [];
       seasonLogPush(blog); renderLogComment(document.getElementById('se-build-log'), blog);
       // запомнить подсказку типа артикула (движок оценил рельеф рынка)
@@ -2612,6 +2673,7 @@ async function renderSeasonView(articleId) {
       const btn = e.currentTarget; btn.disabled = true; btn.textContent = '⏳ Пересобираю план…';
       try {
         await api('/api/season/build', { method: 'POST', body: JSON.stringify({ ...rec.cfg, articleId }) });
+        delete matrixColorMonthly[articleId]; // сбросить кэш помесячного анализа цветов
         toast('План пересобран новым движком');
         await renderSeasonView(articleId);
       } catch (err) {
@@ -2639,6 +2701,7 @@ async function applySeasonExclusions(articleId, baseCfg, exSet) {
   if (status) status.textContent = 'пересобираю план…';
   try {
     await api('/api/season/build', { method: 'POST', body: JSON.stringify(cfg) });
+    delete matrixColorMonthly[articleId]; // сбросить кэш помесячного анализа цветов
     // запомнить исключения в артикуле, чтобы не отжимать заново
     const a = state.articles.find((x) => x.id === articleId);
     if (a) { a.seasonFilter = a.seasonFilter || {}; a.seasonFilter.excludedIds = [...exSet]; unitPersist(); }

@@ -19,7 +19,7 @@ import { buildForecast } from './forecast.js';
 import { fetchCardsInfo, cardMatchText, cardCharText } from './wbCard.js';
 import { filterByRelevance } from './relevance.js';
 import { fetchSerp, DailyLimitError as SerpLimitError } from './wbSerp.js';
-import { computeColorShares } from './colorSize.js';
+import { computeColorShares, computeColorSharesByMonth } from './colorSize.js';
 import { fetchSalesSizesBatch, fetchApiLimit } from './mpstatsSizes.js';
 import { computeSizeCurveFromSales } from './sizeCurve.js';
 import { serpLoad, serpSave, mpSizeSalesLoad, mpSizeSalesSave } from '../db.js';
@@ -272,7 +272,21 @@ export async function collectSerpAll({ phrases = [], minusWords = [], priceMin, 
   const colorPool = g.items
     .filter((it) => !excluded.has(Number(it.wb)))
     .map((it) => ({ wb: it.wb, color: it.color, unitsSoldLY: it.salesLY || 0 }));
-  return { periods: g.periods, items: all, total: g.total, fetched: g.total, kept: keptBeforeLimit, requests: g.requests, dailyLimit: g.dailyLimit, windowMonths: g.windowMonths, colorPool, serpTotal: g.items.length };
+  // Пул для ПОМЕСЯЧНОГО анализа цветов: продажи каждого конкурента, разложенные по месяцу года
+  // (01..12) из дневного графика — суммируем через все годы окна (0 сети). Даёт «какие цвета
+  // актуальны в этом месяце» на «Плане по размерам».
+  const colorMonthly = g.items
+    .filter((it) => !excluded.has(Number(it.wb)))
+    .map((it) => {
+      const gph = it.graph || [];
+      const monthly = {};
+      for (let i = 0; i < g.periods.length; i++) {
+        const mm = String(g.periods[i] || '').slice(5, 7);
+        if (mm) monthly[mm] = (monthly[mm] || 0) + (Number(gph[i]) || 0);
+      }
+      return { color: it.color, monthly };
+    });
+  return { periods: g.periods, items: all, total: g.total, fetched: g.total, kept: keptBeforeLimit, requests: g.requests, dailyLimit: g.dailyLimit, windowMonths: g.windowMonths, colorPool, colorMonthly, serpTotal: g.items.length };
 }
 
 /**
@@ -333,7 +347,7 @@ export function sliceSerpWindow(all, w1, w2, oos = false) {
     medianPrice, priceAnchor: medianPrice ? Math.round(medianPrice) : 0,
     deepMatch: false, cardsEnriched: 0, undetermined: [], structuralPool: all.fetched,
     dailyLimit: all.dailyLimit, source: 'serp',
-    colorPool: all.colorPool || null, serpTotal: all.serpTotal || 0, // расширенный пул для цветов
+    colorPool: all.colorPool || null, colorMonthly: all.colorMonthly || null, serpTotal: all.serpTotal || 0, // расширенный пул для цветов (+ помесячный)
   };
 }
 
@@ -944,6 +958,8 @@ export async function buildSeasonPlanReport({
   colorAnalysis.poolSize = colorPool.length;         // сколько артикулов ушло в доли по цветам
   colorAnalysis.planSize = perItemMeta.length;       // сколько в ТОП-N плана (для сравнения)
   colorAnalysis.serpTotal = collected.serpTotal || 0; // вся выдача SERP (диагностика охвата)
+  // Помесячный анализ цветов (Этап 3) — те же доли по календарным месяцам, для «Плана по размерам».
+  const colorAnalysisByMonth = computeColorSharesByMonth(collected.colorMonthly || null);
   // Размерный спрос из MPStats sales/sizes. База — та же ШИРОКАЯ выборка сегмента, что и у цветов
   // (colorPool, не узкий ТОП-N плана): берём ТОП-50 живых конкурентов по продажам. Cache-first, TTL,
   // мягкий квота-гард («сколько влезет в суточный остаток»). Отключается plan.withSizes=false.
@@ -1209,6 +1225,7 @@ export async function buildSeasonPlanReport({
       attributesFound: collected.attributesFound || [],
       segments: segmentsInfo,
       colorAnalysis,
+      colorAnalysisByMonth,
       sizeAnalysis,
       plan: fc,
       errors,
@@ -1237,6 +1254,7 @@ export async function buildSeasonPlanReport({
     attributesFound: collected.attributesFound || [],
     segments: segmentsInfo,
     colorAnalysis,
+    colorAnalysisByMonth,
     sizeAnalysis,
     plan: seasonPlan,
     errors,

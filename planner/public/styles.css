@@ -240,6 +240,20 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .mini-card.mini-done .mini-head { background: rgba(52,211,153,.14); }
 #mx-add-partia, .swatch-add { align-self: center; }
 
+/* помесячный анализ цветов на «Плане по размерам» */
+.mx-cmonth { margin: 2px 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.mx-cm-ctrl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+.mx-cm-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 16px; }
+.mx-cm-row { display: grid; grid-template-columns: 20px 1fr 70px auto; align-items: center; gap: 8px; font-size: 12px; }
+.mx-cm-row.out { opacity: .6; }
+.mx-cm-sw .swatch { border-radius: 50%; }
+.mx-cm-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--line); }
+.mx-cm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.mx-cm-bar { height: 7px; background: var(--panel); border-radius: 4px; overflow: hidden; }
+.mx-cm-bar i { display: block; height: 100%; background: var(--accent); }
+.mx-cm-u { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.mx-cm-weak { margin-top: 8px; }
+
 /* сезонные цвета по довозам (чипы вкл/выкл в «План по размерам») */
 .mx-seasoncolors { margin: 2px 0 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
 .mx-cc-chips { display: flex; flex-wrap: wrap; gap: 8px; }
