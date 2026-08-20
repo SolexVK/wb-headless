@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'color-analysis-by-month-2026-08-20b';
+const APP_BUILD = 'color-month-tier-underline-2026-08-20c';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1648,17 +1648,19 @@ function colorMonthPanelHTML(a, p) {
   if (!mxColorMonth || !months.includes(mxColorMonth)) mxColorMonth = months[0];
   const cur = cam.byMonth[mxColorMonth] || { colors: [] };
   const colors = (cur.colors || []).filter((c) => c.name !== 'не указан' && c.units > 0);
-  const maxU = Math.max(1, ...colors.map((c) => c.units));
   const artByCanon = new Map(activeColors(a).map((c) => [normColor(c), c]));
   const shareByCanon = new Map(colors.map((c) => [c.name, c.rawShare]));
+  const tierOf = (pct) => (pct >= 5 ? 'g' : pct >= 3 ? 'o' : 'r'); // ≥5% зелёный · 3–5% оранжевый · <3% красный
   const rows = colors.slice(0, 30).map((c) => {
     const artName = artByCanon.get(c.name);
     const sw = artName ? swatchTag(a, artName, 16, 16) : '';
-    return `<div class="mx-cm-row ${artName ? 'in' : 'out'}">
+    return `<div class="mx-cm-row tier-${tierOf(c.rawShare)} ${artName ? 'in' : 'out'}">
       <div class="mx-cm-sw">${sw || '<span class="mx-cm-dot"></span>'}</div>
-      <div class="mx-cm-name">${seEsc(artName || c.name)}${artName ? '' : ' <span class="mini">(нет в артикуле)</span>'}</div>
-      <div class="mx-cm-bar"><i style="width:${Math.round(c.units / maxU * 100)}%"></i></div>
-      <div class="mx-cm-u">${c.units.toLocaleString('ru')}<span class="mini"> · ${c.rawShare}%</span></div>
+      <div class="mx-cm-main">
+        <div class="mx-cm-name">${seEsc(artName || c.name)}${artName ? '' : ' <span class="mini">(нет в артикуле)</span>'}</div>
+        <div class="mx-cm-ul"></div>
+      </div>
+      <div class="mx-cm-pct">${c.rawShare}%</div>
     </div>`;
   }).join('');
   // Цвета артикула, слабые в этом месяце (доля < 3% или отсутствуют) — кандидаты выключить в довозе.
@@ -1670,7 +1672,7 @@ function colorMonthPanelHTML(a, p) {
   return `<div class="mx-cmonth">
     <div class="se-chk-head">🎨 Анализ цветов по месяцам <span class="mini">(рынок: ${cam.poolSize || 0} конкурентов)</span></div>
     <div class="mx-cm-ctrl"><label>Месяц: <select id="mx-cmonth-sel">${opts}</select></label>
-      <span class="mini">Спрос по цветам в выбранном месяце (по продажам конкурентов). Свои цвета — со свотчем, рыночные без свотча — «нет в артикуле».</span></div>
+      <span class="mini">Спрос по цветам в выбранном месяце (по продажам конкурентов). Полоса под цветом: <b style="color:#22c55e">зелёная ≥5%</b> · <b style="color:#f59e0b">оранжевая 3–5%</b> · <b style="color:#ef4444">красная &lt;3%</b>.</span></div>
     <div class="mx-cm-list">${rows || '<div class="mini">В этом месяце продаж по цветам не зафиксировано.</div>'}</div>
     ${weakLine}
   </div>`;
