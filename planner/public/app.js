@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'auto-pick-colors-by-month-2026-08-20g';
+const APP_BUILD = 'auto-pick-colors-multimonth-2026-08-20h';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1639,9 +1639,16 @@ function autoPickColorsByMonth(articleId, scope) {
   const marketKnown = new Set();
   for (const mm of cam.months) for (const c of ((cam.byMonth[mm] && cam.byMonth[mm].colors) || [])) marketKnown.add(c.name);
   const isKnown = (c) => marketKnown.has(normColor(c));
-  // окно продаж довоза = от месяца прихода (lead=0, приход = старт продаж) на ~1.5 мес
+  // Окно продаж довоза = ВСЕ месяцы, которые он закрывает: от своего прихода на WB (старт продаж)
+  // до прихода СЛЕДУЮЩЕГО довоза (эксклюзивно); последний довоз — хвост ~2 мес. Так объединённый
+  // на несколько месяцев довоз получает анализ по всем своим месяцам. Несколько партий с одним
+  // сроком (сплит по цехам) = один довоз. «Шьём раньше — продаём позже» учтено: считаем от прихода.
+  const TAIL_MONTHS = 2;
+  const arrivals = [...new Set(allParts.map((x) => x.deadline))].sort();
+  const monthDiff = (fromISO, toISO) => (+toISO.slice(0, 4) - +fromISO.slice(0, 4)) * 12 + (+toISO.slice(5, 7) - +fromISO.slice(5, 7));
+  const spanForPartia = (p) => { const i = arrivals.indexOf(p.deadline); const next = arrivals[i + 1]; return next ? Math.max(1, monthDiff(p.deadline, next)) : TAIL_MONTHS; };
   const winCache = {};
-  const winMap = (p) => (winCache[p.id] || (winCache[p.id] = new Map(aggColorWindow(cam, String(p.deadline).slice(5, 7), 0, MX_COLOR_SPAN).colors.map((x) => [x.name, x.rawShare]))));
+  const winMap = (p) => (winCache[p.id] || (winCache[p.id] = new Map(aggColorWindow(cam, String(p.deadline).slice(5, 7), 0, spanForPartia(p)).colors.map((x) => [x.name, x.rawShare]))));
   // доля цвета в окне: известный рынку, но отсутствующий в этом окне → 0 (не в сезон); совсем неизвестный → null
   const shareOf = (p, c) => { const v = winMap(p).get(normColor(c)); if (v != null) return v; return isKnown(c) ? 0 : null; };
   const oldOffById = {}; for (const p of allParts) oldOffById[p.id] = new Set(Array.isArray(p.colorOff) ? p.colorOff : []);
