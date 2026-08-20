@@ -259,6 +259,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* сезонные цвета по довозам (чипы вкл/выкл в «План по размерам») */
 .mx-seasoncolors { margin: 2px 0 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.mx-cc-auto { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
 .mx-cc-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .mx-cc { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; user-select: none; background: var(--panel); font-size: 12px; font-weight: 600; }
 .mx-cc input { margin: 0; cursor: pointer; }
