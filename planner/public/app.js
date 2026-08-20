@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'matrix-reorg-color-block-2026-08-20i';
+const APP_BUILD = 'forecast-sync-safe-retransfer-2026-08-20j';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1676,6 +1676,7 @@ function autoPickColorsByMonth(articleId, scope) {
 // актуальны в выбранном месяце, чтобы точечно отключать неактуальные чипами довоза ниже.
 let matrixColorMonthly = {};       // articleId → {months, byMonth} | null (загружено, данных нет)
 let matrixColorMonthLoading = {};  // articleId → bool
+let matrixForecastStamp = {};      // articleId → generatedAt текущего прогноза (для значка синхронизации)
 const MX_COLOR_SPAN = 2;           // хвост продаж последнего довоза ≈1.5 мес → 2 календарных месяца
 const MX_MON_RU = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const mmShift = (mm, k) => String(((+mm - 1 + k) % 12 + 12) % 12 + 1).padStart(2, '0');
@@ -1702,6 +1703,7 @@ async function ensureColorMonthly(articleId) {
   matrixColorMonthLoading[articleId] = true;
   try {
     const rec = await api('/api/season/plan?articleId=' + encodeURIComponent(articleId));
+    if (rec && rec.report && rec.report.generatedAt) matrixForecastStamp[articleId] = rec.report.generatedAt; // штамп текущего прогноза
     const cam = rec && rec.report && rec.report.colorAnalysisByMonth;
     if (cam && Array.isArray(cam.months) && cam.months.length) matrixColorMonthly[articleId] = cam;
     else if (rec && rec.report) matrixColorMonthly[articleId] = { months: [], stale: true }; // план есть, поля нет → пересобрать
@@ -1743,6 +1745,18 @@ function partiaTiming(a, p) {
   return { sewStart, finish, sellStart: p.deadline, wsName: ws ? ws.name : 'авто (все цеха)', units, prod, cap };
 }
 
+// Значок синхронизации партии с прогнозом: ✓ если штамп партии совпадает с текущим прогнозом,
+// ⚠ если прогноз пересобрали после переноса (нужно обновить перенос). Без штампа (старые партии)
+// и для ручных — значок не показываем.
+function partiaSyncBadge(a, p) {
+  if (!p || p.origin !== 'forecast') return p && p.origin === 'manual' ? '<span class="mx-sync mx-sync-man" title="Партия заведена вручную — с прогнозом не сверяется">ручная партия</span>' : '';
+  const cur = matrixForecastStamp[a.id], stamp = p.forecastStamp || '';
+  if (!cur || !stamp) return ''; // прогноз не загружен или партия без штампа — статус неизвестен
+  return stamp >= cur
+    ? '<span class="mx-sync mx-sync-ok" title="Даты и объёмы соответствуют текущему прогнозу">✓ синхронизировано с прогнозом</span>'
+    : '<span class="mx-sync mx-sync-warn" title="Прогноз пересобран после переноса — открой «Ранг сезонности» и перенеси «План по размерам из прогноза» заново">⚠ прогноз пересобран — обнови перенос</span>';
+}
+
 // Блок «Подбор цветов для довоза»: выбор довоза + жирная строка «когда шить / когда продажи» +
 // ранжирование цветов, актуальных именно в месяцы продаж этого довоза (умное сопоставление с рынком).
 function colorForPartiaHTML(a, p, parts) {
@@ -1756,7 +1770,7 @@ function colorForPartiaHTML(a, p, parts) {
     : `<div class="mx-cm-timing mini">Задай «Срок WB» у партии ниже — тогда покажу, <b>когда начинать шить</b> и <b>когда пойдут продажи</b>.</div>`;
   const cam = matrixColorMonthly[a.id];
   const head = `<div class="se-chk-head">🎨 Подбор цветов для довоза${cam && cam.poolSize ? ` <span class="mini">(рынок: ${cam.poolSize} конкурентов)</span>` : ''}</div>
-    <div class="mx-cm-ctrl">${partiaSel}</div>
+    <div class="mx-cm-ctrl">${partiaSel}${partiaSyncBadge(a, p)}</div>
     ${timingLine}`;
   const wrap = (inner) => `<div class="mx-cmonth">${head}${inner}</div>`;
   if (cam === undefined) return wrap('<div class="mini">Загрузка помесячного анализа цветов…</div>');
@@ -2699,6 +2713,7 @@ function bindSeasonBuilder() {
     try {
       const built = await api('/api/season/build', { method: 'POST', body: JSON.stringify(cfg) });
       delete matrixColorMonthly[cfg.articleId]; // пересобрали план → сбросить кэш помесячного анализа цветов
+      delete matrixForecastStamp[cfg.articleId];
       const blog = (built && built.report && built.report.log) || [];
       seasonLogPush(blog); renderLogComment(document.getElementById('se-build-log'), blog);
       // запомнить подсказку типа артикула (движок оценил рельеф рынка)
@@ -2810,6 +2825,7 @@ async function renderSeasonView(articleId) {
       try {
         await api('/api/season/build', { method: 'POST', body: JSON.stringify({ ...rec.cfg, articleId }) });
         delete matrixColorMonthly[articleId]; // сбросить кэш помесячного анализа цветов
+        delete matrixForecastStamp[articleId];
         toast('План пересобран новым движком');
         await renderSeasonView(articleId);
       } catch (err) {
@@ -2838,6 +2854,7 @@ async function applySeasonExclusions(articleId, baseCfg, exSet) {
   try {
     await api('/api/season/build', { method: 'POST', body: JSON.stringify(cfg) });
     delete matrixColorMonthly[articleId]; // сбросить кэш помесячного анализа цветов
+    delete matrixForecastStamp[articleId];
     // запомнить исключения в артикуле, чтобы не отжимать заново
     const a = state.articles.find((x) => x.id === articleId);
     if (a) { a.seasonFilter = a.seasonFilter || {}; a.seasonFilter.excludedIds = [...exSet]; unitPersist(); }
@@ -3627,6 +3644,12 @@ async function applyReconcile(rep, p, articleId) {
   if (!r) { toast('Не удалось собрать план (нет данных прогноза)', true); return; }
   const { result, article, choices } = r; // choices — с дефолтами (новые цвета создаются)
   if (!result.totalPlanned) { toast('Нечего размещать — сопоставь цвета', true); return; }
+  // Безопасный повторный перенос: заменяем ТОЛЬКО старые партии-из-прогноза этого артикула,
+  // ручные (origin='manual') не трогаем. Предупреждаем — настройки цветов по довозам сбросятся.
+  const existingFc = (state.partias || []).filter((x) => x.articleId === articleId && x.origin === 'forecast');
+  if (existingFc.length && !confirm(`Обновить «План по размерам» из прогноза?\n\nБудут заменены ${existingFc.length} партий-из-прогноза этого артикула (ручные партии останутся на месте).\nНастройки цветов по довозам (вкл/выкл) сбросятся — их быстро вернёт кнопка «✨ Авто-подбор».`)) {
+    return; // отмена — состояние не меняем (кнопка восстановится в rerenderReconcile)
+  }
   const aliases = (state.settings.colorAliases = state.settings.colorAliases || {});
   const newNames = seasonReconcile.newNames || {};
   article.colorMap = article.colorMap || {};
@@ -3661,6 +3684,9 @@ async function applyReconcile(rep, p, articleId) {
   // серия партий-поставок: полный тираж → доли по времени (Хэмилтон, ноль потерь)
   const dvs = mergeDeliveriesForProduction(reconcileDeliveries(p), result.totalPlanned, p.mode);
   const parts = splitMatrixByShares(result.matrix, dvs.map((d) => d.qty));
+  // удаляем старые партии-из-прогноза этого артикула (ручные остаются) — замена, а не дубли
+  state.partias = (state.partias || []).filter((x) => !(x.articleId === articleId && x.origin === 'forecast'));
+  const fcStamp = rep.generatedAt || ''; // штамп прогноза → для значка «синхронизировано»
   let firstId = null, made = 0;
   dvs.forEach((d, i) => {
     const mtx = parts[i] || {};
@@ -3670,6 +3696,7 @@ async function applyReconcile(rep, p, articleId) {
     const dl = String(d.date || '').slice(0, 10) || String((p && p.forecastPeriod && p.forecastPeriod.to) || '').slice(0, 10);
     const np = newPartia(articleId, '', '', { deadline: dl, deliveryTag: d.tag || ('П' + (i + 1)), origin: 'forecast' });
     np.planMatrix = mtx;
+    np.forecastStamp = fcStamp; // из какого прогноза перенесена партия
     state.partias.push(np); made++; if (!firstId) firstId = np.id;
   });
   if (!made) { toast('Не удалось сформировать партии (пустая матрица)', true); return; }
