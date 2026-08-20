@@ -274,7 +274,38 @@ export function normalizeState(input) {
   s.articles.sort(compareArticleId);
   // партии — источник истины по количествам (миграция из article.matrix при первом запуске)
   ensurePartias(s);
+  // остатки/поставки (Этап 3, Фаза 1): уже существующее предложение для неттинга спроса
+  s.supplies = normalizeSupplies(input.supplies, new Set(s.articles.map((a) => a.id)));
   return s;
+}
+
+export const SUPPLY_SOURCES = ['wb', 'transit', 'prod_stock', 'in_production'];
+function normalizeSupplies(input, articleIds) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  for (const r of input) {
+    if (!r || typeof r !== 'object' || !articleIds.has(r.articleId)) continue;
+    const source = SUPPLY_SOURCES.includes(r.source) ? r.source : 'transit';
+    const M = r.matrix && typeof r.matrix === 'object' ? r.matrix : {};
+    const matrix = {};
+    for (const c of Object.keys(M)) {
+      const row = M[c] && typeof M[c] === 'object' ? M[c] : {};
+      const outRow = {};
+      for (const sz of Object.keys(row)) { const v = Math.max(0, Math.round(+row[sz] || 0)); if (v > 0) outRow[sz] = v; }
+      if (Object.keys(outRow).length) matrix[String(c)] = outRow;
+    }
+    if (!Object.keys(matrix).length) continue; // пустая запись не хранится
+    out.push({
+      id: r.id || genId('sup'),
+      articleId: r.articleId,
+      source,
+      matrix,
+      availableOn: /^\d{4}-\d{2}-\d{2}$/.test(String(r.availableOn || '').slice(0, 10)) ? String(r.availableOn).slice(0, 10) : '',
+      note: typeof r.note === 'string' ? r.note.slice(0, 300) : '',
+      updatedAt: typeof r.updatedAt === 'string' ? r.updatedAt : '',
+    });
+  }
+  return out;
 }
 
 // ---- ПАРТИИ (сквозной учёт план-заявок/производства) ----

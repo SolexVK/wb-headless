@@ -13,8 +13,9 @@
 //    логистику до WB (недельный карго + 10–15 дней), сверяем с дедлайном.
 
 import { makeCalendar, addDays, diffDays, parseISO, toISO, dayOfWeek } from './calendar.js';
-import { partiasOf, partiaPlanUnits, partiaFactUnits, partiaEffectiveUnits, PARTIA_STATUS_RU } from './model.js';
+import { partiasOf, partiaPlanUnits, partiaFactUnits, partiaEffectiveUnits, PARTIA_STATUS_RU, sumMatrixStage } from './model.js';
 import { validateMatrix } from './nesting.js';
+import { computeSupplyNetting } from './supply.js';
 
 const OPS = ['cut', 'sew', 'iron', 'otk'];
 const OP_RU = { cut: 'Крой', sew: 'Пошив', iron: 'Утюжка', otk: 'ОТК' };
@@ -139,18 +140,24 @@ export function buildSchedule(state) {
   const ownId = ownWs ? ownWs.id : null;
   const roleRank = (w) => (w.id === ownId ? 0 : w.role === 'main' ? 1 : 2);
 
-  // задания = партии (не прошлые, объём>0)
+  // НЕТТИНГ: к производству = план − уже существующее предложение (остатки/в пути/производство).
+  // Живой слой — planMatrix не трогаем, считаем «к производству» на каждом расчёте.
+  const netting = computeSupplyNetting(state, todayISO);
+
+  // задания = партии (не прошлые, объём К ПРОИЗВОДСТВУ > 0 после неттинга)
   const jobs = [];
   for (const p of state.partias) {
     if (p.historical) continue;
     const article = articleById[p.articleId];
     if (!article) continue;
     if (article.archived) continue; // архивный артикул не планируется
-    const units = partiaPlanUnits(p);
-    if (units <= 0) continue;
+    // net-матрица (план минус покрытое предложением) для план-партий; иначе — как есть
+    const prodMatrix = netting.net[p.id] || p.planMatrix;
+    const units = sumMatrixStage(prodMatrix);
+    if (units <= 0) continue; // полностью покрыто предложением — производить нечего
     const stage = stageById[p.stageId];
     jobs.push({
-      partia: p, article, units, stage,
+      partia: p, article, units, stage, prodMatrix,
       // дедлайн партии-поставки — собственный (дата прихода на WB); иначе дедлайн этапа (legacy).
       deadline: p.deadline || (stage ? stage.deadline : null),
       stageOrd: stageOrder[p.stageId] ?? 99,
@@ -379,9 +386,9 @@ export function buildSchedule(state) {
     }
   }
 
-  const fabricOrders = aggregateFabric(cycles, state);
+  const fabricOrders = aggregateFabric(cycles, state, netting.net);
 
-  return { cycles, warnings, fabricOrders, generatedFor: state.stages.map((s) => s.id) };
+  return { cycles, warnings, fabricOrders, generatedFor: state.stages.map((s) => s.id), supply: { arrivals: netting.arrivals, unmatched: netting.unmatched } };
 }
 
 function cycleId(partiaId, wsId, idx) {
@@ -431,7 +438,7 @@ function resolveSupplier(article, supById) {
   return { id: '__none__', name: 'Поставщик не указан', orderMode: 'draw', drawStages: 1 };
 }
 
-function aggregateFabric(cycles, state) {
+function aggregateFabric(cycles, state, netByPartia = {}) {
   const safetyMul = 1 + (state.settings.fabric.safetyPct || 0) / 100;
   const artById = Object.fromEntries(state.articles.map((a) => [a.id, a]));
   const supById = Object.fromEntries((state.suppliers || []).map((s) => [s.id, s]));
@@ -460,7 +467,7 @@ function aggregateFabric(cycles, state) {
     if (!a) continue;
     const sup = resolveSupplier(a, supById);
     const wastageMul = 1 + (state.settings.fabric.wastagePct || 0) / 100;
-    const M = p.planMatrix || {};
+    const M = netByPartia[p.id] || p.planMatrix || {}; // ткань — на нетто-объём (не покупаем на уже готовое)
     for (const color of Object.keys(M)) {
       const units = sumRow(M[color]);
       if (units <= 0) continue;
