@@ -378,6 +378,19 @@ app.post('/api/season/build', requireEdit('season'), async (req, res) => {
   }
 });
 
+// Остатки/поставки: тянем опубликованный Google-CSV по ссылке (обходим CORS браузера)
+app.get('/api/supply/csv', requireView('season'), async (req, res) => {
+  const url = String(req.query.url || '').trim();
+  if (!/^https:\/\//i.test(url)) return res.status(400).json({ ok: false, error: 'Нужна https-ссылка на опубликованный CSV (Файл → Опубликовать в интернете → CSV).' });
+  try {
+    const r = await fetch(url, { redirect: 'follow' });
+    if (!r.ok) return res.status(400).json({ ok: false, error: `Не удалось получить CSV: HTTP ${r.status}` });
+    const text = await r.text();
+    if (/<html/i.test(text.slice(0, 500))) return res.status(400).json({ ok: false, error: 'По ссылке вернулся HTML, а не CSV. Проверь, что таблица опубликована именно как CSV и доступна по ссылке.' });
+    res.json({ ok: true, text });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+
 // ── Wildberries API: карточки (маппинг+габариты) и логистика по тарифам ──
 app.get('/api/wb/status', (req, res) => res.json({ ok: true, hasToken: hasWbToken() }));
 // список карточек продавца для пикера «Артикул WB» (nmID/vendorCode/объём), кэш сутки

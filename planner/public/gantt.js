@@ -134,6 +134,24 @@ export function renderGantt(container, schedule, state, opts = {}) {
     el('path', { d: `M${x - 5} ${HEADER_H} L${x + 5} ${HEADER_H} L${x} ${HEADER_H + 9} Z`, fill: 'var(--danger)' }, svg);
   }
 
+  // приход товара ВНЕ плана (остатки на WB / в пути / готово / в производстве) — маркеры на шкале.
+  // Производство уже уменьшено на этот объём (неттинг); здесь показываем, КОГДА он приходит на WB.
+  const SUP_COL = { wb: '#22c55e', transit: '#3b82f6', prod_stock: '#f59e0b', in_production: '#8b5cf6' };
+  const SUP_RU = { wb: 'на складе WB', transit: 'в пути', prod_stock: 'готово на складе', in_production: 'в производстве' };
+  const arrivals = (schedule.supply && schedule.supply.arrivals) || [];
+  for (const a of arrivals) {
+    if (!a.availableOn) continue;
+    const t = parse(a.availableOn);
+    if (t < parse(minD) || t > parse(maxD)) continue;
+    const x = xOf(a.availableOn);
+    const col = SUP_COL[a.source] || 'var(--muted)';
+    el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: col, 'stroke-width': 1, 'stroke-dasharray': '2 5', opacity: 0.3 }, svg);
+    const tri = el('path', { d: `M${x - 5} ${HEADER_H - 2} L${x + 5} ${HEADER_H - 2} L${x} ${HEADER_H + 7} Z`, fill: col }, svg);
+    el('title', {}, tri).textContent = `${a.articleId}: ${a.units} шт — ${SUP_RU[a.source] || a.source}, на WB ${a.availableOn}`;
+    const lab = el('text', { x: x, y: HEADER_H - 5, fill: col, 'font-size': 9, 'font-weight': 700, 'text-anchor': 'middle' }, svg);
+    lab.textContent = '+' + a.units;
+  }
+
   // заголовки строк (цеха)
   el('rect', { x: 0, y: 0, width: LABEL_W, height: totalH, fill: 'var(--panel)' }, svg);
   el('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: totalH, stroke: 'var(--line)' }, svg);

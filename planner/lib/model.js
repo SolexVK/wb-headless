@@ -192,6 +192,7 @@ export function normalizeState(input) {
   s.settings.planningDate = /^\d{4}-\d{2}-\d{2}$/.test(s.settings.planningDate) ? s.settings.planningDate : '';
   s.settings.productionStartDate = /^\d{4}-\d{2}-\d{2}$/.test(String(s.settings.productionStartDate || '').slice(0, 10)) ? String(s.settings.productionStartDate).slice(0, 10) : '';
   s.settings.delayThresholdDays = Math.max(0, Math.round(+s.settings.delayThresholdDays || 6));
+  s.settings.supplyCsvUrl = typeof s.settings.supplyCsvUrl === 'string' ? s.settings.supplyCsvUrl.slice(0, 1000) : ''; // ссылка на Google-CSV остатков
   s.settings.transferDays = Math.max(0, Math.round(+s.settings.transferDays || 2));
   { const n = s.settings.nesting && typeof s.settings.nesting === 'object' ? s.settings.nesting : {};
     s.settings.nesting = { minSizeQty: Math.max(1, Math.round(+n.minSizeQty || 20)), minColorQty: Math.max(1, Math.round(+n.minColorQty || 400)) }; }

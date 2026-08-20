@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'forecast-sync-safe-retransfer-2026-08-20j';
+const APP_BUILD = 'supply-netting-phase1-ui-2026-08-20k';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -194,6 +194,7 @@ function renderCurrent() {
   else if (activeTab === 'fabric') renderFabricOrder();
   else if (activeTab === 'dashboard') renderDashboard();
   else if (activeTab === 'season') renderSeason();
+  else if (activeTab === 'supply') renderSupply();
   else if (activeTab === 'unit') renderUnit();
   else if (activeTab === 'data') renderData();
   applyCollapsibles();
@@ -1988,6 +1989,167 @@ function dashMonthlyLoad() {
       <tbody>${wsRows}</tbody>
     </table></div>
   </div>`;
+}
+
+// ───────────────────── ОСТАТКИ И ПОСТАВКИ (Этап 3, Фаза 1) ─────────────────────
+const SUP_SRC_RU = { wb: 'На складе WB', transit: 'В пути', prod_stock: 'Готово на складе произв.', in_production: 'В производстве' };
+function supplyMatrixSum(m) { let s = 0; for (const c in (m || {})) for (const sz in m[c]) s += Math.max(0, Math.round(+m[c][sz] || 0)); return s; }
+function supTodayISO() { return /^\d{4}-\d{2}-\d{2}$/.test(state.settings.planningDate) ? state.settings.planningDate : new Date().toISOString().slice(0, 10); }
+function supplyDefaultDate(source) {
+  const today = supTodayISO();
+  if (source === 'wb') return today;                                  // уже на складе
+  if (source === 'in_production') return rhythmDate(today, 30 + transitLeadCal()); // грубо: пошив ~30д + логистика
+  return rhythmDate(today, transitLeadCal());                         // в пути / готово → логистика до WB
+}
+function parseSupplySource(s) {
+  const t = String(s || '').toLowerCase().trim();
+  if (/wb|вб|валбер|fbw|фулфил|наличи/.test(t)) return 'wb';
+  if (/prod.?stock|готов|склад.?произв/.test(t)) return 'prod_stock';
+  if (/in.?prod|производ|шь[её]тся|отшив/.test(t)) return 'in_production';
+  if (/transit|пути|едет|карго|дорог/.test(t)) return 'transit';
+  return 'transit';
+}
+function parseSupplyCSV(text) {
+  const out = [];
+  const lines = String(text || '').replace(/\r/g, '').split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
+  if (!lines.length) return out;
+  const delim = (lines[0].match(/;/g) || []).length > (lines[0].match(/,/g) || []).length ? ';' : (lines[0].includes('\t') ? '\t' : ',');
+  let start = 0;
+  if (/артикул|article|цвет|color|размер|size|кол|qty|статус|status/i.test(lines[0])) start = 1;
+  for (let i = start; i < lines.length; i++) {
+    const cols = lines[i].split(delim).map((x) => x.trim());
+    if (cols.length < 4) continue;
+    const article = cols[0], color = cols[1], size = cols[2];
+    const qty = Math.max(0, Math.round(parseFloat(String(cols[3]).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0));
+    if (!article || !color || !size || qty <= 0) continue;
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(cols[5] || '').slice(0, 10)) ? String(cols[5]).slice(0, 10) : '';
+    out.push({ article, color, size, qty, source: parseSupplySource(cols[4]), date });
+  }
+  return out;
+}
+function supplyTemplateCSV() {
+  const lines = ['article,color,size,qty,status,date'];
+  for (const a of activeArticles()) for (const c of activeColors(a)) for (const s of (a.sizes || [])) lines.push([a.id, c, s, '', '', ''].join(','));
+  lines.push('# status: wb | transit | prod_stock | in_production  (или: склад WB / в пути / готово на складе / в производстве)');
+  lines.push('# date: ГГГГ-ММ-ДД — дата прихода на WB / готовности. Пусто — подставим по срокам логистики.');
+  return lines.join('\n');
+}
+function importSupplyRows(rows) {
+  if (!rows.length) { toast('Не найдено строк с количеством (проверь колонки: артикул,цвет,размер,кол-во,статус,дата)', true); return; }
+  const artIds = new Set(state.articles.map((a) => a.id));
+  const groups = new Map(); const skipped = [];
+  for (const r of rows) {
+    if (!artIds.has(r.article)) { skipped.push(r.article); continue; }
+    const date = r.date || supplyDefaultDate(r.source);
+    const key = `${r.article}|${r.source}|${date}`;
+    let g = groups.get(key); if (!g) { g = { articleId: r.article, source: r.source, availableOn: date, matrix: {} }; groups.set(key, g); }
+    g.matrix[r.color] = g.matrix[r.color] || {}; g.matrix[r.color][r.size] = (g.matrix[r.color][r.size] || 0) + r.qty;
+  }
+  const recs = [...groups.values()];
+  if (!recs.length) { toast(`Ни один артикул не совпал с системой${skipped.length ? ` (в CSV: ${[...new Set(skipped)].slice(0, 5).join(', ')})` : ''}`, true); return; }
+  // ЗАМЕНА: удаляем прежние записи тех же (артикул, источник), что импортируем — без дублей
+  const affected = new Set(recs.map((g) => g.articleId + '|' + g.source));
+  state.supplies = (state.supplies || []).filter((s) => !affected.has(s.articleId + '|' + s.source));
+  for (const g of recs) state.supplies.push({ id: uid('sup'), articleId: g.articleId, source: g.source, availableOn: g.availableOn, matrix: g.matrix, note: 'импорт', updatedAt: new Date().toISOString() });
+  dirty = true;
+  recalc(true).then(() => { renderSupply(); toast(`Загружено записей: ${recs.length}${skipped.length ? `, пропущено (нет артикула): ${[...new Set(skipped)].length}` : ''}`); }).catch((e) => toast('Ошибка: ' + e.message, true));
+}
+
+function renderSupply() {
+  const root = document.getElementById('supply');
+  if (!root) return;
+  const sup = state.supplies || [];
+  const url = state.settings.supplyCsvUrl || '';
+  const df = (d) => (d ? `${String(d).slice(8, 10)}.${String(d).slice(5, 7)}.${String(d).slice(2, 4)}` : '—');
+  // сводка неттинга: спрос(план) / предложение / к производству(нетто из schedule)
+  const demand = {}, supByArt = {}, prod = {};
+  for (const p of state.partias || []) if (!p.historical && p.status === 'plan') demand[p.articleId] = (demand[p.articleId] || 0) + matrixSum(p.planMatrix);
+  for (const s of sup) supByArt[s.articleId] = (supByArt[s.articleId] || 0) + supplyMatrixSum(s.matrix);
+  for (const c of (schedule?.cycles || [])) if (!c.historical) prod[c.articleId] = (prod[c.articleId] || 0) + c.units;
+  const artIds = [...new Set([...Object.keys(demand), ...Object.keys(supByArt)])].sort();
+  const nameOf = (id) => { const a = state.articles.find((x) => x.id === id); return a ? `${a.id} — ${a.name}` : id; };
+  const unmatched = (schedule?.supply?.unmatched) || [];
+
+  const recRows = sup.slice().sort((a, b) => String(a.articleId).localeCompare(String(b.articleId)) || String(a.availableOn).localeCompare(String(b.availableOn)))
+    .map((s) => `<tr>
+      <td>${seEsc(s.articleId)}</td>
+      <td>${SUP_SRC_RU[s.source] || s.source}</td>
+      <td class="num">${supplyMatrixSum(s.matrix).toLocaleString('ru')}</td>
+      <td>${df(s.availableOn)}</td>
+      <td class="mini">${seEsc(s.note || '')}</td>
+      <td><button class="btn btn-icon btn-danger" data-sup-del="${s.id}" title="Удалить запись">✕</button></td>
+    </tr>`).join('');
+
+  const summaryRows = artIds.map((id) => {
+    const d = demand[id] || 0, s = supByArt[id] || 0, pr = prod[id] || 0;
+    const cov = d > 0 ? Math.min(100, Math.round(s / d * 100)) : (s > 0 ? 100 : 0);
+    return `<tr>
+      <td>${seEsc(nameOf(id))}</td>
+      <td class="num">${d.toLocaleString('ru')}</td>
+      <td class="num">${s.toLocaleString('ru')}</td>
+      <td class="num"><b>${pr.toLocaleString('ru')}</b></td>
+      <td class="num">${cov}%</td>
+    </tr>`;
+  }).join('');
+
+  root.innerHTML = `
+    <div class="panel">
+      <h3 style="margin:0 0 6px">📦 Остатки и поставки</h3>
+      <div class="mini">Учитываем товар, который уже <b>есть на WB</b>, <b>едет</b>, <b>готов на складе</b> или <b>шьётся</b> вне плана. Система вычитает его из плана производства (по времени и по цвету×размеру): шьём только то, чего не хватает. На складе WB — доступно сейчас; в пути / производство — к своей дате прихода. Всё это увязывается с планом и Ганта.</div>
+    </div>
+
+    <div class="panel">
+      <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">Загрузка данных</div>
+      <div class="matrix-io" style="margin-bottom:8px">
+        <span class="mini"><b>Google-таблица</b> (Файл → Опубликовать в интернете → <b>CSV</b>):</span>
+        <input type="url" id="sup-url" value="${seEsc(url)}" placeholder="https://docs.google.com/…/pub?output=csv" style="flex:1;min-width:260px">
+        <button id="sup-url-fetch" class="btn btn-primary">⟳ Обновить из ссылки</button>
+      </div>
+      <div class="matrix-io" style="margin-bottom:8px">
+        <span class="mini">или вставь CSV / данные из таблицы:</span>
+        <button id="sup-tpl" class="btn btn-accent">⤓ Скачать шаблон CSV</button>
+      </div>
+      <textarea id="sup-csv" rows="4" placeholder="article,color,size,qty,status,date&#10;002,синий,44,120,wb,2026-08-20&#10;002,белый,44,40,в пути,2026-11-01" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px"></textarea>
+      <div class="matrix-io" style="margin-top:6px">
+        <button id="sup-import" class="btn btn-primary">Загрузить из CSV/вставки</button>
+        <span class="mini">Колонки: <b>артикул, цвет, размер, кол-во, статус, дата</b>. Статус: wb / в пути / готово на складе / в производстве. Дата пустая — подставим по срокам. Импорт <b>заменяет</b> прежние записи того же артикула и статуса.</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">Текущее предложение (${sup.length})</div>
+      ${sup.length ? `<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Источник</th><th class="num">Объём</th><th>На WB</th><th>Заметка</th><th></th></tr></thead><tbody>${recRows}</tbody></table></div>
+      <div class="matrix-io" style="margin-top:8px"><button id="sup-clear" class="btn btn-danger">🗑 Очистить всё</button></div>`
+      : '<div class="mini">Пока пусто. Загрузи данные выше (или подключи Google-таблицу).</div>'}
+    </div>
+
+    <div class="panel">
+      <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">Неттинг: спрос → предложение → к производству</div>
+      ${artIds.length ? `<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th class="num">Спрос (план)</th><th class="num">Предложение</th><th class="num">К производству</th><th class="num">Покрытие</th></tr></thead><tbody>${summaryRows}</tbody></table></div>
+      <div class="mini" style="margin-top:6px">«К производству» — после вычета предложения (уже на Ганте). Нажми «Пересчитать», если цифры не обновились.</div>`
+      : '<div class="mini">Нет плановых партий. Перенеси «План по размерам из прогноза».</div>'}
+      ${unmatched.length ? `<div class="mini" style="margin-top:8px;color:#b45309">⚠ Не сопоставлено с артикулом (цвет не найден): ${unmatched.slice(0, 8).map((u) => `${seEsc(u.articleId)}/${seEsc(u.color)}/${seEsc(u.size)} — ${u.qty}`).join('; ')}${unmatched.length > 8 ? ' …' : ''}. Проверь названия цветов.</div>` : ''}
+    </div>`;
+
+  root.querySelector('#sup-tpl')?.addEventListener('click', () => downloadText('supply_template.csv', supplyTemplateCSV()));
+  root.querySelector('#sup-import')?.addEventListener('click', () => importSupplyRows(parseSupplyCSV(document.getElementById('sup-csv').value)));
+  root.querySelector('#sup-url')?.addEventListener('change', (e) => { state.settings.supplyCsvUrl = e.target.value.trim(); dirty = true; });
+  root.querySelector('#sup-url-fetch')?.addEventListener('click', async () => {
+    const u = (document.getElementById('sup-url').value || '').trim();
+    if (!u) { toast('Вставь ссылку на опубликованный CSV', true); return; }
+    state.settings.supplyCsvUrl = u; dirty = true;
+    try { const r = await api('/api/supply/csv?url=' + encodeURIComponent(u)); importSupplyRows(parseSupplyCSV(r.text)); }
+    catch (e) { toast('Не удалось загрузить: ' + e.message, true); }
+  });
+  root.querySelector('#sup-clear')?.addEventListener('click', () => {
+    if (!confirm('Удалить ВСЕ записи остатков/поставок?')) return;
+    state.supplies = []; dirty = true;
+    recalc(true).then(() => { renderSupply(); toast('Очищено'); }).catch((e) => toast('Ошибка: ' + e.message, true));
+  });
+  root.querySelectorAll('[data-sup-del]').forEach((b) => b.addEventListener('click', () => {
+    state.supplies = (state.supplies || []).filter((s) => s.id !== b.dataset.supDel); dirty = true;
+    recalc(true).then(() => { renderSupply(); }).catch((e) => toast('Ошибка: ' + e.message, true));
+  }));
 }
 
 function renderDashboard() {
