@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'color-analysis-by-month-2026-08-20a';
+const APP_BUILD = 'color-analysis-by-month-2026-08-20b';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1631,8 +1631,10 @@ async function ensureColorMonthly(articleId) {
   try {
     const rec = await api('/api/season/plan?articleId=' + encodeURIComponent(articleId));
     const cam = rec && rec.report && rec.report.colorAnalysisByMonth;
-    matrixColorMonthly[articleId] = (cam && Array.isArray(cam.months) && cam.months.length) ? cam : null;
-  } catch { matrixColorMonthly[articleId] = null; }
+    if (cam && Array.isArray(cam.months) && cam.months.length) matrixColorMonthly[articleId] = cam;
+    else if (rec && rec.report) matrixColorMonthly[articleId] = { months: [], stale: true }; // план есть, поля нет → пересобрать
+    else matrixColorMonthly[articleId] = null;
+  } catch { matrixColorMonthly[articleId] = null; } // плана нет (404) — панель не показываем
   matrixColorMonthLoading[articleId] = false;
   if (activeTab === 'matrix' && matrixArticleId === articleId) renderMatrix();
 }
@@ -1640,7 +1642,8 @@ async function ensureColorMonthly(articleId) {
 function colorMonthPanelHTML(a, p) {
   const cam = matrixColorMonthly[a.id];
   if (cam === undefined) return `<div class="mx-cmonth"><div class="se-chk-head">🎨 Анализ цветов по месяцам</div><div class="mini">Загрузка помесячного анализа цветов…</div></div>`;
-  if (!cam || !cam.months.length) return ''; // плана нет / не по SERP — панель не показываем
+  if (!cam) return ''; // плана у артикула нет — панель не показываем
+  if (cam.stale || !cam.months.length) return `<div class="mx-cmonth"><div class="se-chk-head">🎨 Анализ цветов по месяцам</div><div class="mini">Помесячный анализ появится после <b>пересборки плана</b> (это новое поле отчёта). Открой «Ранг сезонности» → артикул <b>${seEsc(a.id)}</b> → «Построить план», затем вернись сюда.</div></div>`;
   const months = cam.months;
   if (!mxColorMonth || !months.includes(mxColorMonth)) mxColorMonth = months[0];
   const cur = cam.byMonth[mxColorMonth] || { colors: [] };
