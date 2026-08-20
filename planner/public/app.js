@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'color-month-my-colors-2026-08-20e';
+const APP_BUILD = 'partia-hide-off-colors-2026-08-20f';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1145,7 +1145,7 @@ function renderMatrix() {
       <div class="mini" style="margin-bottom:12px">Введи количества и нажми <b>«Сохранить план»</b>. Номер партии — свой у каждого цеха. Статус производства и факт — на вкладке «Факт». Сейчас отшивает: <b>${cycInfo}</b>.</div>
       ${hasGrid ? colorMonthPanelHTML(a, p) : ''}
       ${hasGrid ? seasonColorChipsHTML(a, p) : ''}
-      ${hasGrid ? matrixTable(a, M) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
+      ${hasGrid ? matrixTable(a, M, p) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
       ${hasGrid ? (() => { const hidden = a.sizes.length - rowsForMatrix(a, M).length; if (!hidden) return ''; return `<div class="mini" style="margin-top:6px">${mxAllSizes ? `Показаны все размеры ряда. ` : `Пустые размеры скрыты (${hidden}). `}<button id="mx-all-sizes" class="btn btn-subtle" type="button">${mxAllSizes ? '▲ скрыть пустые' : '▽ показать все размеры'}</button></div>`; })() : ''}
       ${(() => { const v = nestingViolations(M, nestingRules()); if (!v.length) return ''; const r = nestingRules(); return `<div style="margin-top:10px;padding:8px 10px;border:1px solid #d97706;border-radius:8px;background:rgba(245,158,11,.1)"><div class="mini"><b>Настил (ориентир):</b> ${v.map((x) => x.kind === 'color' ? `цвет «${x.color}» ${x.qty} шт (&lt;${r.minColorQty})` : `${x.color}/${x.size} ${x.qty} шт (&lt;${r.minSizeQty})`).join(' · ')}. Мягкое предупреждение — можно продолжать.</div></div>`; })()}
     </div>`;
@@ -1214,7 +1214,7 @@ function onMatrixPaste(e) {
   // Раскладка идёт по ВИДИМЫМ строкам/столбцам (скрытые пустые размеры и архивные цвета не в сетке),
   // иначе вставка «съедет» на скрытые ячейки.
   const visSizes = mxAllSizes ? a.sizes : rowsForMatrix(a, p.planMatrix || {});
-  const visCols = colsForMatrix(a, p.planMatrix || {});
+  const visCols = colsForMatrix(a, p.planMatrix || {}).filter((c) => colorOnInPartia(p, c)); // как в matrixTable: выключенные цвета скрыты
   const r0 = visSizes.indexOf(decodeURIComponent(e.target.dataset.s));
   const c0 = visCols.indexOf(decodeURIComponent(e.target.dataset.c));
   const grid = text.replace(/\r/g, '').replace(/\n+$/, '').split('\n').map((r) => r.split('\t'));
@@ -1736,8 +1736,9 @@ function seasonColorChipsHTML(a, p) {
   </div>`;
 }
 
-function matrixTable(a, M) {
-  const cols = colsForMatrix(a, M); // архивные-пустые скрываем, архивные с данными — показываем
+function matrixTable(a, M, p) {
+  let cols = colsForMatrix(a, M); // архивные-пустые скрываем, архивные с данными — показываем
+  if (p) cols = cols.filter((c) => colorOnInPartia(p, c)); // выключенные в этом довозе цвета — прячем столбец целиком
   const sizes = mxAllSizes ? a.sizes : rowsForMatrix(a, M); // пустые размеры прячем (если не «показать все»)
   return `
   <div class="matrix-scroll">
