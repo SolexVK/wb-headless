@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'color-month-lead-forecast-2026-08-20d';
+const APP_BUILD = 'color-month-my-colors-2026-08-20e';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1672,24 +1672,38 @@ function colorMonthPanelHTML(a, p) {
   const startM = mmShift(mxColorMonth, lead), endM = mmShift(mxColorMonth, lead + MX_COLOR_SPAN - 1);
   const periodLbl = MX_COLOR_SPAN > 1 ? `${MX_MON_RU[+startM]}–${MX_MON_RU[+endM]}` : MX_MON_RU[+startM];
   const agg = aggColorWindow(cam, mxColorMonth, lead, MX_COLOR_SPAN);
-  const colors = agg.colors;
-  const artByCanon = new Map(activeColors(a).map((c) => [normColor(c), c]));
-  const shareByCanon = new Map(colors.map((c) => [c.name, c.rawShare]));
   const tierOf = (pct) => (pct >= 5 ? 'g' : pct >= 3 ? 'o' : 'r'); // ≥5% зелёный · 3–5% жёлтый · <3% красный
-  const rows = colors.slice(0, 30).map((c) => {
-    const artName = artByCanon.get(c.name);
-    const sw = artName ? swatchTag(a, artName, 16, 16) : '';
-    return `<div class="mx-cm-row tier-${tierOf(c.rawShare)} ${artName ? 'in' : 'out'}">
-      <div class="mx-cm-sw">${sw || '<span class="mx-cm-dot"></span>'}</div>
+  // Умное сопоставление: канон рынка (normColor) == канон моего цвета → доля переносится на МОЙ цвет
+  // (джинса↔синий, хаки↔зелёный, шоколад↔коричневый и т.п.). Показываем ВСЕ цвета артикула, даже без
+  // рыночных данных; рыночные каноны без моего цвета — как «нет в артикуле».
+  const marketByCanon = new Map(agg.colors.map((c) => [c.name, c]));
+  const artList = activeColors(a).map((c) => ({ art: c, canon: normColor(c) }));
+  const canonCount = {}; artList.forEach((x) => { canonCount[x.canon] = (canonCount[x.canon] || 0) + 1; });
+  const claimed = new Set(artList.map((x) => x.canon));
+  const artRows = artList.map(({ art, canon }) => {
+    const m = marketByCanon.get(canon);
+    const shared = canonCount[canon] > 1 ? artList.filter((y) => y.canon === canon && y.art !== art).map((y) => y.art) : [];
+    return { label: art, swatch: swatchTag(a, art, 16, 16), share: m ? m.rawShare : -1, inArt: true, shared, noData: !m };
+  });
+  const extraRows = agg.colors.filter((c) => !claimed.has(c.name)).map((c) => ({ label: c.name, swatch: '', share: c.rawShare, inArt: false, shared: [], noData: false }));
+  const allRows = [...artRows, ...extraRows].sort((x, y) => y.share - x.share); // строго по убыванию доли (нет данных → вниз)
+  const rows = allRows.slice(0, 40).map((r) => {
+    const tier = r.noData ? '' : `tier-${tierOf(r.share)}`; // нет данных рынка → нейтральная серая полоса
+    const pct = r.noData ? '—' : `${r.share}%`;
+    const note = r.shared.length ? ` <span class="mini">(рынок общий: ${r.shared.map(seEsc).join(', ')})</span>`
+      : r.noData ? ' <span class="mini">(нет данных рынка)</span>'
+        : r.inArt ? '' : ' <span class="mini">(нет в артикуле)</span>';
+    return `<div class="mx-cm-row ${tier} ${r.inArt ? 'in' : 'out'}">
+      <div class="mx-cm-sw">${r.swatch || '<span class="mx-cm-dot"></span>'}</div>
       <div class="mx-cm-main">
-        <div class="mx-cm-name">${seEsc(artName || c.name)}${artName ? '' : ' <span class="mini">(нет в артикуле)</span>'}</div>
+        <div class="mx-cm-name">${seEsc(r.label)}${note}</div>
         <div class="mx-cm-ul"></div>
       </div>
-      <div class="mx-cm-pct">${c.rawShare}%</div>
+      <div class="mx-cm-pct">${pct}</div>
     </div>`;
   }).join('');
-  // Цвета артикула, слабые в окне продаж (доля < 3% или отсутствуют) — кандидаты выключить в довозе.
-  const weak = activeColors(a).filter((c) => (shareByCanon.get(normColor(c)) || 0) < 3);
+  // Цвета артикула, слабые в окне продаж (доля < 3% или без рыночных данных) — кандидаты выключить в довозе.
+  const weak = artList.filter(({ canon }) => { const m = marketByCanon.get(canon); return !m || m.rawShare < 3; }).map((x) => x.art);
   const weakLine = weak.length
     ? `<div class="mx-cm-weak mini">Слабы в продажах «${periodLbl}»: <b>${weak.map(seEsc).join(', ')}</b> — кандидаты выключить в этом довозе (чипами ниже).</div>`
     : `<div class="mx-cm-weak mini">Все цвета артикула заметны в продажах «${periodLbl}».</div>`;
@@ -1701,7 +1715,7 @@ function colorMonthPanelHTML(a, p) {
     <div class="mx-cm-ctrl">
       <label>Пошив в: <select id="mx-cmonth-sel">${opts}</select></label>
       <label>Продажи начнутся: <select id="mx-clead-sel">${leadOpts}</select></label>
-      <span class="mini">На опережение: показаны цвета, актуальные в <b>продажах ${periodLbl}</b> (пока сошьём и довезём — пройдёт ~${lead} мес, товар продаётся ещё ~1.5 мес). Полоса под цветом: <b style="color:#22c55e">зелёная ≥5%</b> · <b style="color:#facc15">жёлтая 3–5%</b> · <b style="color:#ef4444">красная &lt;3%</b>.</span>
+      <span class="mini">На опережение: цвета, актуальные в <b>продажах ${periodLbl}</b> (пока сошьём и довезём — ~${lead} мес, товар продаётся ещё ~1.5 мес). Показаны <b>все цвета артикула</b> (со свотчем) + рыночные аналоги совмещены (джинса↔синий, хаки↔зелёный). Полоса: <b style="color:#22c55e">зелёная ≥5%</b> · <b style="color:#facc15">жёлтая 3–5%</b> · <b style="color:#ef4444">красная &lt;3%</b>.</span>
     </div>
     <div class="mx-cm-list">${rows || '<div class="mini">За этот период продаж по цветам не зафиксировано.</div>'}</div>
     ${weakLine}
