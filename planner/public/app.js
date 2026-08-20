@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'auto-pick-colors-multimonth-2026-08-20h';
+const APP_BUILD = 'matrix-reorg-color-block-2026-08-20i';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1092,9 +1092,6 @@ function renderMatrix() {
           ${state.workshops.filter((w) => usedWs.has(w.id)).map((w) => `<option value="${w.id}"${matrixWsFilter === w.id ? ' selected' : ''}>${w.name}</option>`).join('')}
         </select>
       </label>
-      <label>Партия:
-        <select id="mx-partia">${parts.map((x) => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>${seEsc(partiaLabel(x))}</option>`).join('') || '<option>нет партий</option>'}</select>
-      </label>
       <button id="mx-add-partia" class="btn">＋ партия (ручная)</button>
       ${allParts.some((x) => x.status === 'plan') ? '<button id="mx-distribute-all" class="btn btn-accent" title="Раздробить все партии артикула по цехам пропорционально мощности, чтобы уложиться в сроки (свой цех первым; настил соблюдается)">⚙ Распределить по цехам</button>' : ''}
       ${allParts.length ? '<button id="mx-del-all" class="btn btn-danger" title="Удалить ВСЕ партии этого артикула">🗑 Удалить все партии</button>' : ''}
@@ -1119,6 +1116,7 @@ function renderMatrix() {
   root.innerHTML = `${globalDistHTML()}
     <div class="panel">
       ${controls}
+      ${colorForPartiaHTML(a, p, parts)}
       <div class="partia-bar">
         <span class="partia-badge">Партия ${p.no}${p.deliveryTag ? ' · ' + seEsc(p.deliveryTag) : ''}${p.origin === 'forecast' ? ' <span class="mini">из прогноза</span>' : ''}</span>
         <label>Цех:
@@ -1127,27 +1125,24 @@ function renderMatrix() {
           </select>
         </label>
         <label>Срок WB: <input type="date" id="mx-deadline" value="${p.deadline || ''}"></label>
-        <button id="mx-del-partia" class="btn btn-danger">Удалить партию</button>
         <button id="mx-save" class="btn btn-primary">Сохранить план</button>
+        <button id="mx-del-partia" class="btn btn-danger">Удалить партию</button>
         <button id="mx-split-partia" class="btn btn-subtle" title="Разрезать эту партию надвое вручную (по правилам настила), без учёта мощностей">✂ разрезать вручную</button>
       </div>
-      <div class="matrix-io">
-        <span class="mini"><b>Готовый план → Excel:</b></span>
-        <button id="mx-xlsx-partia" class="btn btn-accent" title="Скачать план этой партии в Excel (матрица цвет×размер + итоги)">⤓ эта партия</button>
-        <button id="mx-xlsx-article" class="btn btn-accent" title="Скачать все партии этого артикула — по листу на партию">⤓ все партии ${a.id}</button>
-      </div>
-      <div class="matrix-io">
-        <span class="mini">Ввод: вручную · <b>вставка из буфера</b> (встань на ячейку и Ctrl+V — блок из Excel/Sheets) · через .xlsx-шаблон:</span>
-        <button id="mx-tpl-one" class="btn">⤓ шаблон .xlsx: ${a.id}</button>
-        <button id="mx-tpl-all" class="btn">⤓ шаблон .xlsx: все</button>
-        <label class="btn">⤒ загрузить (.xlsx)<input type="file" accept=".xlsx,.xls,.tsv,.txt,.csv" id="mx-import" hidden></label>
-      </div>
-      <div class="mini" style="margin-bottom:12px">Введи количества и нажми <b>«Сохранить план»</b>. Номер партии — свой у каждого цеха. Статус производства и факт — на вкладке «Факт». Сейчас отшивает: <b>${cycInfo}</b>.</div>
-      ${hasGrid ? colorMonthPanelHTML(a, p) : ''}
+      <div class="mini" style="margin:2px 0 10px">Сейчас отшивает: <b>${cycInfo}</b>. Заполни количества в таблице и нажми <b>«Сохранить план»</b> (номер партии — свой у каждого цеха; статус и факт — на вкладке «Факт»).</div>
       ${hasGrid ? seasonColorChipsHTML(a, p) : ''}
       ${hasGrid ? matrixTable(a, M, p) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
       ${hasGrid ? (() => { const hidden = a.sizes.length - rowsForMatrix(a, M).length; if (!hidden) return ''; return `<div class="mini" style="margin-top:6px">${mxAllSizes ? `Показаны все размеры ряда. ` : `Пустые размеры скрыты (${hidden}). `}<button id="mx-all-sizes" class="btn btn-subtle" type="button">${mxAllSizes ? '▲ скрыть пустые' : '▽ показать все размеры'}</button></div>`; })() : ''}
       ${(() => { const v = nestingViolations(M, nestingRules()); if (!v.length) return ''; const r = nestingRules(); return `<div style="margin-top:10px;padding:8px 10px;border:1px solid #d97706;border-radius:8px;background:rgba(245,158,11,.1)"><div class="mini"><b>Настил (ориентир):</b> ${v.map((x) => x.kind === 'color' ? `цвет «${x.color}» ${x.qty} шт (&lt;${r.minColorQty})` : `${x.color}/${x.size} ${x.qty} шт (&lt;${r.minSizeQty})`).join(' · ')}. Мягкое предупреждение — можно продолжать.</div></div>`; })()}
+      <div class="matrix-io" style="margin-top:12px">
+        <span class="mini"><b>Готовый план → Excel:</b></span>
+        <button id="mx-xlsx-partia" class="btn btn-accent" title="Скачать план этой партии в Excel (матрица цвет×размер + итоги)">⤓ эта партия</button>
+        <button id="mx-xlsx-article" class="btn btn-accent" title="Скачать все партии этого артикула — по листу на партию">⤓ все партии ${a.id}</button>
+        <span class="mini" style="margin-left:10px">Ввод: <b>Ctrl+V</b> из Excel в ячейку · шаблон:</span>
+        <button id="mx-tpl-one" class="btn btn-subtle">⤓ ${a.id}</button>
+        <button id="mx-tpl-all" class="btn btn-subtle">⤓ все</button>
+        <label class="btn btn-subtle">⤒ загрузить (.xlsx)<input type="file" accept=".xlsx,.xls,.tsv,.txt,.csv" id="mx-import" hidden></label>
+      </div>
     </div>`;
 
   bindMatrixControls(a);
@@ -1158,7 +1153,7 @@ function renderMatrix() {
   document.getElementById('mx-tpl-one').addEventListener('click', () => exportPlanXlsx([a.id], `plan_${a.id}.xlsx`));
   document.getElementById('mx-tpl-all').addEventListener('click', () => exportPlanXlsx(activeArticles().map((x) => x.id), 'plan_all.xlsx'));
   document.getElementById('mx-import').addEventListener('change', (e) => importPlanAnyFile(e.target.files && e.target.files[0]));
-  document.getElementById('mx-partia').addEventListener('change', (e) => { matrixPartiaId = e.target.value; renderMatrix(); });
+  document.getElementById('mx-partia')?.addEventListener('change', (e) => { matrixPartiaId = e.target.value; renderMatrix(); });
   document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a));
   document.getElementById('mx-ws').addEventListener('change', (e) => { p.workshopId = e.target.value; recomputePartiaNumbers(); dirty = true; renderMatrix(); });
   document.getElementById('mx-deadline').addEventListener('change', (e) => { p.deadline = e.target.value || ''; recomputePartiaNumbers(); dirty = true; renderMatrix(); });
@@ -1199,8 +1194,6 @@ function renderMatrix() {
   }));
   document.getElementById('mx-autocolors-all')?.addEventListener('click', () => autoPickColorsByMonth(a.id, 'all'));
   document.getElementById('mx-autocolors-one')?.addEventListener('click', () => autoPickColorsByMonth(a.id, 'one'));
-  document.getElementById('mx-cmonth-sel')?.addEventListener('change', (e) => { mxColorMonth = e.target.value; renderMatrix(); });
-  document.getElementById('mx-clead-sel')?.addEventListener('change', (e) => { mxColorLead = +e.target.value || 0; renderMatrix(); });
   ensureColorMonthly(a.id); // ленивая подгрузка помесячного анализа цветов (из плана «Ранга сезонности»)
   applyCollapsibles();
 }
@@ -1639,16 +1632,11 @@ function autoPickColorsByMonth(articleId, scope) {
   const marketKnown = new Set();
   for (const mm of cam.months) for (const c of ((cam.byMonth[mm] && cam.byMonth[mm].colors) || [])) marketKnown.add(c.name);
   const isKnown = (c) => marketKnown.has(normColor(c));
-  // Окно продаж довоза = ВСЕ месяцы, которые он закрывает: от своего прихода на WB (старт продаж)
-  // до прихода СЛЕДУЮЩЕГО довоза (эксклюзивно); последний довоз — хвост ~2 мес. Так объединённый
-  // на несколько месяцев довоз получает анализ по всем своим месяцам. Несколько партий с одним
-  // сроком (сплит по цехам) = один довоз. «Шьём раньше — продаём позже» учтено: считаем от прихода.
-  const TAIL_MONTHS = 2;
-  const arrivals = [...new Set(allParts.map((x) => x.deadline))].sort();
-  const monthDiff = (fromISO, toISO) => (+toISO.slice(0, 4) - +fromISO.slice(0, 4)) * 12 + (+toISO.slice(5, 7) - +fromISO.slice(5, 7));
-  const spanForPartia = (p) => { const i = arrivals.indexOf(p.deadline); const next = arrivals[i + 1]; return next ? Math.max(1, monthDiff(p.deadline, next)) : TAIL_MONTHS; };
+  // Окно продаж довоза = ВСЕ месяцы, которые он закрывает (partiaCoverage): от прихода на WB
+  // до прихода следующего довоза; последний — хвост ~2 мес. «Шьём раньше — продаём позже» учтено:
+  // считаем от даты прихода (= старт продаж).
   const winCache = {};
-  const winMap = (p) => (winCache[p.id] || (winCache[p.id] = new Map(aggColorWindow(cam, String(p.deadline).slice(5, 7), 0, spanForPartia(p)).colors.map((x) => [x.name, x.rawShare]))));
+  const winMap = (p) => { if (!winCache[p.id]) { const cov = partiaCoverage(articleId, p); winCache[p.id] = new Map(aggColorWindow(cam, cov.baseMM, 0, cov.span).colors.map((x) => [x.name, x.rawShare])); } return winCache[p.id]; };
   // доля цвета в окне: известный рынку, но отсутствующий в этом окне → 0 (не в сезон); совсем неизвестный → null
   const shareOf = (p, c) => { const v = winMap(p).get(normColor(c)); if (v != null) return v; return isKnown(c) ? 0 : null; };
   const oldOffById = {}; for (const p of allParts) oldOffById[p.id] = new Set(Array.isArray(p.colorOff) ? p.colorOff : []);
@@ -1688,9 +1676,7 @@ function autoPickColorsByMonth(articleId, scope) {
 // актуальны в выбранном месяце, чтобы точечно отключать неактуальные чипами довоза ниже.
 let matrixColorMonthly = {};       // articleId → {months, byMonth} | null (загружено, данных нет)
 let matrixColorMonthLoading = {};  // articleId → bool
-let mxColorMonth = null;           // выбранный месяц пошива 'MM' (переживает ре-рендер)
-let mxColorLead = 1;               // опережение: через сколько мес. пойдут продажи (пошив+довоз)
-const MX_COLOR_SPAN = 2;           // окно продаж ≈1.5 мес → 2 календарных месяца
+const MX_COLOR_SPAN = 2;           // хвост продаж последнего довоза ≈1.5 мес → 2 календарных месяца
 const MX_MON_RU = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const mmShift = (mm, k) => String(((+mm - 1 + k) % 12 + 12) % 12 + 1).padStart(2, '0');
 
@@ -1725,22 +1711,64 @@ async function ensureColorMonthly(articleId) {
   if (activeTab === 'matrix' && matrixArticleId === articleId) renderMatrix();
 }
 
-function colorMonthPanelHTML(a, p) {
+// Покрытие довоза: месяцы продаж, которые он закрывает (от прихода до прихода следующего довоза;
+// последний — хвост ~2 мес). Несколько партий с одним сроком (сплит по цехам) = один довоз.
+function partiaCoverage(articleId, p) {
+  if (!p || !p.deadline) return { span: 0, baseMM: null, months: [], sellStartISO: '' };
+  const allParts = articlePlanPartias(articleId).filter((x) => x.deadline);
+  const arrivals = [...new Set(allParts.map((x) => x.deadline))].sort();
+  const i = arrivals.indexOf(p.deadline);
+  const next = arrivals[i + 1];
+  const monthDiff = (f, t) => (+t.slice(0, 4) - +f.slice(0, 4)) * 12 + (+t.slice(5, 7) - +f.slice(5, 7));
+  const span = next ? Math.max(1, monthDiff(p.deadline, next)) : MX_COLOR_SPAN;
+  const baseMM = p.deadline.slice(5, 7);
+  const months = []; for (let k = 0; k < span; k++) months.push(mmShift(baseMM, k));
+  return { span, baseMM, months, sellStartISO: p.deadline };
+}
+function monthsLabel(months) {
+  if (!months || !months.length) return '—';
+  return months.length > 1 ? `${MX_MON_RU[+months[0]]}–${MX_MON_RU[+months[months.length - 1]]}` : MX_MON_RU[+months[0]];
+}
+// Тайминг довоза: даты пошива (обратным счётом от прихода на WB по мощности выбранного цеха)
+// и зафиксированная дата старта продаж (= приход на WB).
+function partiaTiming(a, p) {
+  if (!p || !p.deadline) return null;
+  const units = matrixSum(p.planMatrix) || 0;
+  const ws = p.workshopId ? state.workshops.find((w) => w.id === p.workshopId) : null;
+  const cap = ws ? (+ws.capacities.sew || 0) : dailySewCap(a);
+  const prod = cap > 0 ? prodDaysCal(units, cap) : 0;
+  const transit = transitLeadCal(), buf = riskBufCal();
+  const finish = rhythmDate(p.deadline, -transit);                 // готовность пошива (до логистики)
+  const sewStart = rhythmDate(p.deadline, -(transit + prod + buf)); // когда садиться шить
+  return { sewStart, finish, sellStart: p.deadline, wsName: ws ? ws.name : 'авто (все цеха)', units, prod, cap };
+}
+
+// Блок «Подбор цветов для довоза»: выбор довоза + жирная строка «когда шить / когда продажи» +
+// ранжирование цветов, актуальных именно в месяцы продаж этого довоза (умное сопоставление с рынком).
+function colorForPartiaHTML(a, p, parts) {
+  const df = (d) => (d ? `${String(d).slice(8, 10)}.${String(d).slice(5, 7)}.${String(d).slice(2, 4)}` : '—');
+  const partiaSel = `<label>Довоз / партия: <select id="mx-partia">${(parts || []).map((x) => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>${seEsc(partiaLabel(x))}</option>`).join('') || '<option>нет партий</option>'}</select></label>`;
+  const cov = partiaCoverage(a.id, p);
+  const t = partiaTiming(a, p);
+  const monLbl = monthsLabel(cov.months);
+  const timingLine = t
+    ? `<div class="mx-cm-timing">🧵 <b>Шить ${df(t.sewStart)} — ${df(t.finish)}</b> &nbsp;→&nbsp; 📦 <b>Продажи с ${df(t.sellStart)}</b> <span class="mx-cm-period">${monLbl}</span> <span class="mini">· цех ${seEsc(t.wsName)}, ${t.units.toLocaleString('ru')} шт, ~${t.prod} раб. дн пошива</span></div>`
+    : `<div class="mx-cm-timing mini">Задай «Срок WB» у партии ниже — тогда покажу, <b>когда начинать шить</b> и <b>когда пойдут продажи</b>.</div>`;
   const cam = matrixColorMonthly[a.id];
-  if (cam === undefined) return `<div class="mx-cmonth"><div class="se-chk-head">🎨 Анализ цветов по месяцам</div><div class="mini">Загрузка помесячного анализа цветов…</div></div>`;
-  if (!cam) return ''; // плана у артикула нет — панель не показываем
-  if (cam.stale || !cam.months.length) return `<div class="mx-cmonth"><div class="se-chk-head">🎨 Анализ цветов по месяцам</div><div class="mini">Помесячный анализ появится после <b>пересборки плана</b> (это новое поле отчёта). Открой «Ранг сезонности» → артикул <b>${seEsc(a.id)}</b> → «Построить план», затем вернись сюда.</div></div>`;
-  const months = cam.months;
-  if (!mxColorMonth || !months.includes(mxColorMonth)) mxColorMonth = months[0];
-  const lead = (mxColorLead == null) ? 1 : mxColorLead;
-  // Опережение: в месяц пошива смотрим на продажи через lead мес. (пошив+довоз) за окно ~1.5 мес.
-  const startM = mmShift(mxColorMonth, lead), endM = mmShift(mxColorMonth, lead + MX_COLOR_SPAN - 1);
-  const periodLbl = MX_COLOR_SPAN > 1 ? `${MX_MON_RU[+startM]}–${MX_MON_RU[+endM]}` : MX_MON_RU[+startM];
-  const agg = aggColorWindow(cam, mxColorMonth, lead, MX_COLOR_SPAN);
+  const head = `<div class="se-chk-head">🎨 Подбор цветов для довоза${cam && cam.poolSize ? ` <span class="mini">(рынок: ${cam.poolSize} конкурентов)</span>` : ''}</div>
+    <div class="mx-cm-ctrl">${partiaSel}</div>
+    ${timingLine}`;
+  const wrap = (inner) => `<div class="mx-cmonth">${head}${inner}</div>`;
+  if (cam === undefined) return wrap('<div class="mini">Загрузка помесячного анализа цветов…</div>');
+  if (!cam) return wrap('<div class="mini">Помесячный анализ цветов недоступен — построй план на «Ранге сезонности».</div>');
+  if (cam.stale || !cam.months.length) return wrap(`<div class="mini">Помесячный анализ появится после <b>пересборки плана</b>: «Ранг сезонности» → артикул <b>${seEsc(a.id)}</b> → «Построить план».</div>`);
+  if (!cov.months.length) return wrap('<div class="mini">У этого довоза не задан «Срок WB» — не могу определить месяцы продаж для подбора цветов.</div>');
+  // ранжирование цветов за ОКНО ПРОДАЖ довоза (все его месяцы)
+  const agg = aggColorWindow(cam, cov.baseMM, 0, cov.span);
   const tierOf = (pct) => (pct >= 5 ? 'g' : pct >= 3 ? 'o' : 'r'); // ≥5% зелёный · 3–5% жёлтый · <3% красный
   // Умное сопоставление: канон рынка (normColor) == канон моего цвета → доля переносится на МОЙ цвет
-  // (джинса↔синий, хаки↔зелёный, шоколад↔коричневый и т.п.). Показываем ВСЕ цвета артикула, даже без
-  // рыночных данных; рыночные каноны без моего цвета — как «нет в артикуле».
+  // (джинса↔синий, хаки↔зелёный, шоколад↔коричневый). Показываем ВСЕ цвета артикула; рыночные каноны
+  // без моего цвета — «нет в артикуле».
   const marketByCanon = new Map(agg.colors.map((c) => [c.name, c]));
   const artList = activeColors(a).map((c) => ({ art: c, canon: normColor(c) }));
   const canonCount = {}; artList.forEach((x) => { canonCount[x.canon] = (canonCount[x.canon] || 0) + 1; });
@@ -1751,40 +1779,26 @@ function colorMonthPanelHTML(a, p) {
     return { label: art, swatch: swatchTag(a, art, 16, 16), share: m ? m.rawShare : -1, inArt: true, shared, noData: !m };
   });
   const extraRows = agg.colors.filter((c) => !claimed.has(c.name)).map((c) => ({ label: c.name, swatch: '', share: c.rawShare, inArt: false, shared: [], noData: false }));
-  const allRows = [...artRows, ...extraRows].sort((x, y) => y.share - x.share); // строго по убыванию доли (нет данных → вниз)
-  const rows = allRows.slice(0, 40).map((r) => {
-    const tier = r.noData ? '' : `tier-${tierOf(r.share)}`; // нет данных рынка → нейтральная серая полоса
+  const rows = [...artRows, ...extraRows].sort((x, y) => y.share - x.share).slice(0, 40).map((r) => {
+    const tier = r.noData ? '' : `tier-${tierOf(r.share)}`;
     const pct = r.noData ? '—' : `${r.share}%`;
     const note = r.shared.length ? ` <span class="mini">(рынок общий: ${r.shared.map(seEsc).join(', ')})</span>`
       : r.noData ? ' <span class="mini">(нет данных рынка)</span>'
         : r.inArt ? '' : ' <span class="mini">(нет в артикуле)</span>';
     return `<div class="mx-cm-row ${tier} ${r.inArt ? 'in' : 'out'}">
       <div class="mx-cm-sw">${r.swatch || '<span class="mx-cm-dot"></span>'}</div>
-      <div class="mx-cm-main">
-        <div class="mx-cm-name">${seEsc(r.label)}${note}</div>
-        <div class="mx-cm-ul"></div>
-      </div>
+      <div class="mx-cm-main"><div class="mx-cm-name">${seEsc(r.label)}${note}</div><div class="mx-cm-ul"></div></div>
       <div class="mx-cm-pct">${pct}</div>
     </div>`;
   }).join('');
-  // Цвета артикула, слабые в окне продаж (доля < 3% или без рыночных данных) — кандидаты выключить в довозе.
   const weak = artList.filter(({ canon }) => { const m = marketByCanon.get(canon); return !m || m.rawShare < 3; }).map((x) => x.art);
   const weakLine = weak.length
-    ? `<div class="mx-cm-weak mini">Слабы в продажах «${periodLbl}»: <b>${weak.map(seEsc).join(', ')}</b> — кандидаты выключить в этом довозе (чипами ниже).</div>`
-    : `<div class="mx-cm-weak mini">Все цвета артикула заметны в продажах «${periodLbl}».</div>`;
-  const opts = months.map((m) => `<option value="${m}"${m === mxColorMonth ? ' selected' : ''}>${MX_MON_RU[+m] || m}</option>`).join('');
-  const leadOpts = [[0, 'сразу (без сдвига)'], [1, 'через 1 мес'], [2, 'через 2 мес']]
-    .map(([v, t]) => `<option value="${v}"${v === lead ? ' selected' : ''}>${t}</option>`).join('');
-  return `<div class="mx-cmonth">
-    <div class="se-chk-head">🎨 Анализ цветов по месяцам <span class="mini">(рынок: ${cam.poolSize || 0} конкурентов)</span></div>
-    <div class="mx-cm-ctrl">
-      <label>Пошив в: <select id="mx-cmonth-sel">${opts}</select></label>
-      <label>Продажи начнутся: <select id="mx-clead-sel">${leadOpts}</select></label>
-      <span class="mini">На опережение: цвета, актуальные в <b>продажах ${periodLbl}</b> (пока сошьём и довезём — ~${lead} мес, товар продаётся ещё ~1.5 мес). Показаны <b>все цвета артикула</b> (со свотчем) + рыночные аналоги совмещены (джинса↔синий, хаки↔зелёный). Полоса: <b style="color:#22c55e">зелёная ≥5%</b> · <b style="color:#facc15">жёлтая 3–5%</b> · <b style="color:#ef4444">красная &lt;3%</b>.</span>
-    </div>
+    ? `<div class="mx-cm-weak mini">Слабы в продажах «${monLbl}»: <b>${weak.map(seEsc).join(', ')}</b> — кандидаты выключить в этом довозе (чипами ниже).</div>`
+    : `<div class="mx-cm-weak mini">Все цвета артикула заметны в продажах «${monLbl}».</div>`;
+  return wrap(`
+    <div class="mini" style="margin:6px 0 8px">Актуальность цветов в <b>продажах ${monLbl}</b> (окно этого довоза; рыночные аналоги совмещены — джинса↔синий, хаки↔зелёный). Полоса: <b style="color:#22c55e">зелёная ≥5%</b> · <b style="color:#facc15">жёлтая 3–5%</b> · <b style="color:#ef4444">красная &lt;3%</b>. Отмеченные чипами ниже — что реально поедет.</div>
     <div class="mx-cm-list">${rows || '<div class="mini">За этот период продаж по цветам не зафиксировано.</div>'}</div>
-    ${weakLine}
-  </div>`;
+    ${weakLine}`);
 }
 
 // Ряд чипов цветов для выбранного довоза (показываем, когда у артикула ≥2 plan-партий).

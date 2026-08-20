@@ -243,6 +243,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* помесячный анализ цветов на «Плане по размерам» */
 .mx-cmonth { margin: 2px 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
 .mx-cm-ctrl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+.mx-cm-timing { margin: 6px 0 8px; padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); font-size: 13px; line-height: 1.5; }
+.mx-cm-timing.mini { background: var(--panel); border-color: var(--line); }
+.mx-cm-period { display: inline-block; padding: 1px 8px; margin: 0 2px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 700; font-size: 12px; }
 .mx-cm-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 16px; }
 .mx-cm-row { display: grid; grid-template-columns: 20px 1fr 46px; align-items: center; gap: 8px; font-size: 12px; }
 .mx-cm-row.out { opacity: .6; }
