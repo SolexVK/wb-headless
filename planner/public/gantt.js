@@ -142,14 +142,15 @@ export function renderGantt(container, schedule, state, opts = {}) {
   for (const a of arrivals) {
     if (!a.availableOn) continue;
     const t = parse(a.availableOn);
-    if (t < parse(minD) || t > parse(maxD)) continue;
-    const x = xOf(a.availableOn);
+    if (t > parse(maxD)) continue;                       // приход за правым краем — не рисуем
+    const past = t < parse(minD);                        // уже на складе до начала горизонта → прижать к левому краю
+    const x = past ? LABEL_W + 3 : xOf(a.availableOn);
     const col = SUP_COL[a.source] || 'var(--muted)';
-    el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: col, 'stroke-width': 1, 'stroke-dasharray': '2 5', opacity: 0.3 }, svg);
-    const tri = el('path', { d: `M${x - 5} ${HEADER_H - 2} L${x + 5} ${HEADER_H - 2} L${x} ${HEADER_H + 7} Z`, fill: col }, svg);
-    el('title', {}, tri).textContent = `${a.articleId}: ${a.units} шт — ${SUP_RU[a.source] || a.source}, на WB ${a.availableOn}`;
-    const lab = el('text', { x: x, y: HEADER_H - 5, fill: col, 'font-size': 9, 'font-weight': 700, 'text-anchor': 'middle' }, svg);
-    lab.textContent = '+' + a.units;
+    el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: col, 'stroke-width': 1.2, 'stroke-dasharray': '2 5', opacity: 0.35 }, svg);
+    const tri = el('path', { d: `M${x - 6} ${HEADER_H - 2} L${x + 6} ${HEADER_H - 2} L${x} ${HEADER_H + 9} Z`, fill: col }, svg);
+    el('title', {}, tri).textContent = `${a.articleId}: ${a.units} шт — ${SUP_RU[a.source] || a.source}, на WB ${a.availableOn}${past ? ' (уже на складе)' : ''}`;
+    const lab = el('text', { x: x + (past ? 8 : 0), y: HEADER_H - 5, fill: col, 'font-size': 10, 'font-weight': 700, 'text-anchor': past ? 'start' : 'middle' }, svg);
+    lab.textContent = '+' + a.units + (past ? ' ' + (SUP_RU[a.source] || '') : '');
   }
 
   // заголовки строк (цеха)

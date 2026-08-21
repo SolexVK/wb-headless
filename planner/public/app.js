@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'supply-netting-phase1-ui-2026-08-20k';
+const APP_BUILD = 'supply-detail-excel-2026-08-21a';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1994,6 +1994,65 @@ function dashMonthlyLoad() {
 // ───────────────────── ОСТАТКИ И ПОСТАВКИ (Этап 3, Фаза 1) ─────────────────────
 const SUP_SRC_RU = { wb: 'На складе WB', transit: 'В пути', prod_stock: 'Готово на складе произв.', in_production: 'В производстве' };
 function supplyMatrixSum(m) { let s = 0; for (const c in (m || {})) for (const sz in m[c]) s += Math.max(0, Math.round(+m[c][sz] || 0)); return s; }
+// компактная детализация матрицы: «синий: 44×120, 46×80 · белый: 44×40»
+function supplyDetail(m) {
+  return Object.entries(m || {}).map(([c, row]) => `<b>${seEsc(c)}</b>: ${Object.entries(row).map(([s, v]) => `${seEsc(s)}×${(+v || 0).toLocaleString('ru')}`).join(', ')}`).join(' · ') || '—';
+}
+// ── Excel шаблон/импорт остатков ──
+function supplyTemplateAoA() {
+  const aoa = [['article', 'color', 'size', 'qty', 'status', 'date']];
+  for (const a of activeArticles()) for (const c of activeColors(a)) for (const s of (a.sizes || [])) aoa.push([a.id, c, s, '', '', '']);
+  return aoa;
+}
+function downloadSupplyXlsx() {
+  if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу (Cmd+Shift+R)', true); return; }
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(supplyTemplateAoA());
+  ws['!cols'] = [{ wch: 10 }, { wch: 16 }, { wch: 8 }, { wch: 8 }, { wch: 16 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, ws, 'Остатки');
+  const legend = XLSX.utils.aoa_to_sheet([
+    ['status', 'описание'], ['wb', 'На складе WB (в наличии сейчас)'], ['transit', 'В пути (едет на WB)'],
+    ['prod_stock', 'Готово на складе производства'], ['in_production', 'В производстве (шьётся)'], [],
+    ['date', 'ГГГГ-ММ-ДД — дата прихода на WB / готовности. Пусто — подставим по срокам логистики.'],
+    ['', 'Заполни колонку qty (количество). Строки с пустым qty игнорируются.'],
+  ]);
+  XLSX.utils.book_append_sheet(wb, legend, 'Справка');
+  XLSX.writeFile(wb, 'supply_template.xlsx');
+}
+function parseSupplyWorkbook(wb) {
+  const out = [];
+  for (const name of wb.SheetNames) {
+    if (/справк|legend|инструк/i.test(name)) continue;
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, blankrows: false });
+    for (const row of (aoa || [])) {
+      if (!row || row.length < 4) continue;
+      const article = String(row[0] || '').trim();
+      if (!article || /^article$|артикул/i.test(article)) continue;
+      const color = String(row[1] || '').trim(), size = String(row[2] || '').trim();
+      const qty = Math.max(0, Math.round(parseFloat(String(row[3]).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0));
+      if (!color || !size || qty <= 0) continue;
+      let date = '';
+      const dr = row[5];
+      if (dr instanceof Date) date = new Date(Date.UTC(dr.getFullYear(), dr.getMonth(), dr.getDate())).toISOString().slice(0, 10);
+      else if (/^\d{4}-\d{2}-\d{2}/.test(String(dr || ''))) date = String(dr).slice(0, 10);
+      out.push({ article, color, size, qty, source: parseSupplySource(row[4]), date });
+    }
+  }
+  return out;
+}
+function importSupplyFile(file) {
+  if (!file) return;
+  if (!/\.(xlsx|xls)$/i.test(file.name)) { // csv/tsv — текстом
+    const reader = new FileReader(); reader.onload = () => importSupplyRows(parseSupplyCSV(reader.result)); reader.readAsText(file); return;
+  }
+  if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу (Cmd+Shift+R)', true); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    try { importSupplyRows(parseSupplyWorkbook(XLSX.read(new Uint8Array(reader.result), { type: 'array', cellDates: true }))); }
+    catch (e) { toast('Не удалось разобрать файл: ' + e.message, true); }
+  };
+  reader.readAsArrayBuffer(file);
+}
 function supTodayISO() { return /^\d{4}-\d{2}-\d{2}$/.test(state.settings.planningDate) ? state.settings.planningDate : new Date().toISOString().slice(0, 10); }
 function supplyDefaultDate(source) {
   const today = supTodayISO();
@@ -2076,18 +2135,22 @@ function renderSupply() {
       <td>${SUP_SRC_RU[s.source] || s.source}</td>
       <td class="num">${supplyMatrixSum(s.matrix).toLocaleString('ru')}</td>
       <td>${df(s.availableOn)}</td>
-      <td class="mini">${seEsc(s.note || '')}</td>
+      <td class="mini">${supplyDetail(s.matrix)}</td>
       <td><button class="btn btn-icon btn-danger" data-sup-del="${s.id}" title="Удалить запись">✕</button></td>
     </tr>`).join('');
 
   const summaryRows = artIds.map((id) => {
     const d = demand[id] || 0, s = supByArt[id] || 0, pr = prod[id] || 0;
-    const cov = d > 0 ? Math.min(100, Math.round(s / d * 100)) : (s > 0 ? 100 : 0);
+    const applied = Math.max(0, d - pr);          // сколько предложения РЕАЛЬНО убрало из производства
+    const extra = Math.max(0, s - applied);       // излишек: пришло поздно / нет спроса под этот цвет-размер
+    const cov = d > 0 ? Math.round(applied / d * 100) : 0;
     return `<tr>
       <td>${seEsc(nameOf(id))}</td>
       <td class="num">${d.toLocaleString('ru')}</td>
       <td class="num">${s.toLocaleString('ru')}</td>
+      <td class="num" style="color:#16a34a">${applied.toLocaleString('ru')}</td>
       <td class="num"><b>${pr.toLocaleString('ru')}</b></td>
+      <td class="num">${extra ? `<span style="color:#b45309">${extra.toLocaleString('ru')}</span>` : '0'}</td>
       <td class="num">${cov}%</td>
     </tr>`;
   }).join('');
@@ -2106,32 +2169,37 @@ function renderSupply() {
         <button id="sup-url-fetch" class="btn btn-primary">⟳ Обновить из ссылки</button>
       </div>
       <div class="matrix-io" style="margin-bottom:8px">
-        <span class="mini">или вставь CSV / данные из таблицы:</span>
-        <button id="sup-tpl" class="btn btn-accent">⤓ Скачать шаблон CSV</button>
+        <span class="mini"><b>Файл:</b> скачай шаблон, заполни колонку «кол-во», загрузи обратно:</span>
+        <button id="sup-tpl-xlsx" class="btn btn-accent">⤓ Шаблон Excel</button>
+        <button id="sup-tpl" class="btn btn-subtle">⤓ Шаблон CSV</button>
+        <label class="btn btn-primary">⤒ Загрузить файл (.xlsx/.csv)<input type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" id="sup-file" hidden></label>
       </div>
-      <textarea id="sup-csv" rows="4" placeholder="article,color,size,qty,status,date&#10;002,синий,44,120,wb,2026-08-20&#10;002,белый,44,40,в пути,2026-11-01" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px"></textarea>
+      <div class="matrix-io" style="margin-bottom:4px"><span class="mini">или вставь данные из таблицы вручную:</span></div>
+      <textarea id="sup-csv" rows="3" placeholder="article,color,size,qty,status,date&#10;002,синий,44,120,wb,2026-08-20&#10;002,белый,44,40,в пути,2026-11-01" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px"></textarea>
       <div class="matrix-io" style="margin-top:6px">
-        <button id="sup-import" class="btn btn-primary">Загрузить из CSV/вставки</button>
+        <button id="sup-import" class="btn btn-primary">Загрузить из вставки</button>
         <span class="mini">Колонки: <b>артикул, цвет, размер, кол-во, статус, дата</b>. Статус: wb / в пути / готово на складе / в производстве. Дата пустая — подставим по срокам. Импорт <b>заменяет</b> прежние записи того же артикула и статуса.</span>
       </div>
     </div>
 
     <div class="panel">
       <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">Текущее предложение (${sup.length})</div>
-      ${sup.length ? `<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Источник</th><th class="num">Объём</th><th>На WB</th><th>Заметка</th><th></th></tr></thead><tbody>${recRows}</tbody></table></div>
+      ${sup.length ? `<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Источник</th><th class="num">Объём</th><th>На WB</th><th>Цвет × размер</th><th></th></tr></thead><tbody>${recRows}</tbody></table></div>
       <div class="matrix-io" style="margin-top:8px"><button id="sup-clear" class="btn btn-danger">🗑 Очистить всё</button></div>`
       : '<div class="mini">Пока пусто. Загрузи данные выше (или подключи Google-таблицу).</div>'}
     </div>
 
     <div class="panel">
       <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">Неттинг: спрос → предложение → к производству</div>
-      ${artIds.length ? `<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th class="num">Спрос (план)</th><th class="num">Предложение</th><th class="num">К производству</th><th class="num">Покрытие</th></tr></thead><tbody>${summaryRows}</tbody></table></div>
-      <div class="mini" style="margin-top:6px">«К производству» — после вычета предложения (уже на Ганте). Нажми «Пересчитать», если цифры не обновились.</div>`
-      : '<div class="mini">Нет плановых партий. Перенеси «План по размерам из прогноза».</div>'}
+      ${artIds.length ? `<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th class="num">Спрос (план)</th><th class="num">Предложение</th><th class="num" title="Сколько предложения реально убрало из производства">Покрыто</th><th class="num">К производству</th><th class="num" title="Излишек: пришёл позже всех довозов или нет спроса под этот цвет×размер">Излишек</th><th class="num">Покрытие</th></tr></thead><tbody>${summaryRows}</tbody></table></div>
+      <div class="mini" style="margin-top:6px">«К производству» = «Спрос» − «Покрыто» (уже применено на Ганте, пересчёт не нужен). <b>Излишек</b> — предложение, которое НЕ уменьшило пошив: приходит позже всех довозов артикула или его цвет×размер нет в плане.</div>`
+      : '<div class="mini">Нет плановых партий этого артикула. Перенеси «План по размерам из прогноза».</div>'}
       ${unmatched.length ? `<div class="mini" style="margin-top:8px;color:#b45309">⚠ Не сопоставлено с артикулом (цвет не найден): ${unmatched.slice(0, 8).map((u) => `${seEsc(u.articleId)}/${seEsc(u.color)}/${seEsc(u.size)} — ${u.qty}`).join('; ')}${unmatched.length > 8 ? ' …' : ''}. Проверь названия цветов.</div>` : ''}
     </div>`;
 
   root.querySelector('#sup-tpl')?.addEventListener('click', () => downloadText('supply_template.csv', supplyTemplateCSV()));
+  root.querySelector('#sup-tpl-xlsx')?.addEventListener('click', downloadSupplyXlsx);
+  root.querySelector('#sup-file')?.addEventListener('change', (e) => importSupplyFile(e.target.files && e.target.files[0]));
   root.querySelector('#sup-import')?.addEventListener('click', () => importSupplyRows(parseSupplyCSV(document.getElementById('sup-csv').value)));
   root.querySelector('#sup-url')?.addEventListener('change', (e) => { state.settings.supplyCsvUrl = e.target.value.trim(); dirty = true; });
   root.querySelector('#sup-url-fetch')?.addEventListener('click', async () => {
