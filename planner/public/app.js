@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'supply-declutter-2026-08-21m';
+const APP_BUILD = 'supply-net-export-2026-08-21n';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1136,9 +1136,9 @@ function renderMatrix() {
       ${hasGrid ? (() => { const hidden = a.sizes.length - rowsForMatrix(a, M).length; if (!hidden) return ''; return `<div class="mini" style="margin-top:6px">${mxAllSizes ? `Показаны все размеры ряда. ` : `Пустые размеры скрыты (${hidden}). `}<button id="mx-all-sizes" class="btn btn-subtle" type="button">${mxAllSizes ? '▲ скрыть пустые' : '▽ показать все размеры'}</button></div>`; })() : ''}
       ${(() => { const v = nestingViolations(M, nestingRules()); if (!v.length) return ''; const r = nestingRules(); return `<div style="margin-top:10px;padding:8px 10px;border:1px solid #d97706;border-radius:8px;background:rgba(245,158,11,.1)"><div class="mini"><b>Настил (ориентир):</b> ${v.map((x) => x.kind === 'color' ? `цвет «${x.color}» ${x.qty} шт (&lt;${r.minColorQty})` : `${x.color}/${x.size} ${x.qty} шт (&lt;${r.minSizeQty})`).join(' · ')}. Мягкое предупреждение — можно продолжать.</div></div>`; })()}
       <div class="matrix-io" style="margin-top:12px">
-        <span class="mini"><b>Готовый план → Excel:</b></span>
-        <button id="mx-xlsx-partia" class="btn btn-accent" title="Скачать план этой партии в Excel (матрица цвет×размер + итоги)">⤓ эта партия</button>
-        <button id="mx-xlsx-article" class="btn btn-accent" title="Скачать все партии этого артикула — по листу на партию">⤓ все партии ${a.id}</button>
+        <span class="mini"><b>План для цеха → Excel</b> <span title="Выгрузка идёт на НЕТТО: из плана вычтены загруженные остатки (WB/в пути/склад/производство). Полностью покрытые партии в «все партии» не попадают.">(нетто, за вычетом остатков ⓘ)</span>:</span>
+        <button id="mx-xlsx-partia" class="btn btn-accent" title="Скачать план этой партии в Excel (нетто: за вычетом остатков)">⤓ эта партия</button>
+        <button id="mx-xlsx-article" class="btn btn-accent" title="Скачать все партии этого артикула (нетто) — по листу на партию">⤓ все партии ${a.id}</button>
         <span class="mini" style="margin-left:10px">Ввод: <b>Ctrl+V</b> из Excel в ячейку · шаблон:</span>
         <button id="mx-tpl-one" class="btn btn-subtle">⤓ ${a.id}</button>
         <button id="mx-tpl-all" class="btn btn-subtle">⤓ все</button>
@@ -1376,14 +1376,24 @@ const XLSX_BORDER = () => { const s = { style: 'thin', color: { rgb: 'C8CCD0' } 
 // Лист одной партии: шапка по строкам (текст перетекает в пустые ячейки справа — читается целиком),
 // затем матрица цвет×размер: заголовки цветов жирные, залиты цветом, по центру; тело — по центру
 // с лёгкой заливкой своего цвета; пустые размеры скрыты.
+// матрица «к производству» партии = нетто (план − остатки), если неттинг посчитан; иначе план.
+function prodMatrixFor(p) {
+  const net = schedule && schedule.supply && schedule.supply.netByPartia;
+  return (net && net[p.id]) ? net[p.id] : (p.planMatrix || {});
+}
 function partiaReadyAoA(a, p) {
-  const M = p.planMatrix || {};
+  const M = prodMatrixFor(p);                    // выгрузка для цеха — на НЕТТО (за вычетом остатков)
+  const gross = matrixSum(p.planMatrix);         // спрос по плану
+  const net = matrixSum(M);                       // к пошиву после вычета остатков
   const cols = colsForMatrix(a, M);
   const sizes = rowsForMatrix(a, M);
   const ws = state.workshops.find((w) => w.id === p.workshopId);
   const meta = [`Артикул ${a.id} — ${a.name}`, `Партия ${p.no}${p.deliveryTag ? ' · ' + p.deliveryTag : ''}`];
   if (p.deadline) meta.push(`Срок WB: ${p.deadline}`);
   meta.push(`Цех: ${ws ? ws.name : 'авто'}`, `Статус: ${PARTIA_STATUS_RU[p.status] || p.status || '—'}`);
+  // если остатки что-то покрыли — явно показываем цеху, что это уже нетто
+  if (net < gross) meta.push(`К производству: ${net.toLocaleString('ru')} шт (спрос по плану ${gross.toLocaleString('ru')}, остатки вычтены)`);
+  if (net === 0 && gross > 0) meta.push('⚠ Полностью покрыто остатками — шить не нужно');
   if (a.comment) meta.push(`Особенности: ${a.comment}`);
   const rows = meta.map((t) => [t]); // каждый пункт — своя строка, только колонка A → текст перетекает вправо
   rows.push([]);
@@ -1443,10 +1453,13 @@ function exportReadyPlanXlsx(articleId, partiaId) {
     XLSX.writeFile(wb, `план_${a.id}_партия_${p.no}.xlsx`);
     return;
   }
-  const parts = partiasOfArticle(a.id).filter((p) => matrixSum(p.planMatrix) > 0);
-  if (!parts.length) { toast('У артикула нет партий с планом', true); return; }
+  const all = partiasOfArticle(a.id).filter((p) => matrixSum(p.planMatrix) > 0);
+  const parts = all.filter((p) => matrixSum(prodMatrixFor(p)) > 0); // фул-покрытые остатками не выгружаем
+  if (!parts.length) { toast('Нечего шить: весь план этого артикула покрыт остатками', true); return; }
   for (const p of parts) appendReadySheet(wb, a, p, used);
   XLSX.writeFile(wb, `план_${a.id}_все_партии.xlsx`);
+  const covered = all.length - parts.length;
+  toast(`Выгружено партий: ${parts.length}${covered ? ` (${covered} полностью покрыто остатками — пропущены)` : ''}. Объёмы — нетто, за вычетом остатков.`);
 }
 // разобрать книгу .xlsx в структуру { articleId: { stageId: { color: { size: qty } } } }
 function parsePlanWorkbook(wb) {

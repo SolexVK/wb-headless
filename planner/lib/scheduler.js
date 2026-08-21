@@ -388,7 +388,9 @@ export function buildSchedule(state) {
 
   const fabricOrders = aggregateFabric(cycles, state, netting.net);
 
-  return { cycles, warnings, fabricOrders, generatedFor: state.stages.map((s) => s.id), supply: { arrivals: netting.arrivals, unmatched: netting.unmatched } };
+  // netByPartia — матрица «к производству» (план − остатки) по каждой план-партии.
+  // Нужна фронту, чтобы выгрузка «План по размерам → Excel для цеха» шла на нетто, а не на спрос.
+  return { cycles, warnings, fabricOrders, generatedFor: state.stages.map((s) => s.id), supply: { arrivals: netting.arrivals, unmatched: netting.unmatched, netByPartia: netting.net } };
 }
 
 function cycleId(partiaId, wsId, idx) {
