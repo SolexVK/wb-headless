@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'wb-fbs-nomenclature-2026-08-21j';
+const APP_BUILD = 'wb-fbs-fix-2026-08-21k';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2334,20 +2334,21 @@ function renderSupply() {
       <div class="matrix-io" style="margin-bottom:8px">
         <button id="sup-wb-nom" class="btn btn-accent">⤓ Номенклатура WB (для привязки)</button>
         <label class="btn btn-primary">⤒ Загрузить номенклатуру / привязку<input type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" id="sup-wb-links" hidden></label>
+        <button id="sup-wb-clear" class="btn btn-danger" title="Очистить все ключи WB">🗑 Очистить ключи</button>
         <span class="mini">Загрузи <b>таблицу номенклатур ВБ</b> (колонки «Артикул продавца» + «Артикул WB») — привязка проставится сама по <b>ведущему номеру</b> (022 МР… → артикул 022). Либо выгрузи карточки, впиши в колонку <b>article</b> наш номер и загрузи.</span>
       </div>
-      <div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Название</th><th>Ключ WB (артикул продавца без цвета / nmID)</th></tr></thead><tbody>
-        ${activeArticles().map((a) => `<tr><td>${seEsc(a.id)}</td><td class="mini">${seEsc(a.name || '')}</td><td><input type="text" data-wbkey="${seEsc(a.id)}" value="${seEsc(a.wbKey || '')}" placeholder="напр. 023_рвп" style="width:260px"></td></tr>`).join('')}
+      <div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Название</th><th>Ключ WB (nmID)</th></tr></thead><tbody>
+        ${activeArticles().map((a) => `<tr><td>${seEsc(a.id)}</td><td class="mini">${seEsc(a.name || '')}</td><td><input type="text" data-wbkey="${seEsc(a.id)}" value="${seEsc(a.wbKey || '')}" placeholder="nmID через запятую" style="width:260px"></td></tr>`).join('')}
       </tbody></table></div>
       ${wbVendors ? `<div class="mini" style="margin-top:8px">Твои артикулы продавца (${wbVendors.cardsCount} карточек) сгруппированы по префиксу — <b>копируй нужный префикс в «Ключ WB»</b>:
         <div class="matrix-scroll" style="max-height:220px;overflow:auto"><table class="matrix-table"><thead><tr><th>Префикс (ключ)</th><th class="num">Карточек</th><th>Примеры артикулов продавца</th></tr></thead><tbody>
         ${(wbVendors.prefixes || []).slice(0, 60).map((p) => `<tr><td><b>${seEsc(p.prefix)}</b></td><td class="num">${p.count}</td><td class="mini">${(p.samples || []).map(seEsc).join(', ')}</td></tr>`).join('')}
         </tbody></table></div></div>` : ''}
       ${wbPullDiag ? `<div class="mini" style="margin-top:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">
-        <b>Диагностика подтяжки:</b> в отчёте WB строк остатков (FBW) — <b>${wbPullDiag.stocksRows}</b>, карточек продавца — <b>${wbPullDiag.cardsCount}</b>.
+        <b>Диагностика подтяжки:</b> в отчёте WB строк остатков (FBW) — <b>${wbPullDiag.stocksRows}</b> по <b>${wbPullDiag.stockNms || 0}</b> nmID, карточек продавца — <b>${wbPullDiag.cardsCount}</b>.
         ${wbPullDiag.fbs ? `FBS: штрихкодов запрошено — <b>${wbPullDiag.fbs.skusAsked || 0}</b>, с остатком — <b>${wbPullDiag.fbs.found || 0}</b>${wbPullDiag.fbs.error ? ` <span style="color:#b45309">(FBS недоступен: ${seEsc(wbPullDiag.fbs.error)})</span>` : ''}.` : ''}
-        <div class="matrix-scroll" style="margin-top:6px"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Ключ</th><th class="num">Карточек</th><th class="num">Цветов</th><th class="num">Остаток</th><th class="num">из них FBS</th><th>Примеры / ошибка</th></tr></thead><tbody>
-        ${(wbPullDiag.diag || []).map((d) => `<tr><td>${seEsc(d.articleId)}</td><td class="mini">${seEsc(d.key || '')}</td><td class="num">${d.cards || 0}</td><td class="num">${d.colors || 0}</td><td class="num">${(d.units || 0).toLocaleString('ru')}</td><td class="num">${(d.fbs || 0).toLocaleString('ru')}</td><td class="mini${d.error ? '" style="color:#b45309' : ''}">${seEsc(d.error || (d.sample || []).join(', '))}</td></tr>`).join('')}
+        <div class="matrix-scroll" style="margin-top:6px"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Ключ</th><th class="num">Карточек (со стоком)</th><th class="num">Цветов</th><th class="num">Остаток</th><th class="num">из них FBS</th><th>Примеры / ошибка</th></tr></thead><tbody>
+        ${(wbPullDiag.diag || []).map((d) => `<tr><td>${seEsc(d.articleId)}</td><td class="mini">${seEsc(d.key || '')}</td><td class="num">${d.cards || 0}${d.matchedNm != null ? ` (${d.matchedNm})` : ''}</td><td class="num">${d.colors || 0}</td><td class="num">${(d.units || 0).toLocaleString('ru')}</td><td class="num">${(d.fbs || 0).toLocaleString('ru')}</td><td class="mini${d.error ? '" style="color:#b45309' : ''}">${seEsc(d.error || (d.sample || []).join(', '))}</td></tr>`).join('')}
         </tbody></table></div>
         ${wbPullDiag.stocksRows === 0 && (!wbPullDiag.fbs || !wbPullDiag.fbs.found) ? '<div style="color:#b45309;margin-top:6px">Отчёт WB вернул 0 строк FBW и 0 остатков FBS — значит по этим артикулам сейчас пусто (или товар не заведён на складах WB/продавца).</div>' : ''}
       </div>` : ''}
@@ -2398,6 +2399,14 @@ function renderSupply() {
   root.querySelector('#sup-wb-force')?.addEventListener('click', () => pullWbStocks(true));
   root.querySelector('#sup-wb-nom')?.addEventListener('click', downloadWbNomenclature);
   root.querySelector('#sup-wb-links')?.addEventListener('change', (e) => importWbLinksFile(e.target.files && e.target.files[0]));
+  root.querySelector('#sup-wb-clear')?.addEventListener('click', () => {
+    const n = (state.articles || []).filter((a) => a.wbKey).length;
+    if (!n) { toast('Ключи WB уже пусты'); return; }
+    if (!confirm(`Очистить «Ключ WB» у ${n} артикулов?`)) return;
+    for (const a of state.articles) a.wbKey = '';
+    dirty = true; unitPersist(); renderSupply();
+    toast(`Очищено ключей WB: ${n}`);
+  });
   root.querySelector('#sup-wb-vendors')?.addEventListener('click', async (e) => {
     const b = e.currentTarget; b.disabled = true; b.textContent = '⏳ Загружаю карточки WB…';
     try { wbVendors = await api('/api/supply/wb-vendors'); renderSupply(); }

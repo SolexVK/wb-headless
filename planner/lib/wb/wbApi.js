@@ -92,22 +92,37 @@ export async function fetchStocks({ force = false } = {}) {
   return rows;
 }
 
-/** Свести остатки по (nmId × размер): quantityWarehousesFull (уже по всем складам) + в пути + возвраты. */
+/**
+ * Свести остатки FBW по nmId → (размер → {quantity, в пути к клиенту, возвраты}).
+ * Индексируем ПО nmId, а размер берём из самой строки отчёта: в карточках Content API
+ * поле techSize часто пустое (размер лежит в wbSize), поэтому join по размеру карточки
+ * терял все строки. Количество: quantityWarehousesFull (сумма по складам) с фолбэками.
+ */
 export function aggregateStocks(rows) {
-  const m = new Map();
+  const byNm = new Map(); // nmIdStr → Map(size → {quantity, inWayToClient, inWayFromClient})
   for (const r of (rows || [])) {
     const nmId = r.nmId != null ? r.nmId : r.nmID;
     if (nmId == null) continue;
-    const ts = String(r.techSize != null ? r.techSize : '').trim();
-    const key = nmId + '|' + ts;
-    const cur = m.get(key) || { quantity: 0, inWayToClient: 0, inWayFromClient: 0 };
-    cur.quantity += (r.quantityWarehousesFull != null ? +r.quantityWarehousesFull : +r.quantity) || 0;
+    const ts = String(r.techSize != null && r.techSize !== '' ? r.techSize : (r.wbSize != null ? r.wbSize : (r.size != null ? r.size : ''))).trim();
+    // количество на складах: приоритет — итоговое поле; иначе запись «Всего…»; иначе сумма по складам; иначе quantity
+    let q = null;
+    if (r.quantityWarehousesFull != null) q = +r.quantityWarehousesFull;
+    else if (Array.isArray(r.warehouses)) {
+      const total = r.warehouses.find((w) => /всего|итог|total/i.test(w && w.warehouseName || ''));
+      q = total ? (+total.quantity || 0) : r.warehouses.reduce((a, w) => a + (+((w && w.quantity)) || 0), 0);
+    } else if (r.quantity != null) q = +r.quantity;
+    const key = String(nmId);
+    let m = byNm.get(key); if (!m) { m = new Map(); byNm.set(key, m); }
+    const cur = m.get(ts) || { quantity: 0, inWayToClient: 0, inWayFromClient: 0 };
+    cur.quantity += (+q || 0);
     cur.inWayToClient += +r.inWayToClient || 0;
     cur.inWayFromClient += +r.inWayFromClient || 0;
-    m.set(key, cur);
+    m.set(ts, cur);
   }
-  return m;
+  return byNm;
 }
+/** Число строк-размеров в индексе остатков (для диагностики). */
+function countStockRows(byNm) { let n = 0; for (const m of byNm.values()) n += m.size; return n; }
 
 const FBS_TTL = 30 * 60 * 1000; // остатки FBS — кэш 30 минут
 
@@ -175,7 +190,7 @@ function resolveArticleCards(key, cards, byNm) {
 
 export async function buildWbSupply({ items = [], buyoutPct = 37, force = false, includeFbs = true } = {}) {
   const cards = await fetchCards({ force });
-  const stocks = aggregateStocks(await fetchStocks({ force }));
+  const stocksByNm = aggregateStocks(await fetchStocks({ force })); // nmIdStr → Map(size → agg)
   const byNm = new Map(cards.map((c) => [String(c.nmID), c]));
   const buyout = Math.max(0, Math.min(100, +buyoutPct || 0)) / 100; // доля выкупа (уходит из остатка)
 
@@ -197,15 +212,18 @@ export async function buildWbSupply({ items = [], buyoutPct = 37, force = false,
     const key = it.key != null ? it.key : it.nmID; // key = nmID или префикс артикула продавца
     const sibs = resolveArticleCards(key, cards, byNm);
     if (!sibs.length) { diag.push({ articleId: it.articleId, key: String(key || ''), error: 'карточки WB по этому ключу не найдены (проверь nmID / артикул продавца)' }); continue; }
-    const matrix = {}; let fbsUnits = 0;
+    const matrix = {}; let fbsUnits = 0; let matchedNm = 0;
     for (const card of sibs) {
       const color = card.color || vendorColor(card.vendorCode) || 'без цвета';
-      // штрихкоды по размеру (для FBS): techSize → [skus]
+      // штрихкоды по размеру (для FBS): size → [skus]
       const skusBySize = {};
-      for (const sz of (card.sizes || [])) skusBySize[sz.techSize] = sz.skus || [];
-      const sizeSet = new Set([...(card.techSizes || []), ...Object.keys(skusBySize)]);
+      for (const sz of (card.sizes || [])) if (sz.size) (skusBySize[sz.size] = skusBySize[sz.size] || []).push(...(sz.skus || []));
+      // остатки FBW этой карточки по размерам (размер берём из отчёта, не из карточки)
+      const stockSizes = stocksByNm.get(String(card.nmID)) || new Map();
+      if (stockSizes.size) matchedNm += 1;
+      const sizeSet = new Set([...stockSizes.keys(), ...Object.keys(skusBySize)]);
       for (const ts of sizeSet) {
-        const s = stocks.get(String(card.nmID) + '|' + ts);
+        const s = stockSizes.get(ts);
         // FBW: наличие + возвраты + доля не выкупленного из «в пути к клиенту»
         const fbw = s ? Math.round((s.quantity || 0) + (s.inWayFromClient || 0) + (s.inWayToClient || 0) * (1 - buyout)) : 0;
         // FBS: физический остаток на складе продавца по штрихкодам этого размера (без дисконта выкупа)
@@ -220,11 +238,11 @@ export async function buildWbSupply({ items = [], buyoutPct = 37, force = false,
     const units = Object.values(matrix).reduce((a, r) => a + Object.values(r).reduce((x, v) => x + v, 0), 0);
     const sample = sibs.slice(0, 3).map((c) => c.vendorCode).filter(Boolean);
     supplies.push({ articleId: it.articleId, source: 'wb', matrix, units });
-    diag.push({ articleId: it.articleId, key: String(key || ''), cards: sibs.length, colors: Object.keys(matrix).length, units, fbs: fbsUnits, sample });
+    diag.push({ articleId: it.articleId, key: String(key || ''), cards: sibs.length, matchedNm, colors: Object.keys(matrix).length, units, fbs: fbsUnits, sample });
   }
   return {
     supplies, diag, buyoutPct: Math.round(buyout * 100),
-    stocksRows: (stocks && stocks.size) || 0, cardsCount: cards.length,
+    stocksRows: countStockRows(stocksByNm), stockNms: stocksByNm.size, cardsCount: cards.length,
     fbs: { skusAsked: fbsSkusAsked, found: fbsMap.size, error: fbsErr },
   };
 }
@@ -292,12 +310,13 @@ export async function fetchCards({ force = false } = {}) {
         title: card.title || '', // название карточки (для выгрузки номенклатуры)
         brand: card.brand || '',
         color: cardColor(card), // цвет карточки (для сведения остатков по цвету)
-        techSizes: Array.isArray(card.sizes) ? card.sizes.map((s) => String(s.techSize || '').trim()).filter(Boolean) : [],
-        // размеры со штрихкодами (skus) — нужны для остатков FBS (склад продавца): запрос идёт по баркодам
+        techSizes: Array.isArray(card.sizes) ? card.sizes.map((s) => String(s.techSize || s.wbSize || '').trim()).filter(Boolean) : [],
+        // размеры со штрихкодами (skus) — нужны для остатков FBS (склад продавца): запрос идёт по баркодам.
+        // Размер (size) = techSize, иначе wbSize (в карточках Content API techSize часто пустой).
         sizes: Array.isArray(card.sizes) ? card.sizes.map((s) => ({
-          techSize: String(s.techSize || '').trim(),
+          size: String(s.techSize || s.wbSize || '').trim(),
           skus: Array.isArray(s.skus) ? s.skus.map((x) => String(x).trim()).filter(Boolean) : [],
-        })).filter((s) => s.techSize) : [],
+        })).filter((s) => s.size || s.skus.length) : [],
         dimensions: card.dimensions || null,
         volumeL: volumeLitres(card.dimensions),
       });
