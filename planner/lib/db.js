@@ -33,6 +33,7 @@ function migrate(db) {
       vendorCode TEXT, brand TEXT,
       length REAL, width REAL, height REAL, weightBrutto REAL, isValid INTEGER,
       volumeL REAL,
+      payload TEXT,               -- JSON доп. полей карточки (imtID, title, color, techSizes, sizes/skus)
       fetchedAt TEXT
     );
     CREATE TABLE IF NOT EXISTS wb_tariffs (
@@ -154,6 +155,8 @@ function migrate(db) {
   for (const [col, decl] of [['role', "TEXT DEFAULT 'viewer'"], ['perms', 'TEXT'], ['accessRequest', 'TEXT']]) {
     try { db.exec(`ALTER TABLE users ADD COLUMN ${col} ${decl}`); } catch { /* колонка уже есть */ }
   }
+  // wb_cards.payload — JSON доп. полей карточки (штрихкоды skus для FBS и т.п.) в старых БД.
+  try { db.exec('ALTER TABLE wb_cards ADD COLUMN payload TEXT'); } catch { /* колонка уже есть */ }
 }
 
 /** Открыть (лениво) БД. Возвращает объект БД или null, если SQLite недоступен. */
@@ -191,17 +194,19 @@ export function metaSet(key, value) {
 export function wbSaveCards(cards) {
   const db = getDb(); if (!db) return false;
   const now = new Date().toISOString();
-  const ins = db.prepare(`INSERT INTO wb_cards(nmID,vendorCode,brand,length,width,height,weightBrutto,isValid,volumeL,fetchedAt)
-    VALUES(?,?,?,?,?,?,?,?,?,?)
+  const ins = db.prepare(`INSERT INTO wb_cards(nmID,vendorCode,brand,length,width,height,weightBrutto,isValid,volumeL,payload,fetchedAt)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(nmID) DO UPDATE SET vendorCode=excluded.vendorCode, brand=excluded.brand,
       length=excluded.length, width=excluded.width, height=excluded.height, weightBrutto=excluded.weightBrutto,
-      isValid=excluded.isValid, volumeL=excluded.volumeL, fetchedAt=excluded.fetchedAt`);
+      isValid=excluded.isValid, volumeL=excluded.volumeL, payload=excluded.payload, fetchedAt=excluded.fetchedAt`);
   db.exec('BEGIN');
   try {
     for (const c of cards) {
       const d = c.dimensions || {};
+      // доп. поля карточки, которых нет отдельными колонками (нужны для остатков FBS/цвета)
+      const payload = JSON.stringify({ imtID: c.imtID ?? null, title: c.title || '', color: c.color || '', techSizes: c.techSizes || [], sizes: c.sizes || [] });
       ins.run(c.nmID, c.vendorCode || '', c.brand || '', d.length ?? null, d.width ?? null, d.height ?? null,
-        d.weightBrutto ?? null, d.isValid ? 1 : 0, c.volumeL ?? null, now);
+        d.weightBrutto ?? null, d.isValid ? 1 : 0, c.volumeL ?? null, payload, now);
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
@@ -215,10 +220,17 @@ export function wbLoadCards(maxAgeMs) {
   if (!m || (maxAgeMs != null && Date.now() - Date.parse(m.value) > maxAgeMs)) return null;
   const rows = db.prepare('SELECT * FROM wb_cards').all();
   if (!rows.length) return null;
-  return rows.map((r) => ({
-    nmID: r.nmID, vendorCode: r.vendorCode, brand: r.brand, volumeL: r.volumeL,
-    dimensions: { length: r.length, width: r.width, height: r.height, weightBrutto: r.weightBrutto, isValid: !!r.isValid },
-  }));
+  return rows.map((r) => {
+    let extra = {};
+    try { extra = r.payload ? JSON.parse(r.payload) : {}; } catch { extra = {}; }
+    return {
+      nmID: r.nmID, vendorCode: r.vendorCode, brand: r.brand, volumeL: r.volumeL,
+      dimensions: { length: r.length, width: r.width, height: r.height, weightBrutto: r.weightBrutto, isValid: !!r.isValid },
+      imtID: extra.imtID ?? null, title: extra.title || '', color: extra.color || '',
+      techSizes: Array.isArray(extra.techSizes) ? extra.techSizes : [],
+      sizes: Array.isArray(extra.sizes) ? extra.sizes : [],
+    };
+  });
 }
 
 // ── WB тарифы box (по дате) ──

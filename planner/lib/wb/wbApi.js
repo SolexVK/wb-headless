@@ -189,22 +189,34 @@ function resolveArticleCards(key, cards, byNm) {
 }
 
 export async function buildWbSupply({ items = [], buyoutPct = 37, force = false, includeFbs = true } = {}) {
-  const cards = await fetchCards({ force });
+  let cards = await fetchCards({ force });
   const stocksByNm = aggregateStocks(await fetchStocks({ force })); // nmIdStr → Map(size → agg)
-  const byNm = new Map(cards.map((c) => [String(c.nmID), c]));
+  let byNm = new Map(cards.map((c) => [String(c.nmID), c]));
   const buyout = Math.max(0, Math.min(100, +buyoutPct || 0)) / 100; // доля выкупа (уходит из остатка)
 
-  // Остатки FBS (склад продавца) — по штрихкодам всех запрашиваемых карточек, best-effort.
-  let fbsMap = new Map(); let fbsErr = null; let fbsSkusAsked = 0;
-  if (includeFbs) {
-    const allSkus = new Set();
+  const collectSkus = () => {
+    const set = new Set();
     for (const it of items) {
       for (const card of resolveArticleCards(it.key != null ? it.key : it.nmID, cards, byNm)) {
-        for (const sz of (card.sizes || [])) for (const bc of (sz.skus || [])) allSkus.add(bc);
+        for (const sz of (card.sizes || [])) for (const bc of (sz.skus || [])) set.add(bc);
       }
     }
+    return set;
+  };
+
+  // Остатки FBS (склад продавца) — по штрихкодам всех запрашиваемых карточек, best-effort.
+  let fbsMap = new Map(); let fbsErr = null; let fbsSkusAsked = 0; let fbsRefetched = false; let fbsWhCount = 0;
+  if (includeFbs) {
+    let allSkus = collectSkus();
+    // карточки могли прийти из кэша БЕЗ штрихкодов (старый кэш) — тогда перечитаем свежие ради FBS
+    if (!allSkus.size && !force) { cards = await fetchCards({ force: true }); byNm = new Map(cards.map((c) => [String(c.nmID), c])); allSkus = collectSkus(); fbsRefetched = true; }
     fbsSkusAsked = allSkus.size;
-    if (allSkus.size) { try { fbsMap = await fetchFbsStockMap({ skus: [...allSkus], force }); } catch (e) { fbsErr = String(e.message || e); } }
+    if (allSkus.size) {
+      try {
+        fbsWhCount = (await fetchFbsWarehouses({ force })).length; // сколько складов продавца (12ч кэш → почти бесплатно)
+        fbsMap = await fetchFbsStockMap({ skus: [...allSkus], force });
+      } catch (e) { fbsErr = String(e.message || e); }
+    }
   }
 
   const supplies = []; const diag = [];
@@ -243,7 +255,7 @@ export async function buildWbSupply({ items = [], buyoutPct = 37, force = false,
   return {
     supplies, diag, buyoutPct: Math.round(buyout * 100),
     stocksRows: countStockRows(stocksByNm), stockNms: stocksByNm.size, cardsCount: cards.length,
-    fbs: { skusAsked: fbsSkusAsked, found: fbsMap.size, error: fbsErr },
+    fbs: { skusAsked: fbsSkusAsked, found: fbsMap.size, warehouses: fbsWhCount, error: fbsErr, refetched: fbsRefetched },
   };
 }
 

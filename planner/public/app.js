@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'wb-fbs-fix-2026-08-21k';
+const APP_BUILD = 'wb-fbs-skus-2026-08-21l';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2346,7 +2346,7 @@ function renderSupply() {
         </tbody></table></div></div>` : ''}
       ${wbPullDiag ? `<div class="mini" style="margin-top:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">
         <b>Диагностика подтяжки:</b> в отчёте WB строк остатков (FBW) — <b>${wbPullDiag.stocksRows}</b> по <b>${wbPullDiag.stockNms || 0}</b> nmID, карточек продавца — <b>${wbPullDiag.cardsCount}</b>.
-        ${wbPullDiag.fbs ? `FBS: штрихкодов запрошено — <b>${wbPullDiag.fbs.skusAsked || 0}</b>, с остатком — <b>${wbPullDiag.fbs.found || 0}</b>${wbPullDiag.fbs.error ? ` <span style="color:#b45309">(FBS недоступен: ${seEsc(wbPullDiag.fbs.error)})</span>` : ''}.` : ''}
+        ${wbPullDiag.fbs ? `FBS: складов продавца — <b>${wbPullDiag.fbs.warehouses || 0}</b>, штрихкодов запрошено — <b>${wbPullDiag.fbs.skusAsked || 0}</b>, с остатком — <b>${wbPullDiag.fbs.found || 0}</b>${wbPullDiag.fbs.error ? ` <span style="color:#b45309">(FBS недоступен: ${seEsc(wbPullDiag.fbs.error)})</span>` : ''}.` : ''}
         <div class="matrix-scroll" style="margin-top:6px"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Ключ</th><th class="num">Карточек (со стоком)</th><th class="num">Цветов</th><th class="num">Остаток</th><th class="num">из них FBS</th><th>Примеры / ошибка</th></tr></thead><tbody>
         ${(wbPullDiag.diag || []).map((d) => `<tr><td>${seEsc(d.articleId)}</td><td class="mini">${seEsc(d.key || '')}</td><td class="num">${d.cards || 0}${d.matchedNm != null ? ` (${d.matchedNm})` : ''}</td><td class="num">${d.colors || 0}</td><td class="num">${(d.units || 0).toLocaleString('ru')}</td><td class="num">${(d.fbs || 0).toLocaleString('ru')}</td><td class="mini${d.error ? '" style="color:#b45309' : ''}">${seEsc(d.error || (d.sample || []).join(', '))}</td></tr>`).join('')}
         </tbody></table></div>
