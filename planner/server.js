@@ -10,7 +10,7 @@ import { defaultState, normalizeState, PARTIA_ROLES } from './lib/model.js';
 import { buildSchedule } from './lib/scheduler.js';
 import { findRescues } from './lib/rescue.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates, getSubjectPhrases, budgetStatus } from './lib/seasonApi.js';
-import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse, buildWbSupply } from './lib/wb/wbApi.js';
+import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse, buildWbSupply, listVendorPrefixes } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
 import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList, metaGet, metaSet } from './lib/db.js';
 import { installAuth, requireView, requireEdit } from './lib/authMiddleware.js';
@@ -22,7 +22,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'wb-warehouse-remains-2026-08-21e';
+const BACKEND_BUILD = 'wb-pull-diagnostics-2026-08-21g';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -401,6 +401,13 @@ app.post('/api/supply/wb-pull', requireEdit('season'), async (req, res) => {
     const bp = +(req.body && req.body.buyoutPct);
     const out = await buildWbSupply({ items, buyoutPct: Number.isFinite(bp) ? bp : 37, force: !!(req.body && req.body.force) });
     res.json({ ok: true, ...out });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+// Список артикулов продавца (префиксы vendorCode) — помощь в подборе «Ключа WB».
+app.get('/api/supply/wb-vendors', requireView('season'), async (req, res) => {
+  try {
+    if (!hasWbToken()) return res.status(400).json({ ok: false, error: 'WB-токен не задан.' });
+    res.json({ ok: true, ...(await listVendorPrefixes({ force: req.query.force === '1' })) });
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 

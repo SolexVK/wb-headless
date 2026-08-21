@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'wbkey-autosave-2026-08-21f';
+const APP_BUILD = 'wb-pull-diagnostics-2026-08-21g';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2135,6 +2135,8 @@ function importSupplyRows(rows) {
 
 // Автоподтяжка остатков WB (Фаза 2): по привязанным карточкам nmID → imtID → цвета → остатки FBW.
 function articleWbKey(a) { return (a.wbKey && a.wbKey.trim()) || (a.unit && a.unit.wb && a.unit.wb.nmID ? String(a.unit.wb.nmID) : ''); }
+let wbPullDiag = null;   // диагностика последней подтяжки {diag, stocksRows, cardsCount}
+let wbVendors = null;    // список артикулов продавца (префиксы) для подбора ключа
 async function pullWbStocks(force) {
   const items = (state.articles || []).filter((a) => !a.archived && articleWbKey(a)).map((a) => ({ articleId: a.id, key: articleWbKey(a) }));
   if (!items.length) { toast('Ни у одного артикула нет привязки WB — впиши nmID или артикул продавца (023_рвп) в таблице ниже', true); return; }
@@ -2144,6 +2146,7 @@ async function pullWbStocks(force) {
   toast('WB формирует отчёт по остаткам — это может занять до ~2 минут, подожди…');
   try {
     const r = await api('/api/supply/wb-pull', { method: 'POST', body: JSON.stringify({ items, buyoutPct: bp, force: !!force }) });
+    wbPullDiag = { diag: r.diag || [], stocksRows: r.stocksRows || 0, cardsCount: r.cardsCount || 0 };
     const recs = (r.supplies || []).filter((s) => s.units > 0);
     const affected = new Set(items.map((x) => x.articleId)); // заменяем wb-предложение всех запрошенных (даже если стало 0)
     state.supplies = (state.supplies || []).filter((s) => !(s.source === 'wb' && affected.has(s.articleId)));
@@ -2215,6 +2218,18 @@ function renderSupply() {
       <div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Название</th><th>Ключ WB (артикул продавца без цвета / nmID)</th></tr></thead><tbody>
         ${activeArticles().map((a) => `<tr><td>${seEsc(a.id)}</td><td class="mini">${seEsc(a.name || '')}</td><td><input type="text" data-wbkey="${seEsc(a.id)}" value="${seEsc(a.wbKey || '')}" placeholder="напр. 023_рвп" style="width:260px"></td></tr>`).join('')}
       </tbody></table></div>
+      <div class="matrix-io" style="margin-top:8px"><button id="sup-wb-vendors" class="btn btn-subtle">🔎 Показать мои артикулы WB (подобрать ключ)</button></div>
+      ${wbVendors ? `<div class="mini" style="margin-top:8px">Твои артикулы продавца (${wbVendors.cardsCount} карточек) сгруппированы по префиксу — <b>копируй нужный префикс в «Ключ WB»</b>:
+        <div class="matrix-scroll" style="max-height:220px;overflow:auto"><table class="matrix-table"><thead><tr><th>Префикс (ключ)</th><th class="num">Карточек</th><th>Примеры артикулов продавца</th></tr></thead><tbody>
+        ${(wbVendors.prefixes || []).slice(0, 60).map((p) => `<tr><td><b>${seEsc(p.prefix)}</b></td><td class="num">${p.count}</td><td class="mini">${(p.samples || []).map(seEsc).join(', ')}</td></tr>`).join('')}
+        </tbody></table></div></div>` : ''}
+      ${wbPullDiag ? `<div class="mini" style="margin-top:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">
+        <b>Диагностика подтяжки:</b> в отчёте WB строк остатков — <b>${wbPullDiag.stocksRows}</b>, карточек продавца — <b>${wbPullDiag.cardsCount}</b>.
+        <div class="matrix-scroll" style="margin-top:6px"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Ключ</th><th class="num">Карточек</th><th class="num">Цветов</th><th class="num">Остаток</th><th>Примеры / ошибка</th></tr></thead><tbody>
+        ${(wbPullDiag.diag || []).map((d) => `<tr><td>${seEsc(d.articleId)}</td><td class="mini">${seEsc(d.key || '')}</td><td class="num">${d.cards || 0}</td><td class="num">${d.colors || 0}</td><td class="num">${(d.units || 0).toLocaleString('ru')}</td><td class="mini${d.error ? '" style="color:#b45309' : ''}">${seEsc(d.error || (d.sample || []).join(', '))}</td></tr>`).join('')}
+        </tbody></table></div>
+        ${wbPullDiag.stocksRows === 0 ? '<div style="color:#b45309;margin-top:6px">Отчёт WB вернул 0 строк остатков — значит на FBW сейчас пусто ИЛИ товар не на FBW (а FBS/на своём складе — их этот отчёт не показывает).</div>' : ''}
+      </div>` : ''}
     </div>
 
     <div class="panel">
@@ -2259,6 +2274,11 @@ function renderSupply() {
   }));
   root.querySelector('#sup-wb-pull')?.addEventListener('click', () => pullWbStocks(false));
   root.querySelector('#sup-wb-force')?.addEventListener('click', () => pullWbStocks(true));
+  root.querySelector('#sup-wb-vendors')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget; b.disabled = true; b.textContent = '⏳ Загружаю карточки WB…';
+    try { wbVendors = await api('/api/supply/wb-vendors'); renderSupply(); }
+    catch (err) { toast('Ошибка WB: ' + err.message, true); b.disabled = false; b.textContent = '🔎 Показать мои артикулы WB (подобрать ключ)'; }
+  });
   root.querySelector('#sup-tpl')?.addEventListener('click', () => downloadText('supply_template.csv', supplyTemplateCSV()));
   root.querySelector('#sup-tpl-xlsx')?.addEventListener('click', downloadSupplyXlsx);
   root.querySelector('#sup-file')?.addEventListener('change', (e) => importSupplyFile(e.target.files && e.target.files[0]));

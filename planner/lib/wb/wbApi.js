@@ -157,10 +157,26 @@ export async function buildWbSupply({ items = [], buyoutPct = 37, force = false 
       }
     }
     const units = Object.values(matrix).reduce((a, r) => a + Object.values(r).reduce((x, v) => x + v, 0), 0);
+    const sample = sibs.slice(0, 3).map((c) => c.vendorCode).filter(Boolean);
     supplies.push({ articleId: it.articleId, source: 'wb', matrix, units });
-    diag.push({ articleId: it.articleId, key: String(key || ''), cards: sibs.length, colors: Object.keys(matrix).length, units });
+    diag.push({ articleId: it.articleId, key: String(key || ''), cards: sibs.length, colors: Object.keys(matrix).length, units, sample });
   }
-  return { supplies, diag, buyoutPct: Math.round(buyout * 100) };
+  return { supplies, diag, buyoutPct: Math.round(buyout * 100), stocksRows: (stocks && stocks.size) || 0, cardsCount: cards.length };
+}
+
+/** Список артикулов продавца (vendorCode) сгруппированный по префиксу — для подбора «Ключа WB». */
+export async function listVendorPrefixes({ force = false } = {}) {
+  const cards = await fetchCards({ force });
+  const byPfx = new Map();
+  for (const c of cards) {
+    const pfx = vendorPrefix(c.vendorCode) || c.vendorCode || '';
+    if (!pfx) continue;
+    const g = byPfx.get(pfx) || { prefix: pfx, count: 0, samples: [] };
+    g.count += 1;
+    if (g.samples.length < 4) g.samples.push(c.vendorCode);
+    byPfx.set(pfx, g);
+  }
+  return { prefixes: [...byPfx.values()].sort((a, b) => b.count - a.count), cardsCount: cards.length };
 }
 
 /** Число из строки WB (запятая как разделитель; '' и '-' → null). */
