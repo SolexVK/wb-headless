@@ -5,6 +5,7 @@ import {
   nf, fmtHrs, DKAC, dkKpi, dkInsights, ph, statusBadge, whenLabel, downloadBar, runStatus,
 } from './kit.js';
 import { reportRu } from '../report-names.js';
+import { stockMetrics, oosLabel } from '../../scripts/lib/agg/stock.mjs';
 
 // Глоссарий подсорта — работает и на телефоне (в отличие от hover-подсказок).
 function podsortGlossary() {
@@ -279,42 +280,42 @@ function stockDynamics(series, { downloadHref }) {
   // Чипы = интерактивная легенда: клик включает/выключает линию ФФ (клиентский JS,
   // без перезагрузки — см. report-interactive.mjs). «Показать все» сбрасывает выбор.
   const chips = lines.map((l, i) => `<button type="button" class="dyn-chip" data-li="${i}" title="Показать/скрыть на графике"><span class="dot" style="background:${l.color}"></span>${esc(l.name)}</button>`).join('');
-  const resetBtn = `<button type="button" class="dyn-chip dyn-reset" data-dyn-all title="Показать все линии">↺ Показать все</button>`;
+  const resetBtns = `<button type="button" class="dyn-chip dyn-reset" data-dyn-all title="Показать все линии">↺ Показать все</button><button type="button" class="dyn-chip dyn-reset" data-dyn-none title="Скрыть все линии">✕ Сбросить все</button>`;
   const dynData = esc(JSON.stringify({ labels: labelStrs, lines: lines.map((l) => ({ name: l.name, color: l.color, values: l.values, bold: !!l.bold })) }));
-  // Сводка по каждому ФФ: старт → текущий, изменение за период, мин/макс.
-  const rows = s.warehouses.map((w) => {
-    const first = w.values[0] || 0; const now = last(w.values) || 0; const delta = now - first;
-    const mn = Math.min(...w.values); const mx = Math.max(...w.values);
-    const sign = delta > 0 ? 'st-ok' : delta < 0 ? 'st-gap' : '';
-    return `<tr><td class="tl">${esc(w.name)}</td><td class="num" data-v="${first}">${nf(first)}</td><td class="num" data-v="${now}">${nf(now)}</td><td class="num" data-v="${delta}"><span class="badge ${sign}">${delta > 0 ? '+' : ''}${nf(delta)}</span></td><td class="num" data-v="${mn}">${nf(mn)}</td><td class="num" data-v="${mx}">${nf(mx)}</td></tr>`;
+  const M = stockMetrics(s);
+  // Сводка по каждому ФФ: текущий → старт, изменение, дни до нуля, мин/макс.
+  const rows = M.per.map((p) => {
+    const sign = p.delta > 0 ? 'st-ok' : p.delta < 0 ? 'st-gap' : '';
+    const oos = p.daysToZero == null ? '<span class="muted">растёт/стаб.</span>' : `<span class="badge ${p.daysToZero <= 14 ? 'st-gap' : ''}">${nf(p.daysToZero)} дн</span>`;
+    return `<tr><td class="tl">${esc(p.name)}</td><td class="num" data-v="${p.first}">${nf(p.first)}</td><td class="num" data-v="${p.now}">${nf(p.now)}</td><td class="num" data-v="${p.delta}"><span class="badge ${sign}">${p.delta > 0 ? '+' : ''}${nf(p.delta)}</span></td><td class="num" data-v="${p.daysToZero == null ? 999999 : p.daysToZero}">${oos}</td><td class="num" data-v="${p.min}">${nf(p.min)}</td><td class="num" data-v="${p.max}">${nf(p.max)}</td></tr>`;
   }).join('');
-  // Инсайты: кто вырос/просел сильнее всех за период.
-  const deltas = s.warehouses.map((w) => ({ name: w.name, d: (last(w.values) || 0) - (w.values[0] || 0) }));
-  const up = [...deltas].sort((a, b) => b.d - a.d)[0];
-  const down = [...deltas].sort((a, b) => a.d - b.d)[0];
-  const tiles = [
-    dkKpi(`${esc(String(s.from).slice(5))} → ${esc(String(s.to).slice(5))}`, 'период (по снимкам)', { icon: '📅', accent: DKAC.blue }),
-    dkKpi(nf(s.count), 'снимков в графике', { icon: '🗂️', accent: DKAC.teal }),
-    dkKpi(nf(s.warehouses.length), 'фулфилментов', { icon: '🏭', accent: DKAC.violet }),
+  // Общие данные: суммарный остаток + плашка на каждый ФФ (текущий + дни до нуля),
+  // плюс кто вырос/просел сильнее всех за период.
+  const headTiles = [
     dkKpi(nf(grandNow), 'сейчас всего, шт', { icon: '📦', accent: DKAC.green }),
+    M.grow ? dkKpi(`+${nf(M.grow.delta)}`, `вырос: ${esc(M.grow.name)}`, { icon: '📈', accent: DKAC.green }) : dkKpi('—', 'роста за период нет', { icon: '📈', accent: DKAC.teal }),
+    M.drop ? dkKpi(nf(M.drop.delta), `просел: ${esc(M.drop.name)}`, { icon: '📉', accent: DKAC.red }) : dkKpi('—', 'падения за период нет', { icon: '📉', accent: DKAC.teal }),
   ].join('');
+  const ffTiles = M.per.map((p) => dkKpi(nf(p.now), `${esc(p.name)} · ${esc(oosLabel(p.daysToZero))}`, { icon: '🏭', accent: p.daysToZero != null && p.daysToZero <= 14 ? DKAC.red : DKAC.blue })).join('');
   const insightRow = dkInsights([
-    up && up.d > 0 ? { icon: '📈', accent: DKAC.green, text: `Больше всего вырос: <b>${esc(up.name)}</b> — на ${nf(up.d)} шт за период` } : null,
-    down && down.d < 0 ? { icon: '📉', accent: DKAC.red, text: `Сильнее всех просел: <b>${esc(down.name)}</b> — на ${nf(down.d)} шт` } : null,
+    M.soonest ? { icon: '⏳', accent: DKAC.amber, text: `Быстрее всех закончится: <b>${esc(M.soonest.name)}</b> — ${esc(oosLabel(M.soonest.daysToZero))} при текущем тренде` } : null,
+    M.riskCount ? { icon: '🚨', accent: DKAC.red, text: `<b>${nf(M.riskCount)}</b> ФФ рискуют уйти в ноль за < 14 дней` } : { icon: '✅', accent: DKAC.green, text: 'Критичных по остатку ФФ нет' },
   ]);
   return `<div class="section">
-      <p class="kv" style="margin:0 0 12px">Как менялся остаток на каждом фулфилменте по накопленным ежедневным снимкам. Период: <b>${esc(String(s.from))} → ${esc(String(s.to))}</b> (${nf(s.count)} снимков).</p>
-      <div class="dk-kpis">${tiles}</div>
+      <p class="kv" style="margin:0 0 12px">Как менялся остаток на каждом фулфилменте по накопленным ежедневным снимкам. Период: <b>${esc(String(s.from))} → ${esc(String(s.to))}</b>. «Дней до нуля» — оценка по тренду периода.</p>
+      <div class="dk-kpis">${headTiles}</div>
       ${insightRow}
-      <div style="margin-bottom:12px">${dynBar}</div>
+      ${ph('🏭', 'Остаток по каждому фулфилменту сейчас', 'большое число — текущий остаток · снизу оценка «дней до нуля»', DKAC.blue)}
+      <div class="dk-kpis">${ffTiles}</div>
+      <div style="margin:14px 0 12px">${dynBar}</div>
       ${ph('📈', 'Остаток по фулфилментам во времени', 'жирная линия — суммарный остаток · кнопки ниже включают/выключают склады · наведите на график', DKAC.blue)}
       <div class="dyn" data-dyn="${dynData}">
-        <div class="dyn-chips">${chips}${resetBtn}</div>
+        <div class="dyn-chips">${chips}${resetBtns}</div>
         <div class="dyn-chart chart-wrap">${mvChart(labelStrs.map((l) => ({ label: l })), lines, false)}</div>
       </div>
       <div style="margin-top:22px"></div>
-      ${ph('📊', 'Изменение за период по ФФ', 'старт → текущий · клик по заголовку — сортировка', DKAC.violet)}
-      <div class="scroll"><table class="rt sortable"><thead><tr>${thT('Фулфилмент', 'Наш склад', 'tl')}${thT('Старт', 'Остаток в начале периода', 'num')}${thT('Сейчас', 'Последний снимок', 'num')}${thT('Δ', 'Изменение за период', 'num')}${thT('Мин', '', 'num')}${thT('Макс', '', 'num')}</tr></thead><tbody>${rows}</tbody></table></div>
+      ${ph('📊', 'Изменение за период по ФФ', 'старт → текущий · дни до нуля · клик по заголовку — сортировка', DKAC.violet)}
+      <div class="scroll"><table class="rt sortable"><thead><tr>${thT('Фулфилмент', 'Наш склад', 'tl')}${thT('Старт', 'Остаток в начале периода', 'num')}${thT('Сейчас', 'Последний снимок', 'num')}${thT('Δ', 'Изменение за период', 'num')}${thT('Дней до 0', 'Оценка по тренду периода', 'num')}${thT('Мин', '', 'num')}${thT('Макс', '', 'num')}</tr></thead><tbody>${rows}</tbody></table></div>
     </div>`;
 }
 

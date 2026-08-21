@@ -119,6 +119,8 @@ export const INTERACTIVE_JS = `
       });
       var allBtn=host.querySelector('[data-dyn-all]');
       if(allBtn) allBtn.addEventListener('click',function(){ visible=data.lines.map(function(){return true;}); host.querySelectorAll('[data-li]').forEach(function(c){c.classList.remove('off');}); render(); });
+      var noneBtn=host.querySelector('[data-dyn-none]');
+      if(noneBtn) noneBtn.addEventListener('click',function(){ visible=data.lines.map(function(){return false;}); host.querySelectorAll('[data-li]').forEach(function(c){c.classList.add('off');}); render(); });
     });
   });
 })();

@@ -159,8 +159,9 @@ try {
   raw.prepare("UPDATE report_runs SET created_at = datetime('now','-1 day') WHERE id = (SELECT MIN(id) FROM report_runs WHERE report='stock')").run();
   raw.close();
   r = await req('GET', `/org/${orgId}/reports/stock?tab=dynamics`);
-  ok(r.status === 200 && r.text.includes('mv-chart') && r.text.includes('Изменение за период') && r.text.includes('Итого'), 'Ф2: динамика — график по 2 дням (mv-chart + таблица)');
-  ok(r.text.includes('data-dyn=') && r.text.includes('class="dyn-chip"') && r.text.includes('data-li="0"') && r.text.includes('data-dyn-all'), 'Ф2: динамика — чипы-переключатели ФФ + «Показать все»');
+  ok(r.status === 200 && r.text.includes('mv-chart') && r.text.includes('Изменение за период') && r.text.includes('Дней до 0'), 'Ф2: динамика — график по 2 дням (mv-chart + таблица + дни до 0)');
+  ok(r.text.includes('data-dyn=') && r.text.includes('class="dyn-chip"') && r.text.includes('data-li="0"') && r.text.includes('data-dyn-all') && r.text.includes('data-dyn-none'), 'Ф2: динамика — чипы ФФ + «Показать все» + «Сбросить все»');
+  ok(!r.text.includes('снимков в графике') && !r.text.includes('период (по снимкам)'), 'Ф2: динамика — убраны пустые плашки «период/снимков»');
   const dj = await req('GET', `/org/${orgId}/reports/stock/dynamics/download/json`);
   let dser = null; try { dser = JSON.parse(dj.text); } catch { /* */ }
   ok(dj.status === 200 && dser?.count === 2 && Array.isArray(dser?.warehouses), 'Ф2: динамика JSON — 2 дня, ряд по ФФ');

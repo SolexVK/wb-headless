@@ -6,6 +6,7 @@
 import { avg, median, pct, r2, mskDate } from '../scripts/lib/agg/stats.mjs';
 import { buildAssembly, buildDelivery, buildReturnPath } from '../scripts/lib/agg/logistics.mjs';
 import { aggregateRegions, aggregateFbs } from '../scripts/lib/agg/geo.mjs';
+import { stockMetrics, oosLabel } from '../scripts/lib/agg/stock.mjs';
 
 let failed = 0;
 const ok = (cond, msg) => { console.log(`${cond ? '✓' : '✗'}  ${msg}`); if (!cond) failed++; };
@@ -149,6 +150,29 @@ eq(rp.byReturnWarehouse.map((w) => [w.warehouse, w.count]), [['Подольск'
 eq(rp.routes[0], { ff: 'A', regionSale: 'Москва', regionReturn: 'Москва', returnWarehouse: 'Подольск', count: 1, holdDays: 3, deliverHours: 45 }, 'путь возврата: маршрут r1 точный');
 const rpEmpty = buildReturnPath([], new Map(), () => null);
 eq(rpEmpty.available, false, 'путь возврата: пусто → available=false');
+
+// ── ДИНАМИКА ОСТАТКОВ: тренд, «дни до нуля», вырос/просел ────────────────────────
+// A: 100→80 (span=2, тренд −10/дн → 80/10 = 8 дн); B: 50→60 (растёт → null);
+// C: 30→5 (тренд −12.5 → round(0.4)=0 дн).
+const sm = stockMetrics({
+  count: 3, dates: ['d1', 'd2', 'd3'],
+  warehouses: [
+    { name: 'A', values: [100, 90, 80] },
+    { name: 'B', values: [50, 55, 60] },
+    { name: 'C', values: [30, 20, 5] },
+  ],
+  grand: [180, 165, 145],
+});
+eq(sm.grandNow, 145, 'динамика: текущий суммарный остаток');
+eq([sm.grow.name, sm.grow.delta], ['B', 10], 'динамика: больше всех вырос B (+10)');
+eq([sm.drop.name, sm.drop.delta], ['C', -25], 'динамика: сильнее всех просел C (−25)');
+eq(sm.per.find((p) => p.name === 'A').daysToZero, 8, 'динамика: A дней до нуля = 8');
+eq(sm.per.find((p) => p.name === 'B').daysToZero, null, 'динамика: B растёт → null');
+eq(sm.per.find((p) => p.name === 'C').daysToZero, 0, 'динамика: C дней до нуля = 0');
+eq([sm.soonest.name, sm.soonest.daysToZero], ['C', 0], 'динамика: быстрее всех закончится C');
+eq(sm.riskCount, 2, 'динамика: 2 ФФ в риске (<14 дн)');
+eq(oosLabel(null), 'растёт/стаб.', 'динамика: подпись OOS для null');
+eq(oosLabel(8), '≈ 8 дн до 0', 'динамика: подпись OOS для числа');
 
 console.log(`\nАгрегаторы (agg): ${failed ? failed + ' ПРОВАЛ(ов)' : 'все проверки зелёные'}`);
 process.exit(failed ? 1 : 0);
