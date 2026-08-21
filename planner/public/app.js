@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'supply-import-colmap-note-2026-08-21h';
+const APP_BUILD = 'wb-link-nomenclature-2026-08-21i';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2152,6 +2152,83 @@ function importSupplyRows(rows) {
 function articleWbKey(a) { return (a.wbKey && a.wbKey.trim()) || (a.unit && a.unit.wb && a.unit.wb.nmID ? String(a.unit.wb.nmID) : ''); }
 let wbPullDiag = null;   // диагностика последней подтяжки {diag, stocksRows, cardsCount}
 let wbVendors = null;    // список артикулов продавца (префиксы) для подбора ключа
+
+// Выгрузка номенклатуры WB (все карточки) — чтобы проставить наш номер артикула и загрузить привязку.
+async function downloadWbNomenclature() {
+  if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови (Cmd+Shift+R)', true); return; }
+  toast('Загружаю карточки WB…');
+  try {
+    const r = await api('/api/wb/cards');
+    const cards = r.cards || [];
+    if (!cards.length) { toast('Карточки WB не найдены', true); return; }
+    const aoa = [['nmID', 'vendorCode', 'название', 'цвет', 'article']];
+    for (const c of cards) aoa.push([c.nmID, c.vendorCode || '', c.title || '', c.color || '', '']);
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 12 }, { wch: 28 }, { wch: 40 }, { wch: 14 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'Номенклатура');
+    XLSX.writeFile(wb, 'wb_nomenclature.xlsx');
+    toast(`Выгружено карточек: ${cards.length}. Впиши в колонку «article» НАШ номер артикула напротив нужных nmID и загрузи обратно.`);
+  } catch (e) { toast('Ошибка WB: ' + e.message, true); }
+}
+function mapLinkHeader(cells) {
+  const idx = {};
+  (cells || []).forEach((h, i) => {
+    const t = String(h || '').trim();
+    if (idx.article == null && /^article$|наш.*артик|артикул.*систем/i.test(t)) idx.article = i;
+    if (idx.nmid == null && /nmid|нмид/i.test(t)) idx.nmid = i;
+    if (idx.vendor == null && /vendor|продавц|ключ/i.test(t)) idx.vendor = i;
+  });
+  return (idx.article != null && (idx.nmid != null || idx.vendor != null)) ? idx : null;
+}
+function wbLinkRowsFromAoA(aoa) {
+  const out = []; if (!aoa || !aoa.length) return out;
+  const map = mapLinkHeader(aoa[0]); if (!map) return out;
+  for (let i = 1; i < aoa.length; i++) {
+    const r = aoa[i] || [];
+    const article = String(r[map.article] || '').trim();
+    const key = (map.nmid != null ? String(r[map.nmid] || '').trim() : '') || (map.vendor != null ? String(r[map.vendor] || '').trim() : '');
+    if (article && key) out.push({ article, key });
+  }
+  return out;
+}
+function applyWbLinks(pairs) {
+  const artIds = new Set(state.articles.map((a) => a.id));
+  const byArt = new Map(); let skipped = 0;
+  for (const p of (pairs || [])) {
+    if (!artIds.has(p.article)) { skipped++; continue; }
+    const set = byArt.get(p.article) || new Set(); set.add(p.key); byArt.set(p.article, set);
+  }
+  if (!byArt.size) { toast('Не найдено пар «article → nmID». Впиши в колонку «article» наш номер артикула (напр. 016).', true); return; }
+  for (const [art, set] of byArt) {
+    const a = state.articles.find((x) => x.id === art); if (!a) continue;
+    const ex = new Set(String(a.wbKey || '').split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean));
+    for (const k of set) ex.add(k);
+    a.wbKey = [...ex].join(', ');
+  }
+  dirty = true; unitPersist(); renderSupply();
+  toast(`Привязка обновлена: ${byArt.size} артикулов${skipped ? `, пропущено строк ${skipped}` : ''}`);
+}
+function importWbLinksFile(file) {
+  if (!file) return;
+  const isXls = /\.(xlsx|xls)$/i.test(file.name);
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      let rows = [];
+      if (isXls) {
+        if (!window.XLSX) { toast('xlsx не загрузилась', true); return; }
+        const wb = XLSX.read(new Uint8Array(reader.result), { type: 'array' });
+        for (const n of wb.SheetNames) rows = rows.concat(wbLinkRowsFromAoA(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, blankrows: false })));
+      } else {
+        const lines = String(reader.result).replace(/\r/g, '').split('\n').filter((l) => l.trim());
+        const delim = (lines[0].match(/;/g) || []).length > (lines[0].match(/,/g) || []).length ? ';' : (lines[0].includes('\t') ? '\t' : ',');
+        rows = wbLinkRowsFromAoA(lines.map((l) => l.split(delim).map((x) => x.trim())));
+      }
+      applyWbLinks(rows);
+    } catch (e) { toast('Не удалось разобрать файл: ' + e.message, true); }
+  };
+  if (isXls) reader.readAsArrayBuffer(file); else reader.readAsText(file);
+}
 async function pullWbStocks(force) {
   const items = (state.articles || []).filter((a) => !a.archived && articleWbKey(a)).map((a) => ({ articleId: a.id, key: articleWbKey(a) }));
   if (!items.length) { toast('Ни у одного артикула нет привязки WB — впиши nmID или артикул продавца (023_рвп) в таблице ниже', true); return; }
@@ -2230,7 +2307,12 @@ function renderSupply() {
         <button id="sup-wb-force" class="btn btn-subtle" title="Игнорировать часовой кэш и запросить свежие остатки">свежие (без кэша)</button>
         <button id="sup-wb-vendors" class="btn btn-subtle" title="Показать твои артикулы продавца — чтобы подобрать правильный «Ключ WB»">🔎 Мои артикулы WB</button>
       </div>
-      <div class="mini" style="margin-bottom:8px">Впиши для артикула <b>артикул продавца без цвета</b> (напр. <code>023_рвп</code>) — система сама возьмёт все цветовые карточки этого товара по всем FBW-складам. Можно и <b>nmID</b> одной карточки (тогда добавим её imtID и тот же префикс). Доступный остаток = склад + возвраты + едущее к клиенту × (1 − выкуп%).</div>
+      <div class="mini" style="margin-bottom:8px">Впиши для артикула <b>артикул продавца без цвета</b> (напр. <code>023_рвп</code>) — система возьмёт все цветовые карточки. Если написаний много/разные — впиши <b>несколько ключей или nmID через запятую</b> (nmID = точная привязка одной карточки). Или заполни массово: выгрузи номенклатуру, проставь наш номер артикула, загрузи. Доступный остаток = склад + возвраты + едущее к клиенту × (1 − выкуп%).</div>
+      <div class="matrix-io" style="margin-bottom:8px">
+        <button id="sup-wb-nom" class="btn btn-accent">⤓ Номенклатура WB (для привязки)</button>
+        <label class="btn btn-primary">⤒ Загрузить привязку (article ↔ nmID)<input type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" id="sup-wb-links" hidden></label>
+        <span class="mini">Скачай список карточек → в колонке <b>article</b> впиши наш номер артикула (напр. 016) → загрузи. nmID разложатся по артикулам.</span>
+      </div>
       <div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Название</th><th>Ключ WB (артикул продавца без цвета / nmID)</th></tr></thead><tbody>
         ${activeArticles().map((a) => `<tr><td>${seEsc(a.id)}</td><td class="mini">${seEsc(a.name || '')}</td><td><input type="text" data-wbkey="${seEsc(a.id)}" value="${seEsc(a.wbKey || '')}" placeholder="напр. 023_рвп" style="width:260px"></td></tr>`).join('')}
       </tbody></table></div>
@@ -2290,6 +2372,8 @@ function renderSupply() {
   }));
   root.querySelector('#sup-wb-pull')?.addEventListener('click', () => pullWbStocks(false));
   root.querySelector('#sup-wb-force')?.addEventListener('click', () => pullWbStocks(true));
+  root.querySelector('#sup-wb-nom')?.addEventListener('click', downloadWbNomenclature);
+  root.querySelector('#sup-wb-links')?.addEventListener('change', (e) => importWbLinksFile(e.target.files && e.target.files[0]));
   root.querySelector('#sup-wb-vendors')?.addEventListener('click', async (e) => {
     const b = e.currentTarget; b.disabled = true; b.textContent = '⏳ Загружаю карточки WB…';
     try { wbVendors = await api('/api/supply/wb-vendors'); renderSupply(); }

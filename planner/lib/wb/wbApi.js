@@ -12,7 +12,7 @@ import { normColor } from '../../public/colorNorm.js';
 // Канонические цвета — для распознавания «цветового» сегмента в артикуле продавца (023_рвп_ГОЛУБОЙ_ип).
 const CANON_COLORS = new Set(['белый/молочный', 'бежевый', 'чёрный', 'серый', 'голубой', 'синий', 'зелёный', 'розовый', 'красный', 'жёлтый', 'оранжевый', 'фиолетовый', 'коричневый']);
 const isColorWord = (seg) => CANON_COLORS.has(normColor(seg));
-const vcSegments = (vc) => String(vc || '').split(/[_\-\s]+/).filter(Boolean);
+const vcSegments = (vc) => String(vc || '').split(/[_\s]+/).filter(Boolean); // НЕ рвём по дефису (светло-коричневый — один цвет)
 // Префикс товара (до цветового сегмента): «023_рвп_голубой_ип» → «023_рвп».
 function vendorPrefix(vc) {
   const segs = vcSegments(vc);
@@ -118,20 +118,14 @@ export function aggregateStocks(rows) {
 // Найти все цветовые карточки товара по ключу привязки: ключ = nmID (тогда берём imtID +
 // префикс артикула продавца) ИЛИ префикс артикула продавца (023_рвп) → все карточки с ним.
 function resolveArticleCards(key, cards, byNm) {
-  const k = String(key || '').trim();
-  if (!k) return [];
+  const keys = String(key || '').split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean); // можно несколько ключей
   const dedupe = (arr) => { const seen = new Set(), out = []; for (const c of arr) if (!seen.has(c.nmID)) { seen.add(c.nmID); out.push(c); } return out; };
-  if (/^\d{6,}$/.test(k)) { // это nmID
-    const base = byNm.get(k);
-    if (!base) return [];
-    let sibs = [base];
-    if (base.imtID != null) sibs = sibs.concat(cards.filter((c) => c.imtID === base.imtID));
-    const pfx = vendorPrefix(base.vendorCode);
-    if (pfx) sibs = sibs.concat(cards.filter((c) => vcStarts(c.vendorCode, pfx + '_')));
-    return dedupe(sibs);
+  const all = [];
+  for (const k of keys) {
+    if (/^\d{6,}$/.test(k)) { const base = byNm.get(k); if (base) all.push(base); } // nmID → ТОЧНО эта карточка (артикул+цвет)
+    else for (const c of cards) if (vcStarts(c.vendorCode, k)) all.push(c);            // префикс → все карточки с ним
   }
-  // это префикс артикула продавца
-  return dedupe(cards.filter((c) => vcStarts(c.vendorCode, k)));
+  return dedupe(all);
 }
 
 export async function buildWbSupply({ items = [], buyoutPct = 37, force = false } = {}) {
@@ -224,6 +218,7 @@ export async function fetchCards({ force = false } = {}) {
         nmID: card.nmID,
         imtID: card.imtID != null ? card.imtID : null, // объединяет цветовые варианты одного товара
         vendorCode: card.vendorCode || '',
+        title: card.title || '', // название карточки (для выгрузки номенклатуры)
         brand: card.brand || '',
         color: cardColor(card), // цвет карточки (для сведения остатков по цвету)
         techSizes: Array.isArray(card.sizes) ? card.sizes.map((s) => String(s.techSize || '').trim()).filter(Boolean) : [],
