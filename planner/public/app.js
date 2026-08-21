@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'wb-fbs-skus-2026-08-21l';
+const APP_BUILD = 'supply-declutter-2026-08-21m';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2151,25 +2151,7 @@ function importSupplyRows(rows) {
 // Автоподтяжка остатков WB (Фаза 2): по привязанным карточкам nmID → imtID → цвета → остатки FBW.
 function articleWbKey(a) { return (a.wbKey && a.wbKey.trim()) || (a.unit && a.unit.wb && a.unit.wb.nmID ? String(a.unit.wb.nmID) : ''); }
 let wbPullDiag = null;   // диагностика последней подтяжки {diag, stocksRows, cardsCount}
-let wbVendors = null;    // список артикулов продавца (префиксы) для подбора ключа
 
-// Выгрузка номенклатуры WB (все карточки) — чтобы проставить наш номер артикула и загрузить привязку.
-async function downloadWbNomenclature() {
-  if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови (Cmd+Shift+R)', true); return; }
-  toast('Загружаю карточки WB…');
-  try {
-    const r = await api('/api/wb/cards');
-    const cards = r.cards || [];
-    if (!cards.length) { toast('Карточки WB не найдены', true); return; }
-    const aoa = [['nmID', 'vendorCode', 'название', 'цвет', 'article']];
-    for (const c of cards) aoa.push([c.nmID, c.vendorCode || '', c.title || '', c.color || '', '']);
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 12 }, { wch: 28 }, { wch: 40 }, { wch: 14 }, { wch: 14 }];
-    XLSX.utils.book_append_sheet(wb, ws, 'Номенклатура');
-    XLSX.writeFile(wb, 'wb_nomenclature.xlsx');
-    toast(`Выгружено карточек: ${cards.length}. Впиши в колонку «article» НАШ номер артикула напротив нужных nmID и загрузи обратно.`);
-  } catch (e) { toast('Ошибка WB: ' + e.message, true); }
-}
 function mapLinkHeader(cells) {
   const idx = {};
   (cells || []).forEach((h, i) => {
@@ -2328,22 +2310,16 @@ function renderSupply() {
         <button id="sup-wb-pull" class="btn btn-primary">⟳ Подтянуть остатки WB</button>
         <label class="mini">Выкуп: <input type="number" id="sup-buyout" min="0" max="100" value="${Math.round(+state.settings.wbBuyoutPct || 37)}" style="width:56px"> %</label>
         <button id="sup-wb-force" class="btn btn-subtle" title="Игнорировать часовой кэш и запросить свежие остатки">свежие (без кэша)</button>
-        <button id="sup-wb-vendors" class="btn btn-subtle" title="Показать твои артикулы продавца — чтобы подобрать правильный «Ключ WB»">🔎 Мои артикулы WB</button>
       </div>
-      <div class="mini" style="margin-bottom:8px">Впиши для артикула <b>артикул продавца без цвета</b> (напр. <code>023_рвп</code>) — система возьмёт все цветовые карточки. Если написаний много/разные — впиши <b>несколько ключей или nmID через запятую</b> (nmID = точная привязка одной карточки). Или заполни массово (см. ниже). Остаток = <b>FBW</b> (склад WB + возвраты + едущее×(1−выкуп%)) + <b>FBS</b> (твой склад, по штрихкодам).</div>
+      <div class="mini" style="margin-bottom:8px">Остаток = <b>FBW</b> (склад WB + возвраты + едущее×(1−выкуп%)) + <b>FBS</b> (твой склад, по штрихкодам). Привязка артикулов — по <b>nmID</b> (загрузи таблицу номенклатур ВБ, проставится сама).</div>
       <div class="matrix-io" style="margin-bottom:8px">
-        <button id="sup-wb-nom" class="btn btn-accent">⤓ Номенклатура WB (для привязки)</button>
-        <label class="btn btn-primary">⤒ Загрузить номенклатуру / привязку<input type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" id="sup-wb-links" hidden></label>
+        <label class="btn btn-primary">⤒ Загрузить номенклатуру ВБ (привязка)<input type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" id="sup-wb-links" hidden></label>
         <button id="sup-wb-clear" class="btn btn-danger" title="Очистить все ключи WB">🗑 Очистить ключи</button>
-        <span class="mini">Загрузи <b>таблицу номенклатур ВБ</b> (колонки «Артикул продавца» + «Артикул WB») — привязка проставится сама по <b>ведущему номеру</b> (022 МР… → артикул 022). Либо выгрузи карточки, впиши в колонку <b>article</b> наш номер и загрузи.</span>
+        <span class="mini">Файл с колонками «Артикул продавца» + «Артикул WB» — nmID разложатся по артикулам по <b>ведущему номеру</b> (022 МР… → артикул 022).</span>
       </div>
       <div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Название</th><th>Ключ WB (nmID)</th></tr></thead><tbody>
         ${activeArticles().map((a) => `<tr><td>${seEsc(a.id)}</td><td class="mini">${seEsc(a.name || '')}</td><td><input type="text" data-wbkey="${seEsc(a.id)}" value="${seEsc(a.wbKey || '')}" placeholder="nmID через запятую" style="width:260px"></td></tr>`).join('')}
       </tbody></table></div>
-      ${wbVendors ? `<div class="mini" style="margin-top:8px">Твои артикулы продавца (${wbVendors.cardsCount} карточек) сгруппированы по префиксу — <b>копируй нужный префикс в «Ключ WB»</b>:
-        <div class="matrix-scroll" style="max-height:220px;overflow:auto"><table class="matrix-table"><thead><tr><th>Префикс (ключ)</th><th class="num">Карточек</th><th>Примеры артикулов продавца</th></tr></thead><tbody>
-        ${(wbVendors.prefixes || []).slice(0, 60).map((p) => `<tr><td><b>${seEsc(p.prefix)}</b></td><td class="num">${p.count}</td><td class="mini">${(p.samples || []).map(seEsc).join(', ')}</td></tr>`).join('')}
-        </tbody></table></div></div>` : ''}
       ${wbPullDiag ? `<div class="mini" style="margin-top:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">
         <b>Диагностика подтяжки:</b> в отчёте WB строк остатков (FBW) — <b>${wbPullDiag.stocksRows}</b> по <b>${wbPullDiag.stockNms || 0}</b> nmID, карточек продавца — <b>${wbPullDiag.cardsCount}</b>.
         ${wbPullDiag.fbs ? `FBS: складов продавца — <b>${wbPullDiag.fbs.warehouses || 0}</b>, штрихкодов запрошено — <b>${wbPullDiag.fbs.skusAsked || 0}</b>, с остатком — <b>${wbPullDiag.fbs.found || 0}</b>${wbPullDiag.fbs.error ? ` <span style="color:#b45309">(FBS недоступен: ${seEsc(wbPullDiag.fbs.error)})</span>` : ''}.` : ''}
@@ -2386,7 +2362,7 @@ function renderSupply() {
     <div class="panel">
       <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">Неттинг: спрос → предложение → к производству</div>
       ${artIds.length ? `<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th class="num">Спрос (план)</th><th class="num">Предложение</th><th class="num" title="Сколько предложения реально убрало из производства">Покрыто</th><th class="num">К производству</th><th class="num" title="Излишек: пришёл позже всех довозов или нет спроса под этот цвет×размер">Излишек</th><th class="num">Покрытие</th></tr></thead><tbody>${summaryRows}</tbody></table></div>
-      <div class="mini" style="margin-top:6px">«К производству» = «Спрос» − «Покрыто» (уже применено на Ганте, пересчёт не нужен). <b>Излишек</b> — предложение, которое НЕ уменьшило пошив: приходит позже всех довозов артикула или его цвет×размер нет в плане.</div>`
+      <div class="mini" style="margin-top:6px">«К производству» = «Спрос» − «Покрыто». Это <b>уже применено</b>: остатки вычтены живьём, поэтому <b>план по размерам не меняем</b> — фактический пошив (нетто), разложенный по цехам, смотри на листе <b>«Диаграмма Ганта»</b> (там же метки прихода поставок). <b>Излишек</b> — предложение, которое НЕ уменьшило пошив: приходит позже всех довозов артикула или его цвет×размер нет в плане.</div>`
       : '<div class="mini">Нет плановых партий этого артикула. Перенеси «План по размерам из прогноза».</div>'}
       ${unmatched.length ? `<div class="mini" style="margin-top:8px;color:#b45309">⚠ Не сопоставлено с артикулом (цвет не найден): ${unmatched.slice(0, 8).map((u) => `${seEsc(u.articleId)}/${seEsc(u.color)}/${seEsc(u.size)} — ${u.qty}`).join('; ')}${unmatched.length > 8 ? ' …' : ''}. Проверь названия цветов.</div>` : ''}
     </div>`;
@@ -2397,7 +2373,6 @@ function renderSupply() {
   }));
   root.querySelector('#sup-wb-pull')?.addEventListener('click', () => pullWbStocks(false));
   root.querySelector('#sup-wb-force')?.addEventListener('click', () => pullWbStocks(true));
-  root.querySelector('#sup-wb-nom')?.addEventListener('click', downloadWbNomenclature);
   root.querySelector('#sup-wb-links')?.addEventListener('change', (e) => importWbLinksFile(e.target.files && e.target.files[0]));
   root.querySelector('#sup-wb-clear')?.addEventListener('click', () => {
     const n = (state.articles || []).filter((a) => a.wbKey).length;
@@ -2406,11 +2381,6 @@ function renderSupply() {
     for (const a of state.articles) a.wbKey = '';
     dirty = true; unitPersist(); renderSupply();
     toast(`Очищено ключей WB: ${n}`);
-  });
-  root.querySelector('#sup-wb-vendors')?.addEventListener('click', async (e) => {
-    const b = e.currentTarget; b.disabled = true; b.textContent = '⏳ Загружаю карточки WB…';
-    try { wbVendors = await api('/api/supply/wb-vendors'); renderSupply(); }
-    catch (err) { toast('Ошибка WB: ' + err.message, true); b.disabled = false; b.textContent = '🔎 Показать мои артикулы WB (подобрать ключ)'; }
   });
   root.querySelector('#sup-tpl')?.addEventListener('click', () => downloadText('supply_template.csv', supplyTemplateCSV()));
   root.querySelector('#sup-tpl-xlsx')?.addEventListener('click', downloadSupplyXlsx);
