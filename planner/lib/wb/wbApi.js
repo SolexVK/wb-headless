@@ -109,6 +109,51 @@ export function aggregateStocks(rows) {
   return m;
 }
 
+const FBS_TTL = 30 * 60 * 1000; // остатки FBS — кэш 30 минут
+
+/** Склады продавца (FBS/маркетплейс): [{id, name}]. Кэш 12ч. */
+export async function fetchFbsWarehouses({ force = false } = {}) {
+  if (!force) { const c = readCache('fbs-warehouses.json', 12 * 3600 * 1000); if (c) return c.data; }
+  const c = client();
+  const { data } = await c.request('marketplace', '/api/v3/warehouses', { method: 'GET', methodLimit: { limit: 30, periodSec: 60, burst: 10 } });
+  const list = (Array.isArray(data) ? data : []).map((w) => ({ id: w.id, name: w.name || '' })).filter((w) => w.id != null);
+  writeCache('fbs-warehouses.json', list);
+  return list;
+}
+
+/**
+ * Остатки FBS (склады продавца) по штрихкодам. Возвращает Map(barcode → amount), сведённую
+ * по всем складам продавца. Метод POST /api/v3/stocks/{warehouseId} принимает до 1000 skus.
+ * Best-effort: если нет складов/доступа — вернётся пустая карта (FBS не у всех).
+ */
+export async function fetchFbsStockMap({ skus = [], force = false } = {}) {
+  const uniq = [...new Set((skus || []).map((s) => String(s).trim()).filter(Boolean))];
+  const out = new Map();
+  if (!uniq.length) return out;
+  const cacheName = 'fbs-stocks.json';
+  if (!force) {
+    const c = readCache(cacheName, FBS_TTL);
+    if (c && c.data && Array.isArray(c.data)) { for (const [bc, amt] of c.data) out.set(bc, amt); return out; }
+  }
+  const c = client();
+  const whs = await fetchFbsWarehouses({ force });
+  for (const wh of whs) {
+    for (let i = 0; i < uniq.length; i += 1000) {
+      const batch = uniq.slice(i, i + 1000);
+      const { data } = await c.request('marketplace', `/api/v3/stocks/${wh.id}`, {
+        method: 'POST', body: { skus: batch }, methodLimit: { limit: 300, periodSec: 60, burst: 20 },
+      });
+      const rows = (data && Array.isArray(data.stocks)) ? data.stocks : [];
+      for (const r of rows) {
+        const bc = String(r.sku || '').trim(); if (!bc) continue;
+        out.set(bc, (out.get(bc) || 0) + (+r.amount || 0));
+      }
+    }
+  }
+  writeCache(cacheName, [...out.entries()]);
+  return out;
+}
+
 /**
  * Собрать WB-остатки в предложение по артикулам. Для каждого item {articleId, nmID}:
  * по nmID берём imtID → все цветовые карточки → по каждой (цвет + techSize) считаем
@@ -128,23 +173,45 @@ function resolveArticleCards(key, cards, byNm) {
   return dedupe(all);
 }
 
-export async function buildWbSupply({ items = [], buyoutPct = 37, force = false } = {}) {
+export async function buildWbSupply({ items = [], buyoutPct = 37, force = false, includeFbs = true } = {}) {
   const cards = await fetchCards({ force });
   const stocks = aggregateStocks(await fetchStocks({ force }));
   const byNm = new Map(cards.map((c) => [String(c.nmID), c]));
   const buyout = Math.max(0, Math.min(100, +buyoutPct || 0)) / 100; // доля выкупа (уходит из остатка)
+
+  // Остатки FBS (склад продавца) — по штрихкодам всех запрашиваемых карточек, best-effort.
+  let fbsMap = new Map(); let fbsErr = null; let fbsSkusAsked = 0;
+  if (includeFbs) {
+    const allSkus = new Set();
+    for (const it of items) {
+      for (const card of resolveArticleCards(it.key != null ? it.key : it.nmID, cards, byNm)) {
+        for (const sz of (card.sizes || [])) for (const bc of (sz.skus || [])) allSkus.add(bc);
+      }
+    }
+    fbsSkusAsked = allSkus.size;
+    if (allSkus.size) { try { fbsMap = await fetchFbsStockMap({ skus: [...allSkus], force }); } catch (e) { fbsErr = String(e.message || e); } }
+  }
+
   const supplies = []; const diag = [];
   for (const it of items) {
     const key = it.key != null ? it.key : it.nmID; // key = nmID или префикс артикула продавца
     const sibs = resolveArticleCards(key, cards, byNm);
     if (!sibs.length) { diag.push({ articleId: it.articleId, key: String(key || ''), error: 'карточки WB по этому ключу не найдены (проверь nmID / артикул продавца)' }); continue; }
-    const matrix = {};
+    const matrix = {}; let fbsUnits = 0;
     for (const card of sibs) {
       const color = card.color || vendorColor(card.vendorCode) || 'без цвета';
-      for (const ts of (card.techSizes || [])) {
+      // штрихкоды по размеру (для FBS): techSize → [skus]
+      const skusBySize = {};
+      for (const sz of (card.sizes || [])) skusBySize[sz.techSize] = sz.skus || [];
+      const sizeSet = new Set([...(card.techSizes || []), ...Object.keys(skusBySize)]);
+      for (const ts of sizeSet) {
         const s = stocks.get(String(card.nmID) + '|' + ts);
-        if (!s) continue;
-        const eff = Math.round((s.quantity || 0) + (s.inWayFromClient || 0) + (s.inWayToClient || 0) * (1 - buyout));
+        // FBW: наличие + возвраты + доля не выкупленного из «в пути к клиенту»
+        const fbw = s ? Math.round((s.quantity || 0) + (s.inWayFromClient || 0) + (s.inWayToClient || 0) * (1 - buyout)) : 0;
+        // FBS: физический остаток на складе продавца по штрихкодам этого размера (без дисконта выкупа)
+        let fbs = 0; for (const bc of (skusBySize[ts] || [])) fbs += fbsMap.get(bc) || 0;
+        fbsUnits += fbs;
+        const eff = fbw + fbs;
         if (eff <= 0) continue;
         matrix[color] = matrix[color] || {};
         matrix[color][ts] = (matrix[color][ts] || 0) + eff;
@@ -153,9 +220,13 @@ export async function buildWbSupply({ items = [], buyoutPct = 37, force = false 
     const units = Object.values(matrix).reduce((a, r) => a + Object.values(r).reduce((x, v) => x + v, 0), 0);
     const sample = sibs.slice(0, 3).map((c) => c.vendorCode).filter(Boolean);
     supplies.push({ articleId: it.articleId, source: 'wb', matrix, units });
-    diag.push({ articleId: it.articleId, key: String(key || ''), cards: sibs.length, colors: Object.keys(matrix).length, units, sample });
+    diag.push({ articleId: it.articleId, key: String(key || ''), cards: sibs.length, colors: Object.keys(matrix).length, units, fbs: fbsUnits, sample });
   }
-  return { supplies, diag, buyoutPct: Math.round(buyout * 100), stocksRows: (stocks && stocks.size) || 0, cardsCount: cards.length };
+  return {
+    supplies, diag, buyoutPct: Math.round(buyout * 100),
+    stocksRows: (stocks && stocks.size) || 0, cardsCount: cards.length,
+    fbs: { skusAsked: fbsSkusAsked, found: fbsMap.size, error: fbsErr },
+  };
 }
 
 /** Список артикулов продавца (vendorCode) сгруппированный по префиксу — для подбора «Ключа WB». */
@@ -222,6 +293,11 @@ export async function fetchCards({ force = false } = {}) {
         brand: card.brand || '',
         color: cardColor(card), // цвет карточки (для сведения остатков по цвету)
         techSizes: Array.isArray(card.sizes) ? card.sizes.map((s) => String(s.techSize || '').trim()).filter(Boolean) : [],
+        // размеры со штрихкодами (skus) — нужны для остатков FBS (склад продавца): запрос идёт по баркодам
+        sizes: Array.isArray(card.sizes) ? card.sizes.map((s) => ({
+          techSize: String(s.techSize || '').trim(),
+          skus: Array.isArray(s.skus) ? s.skus.map((x) => String(x).trim()).filter(Boolean) : [],
+        })).filter((s) => s.techSize) : [],
         dimensions: card.dimensions || null,
         volumeL: volumeLitres(card.dimensions),
       });

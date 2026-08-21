@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'wb-link-nomenclature-2026-08-21i';
+const APP_BUILD = 'wb-fbs-nomenclature-2026-08-21j';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2174,31 +2174,53 @@ function mapLinkHeader(cells) {
   const idx = {};
   (cells || []).forEach((h, i) => {
     const t = String(h || '').trim();
+    // наш номер артикула (если проставлен вручную в выгрузке)
     if (idx.article == null && /^article$|наш.*артик|артикул.*систем/i.test(t)) idx.article = i;
-    if (idx.nmid == null && /nmid|нмид/i.test(t)) idx.nmid = i;
-    if (idx.vendor == null && /vendor|продавц|ключ/i.test(t)) idx.vendor = i;
+    // артикул WB = nmID
+    if (idx.nmid == null && /nmid|нмид|артикул\s*вб|артикул\s*wb/i.test(t)) idx.nmid = i;
+    // артикул продавца (vendorCode) — по нему выводим наш номер (ведущее число)
+    if (idx.seller == null && /артикул\s*продавц|vendorcode|vendor\s*code/i.test(t)) idx.seller = i;
+    // произвольный «ключ»/vendor (обратная совместимость)
+    if (idx.vendor == null && /^vendor$|ключ/i.test(t)) idx.vendor = i;
   });
-  return (idx.article != null && (idx.nmid != null || idx.vendor != null)) ? idx : null;
+  // Годится, если можем получить пару (наш артикул ← article|seller) и ключ (nmid|vendor|seller)
+  const haveArt = idx.article != null || idx.seller != null;
+  const haveKey = idx.nmid != null || idx.vendor != null || idx.seller != null;
+  return (haveArt && haveKey) ? idx : null;
 }
+// Ведущее число артикула (наш номер): «016 МС белый» → «16», «003_РМП_белая» → «3».
+function leadingArtNum(s) { const m = String(s || '').match(/\d{1,3}/); return m ? String(+m[0]) : ''; }
 function wbLinkRowsFromAoA(aoa) {
   const out = []; if (!aoa || !aoa.length) return out;
   const map = mapLinkHeader(aoa[0]); if (!map) return out;
   for (let i = 1; i < aoa.length; i++) {
     const r = aoa[i] || [];
-    const article = String(r[map.article] || '').trim();
-    const key = (map.nmid != null ? String(r[map.nmid] || '').trim() : '') || (map.vendor != null ? String(r[map.vendor] || '').trim() : '');
+    // наш артикул: явная колонка «article», иначе выводим из ведущего числа артикула продавца
+    let article = map.article != null ? String(r[map.article] || '').trim() : '';
+    const seller = map.seller != null ? String(r[map.seller] || '').trim() : '';
+    if (!article && seller) article = '#' + leadingArtNum(seller); // маркер «сопоставить по номеру»
+    // ключ привязки: предпочитаем nmID, затем seller (префикс), затем произвольный vendor
+    const key = (map.nmid != null ? String(r[map.nmid] || '').trim() : '')
+      || (map.vendor != null ? String(r[map.vendor] || '').trim() : '')
+      || seller;
     if (article && key) out.push({ article, key });
   }
   return out;
 }
+// Найти наш артикул по ссылке: точное id, либо (для «#N») — по числовому номеру.
+function findArticleByRef(ref) {
+  const s = String(ref || '').trim();
+  if (s.startsWith('#')) { const n = s.slice(1); return state.articles.find((a) => leadingArtNum(a.id) === n) || null; }
+  const exact = state.articles.find((a) => a.id === s); if (exact) return exact;
+  const n = leadingArtNum(s); return n ? (state.articles.find((a) => leadingArtNum(a.id) === n) || null) : null;
+}
 function applyWbLinks(pairs) {
-  const artIds = new Set(state.articles.map((a) => a.id));
   const byArt = new Map(); let skipped = 0;
   for (const p of (pairs || [])) {
-    if (!artIds.has(p.article)) { skipped++; continue; }
-    const set = byArt.get(p.article) || new Set(); set.add(p.key); byArt.set(p.article, set);
+    const a = findArticleByRef(p.article); if (!a) { skipped++; continue; }
+    const set = byArt.get(a.id) || new Set(); set.add(p.key); byArt.set(a.id, set);
   }
-  if (!byArt.size) { toast('Не найдено пар «article → nmID». Впиши в колонку «article» наш номер артикула (напр. 016).', true); return; }
+  if (!byArt.size) { toast('Не найдено пар «артикул → nmID». Нужна колонка «Артикул продавца» (022 МР…) или «article» с нашим номером, и «Артикул WB»/nmID.', true); return; }
   for (const [art, set] of byArt) {
     const a = state.articles.find((x) => x.id === art); if (!a) continue;
     const ex = new Set(String(a.wbKey || '').split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean));
@@ -2206,7 +2228,7 @@ function applyWbLinks(pairs) {
     a.wbKey = [...ex].join(', ');
   }
   dirty = true; unitPersist(); renderSupply();
-  toast(`Привязка обновлена: ${byArt.size} артикулов${skipped ? `, пропущено строк ${skipped}` : ''}`);
+  toast(`Привязка обновлена: ${byArt.size} артикулов${skipped ? `, пропущено строк ${skipped}` : ''}. Теперь «Подтянуть остатки WB».`);
 }
 function importWbLinksFile(file) {
   if (!file) return;
@@ -2238,7 +2260,7 @@ async function pullWbStocks(force) {
   toast('WB формирует отчёт по остаткам — это может занять до ~2 минут, подожди…');
   try {
     const r = await api('/api/supply/wb-pull', { method: 'POST', body: JSON.stringify({ items, buyoutPct: bp, force: !!force }) });
-    wbPullDiag = { diag: r.diag || [], stocksRows: r.stocksRows || 0, cardsCount: r.cardsCount || 0 };
+    wbPullDiag = { diag: r.diag || [], stocksRows: r.stocksRows || 0, cardsCount: r.cardsCount || 0, fbs: r.fbs || null };
     const recs = (r.supplies || []).filter((s) => s.units > 0);
     const affected = new Set(items.map((x) => x.articleId)); // заменяем wb-предложение всех запрошенных (даже если стало 0)
     state.supplies = (state.supplies || []).filter((s) => !(s.source === 'wb' && affected.has(s.articleId)));
@@ -2247,8 +2269,9 @@ async function pullWbStocks(force) {
     dirty = true;
     await recalc(true); renderSupply();
     const tot = recs.reduce((a, s) => a + s.units, 0);
+    const fbsTot = (r.diag || []).reduce((a, d) => a + (d.fbs || 0), 0);
     const noCard = (r.diag || []).filter((d) => d.error).length;
-    toast(`Остатки WB: ${recs.length} арт., ${tot.toLocaleString('ru')} шт (выкуп ${bp}%)${noCard ? `, без карточки ${noCard}` : ''}`);
+    toast(`Остатки WB: ${recs.length} арт., ${tot.toLocaleString('ru')} шт (выкуп ${bp}%${fbsTot ? `, FBS ${fbsTot.toLocaleString('ru')}` : ''})${noCard ? `, без карточки ${noCard}` : ''}`);
   } catch (e) { toast('Ошибка WB: ' + e.message, true); renderSupply(); }
 }
 
@@ -2300,18 +2323,18 @@ function renderSupply() {
     </div>
 
     <div class="panel">
-      <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">🛒 Остатки Wildberries (FBW) — автоматически</div>
+      <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">🛒 Остатки Wildberries (FBW + FBS) — автоматически</div>
       <div class="matrix-io" style="margin-bottom:8px">
         <button id="sup-wb-pull" class="btn btn-primary">⟳ Подтянуть остатки WB</button>
         <label class="mini">Выкуп: <input type="number" id="sup-buyout" min="0" max="100" value="${Math.round(+state.settings.wbBuyoutPct || 37)}" style="width:56px"> %</label>
         <button id="sup-wb-force" class="btn btn-subtle" title="Игнорировать часовой кэш и запросить свежие остатки">свежие (без кэша)</button>
         <button id="sup-wb-vendors" class="btn btn-subtle" title="Показать твои артикулы продавца — чтобы подобрать правильный «Ключ WB»">🔎 Мои артикулы WB</button>
       </div>
-      <div class="mini" style="margin-bottom:8px">Впиши для артикула <b>артикул продавца без цвета</b> (напр. <code>023_рвп</code>) — система возьмёт все цветовые карточки. Если написаний много/разные — впиши <b>несколько ключей или nmID через запятую</b> (nmID = точная привязка одной карточки). Или заполни массово: выгрузи номенклатуру, проставь наш номер артикула, загрузи. Доступный остаток = склад + возвраты + едущее к клиенту × (1 − выкуп%).</div>
+      <div class="mini" style="margin-bottom:8px">Впиши для артикула <b>артикул продавца без цвета</b> (напр. <code>023_рвп</code>) — система возьмёт все цветовые карточки. Если написаний много/разные — впиши <b>несколько ключей или nmID через запятую</b> (nmID = точная привязка одной карточки). Или заполни массово (см. ниже). Остаток = <b>FBW</b> (склад WB + возвраты + едущее×(1−выкуп%)) + <b>FBS</b> (твой склад, по штрихкодам).</div>
       <div class="matrix-io" style="margin-bottom:8px">
         <button id="sup-wb-nom" class="btn btn-accent">⤓ Номенклатура WB (для привязки)</button>
-        <label class="btn btn-primary">⤒ Загрузить привязку (article ↔ nmID)<input type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" id="sup-wb-links" hidden></label>
-        <span class="mini">Скачай список карточек → в колонке <b>article</b> впиши наш номер артикула (напр. 016) → загрузи. nmID разложатся по артикулам.</span>
+        <label class="btn btn-primary">⤒ Загрузить номенклатуру / привязку<input type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" id="sup-wb-links" hidden></label>
+        <span class="mini">Загрузи <b>таблицу номенклатур ВБ</b> (колонки «Артикул продавца» + «Артикул WB») — привязка проставится сама по <b>ведущему номеру</b> (022 МР… → артикул 022). Либо выгрузи карточки, впиши в колонку <b>article</b> наш номер и загрузи.</span>
       </div>
       <div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Название</th><th>Ключ WB (артикул продавца без цвета / nmID)</th></tr></thead><tbody>
         ${activeArticles().map((a) => `<tr><td>${seEsc(a.id)}</td><td class="mini">${seEsc(a.name || '')}</td><td><input type="text" data-wbkey="${seEsc(a.id)}" value="${seEsc(a.wbKey || '')}" placeholder="напр. 023_рвп" style="width:260px"></td></tr>`).join('')}
@@ -2321,11 +2344,12 @@ function renderSupply() {
         ${(wbVendors.prefixes || []).slice(0, 60).map((p) => `<tr><td><b>${seEsc(p.prefix)}</b></td><td class="num">${p.count}</td><td class="mini">${(p.samples || []).map(seEsc).join(', ')}</td></tr>`).join('')}
         </tbody></table></div></div>` : ''}
       ${wbPullDiag ? `<div class="mini" style="margin-top:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">
-        <b>Диагностика подтяжки:</b> в отчёте WB строк остатков — <b>${wbPullDiag.stocksRows}</b>, карточек продавца — <b>${wbPullDiag.cardsCount}</b>.
-        <div class="matrix-scroll" style="margin-top:6px"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Ключ</th><th class="num">Карточек</th><th class="num">Цветов</th><th class="num">Остаток</th><th>Примеры / ошибка</th></tr></thead><tbody>
-        ${(wbPullDiag.diag || []).map((d) => `<tr><td>${seEsc(d.articleId)}</td><td class="mini">${seEsc(d.key || '')}</td><td class="num">${d.cards || 0}</td><td class="num">${d.colors || 0}</td><td class="num">${(d.units || 0).toLocaleString('ru')}</td><td class="mini${d.error ? '" style="color:#b45309' : ''}">${seEsc(d.error || (d.sample || []).join(', '))}</td></tr>`).join('')}
+        <b>Диагностика подтяжки:</b> в отчёте WB строк остатков (FBW) — <b>${wbPullDiag.stocksRows}</b>, карточек продавца — <b>${wbPullDiag.cardsCount}</b>.
+        ${wbPullDiag.fbs ? `FBS: штрихкодов запрошено — <b>${wbPullDiag.fbs.skusAsked || 0}</b>, с остатком — <b>${wbPullDiag.fbs.found || 0}</b>${wbPullDiag.fbs.error ? ` <span style="color:#b45309">(FBS недоступен: ${seEsc(wbPullDiag.fbs.error)})</span>` : ''}.` : ''}
+        <div class="matrix-scroll" style="margin-top:6px"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Ключ</th><th class="num">Карточек</th><th class="num">Цветов</th><th class="num">Остаток</th><th class="num">из них FBS</th><th>Примеры / ошибка</th></tr></thead><tbody>
+        ${(wbPullDiag.diag || []).map((d) => `<tr><td>${seEsc(d.articleId)}</td><td class="mini">${seEsc(d.key || '')}</td><td class="num">${d.cards || 0}</td><td class="num">${d.colors || 0}</td><td class="num">${(d.units || 0).toLocaleString('ru')}</td><td class="num">${(d.fbs || 0).toLocaleString('ru')}</td><td class="mini${d.error ? '" style="color:#b45309' : ''}">${seEsc(d.error || (d.sample || []).join(', '))}</td></tr>`).join('')}
         </tbody></table></div>
-        ${wbPullDiag.stocksRows === 0 ? '<div style="color:#b45309;margin-top:6px">Отчёт WB вернул 0 строк остатков — значит на FBW сейчас пусто ИЛИ товар не на FBW (а FBS/на своём складе — их этот отчёт не показывает).</div>' : ''}
+        ${wbPullDiag.stocksRows === 0 && (!wbPullDiag.fbs || !wbPullDiag.fbs.found) ? '<div style="color:#b45309;margin-top:6px">Отчёт WB вернул 0 строк FBW и 0 остатков FBS — значит по этим артикулам сейчас пусто (или товар не заведён на складах WB/продавца).</div>' : ''}
       </div>` : ''}
     </div>
 
