@@ -22,7 +22,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'wb-stocks-pull-phase2-2026-08-21c';
+const BACKEND_BUILD = 'wb-link-by-prefix-2026-08-21d';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -396,8 +396,8 @@ app.get('/api/supply/csv', requireView('season'), async (req, res) => {
 app.post('/api/supply/wb-pull', requireEdit('season'), async (req, res) => {
   try {
     if (!hasWbToken()) return res.status(400).json({ ok: false, error: 'WB-токен не задан в окружении службы (WB_API_TOKEN).' });
-    const items = Array.isArray(req.body && req.body.items) ? req.body.items.filter((x) => x && x.articleId && x.nmID) : [];
-    if (!items.length) return res.status(400).json({ ok: false, error: 'Нет артикулов с привязанной карточкой WB (nmID). Привяжи карточку в «Юнит-экономика».' });
+    const items = Array.isArray(req.body && req.body.items) ? req.body.items.filter((x) => x && x.articleId && (x.key || x.nmID)) : [];
+    if (!items.length) return res.status(400).json({ ok: false, error: 'Нет артикулов с привязкой WB. Впиши на вкладке «Остатки и поставки» nmID или артикул продавца (напр. 023_рвп).' });
     const bp = +(req.body && req.body.buyoutPct);
     const out = await buildWbSupply({ items, buyoutPct: Number.isFinite(bp) ? bp : 37, force: !!(req.body && req.body.force) });
     res.json({ ok: true, ...out });

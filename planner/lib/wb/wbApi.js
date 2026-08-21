@@ -7,6 +7,25 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WbClient } from './wbClient.js';
 import { dbAvailable, wbLoadCards, wbSaveCards, wbLoadTariffs, wbSaveTariffs } from '../db.js';
+import { normColor } from '../../public/colorNorm.js';
+
+// Канонические цвета — для распознавания «цветового» сегмента в артикуле продавца (023_рвп_ГОЛУБОЙ_ип).
+const CANON_COLORS = new Set(['белый/молочный', 'бежевый', 'чёрный', 'серый', 'голубой', 'синий', 'зелёный', 'розовый', 'красный', 'жёлтый', 'оранжевый', 'фиолетовый', 'коричневый']);
+const isColorWord = (seg) => CANON_COLORS.has(normColor(seg));
+const vcSegments = (vc) => String(vc || '').split(/[_\-\s]+/).filter(Boolean);
+// Префикс товара (до цветового сегмента): «023_рвп_голубой_ип» → «023_рвп».
+function vendorPrefix(vc) {
+  const segs = vcSegments(vc);
+  const ci = segs.findIndex(isColorWord);
+  return ci > 0 ? segs.slice(0, ci).join('_') : '';
+}
+// Цвет из артикула продавца (сегмент, распознанный как цвет).
+function vendorColor(vc) {
+  const segs = vcSegments(vc);
+  const seg = segs.find(isColorWord);
+  return seg || '';
+}
+const vcStarts = (vc, pfx) => String(vc || '').toLowerCase().startsWith(String(pfx || '').toLowerCase());
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_DIR = path.join(__dirname, '..', '..', 'data', 'wb-cache');
@@ -79,21 +98,38 @@ export function aggregateStocks(rows) {
  * доступный остаток = quantity + inWayFromClient + inWayToClient×(1 − выкуп%).
  * @returns {{supplies:Array<{articleId,source,matrix,units}>, diag:Array, buyoutPct:number}}
  */
+// Найти все цветовые карточки товара по ключу привязки: ключ = nmID (тогда берём imtID +
+// префикс артикула продавца) ИЛИ префикс артикула продавца (023_рвп) → все карточки с ним.
+function resolveArticleCards(key, cards, byNm) {
+  const k = String(key || '').trim();
+  if (!k) return [];
+  const dedupe = (arr) => { const seen = new Set(), out = []; for (const c of arr) if (!seen.has(c.nmID)) { seen.add(c.nmID); out.push(c); } return out; };
+  if (/^\d{6,}$/.test(k)) { // это nmID
+    const base = byNm.get(k);
+    if (!base) return [];
+    let sibs = [base];
+    if (base.imtID != null) sibs = sibs.concat(cards.filter((c) => c.imtID === base.imtID));
+    const pfx = vendorPrefix(base.vendorCode);
+    if (pfx) sibs = sibs.concat(cards.filter((c) => vcStarts(c.vendorCode, pfx + '_')));
+    return dedupe(sibs);
+  }
+  // это префикс артикула продавца
+  return dedupe(cards.filter((c) => vcStarts(c.vendorCode, k)));
+}
+
 export async function buildWbSupply({ items = [], buyoutPct = 37, force = false } = {}) {
   const cards = await fetchCards({ force });
   const stocks = aggregateStocks(await fetchStocks({ force }));
   const byNm = new Map(cards.map((c) => [String(c.nmID), c]));
-  const byImt = new Map();
-  for (const c of cards) { if (c.imtID != null) { const a = byImt.get(c.imtID) || []; a.push(c); byImt.set(c.imtID, a); } }
   const buyout = Math.max(0, Math.min(100, +buyoutPct || 0)) / 100; // доля выкупа (уходит из остатка)
   const supplies = []; const diag = [];
   for (const it of items) {
-    const base = byNm.get(String(it.nmID));
-    if (!base) { diag.push({ articleId: it.articleId, error: `карточка nmID ${it.nmID} не найдена среди карточек продавца` }); continue; }
-    const sibs = (base.imtID != null && byImt.get(base.imtID)) || [base];
+    const key = it.key != null ? it.key : it.nmID; // key = nmID или префикс артикула продавца
+    const sibs = resolveArticleCards(key, cards, byNm);
+    if (!sibs.length) { diag.push({ articleId: it.articleId, key: String(key || ''), error: 'карточки WB по этому ключу не найдены (проверь nmID / артикул продавца)' }); continue; }
     const matrix = {};
     for (const card of sibs) {
-      const color = card.color || 'без цвета';
+      const color = card.color || vendorColor(card.vendorCode) || 'без цвета';
       for (const ts of (card.techSizes || [])) {
         const s = stocks.get(String(card.nmID) + '|' + ts);
         if (!s) continue;
@@ -105,7 +141,7 @@ export async function buildWbSupply({ items = [], buyoutPct = 37, force = false 
     }
     const units = Object.values(matrix).reduce((a, r) => a + Object.values(r).reduce((x, v) => x + v, 0), 0);
     supplies.push({ articleId: it.articleId, source: 'wb', matrix, units });
-    diag.push({ articleId: it.articleId, imtID: base.imtID, colors: Object.keys(matrix).length, siblings: sibs.length, units });
+    diag.push({ articleId: it.articleId, key: String(key || ''), cards: sibs.length, colors: Object.keys(matrix).length, units });
   }
   return { supplies, diag, buyoutPct: Math.round(buyout * 100) };
 }

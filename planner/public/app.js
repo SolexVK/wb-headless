@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'wb-stocks-pull-phase2-2026-08-21c';
+const APP_BUILD = 'wb-link-by-prefix-2026-08-21d';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2028,18 +2028,11 @@ function parseSupplyWorkbook(wb) {
   for (const name of wb.SheetNames) {
     if (/справк|legend|инструк/i.test(name)) continue;
     const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, blankrows: false });
-    for (const row of (aoa || [])) {
-      if (!row || row.length < 4) continue;
-      const article = String(row[0] || '').trim();
-      if (!article || /^article$|артикул/i.test(article)) continue;
-      const color = String(row[1] || '').trim(), size = String(row[2] || '').trim();
-      const qty = Math.max(0, Math.round(parseFloat(String(row[3]).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0));
-      if (!color || !size || qty <= 0) continue;
-      let date = '';
-      const dr = row[5];
-      if (dr instanceof Date) date = new Date(Date.UTC(dr.getFullYear(), dr.getMonth(), dr.getDate())).toISOString().slice(0, 10);
-      else if (/^\d{4}-\d{2}-\d{2}/.test(String(dr || ''))) date = String(dr).slice(0, 10);
-      out.push({ article, color, size, qty, source: parseSupplySource(row[4]), date });
+    if (!aoa || !aoa.length) continue;
+    const map = mapSupplyHeader(aoa[0]); // колонки по названию (любой порядок), либо позиционно
+    for (let i = map ? 1 : 0; i < aoa.length; i++) {
+      const r = supplyRowFrom(aoa[i] || [], map);
+      if (r) out.push(r);
     }
   }
   return out;
@@ -2072,21 +2065,43 @@ function parseSupplySource(s) {
   if (/transit|пути|едет|карго|дорог/.test(t)) return 'transit';
   return 'transit';
 }
+// Сопоставление колонок по НАЗВАНИЮ (устойчиво к порядку и лишним колонкам в твоей таблице).
+const SUP_COL_ALIASES = {
+  article: /артикул|article|модель|номенклатур/i,
+  color: /цвет|color|расцвет/i,
+  size: /размер|size|техразмер|techsize/i,
+  qty: /кол|qty|остаток|количество|quantity|\bшт\b/i,
+  status: /статус|status|источник|тип|состояни/i,
+  date: /дата|date|срок|приход|eta|готовн/i,
+};
+function mapSupplyHeader(cells) {
+  const idx = {};
+  (cells || []).forEach((h, i) => { const t = String(h || '').trim(); for (const [k, re] of Object.entries(SUP_COL_ALIASES)) if (idx[k] == null && re.test(t)) idx[k] = i; });
+  return (idx.article != null && idx.qty != null) ? idx : null; // валидная шапка = есть хотя бы «артикул» и «кол-во»
+}
+function supplyRowFrom(cells, map) {
+  const at = (k, pos) => { const i = map ? map[k] : pos; return i == null ? '' : cells[i]; };
+  const article = String(at('article', 0) || '').trim();
+  const color = String(at('color', 1) || '').trim();
+  const size = String(at('size', 2) || '').trim();
+  const qty = Math.max(0, Math.round(parseFloat(String(at('qty', 3)).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0));
+  if (!article || !color || !size || qty <= 0) return null;
+  const dr = at('date', 5);
+  let date = '';
+  if (dr instanceof Date) date = new Date(Date.UTC(dr.getFullYear(), dr.getMonth(), dr.getDate())).toISOString().slice(0, 10);
+  else if (/^\d{4}-\d{2}-\d{2}/.test(String(dr || ''))) date = String(dr).slice(0, 10);
+  return { article, color, size, qty, source: parseSupplySource(at('status', 4)), date };
+}
 function parseSupplyCSV(text) {
   const out = [];
   const lines = String(text || '').replace(/\r/g, '').split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
   if (!lines.length) return out;
   const delim = (lines[0].match(/;/g) || []).length > (lines[0].match(/,/g) || []).length ? ';' : (lines[0].includes('\t') ? '\t' : ',');
-  let start = 0;
-  if (/артикул|article|цвет|color|размер|size|кол|qty|статус|status/i.test(lines[0])) start = 1;
-  for (let i = start; i < lines.length; i++) {
-    const cols = lines[i].split(delim).map((x) => x.trim());
-    if (cols.length < 4) continue;
-    const article = cols[0], color = cols[1], size = cols[2];
-    const qty = Math.max(0, Math.round(parseFloat(String(cols[3]).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0));
-    if (!article || !color || !size || qty <= 0) continue;
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(cols[5] || '').slice(0, 10)) ? String(cols[5]).slice(0, 10) : '';
-    out.push({ article, color, size, qty, source: parseSupplySource(cols[4]), date });
+  const split = (l) => l.split(delim).map((x) => x.trim());
+  const map = mapSupplyHeader(split(lines[0]));   // колонки по названию (любой порядок)
+  for (let i = map ? 1 : 0; i < lines.length; i++) {
+    const r = supplyRowFrom(split(lines[i]), map);
+    if (r) out.push(r);
   }
   return out;
 }
@@ -2119,9 +2134,10 @@ function importSupplyRows(rows) {
 }
 
 // Автоподтяжка остатков WB (Фаза 2): по привязанным карточкам nmID → imtID → цвета → остатки FBW.
+function articleWbKey(a) { return (a.wbKey && a.wbKey.trim()) || (a.unit && a.unit.wb && a.unit.wb.nmID ? String(a.unit.wb.nmID) : ''); }
 async function pullWbStocks(force) {
-  const items = (state.articles || []).filter((a) => a.unit && a.unit.wb && a.unit.wb.nmID).map((a) => ({ articleId: a.id, nmID: a.unit.wb.nmID }));
-  if (!items.length) { toast('Нет артикулов с привязанной карточкой WB — привяжи в «Юнит-экономика»', true); return; }
+  const items = (state.articles || []).filter((a) => !a.archived && articleWbKey(a)).map((a) => ({ articleId: a.id, key: articleWbKey(a) }));
+  if (!items.length) { toast('Ни у одного артикула нет привязки WB — впиши nmID или артикул продавца (023_рвп) в таблице ниже', true); return; }
   const bp = Math.max(0, Math.min(100, Math.round(+((document.getElementById('sup-buyout') || {}).value) || 37)));
   state.settings.wbBuyoutPct = bp; dirty = true;
   const btn = document.getElementById('sup-wb-pull'); if (btn) { btn.disabled = true; btn.textContent = '⏳ Тяну остатки WB…'; }
@@ -2189,12 +2205,15 @@ function renderSupply() {
 
     <div class="panel">
       <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">🛒 Остатки Wildberries (FBW) — автоматически</div>
-      <div class="matrix-io">
+      <div class="matrix-io" style="margin-bottom:8px">
         <button id="sup-wb-pull" class="btn btn-primary">⟳ Подтянуть остатки WB</button>
         <label class="mini">Выкуп: <input type="number" id="sup-buyout" min="0" max="100" value="${Math.round(+state.settings.wbBuyoutPct || 37)}" style="width:56px"> %</label>
         <button id="sup-wb-force" class="btn btn-subtle" title="Игнорировать часовой кэш и запросить свежие остатки">свежие (без кэша)</button>
-        <span class="mini">Тянем по привязанным карточкам («Юнит-экономика» → nmID) все цвета одного товара (imtID) и суммируем по FBW-складам. Доступный остаток = склад + возвраты + едущее к клиенту × (1 − выкуп%).</span>
       </div>
+      <div class="mini" style="margin-bottom:8px">Впиши для артикула <b>артикул продавца без цвета</b> (напр. <code>023_рвп</code>) — система сама возьмёт все цветовые карточки этого товара по всем FBW-складам. Можно и <b>nmID</b> одной карточки (тогда добавим её imtID и тот же префикс). Доступный остаток = склад + возвраты + едущее к клиенту × (1 − выкуп%).</div>
+      <div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Название</th><th>Ключ WB (артикул продавца без цвета / nmID)</th></tr></thead><tbody>
+        ${activeArticles().map((a) => `<tr><td>${seEsc(a.id)}</td><td class="mini">${seEsc(a.name || '')}</td><td><input type="text" data-wbkey="${seEsc(a.id)}" value="${seEsc(a.wbKey || '')}" placeholder="напр. 023_рвп" style="width:260px"></td></tr>`).join('')}
+      </tbody></table></div>
     </div>
 
     <div class="panel">
@@ -2233,6 +2252,10 @@ function renderSupply() {
       ${unmatched.length ? `<div class="mini" style="margin-top:8px;color:#b45309">⚠ Не сопоставлено с артикулом (цвет не найден): ${unmatched.slice(0, 8).map((u) => `${seEsc(u.articleId)}/${seEsc(u.color)}/${seEsc(u.size)} — ${u.qty}`).join('; ')}${unmatched.length > 8 ? ' …' : ''}. Проверь названия цветов.</div>` : ''}
     </div>`;
 
+  root.querySelectorAll('input[data-wbkey]').forEach((inp) => inp.addEventListener('change', (e) => {
+    const a = state.articles.find((x) => x.id === e.target.dataset.wbkey);
+    if (a) { a.wbKey = e.target.value.trim(); dirty = true; setStatus(); }
+  }));
   root.querySelector('#sup-wb-pull')?.addEventListener('click', () => pullWbStocks(false));
   root.querySelector('#sup-wb-force')?.addEventListener('click', () => pullWbStocks(true));
   root.querySelector('#sup-tpl')?.addEventListener('click', () => downloadText('supply_template.csv', supplyTemplateCSV()));

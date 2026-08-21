@@ -271,6 +271,8 @@ export function normalizeState(input) {
     if (a.seasonFilter && typeof a.seasonFilter === 'object') { /* keep */ } else delete a.seasonFilter;
     // юнит-экономика: себестоимость, цена, плановая вилка маржи/прибыли, фаза ДРР, переопределения
     a.unit = normalizeUnitArticle(a.unit);
+    // ключ привязки к WB для авто-остатков: nmID ИЛИ префикс артикула продавца (023_рвп)
+    a.wbKey = typeof a.wbKey === 'string' ? a.wbKey.trim().slice(0, 80) : '';
   }
   // автосортировка артикулов по номеру, от меньшего к большему (числовая)
   s.articles.sort(compareArticleId);
