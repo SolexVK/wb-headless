@@ -6,7 +6,7 @@ import express from 'express';
 import { Orgs, Cabinets, ReportRuns } from './models.js';
 import { requireAuth } from './security.js';
 import { reportsPage, podsortPage, stockPage, movementPage, movementView, geoPage, geoView, logisticsPage, logisticsView, archivePage, archiveViewPage } from './views.js';
-import { podsortDefaults, normalizePodsort, movementDefaults, normalizeMovement, geoDefaults, normalizeGeo, logisticsDefaults, normalizeLogistics, startPodsort, startStock, startMovement, startGeo, startLogistics, getJob, buildXlsx, buildStockXlsx, buildMovementXlsx, buildGeoXlsx, buildLogisticsXlsx, buildDashboardHtml, buildStockDashboardHtml, buildMovementDashboardHtml, buildGeoDashboardHtml, buildLogisticsDashboardHtml, dashboardToPdf } from './reports-runner.js';
+import { podsortDefaults, normalizePodsort, movementDefaults, normalizeMovement, geoDefaults, normalizeGeo, logisticsDefaults, normalizeLogistics, startPodsort, startStock, startMovement, startGeo, startLogistics, getJob, buildXlsx, buildStockXlsx, buildMovementXlsx, buildGeoXlsx, buildLogisticsXlsx, buildDashboardHtml, buildStockDashboardHtml, buildMovementDashboardHtml, buildGeoDashboardHtml, buildLogisticsDashboardHtml, buildStockDynamicsHtml, dashboardToPdf } from './reports-runner.js';
 import { logger } from './logger.js';
 import { REPORT_RU } from './report-names.js';
 
@@ -108,12 +108,37 @@ reportsRouter.get('/org/:id/reports/stock', requireAuth, loadOrg, (req, res) => 
     const run = ReportRuns.byId(wantId);
     if (run && run.cabinetId === cab.id && run.report === 'stock' && run.data) selected = run;
   }
+  const tab = req.query.tab === 'dynamics' ? 'dynamics' : 'current';
+  const series = (cab && tab === 'dynamics') ? ReportRuns.stockSeries(cab.id, { days: 120 }) : null;
   res.send(stockPage({
     user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
     org: req.org, role: req.role,
     active: cab ? { id: cab.id, name: cab.name } : null,
-    latest, snapshots, selected, job: cab ? getJob(cab.id, 'stock') : null,
+    latest, snapshots, selected, tab, series, job: cab ? getJob(cab.id, 'stock') : null,
   }));
+});
+
+// ── Остатки: «Динамика» — HTML/PDF/JSON по накопленным снимкам ────────────────
+reportsRouter.get('/org/:id/reports/stock/dynamics/download/:kind', requireAuth, loadOrg, async (req, res) => {
+  const cab = Cabinets.activeOf(req.org.id);
+  if (!cab) return res.status(404).send('Нет активного кабинета.');
+  const series = ReportRuns.stockSeries(cab.id, { days: 120 });
+  if (!series.count || series.count < 2) return res.status(404).send('Недостаточно снимков для графика (нужно ≥2).');
+  const stem = `Остатки-динамика ${series.from}–${series.to}`;
+  const kind = req.params.kind;
+  try {
+    if (kind === 'json') {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.attachment(`${stem}.json`);
+      return res.send(JSON.stringify(series, null, 2));
+    }
+    if (kind === 'html' || kind === 'pdf') {
+      const html = await buildStockDynamicsHtml({ id: cab.id }, series);
+      if (kind === 'html') return res.download(html, `${stem}.html`);
+      return res.download(await dashboardToPdf(html), `${stem}.pdf`);
+    }
+    return res.status(404).send('Формат недоступен.');
+  } catch (e) { logger.error({ err: e.message }, 'остатки-динамика: ошибка выгрузки'); res.status(500).send('Ошибка сборки файла: ' + e.message); }
 });
 
 // ── Движение заказов: страница ───────────────────────────────────────────────

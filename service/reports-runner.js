@@ -443,6 +443,10 @@ export async function buildDashboardHtml(cabinet, snapshot) {
 export async function buildStockDashboardHtml(cabinet, snapshot) {
   return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-stock-service.json', cmd: process.execPath, script: path.join(SCRIPTS, 'fbs-stock-dashboard.mjs'), outName: 'fbs-stock-dashboard.html', errMsg: 'Не удалось собрать HTML-дашборд остатков' });
 }
+// Дашборд «Динамика остатков» — из ряда по дням (series), а не из одного снимка.
+export async function buildStockDynamicsHtml(cabinet, series) {
+  return genArtifact({ cabinetId: cabinet.id, snapshot: series, inName: 'fbs-stock-series.json', cmd: process.execPath, script: path.join(SCRIPTS, 'fbs-stock-dynamics-dashboard.mjs'), outName: 'fbs-stock-dynamics.html', errMsg: 'Не удалось собрать дашборд динамики остатков' });
+}
 export async function buildMovementDashboardHtml(cabinet, snapshot, cost = 620) {
   return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-movement-service.json', cmd: process.execPath, script: path.join(SCRIPTS, 'fbs-movement-dashboard.mjs'), outName: 'fbs-movement-dashboard.html', extraEnv: { COST_PER_UNIT: String(cost) }, errMsg: 'Не удалось собрать HTML-дашборд движения' });
 }

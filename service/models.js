@@ -79,6 +79,8 @@ const q = {
     SELECT r.id, r.report, r.params_json, r.summary_json, r.generated_at, r.created_at, r.user_id, u.email AS user_email
     FROM report_runs r LEFT JOIN users u ON u.id = r.user_id
     WHERE r.cabinet_id = ? ORDER BY r.created_at DESC, r.id DESC LIMIT 200`),
+  // Все снимки одного отчёта с распакованными данными — для «динамики» по дням.
+  runsDataByReport: db.prepare("SELECT id, created_at, data_gz FROM report_runs WHERE cabinet_id = ? AND report = ? ORDER BY created_at ASC"),
   deleteRunByAuthor: db.prepare('DELETE FROM report_runs WHERE id = ? AND user_id = ?'),
   // Владелец удаляет любой АВТОРСКИЙ запуск (кроме системных по расписанию — user_id IS NULL).
   deleteRunAuthored: db.prepare('DELETE FROM report_runs WHERE id = ? AND user_id IS NOT NULL'),
@@ -279,6 +281,29 @@ export const ReportRuns = {
   datesOf: (cabinetId, report) => q.runsByReport.all(cabinetId, report).map((r) => ({
     id: r.id, createdAt: r.created_at, generatedAt: r.generated_at, authorId: r.user_id,
   })),
+  // Динамика остатков по дням: для каждого дня берём ПОСЛЕДНИЙ снимок и остаток
+  // каждого ФФ (totalQuantity). Ряд для линейного графика (страница + PDF-дашборд).
+  stockSeries: (cabinetId, { days = 120 } = {}) => {
+    const rows = q.runsDataByReport.all(cabinetId, 'stock');
+    const byDay = new Map(); const names = new Set();
+    for (const r of rows) {
+      const day = String(r.created_at || '').slice(0, 10);
+      const data = gunz(r.data_gz);
+      if (!data) continue;
+      const m = new Map();
+      for (const w of data.warehouses || []) { m.set(w.name, w.totalQuantity || 0); names.add(w.name); }
+      const grand = data.totals?.grandTotal ?? [...m.values()].reduce((a, b) => a + b, 0);
+      byDay.set(day, { m, grand }); // поздний снимок того же дня перезаписывает ранний
+    }
+    let dates = [...byDay.keys()].sort();
+    if (days && dates.length > days) dates = dates.slice(-days);
+    const warehouses = [...names].sort((a, b) => a.localeCompare(b, 'ru'))
+      .map((name) => ({ name, values: dates.map((d) => byDay.get(d).m.get(name) ?? 0) }));
+    return {
+      from: dates[0] || null, to: dates[dates.length - 1] || null, count: dates.length,
+      dates, warehouses, grand: dates.map((d) => byDay.get(d).grand),
+    };
+  },
   // Удалить может только автор запуска (проверка через user_id в запросе).
   deleteByAuthor: (id, userId) => q.deleteRunByAuthor.run(id, userId).changes > 0,
   // Владелец: удалить любой авторский запуск (системные по расписанию не тронет).

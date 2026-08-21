@@ -4,6 +4,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { DatabaseSync } from 'node:sqlite'; // для «состаривания» снимка (тест вкладки «Динамика»)
 
 process.env.NODE_ENV = 'test';
 process.env.BASE_PATH = ''; // тест в корне: не даём .env (BASE_PATH=/fbs) сбить пути
@@ -144,6 +145,27 @@ try {
   const older = stockOpts[stockOpts.length - 1];
   r = await req('GET', `/org/${orgId}/reports/stock?run=${older}`);
   ok(r.status === 200 && r.text.includes('из архива') && r.text.includes('Снимок остатков на'), 'Ф2: остатки на выбранную дату (снимок из архива)');
+
+  // ── Остатки → вкладка «Динамика» ─────────────────────────────────────────────
+  // Оба снимка — за один UTC-день, поэтому в графике 1 точка (нужно ≥2): проверяем
+  // подсказку и защиту выгрузки. Затем «состариваем» один снимок на день назад
+  // прямым SQL (как будто это вчерашний авто-снимок) → появляется реальный график.
+  r = await req('GET', `/org/${orgId}/reports/stock?tab=dynamics`);
+  ok(r.status === 200 && r.text.includes('Динамика') && r.text.includes('нужно') && /tab=dynamics/.test(r.text), 'Ф2: вкладка «Динамика» (1 снимок → подсказка «нужно ≥2»)');
+  r = await req('GET', `/org/${orgId}/reports/stock/dynamics/download/pdf`);
+  ok(r.status === 404, 'Ф2: динамика PDF при <2 снимках → 404 (защита)');
+
+  const raw = new DatabaseSync(process.env.DB_PATH);
+  raw.prepare("UPDATE report_runs SET created_at = datetime('now','-1 day') WHERE id = (SELECT MIN(id) FROM report_runs WHERE report='stock')").run();
+  raw.close();
+  r = await req('GET', `/org/${orgId}/reports/stock?tab=dynamics`);
+  ok(r.status === 200 && r.text.includes('mv-chart') && r.text.includes('Изменение за период') && r.text.includes('Итого'), 'Ф2: динамика — график по 2 дням (mv-chart + таблица)');
+  const dj = await req('GET', `/org/${orgId}/reports/stock/dynamics/download/json`);
+  let dser = null; try { dser = JSON.parse(dj.text); } catch { /* */ }
+  ok(dj.status === 200 && dser?.count === 2 && Array.isArray(dser?.warehouses), 'Ф2: динамика JSON — 2 дня, ряд по ФФ');
+  const dh = await req('GET', `/org/${orgId}/reports/stock/dynamics/download/html`);
+  ok(dh.status === 200 && /<html/i.test(dh.text) && dh.text.includes('Динамика остатков'), 'Ф2: динамика HTML-дашборд');
+  await pdfCheck(`/org/${orgId}/reports/stock/dynamics/download/pdf`, 'Ф2: динамика PDF-дашборд');
 
   // ── Отчёт «Движение заказов» ─────────────────────────────────────────────────
   r = await req('GET', `/org/${orgId}/reports/movement`);

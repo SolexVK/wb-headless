@@ -70,8 +70,8 @@ export function reportsPage(p) {
           'Сколько и каких размеров дозаказать на каждый фулфилмент: скорость продаж по складу, дни до нуля, рекомендация к заказу + пробный завоз новинок и докладок.',
           'перед формированием поставки на фулфилменты', !!active)}
         ${card(`/org/${org.id}/reports/stock`, 'Остатки',
-          'Что лежит на складах прямо сейчас — по фулфилментам и в разрезе артикул+цвет × склад. Копит ежедневные снимки: можно смотреть остаток на любую прошлую дату.',
-          'быстрый срез наличия и динамика запаса', !!active)}
+          'Что лежит на складах прямо сейчас — по фулфилментам и в разрезе артикул+цвет × склад. Копит ежедневные снимки: вкладка «Динамика» показывает график изменения остатка на каждом ФФ за период (+ PDF).',
+          'быстрый срез наличия и динамика запаса по складам', !!active)}
         ${card(`/org/${org.id}/reports/movement`, 'Движение заказов',
           'Сколько заказов принято на фулфилмент и передано в доставку — по дням и складам, в штуках и рублях (себестоимость / цена продажи / цена заказа), со сравнением периодов.',
           'контроль темпа отгрузок и денежного потока по складам', !!active)}
@@ -261,8 +261,60 @@ function stockResults(s, { downloadHref, whenLabel }) {
     </div>`;
 }
 
+// Вкладка «Динамика»: как менялся остаток каждого ФФ по накопленным снимкам.
+// series = { from, to, count, dates:[...], warehouses:[{name, values:[...]}], grand:[...] }.
+function stockDynamics(series, { downloadHref }) {
+  const s = series || { count: 0, dates: [], warehouses: [], grand: [] };
+  const dynBar = `<a class="dl" href="${downloadHref('html')}">📊 HTML-дашборд</a> <a class="dl" href="${downloadHref('pdf')}">📄 PDF</a> <a class="dl" href="${downloadHref('json')}">⬇ JSON</a>`;
+  if (!s.count || s.count < 2) {
+    return `<div class="section"><p class="kv">График строится по накопленным <b>ежедневным снимкам</b> остатков (сохраняются автоматически раз в сутки). Сейчас снимков: <b>${nf(s.count || 0)}</b> — нужно минимум <b>2</b>. Загляните завтра, либо нажмите «Обновить данные» на вкладке «Текущие», чтобы копить историю.</p></div>`;
+  }
+  const last = (a) => a[a.length - 1];
+  const grandNow = last(s.grand) || 0;
+  const labels = s.dates.map((d) => ({ label: String(d).slice(5) }));   // MM-DD
+  const lines = [
+    { name: 'Итого', color: 'var(--total)', bold: true, values: s.grand },
+    ...s.warehouses.map((w, i) => ({ name: w.name, color: MV_PALETTE[i % MV_PALETTE.length], values: w.values })),
+  ];
+  const legend = `<div class="mv-legend">${lines.map((l) => `<span><i style="background:${l.color}"></i>${esc(l.name)}</span>`).join('')}</div>`;
+  // Сводка по каждому ФФ: старт → текущий, изменение за период, мин/макс.
+  const rows = s.warehouses.map((w) => {
+    const first = w.values[0] || 0; const now = last(w.values) || 0; const delta = now - first;
+    const mn = Math.min(...w.values); const mx = Math.max(...w.values);
+    const sign = delta > 0 ? 'st-ok' : delta < 0 ? 'st-gap' : '';
+    return `<tr><td class="tl">${esc(w.name)}</td><td class="num" data-v="${first}">${nf(first)}</td><td class="num" data-v="${now}">${nf(now)}</td><td class="num" data-v="${delta}"><span class="badge ${sign}">${delta > 0 ? '+' : ''}${nf(delta)}</span></td><td class="num" data-v="${mn}">${nf(mn)}</td><td class="num" data-v="${mx}">${nf(mx)}</td></tr>`;
+  }).join('');
+  // Инсайты: кто вырос/просел сильнее всех за период.
+  const deltas = s.warehouses.map((w) => ({ name: w.name, d: (last(w.values) || 0) - (w.values[0] || 0) }));
+  const up = [...deltas].sort((a, b) => b.d - a.d)[0];
+  const down = [...deltas].sort((a, b) => a.d - b.d)[0];
+  const tiles = [
+    dkKpi(`${esc(String(s.from).slice(5))} → ${esc(String(s.to).slice(5))}`, 'период (по снимкам)', { icon: '📅', accent: DKAC.blue }),
+    dkKpi(nf(s.count), 'снимков в графике', { icon: '🗂️', accent: DKAC.teal }),
+    dkKpi(nf(s.warehouses.length), 'фулфилментов', { icon: '🏭', accent: DKAC.violet }),
+    dkKpi(nf(grandNow), 'сейчас всего, шт', { icon: '📦', accent: DKAC.green }),
+  ].join('');
+  const insightRow = dkInsights([
+    up && up.d > 0 ? { icon: '📈', accent: DKAC.green, text: `Больше всего вырос: <b>${esc(up.name)}</b> — на ${nf(up.d)} шт за период` } : null,
+    down && down.d < 0 ? { icon: '📉', accent: DKAC.red, text: `Сильнее всех просел: <b>${esc(down.name)}</b> — на ${nf(down.d)} шт` } : null,
+  ]);
+  return `<div class="section">
+      <p class="kv" style="margin:0 0 12px">Как менялся остаток на каждом фулфилменте по накопленным ежедневным снимкам. Период: <b>${esc(String(s.from))} → ${esc(String(s.to))}</b> (${nf(s.count)} снимков).</p>
+      <div class="dk-kpis">${tiles}</div>
+      ${insightRow}
+      <div style="margin-bottom:12px">${dynBar}</div>
+      ${ph('📈', 'Остаток по фулфилментам во времени', 'жирная линия — суммарный остаток · наведите на график', DKAC.blue)}
+      <div class="chart-wrap">${mvChart(labels, lines, false)}</div>
+      ${legend}
+      <div style="margin-top:22px"></div>
+      ${ph('📊', 'Изменение за период по ФФ', 'старт → текущий · клик по заголовку — сортировка', DKAC.violet)}
+      <div class="scroll"><table class="rt sortable"><thead><tr>${thT('Фулфилмент', 'Наш склад', 'tl')}${thT('Старт', 'Остаток в начале периода', 'num')}${thT('Сейчас', 'Последний снимок', 'num')}${thT('Δ', 'Изменение за период', 'num')}${thT('Мин', '', 'num')}${thT('Макс', '', 'num')}</tr></thead><tbody>${rows}</tbody></table></div>
+    </div>`;
+}
+
 export function stockPage(p) {
   const { user, csrf, base = '', org, role, active, latest, snapshots = [], selected, job } = p;
+  const tab = p.tab === 'dynamics' ? 'dynamics' : 'current';
   const u = (path) => base + path;
   const back = `<div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>`;
   if (!active) {
@@ -297,15 +349,26 @@ export function stockPage(p) {
        <form method="get" action="${u(`/org/${org.id}/reports/stock`)}"><select name="run" style="max-width:340px" onchange="this.form.submit()">${dateOpts}</select> <noscript><button class="btn" type="submit" style="max-width:140px;display:inline-block">Показать</button></noscript></form></div>`
     : '';
 
+  const tabBar = `<div class="mv-bar"><div class="mv-seg"><span class="lab">Разрез</span>
+      <a class="mv-chip${tab === 'current' ? ' on' : ''}" href="${u(`/org/${org.id}/reports/stock`)}">Текущие остатки</a>
+      <a class="mv-chip${tab === 'dynamics' ? ' on' : ''}" href="${u(`/org/${org.id}/reports/stock?tab=dynamics`)}">Динамика</a>
+    </div></div>`;
+  const currentBlock = `
+      <div class="section"><form method="post" action="${u(`/org/${org.id}/reports/stock/refresh`)}">${csrfField(csrf)}<button class="btn" type="submit" style="max-width:280px"${running ? ' disabled' : ''}>${running ? 'Идёт обновление…' : 'Обновить данные'}</button></form></div>
+      ${datePicker}
+      ${results}`;
+  const content = tab === 'dynamics'
+    ? stockDynamics(p.series, { downloadHref: (k) => u(`/org/${org.id}/reports/stock/dynamics/download/${k}`) })
+    : currentBlock;
+
   return layout({
     title: `Остатки — ${org.name}`, user, csrf, base, head,
     body: `<div class="wrap">${back}
       <h1>Остатки <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
-      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Текущий остаток FBS по складам и артикулам/цветам. Снимок сохраняется автоматически раз в сутки. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
+      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Текущий остаток FBS по складам и артикулам/цветам + динамика по накопленным снимкам. Снимок сохраняется автоматически раз в сутки. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
       ${statusBox}
-      <div class="section"><form method="post" action="${u(`/org/${org.id}/reports/stock/refresh`)}">${csrfField(csrf)}<button class="btn" type="submit" style="max-width:280px"${running ? ' disabled' : ''}>${running ? 'Идёт обновление…' : 'Обновить данные'}</button></form></div>
-      ${datePicker}
-      ${results}
+      ${tabBar}
+      ${content}
     </div>`,
   });
 }
