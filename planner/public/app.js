@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'wb-warehouse-remains-2026-08-21e';
+const APP_BUILD = 'wbkey-autosave-2026-08-21f';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2255,7 +2255,7 @@ function renderSupply() {
 
   root.querySelectorAll('input[data-wbkey]').forEach((inp) => inp.addEventListener('change', (e) => {
     const a = state.articles.find((x) => x.id === e.target.dataset.wbkey);
-    if (a) { a.wbKey = e.target.value.trim(); dirty = true; setStatus(); }
+    if (a) { a.wbKey = e.target.value.trim(); dirty = true; setStatus(); unitPersist(); } // сохраняем сразу (дебаунс)
   }));
   root.querySelector('#sup-wb-pull')?.addEventListener('click', () => pullWbStocks(false));
   root.querySelector('#sup-wb-force')?.addEventListener('click', () => pullWbStocks(true));
