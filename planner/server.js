@@ -10,7 +10,7 @@ import { defaultState, normalizeState, PARTIA_ROLES } from './lib/model.js';
 import { buildSchedule } from './lib/scheduler.js';
 import { findRescues } from './lib/rescue.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates, getSubjectPhrases, budgetStatus } from './lib/seasonApi.js';
-import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse } from './lib/wb/wbApi.js';
+import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse, buildWbSupply } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
 import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList, metaGet, metaSet } from './lib/db.js';
 import { installAuth, requireView, requireEdit } from './lib/authMiddleware.js';
@@ -22,7 +22,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'supply-netting-phase1-2026-08-20k';
+const BACKEND_BUILD = 'wb-stocks-pull-phase2-2026-08-21c';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -388,6 +388,19 @@ app.get('/api/supply/csv', requireView('season'), async (req, res) => {
     const text = await r.text();
     if (/<html/i.test(text.slice(0, 500))) return res.status(400).json({ ok: false, error: 'По ссылке вернулся HTML, а не CSV. Проверь, что таблица опубликована именно как CSV и доступна по ссылке.' });
     res.json({ ok: true, text });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// Автоподтяжка остатков WB (FBW) в предложение: по nmID → imtID → цвета → остатки по складам.
+// Доступный остаток = quantity + inWayFromClient + inWayToClient×(1 − выкуп%). buyoutPct настраиваемый.
+app.post('/api/supply/wb-pull', requireEdit('season'), async (req, res) => {
+  try {
+    if (!hasWbToken()) return res.status(400).json({ ok: false, error: 'WB-токен не задан в окружении службы (WB_API_TOKEN).' });
+    const items = Array.isArray(req.body && req.body.items) ? req.body.items.filter((x) => x && x.articleId && x.nmID) : [];
+    if (!items.length) return res.status(400).json({ ok: false, error: 'Нет артикулов с привязанной карточкой WB (nmID). Привяжи карточку в «Юнит-экономика».' });
+    const bp = +(req.body && req.body.buyoutPct);
+    const out = await buildWbSupply({ items, buyoutPct: Number.isFinite(bp) ? bp : 37, force: !!(req.body && req.body.force) });
+    res.json({ ok: true, ...out });
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 

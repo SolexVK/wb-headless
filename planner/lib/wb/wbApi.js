@@ -29,6 +29,87 @@ export function hasWbToken() {
   return !!(process.env.WB_API_TOKEN || process.env.Wildberries_API);
 }
 
+// Цвет карточки WB из characteristics (name ~ «Цвет»); значение — массив или строка.
+function cardColor(card) {
+  const chs = (card && card.characteristics) || [];
+  for (const ch of chs) {
+    if (/цвет/i.test(ch && ch.name || '')) {
+      const v = ch.value;
+      return Array.isArray(v) ? String(v[0] || '').trim() : String(v || '').trim();
+    }
+  }
+  return String((card && card.color) || '').trim();
+}
+
+const STOCKS_TTL = 60 * 60 * 1000; // остатки FBW — кэш 1 час (эндпоинт статистики жёстко лимитирован)
+
+/** Текущие остатки FBW (Statistics API). Возвращает сырые строки как есть. */
+export async function fetchStocks({ force = false } = {}) {
+  if (!force) { const c = readCache('stocks.json', STOCKS_TTL); if (c) return c.data; }
+  const c = client();
+  const dateFrom = '2020-01-01'; // WB отдаёт актуальные остатки на момент запроса
+  const { data } = await c.request('statistics', `/api/v1/supplier/stocks?dateFrom=${dateFrom}`, {
+    method: 'GET', methodLimit: { limit: 1, periodSec: 60, burst: 1 },
+  });
+  const rows = Array.isArray(data) ? data : [];
+  writeCache('stocks.json', rows);
+  return rows;
+}
+
+/** Свести остатки по (nmId × techSize): суммируем количество/в пути к клиенту/возвраты по складам. */
+export function aggregateStocks(rows) {
+  const m = new Map();
+  for (const r of (rows || [])) {
+    const nmId = r.nmId != null ? r.nmId : r.nmID;
+    if (nmId == null) continue;
+    const ts = String(r.techSize != null ? r.techSize : '').trim();
+    const key = nmId + '|' + ts;
+    const cur = m.get(key) || { quantity: 0, inWayToClient: 0, inWayFromClient: 0 };
+    cur.quantity += +r.quantity || 0;
+    cur.inWayToClient += +r.inWayToClient || 0;
+    cur.inWayFromClient += +r.inWayFromClient || 0;
+    m.set(key, cur);
+  }
+  return m;
+}
+
+/**
+ * Собрать WB-остатки в предложение по артикулам. Для каждого item {articleId, nmID}:
+ * по nmID берём imtID → все цветовые карточки → по каждой (цвет + techSize) считаем
+ * доступный остаток = quantity + inWayFromClient + inWayToClient×(1 − выкуп%).
+ * @returns {{supplies:Array<{articleId,source,matrix,units}>, diag:Array, buyoutPct:number}}
+ */
+export async function buildWbSupply({ items = [], buyoutPct = 37, force = false } = {}) {
+  const cards = await fetchCards({ force });
+  const stocks = aggregateStocks(await fetchStocks({ force }));
+  const byNm = new Map(cards.map((c) => [String(c.nmID), c]));
+  const byImt = new Map();
+  for (const c of cards) { if (c.imtID != null) { const a = byImt.get(c.imtID) || []; a.push(c); byImt.set(c.imtID, a); } }
+  const buyout = Math.max(0, Math.min(100, +buyoutPct || 0)) / 100; // доля выкупа (уходит из остатка)
+  const supplies = []; const diag = [];
+  for (const it of items) {
+    const base = byNm.get(String(it.nmID));
+    if (!base) { diag.push({ articleId: it.articleId, error: `карточка nmID ${it.nmID} не найдена среди карточек продавца` }); continue; }
+    const sibs = (base.imtID != null && byImt.get(base.imtID)) || [base];
+    const matrix = {};
+    for (const card of sibs) {
+      const color = card.color || 'без цвета';
+      for (const ts of (card.techSizes || [])) {
+        const s = stocks.get(String(card.nmID) + '|' + ts);
+        if (!s) continue;
+        const eff = Math.round((s.quantity || 0) + (s.inWayFromClient || 0) + (s.inWayToClient || 0) * (1 - buyout));
+        if (eff <= 0) continue;
+        matrix[color] = matrix[color] || {};
+        matrix[color][ts] = (matrix[color][ts] || 0) + eff;
+      }
+    }
+    const units = Object.values(matrix).reduce((a, r) => a + Object.values(r).reduce((x, v) => x + v, 0), 0);
+    supplies.push({ articleId: it.articleId, source: 'wb', matrix, units });
+    diag.push({ articleId: it.articleId, imtID: base.imtID, colors: Object.keys(matrix).length, siblings: sibs.length, units });
+  }
+  return { supplies, diag, buyoutPct: Math.round(buyout * 100) };
+}
+
 /** Число из строки WB (запятая как разделитель; '' и '-' → null). */
 const wbNum = (v) => {
   if (v == null || v === '' || v === '-') return null;
@@ -72,8 +153,11 @@ export async function fetchCards({ force = false } = {}) {
     for (const card of cards) {
       out.push({
         nmID: card.nmID,
+        imtID: card.imtID != null ? card.imtID : null, // объединяет цветовые варианты одного товара
         vendorCode: card.vendorCode || '',
         brand: card.brand || '',
+        color: cardColor(card), // цвет карточки (для сведения остатков по цвету)
+        techSizes: Array.isArray(card.sizes) ? card.sizes.map((s) => String(s.techSize || '').trim()).filter(Boolean) : [],
         dimensions: card.dimensions || null,
         volumeL: volumeLitres(card.dimensions),
       });

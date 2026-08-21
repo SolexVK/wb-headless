@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'supply-detail-fmt-2026-08-21b';
+const APP_BUILD = 'wb-stocks-pull-phase2-2026-08-21c';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2118,6 +2118,28 @@ function importSupplyRows(rows) {
   recalc(true).then(() => { renderSupply(); toast(`Загружено записей: ${recs.length}${skipped.length ? `, пропущено (нет артикула): ${[...new Set(skipped)].length}` : ''}`); }).catch((e) => toast('Ошибка: ' + e.message, true));
 }
 
+// Автоподтяжка остатков WB (Фаза 2): по привязанным карточкам nmID → imtID → цвета → остатки FBW.
+async function pullWbStocks(force) {
+  const items = (state.articles || []).filter((a) => a.unit && a.unit.wb && a.unit.wb.nmID).map((a) => ({ articleId: a.id, nmID: a.unit.wb.nmID }));
+  if (!items.length) { toast('Нет артикулов с привязанной карточкой WB — привяжи в «Юнит-экономика»', true); return; }
+  const bp = Math.max(0, Math.min(100, Math.round(+((document.getElementById('sup-buyout') || {}).value) || 37)));
+  state.settings.wbBuyoutPct = bp; dirty = true;
+  const btn = document.getElementById('sup-wb-pull'); if (btn) { btn.disabled = true; btn.textContent = '⏳ Тяну остатки WB…'; }
+  try {
+    const r = await api('/api/supply/wb-pull', { method: 'POST', body: JSON.stringify({ items, buyoutPct: bp, force: !!force }) });
+    const recs = (r.supplies || []).filter((s) => s.units > 0);
+    const affected = new Set(items.map((x) => x.articleId)); // заменяем wb-предложение всех запрошенных (даже если стало 0)
+    state.supplies = (state.supplies || []).filter((s) => !(s.source === 'wb' && affected.has(s.articleId)));
+    const today = supTodayISO();
+    for (const s of recs) state.supplies.push({ id: uid('sup'), articleId: s.articleId, source: 'wb', availableOn: today, matrix: s.matrix, note: 'WB API', updatedAt: new Date().toISOString() });
+    dirty = true;
+    await recalc(true); renderSupply();
+    const tot = recs.reduce((a, s) => a + s.units, 0);
+    const noCard = (r.diag || []).filter((d) => d.error).length;
+    toast(`Остатки WB: ${recs.length} арт., ${tot.toLocaleString('ru')} шт (выкуп ${bp}%)${noCard ? `, без карточки ${noCard}` : ''}`);
+  } catch (e) { toast('Ошибка WB: ' + e.message, true); renderSupply(); }
+}
+
 function renderSupply() {
   const root = document.getElementById('supply');
   if (!root) return;
@@ -2166,7 +2188,17 @@ function renderSupply() {
     </div>
 
     <div class="panel">
-      <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">Загрузка данных</div>
+      <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">🛒 Остатки Wildberries (FBW) — автоматически</div>
+      <div class="matrix-io">
+        <button id="sup-wb-pull" class="btn btn-primary">⟳ Подтянуть остатки WB</button>
+        <label class="mini">Выкуп: <input type="number" id="sup-buyout" min="0" max="100" value="${Math.round(+state.settings.wbBuyoutPct || 37)}" style="width:56px"> %</label>
+        <button id="sup-wb-force" class="btn btn-subtle" title="Игнорировать часовой кэш и запросить свежие остатки">свежие (без кэша)</button>
+        <span class="mini">Тянем по привязанным карточкам («Юнит-экономика» → nmID) все цвета одного товара (imtID) и суммируем по FBW-складам. Доступный остаток = склад + возвраты + едущее к клиенту × (1 − выкуп%).</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">Загрузка данных вручную (в пути / склад / производство)</div>
       <div class="matrix-io" style="margin-bottom:8px">
         <span class="mini"><b>Google-таблица</b> (Файл → Опубликовать в интернете → <b>CSV</b>):</span>
         <input type="url" id="sup-url" value="${seEsc(url)}" placeholder="https://docs.google.com/…/pub?output=csv" style="flex:1;min-width:260px">
@@ -2201,6 +2233,8 @@ function renderSupply() {
       ${unmatched.length ? `<div class="mini" style="margin-top:8px;color:#b45309">⚠ Не сопоставлено с артикулом (цвет не найден): ${unmatched.slice(0, 8).map((u) => `${seEsc(u.articleId)}/${seEsc(u.color)}/${seEsc(u.size)} — ${u.qty}`).join('; ')}${unmatched.length > 8 ? ' …' : ''}. Проверь названия цветов.</div>` : ''}
     </div>`;
 
+  root.querySelector('#sup-wb-pull')?.addEventListener('click', () => pullWbStocks(false));
+  root.querySelector('#sup-wb-force')?.addEventListener('click', () => pullWbStocks(true));
   root.querySelector('#sup-tpl')?.addEventListener('click', () => downloadText('supply_template.csv', supplyTemplateCSV()));
   root.querySelector('#sup-tpl-xlsx')?.addEventListener('click', downloadSupplyXlsx);
   root.querySelector('#sup-file')?.addEventListener('change', (e) => importSupplyFile(e.target.files && e.target.files[0]));
