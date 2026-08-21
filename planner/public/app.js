@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'supply-detail-excel-2026-08-21a';
+const APP_BUILD = 'supply-detail-fmt-2026-08-21b';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1994,9 +1994,13 @@ function dashMonthlyLoad() {
 // ───────────────────── ОСТАТКИ И ПОСТАВКИ (Этап 3, Фаза 1) ─────────────────────
 const SUP_SRC_RU = { wb: 'На складе WB', transit: 'В пути', prod_stock: 'Готово на складе произв.', in_production: 'В производстве' };
 function supplyMatrixSum(m) { let s = 0; for (const c in (m || {})) for (const sz in m[c]) s += Math.max(0, Math.round(+m[c][sz] || 0)); return s; }
-// компактная детализация матрицы: «синий: 44×120, 46×80 · белый: 44×40»
+// компактная детализация матрицы: «белый 56 шт: L 28, XL 28 · голубой 130 шт: M 75, L 55»
 function supplyDetail(m) {
-  return Object.entries(m || {}).map(([c, row]) => `<b>${seEsc(c)}</b>: ${Object.entries(row).map(([s, v]) => `${seEsc(s)}×${(+v || 0).toLocaleString('ru')}`).join(', ')}`).join(' · ') || '—';
+  return Object.entries(m || {}).map(([c, row]) => {
+    const tot = Object.values(row).reduce((a, v) => a + (+v || 0), 0);
+    const cells = Object.entries(row).map(([s, v]) => `${seEsc(s)} <b>${(+v || 0).toLocaleString('ru')}</b>`).join(', ');
+    return `<b>${seEsc(c)}</b> <span style="color:var(--muted)">${tot.toLocaleString('ru')} шт</span> — ${cells}`;
+  }).join(' &nbsp;·&nbsp; ') || '—';
 }
 // ── Excel шаблон/импорт остатков ──
 function supplyTemplateAoA() {
@@ -2184,7 +2188,7 @@ function renderSupply() {
 
     <div class="panel">
       <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">Текущее предложение (${sup.length})</div>
-      ${sup.length ? `<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Источник</th><th class="num">Объём</th><th>На WB</th><th>Цвет × размер</th><th></th></tr></thead><tbody>${recRows}</tbody></table></div>
+      ${sup.length ? `<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Источник</th><th class="num">Объём</th><th>На WB</th><th>Детализация (размер → кол-во)</th><th></th></tr></thead><tbody>${recRows}</tbody></table></div>
       <div class="matrix-io" style="margin-top:8px"><button id="sup-clear" class="btn btn-danger">🗑 Очистить всё</button></div>`
       : '<div class="mini">Пока пусто. Загрузи данные выше (или подключи Google-таблицу).</div>'}
     </div>
