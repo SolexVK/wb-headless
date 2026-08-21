@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'wb-pull-diagnostics-2026-08-21g';
+const APP_BUILD = 'supply-import-colmap-note-2026-08-21h';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2024,28 +2024,29 @@ function downloadSupplyXlsx() {
   XLSX.writeFile(wb, 'supply_template.xlsx');
 }
 function parseSupplyWorkbook(wb) {
-  const out = [];
+  const rows = []; let map = null, header = [];
   for (const name of wb.SheetNames) {
     if (/справк|legend|инструк/i.test(name)) continue;
     const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, blankrows: false });
     if (!aoa || !aoa.length) continue;
-    const map = mapSupplyHeader(aoa[0]); // колонки по названию (любой порядок), либо позиционно
-    for (let i = map ? 1 : 0; i < aoa.length; i++) {
-      const r = supplyRowFrom(aoa[i] || [], map);
-      if (r) out.push(r);
+    const m = mapSupplyHeader(aoa[0]); // колонки по названию (любой порядок), либо позиционно
+    if (m && !map) { map = m; header = aoa[0]; }
+    for (let i = m ? 1 : 0; i < aoa.length; i++) {
+      const r = supplyRowFrom(aoa[i] || [], m);
+      if (r) rows.push(r);
     }
   }
-  return out;
+  return { rows, map, header };
 }
 function importSupplyFile(file) {
   if (!file) return;
   if (!/\.(xlsx|xls)$/i.test(file.name)) { // csv/tsv — текстом
-    const reader = new FileReader(); reader.onload = () => importSupplyRows(parseSupplyCSV(reader.result)); reader.readAsText(file); return;
+    const reader = new FileReader(); reader.onload = () => importSupplyParsed(parseSupplyCSV(reader.result)); reader.readAsText(file); return;
   }
   if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу (Cmd+Shift+R)', true); return; }
   const reader = new FileReader();
   reader.onload = () => {
-    try { importSupplyRows(parseSupplyWorkbook(XLSX.read(new Uint8Array(reader.result), { type: 'array', cellDates: true }))); }
+    try { importSupplyParsed(parseSupplyWorkbook(XLSX.read(new Uint8Array(reader.result), { type: 'array', cellDates: true }))); }
     catch (e) { toast('Не удалось разобрать файл: ' + e.message, true); }
   };
   reader.readAsArrayBuffer(file);
@@ -2093,17 +2094,31 @@ function supplyRowFrom(cells, map) {
   return { article, color, size, qty, source: parseSupplySource(at('status', 4)), date };
 }
 function parseSupplyCSV(text) {
-  const out = [];
+  const rows = [];
   const lines = String(text || '').replace(/\r/g, '').split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
-  if (!lines.length) return out;
+  if (!lines.length) return { rows, map: null, header: [] };
   const delim = (lines[0].match(/;/g) || []).length > (lines[0].match(/,/g) || []).length ? ';' : (lines[0].includes('\t') ? '\t' : ',');
   const split = (l) => l.split(delim).map((x) => x.trim());
-  const map = mapSupplyHeader(split(lines[0]));   // колонки по названию (любой порядок)
+  const header = split(lines[0]);
+  const map = mapSupplyHeader(header);   // колонки по названию (любой порядок)
   for (let i = map ? 1 : 0; i < lines.length; i++) {
     const r = supplyRowFrom(split(lines[i]), map);
-    if (r) out.push(r);
+    if (r) rows.push(r);
   }
-  return out;
+  return { rows, map, header };
+}
+// Человекочитаемая пометка «как прочитаны колонки» — для проверки правильности импорта.
+function describeSupplyCols(parsed) {
+  if (!parsed) return '';
+  const ru = { article: 'артикул', color: 'цвет', size: 'размер', qty: 'кол-во', status: 'статус', date: 'дата' };
+  if (parsed.map) return 'Колонки распознаны по шапке: ' + Object.keys(ru).filter((k) => parsed.map[k] != null).map((k) => `${ru[k]}←«${seEsc(parsed.header[parsed.map[k]])}»`).join(', ') + '.';
+  return '⚠ Шапка не распознана — читаю строки ПО ПОРЯДКУ: артикул, цвет, размер, кол-во, статус, дата. Если у тебя другой порядок колонок — переименуй заголовки или возьми шаблон.';
+}
+let supImportNote = '';
+function importSupplyParsed(parsed) {
+  if (!parsed || !parsed.rows || !parsed.rows.length) { toast('Не найдено строк с количеством (проверь колонки: артикул, цвет, размер, кол-во)', true); return; }
+  supImportNote = describeSupplyCols(parsed) + ` Загружено строк: ${parsed.rows.length}.`;
+  importSupplyRows(parsed.rows);
 }
 function supplyTemplateCSV() {
   const lines = ['article,color,size,qty,status,date'];
@@ -2213,12 +2228,12 @@ function renderSupply() {
         <button id="sup-wb-pull" class="btn btn-primary">⟳ Подтянуть остатки WB</button>
         <label class="mini">Выкуп: <input type="number" id="sup-buyout" min="0" max="100" value="${Math.round(+state.settings.wbBuyoutPct || 37)}" style="width:56px"> %</label>
         <button id="sup-wb-force" class="btn btn-subtle" title="Игнорировать часовой кэш и запросить свежие остатки">свежие (без кэша)</button>
+        <button id="sup-wb-vendors" class="btn btn-subtle" title="Показать твои артикулы продавца — чтобы подобрать правильный «Ключ WB»">🔎 Мои артикулы WB</button>
       </div>
       <div class="mini" style="margin-bottom:8px">Впиши для артикула <b>артикул продавца без цвета</b> (напр. <code>023_рвп</code>) — система сама возьмёт все цветовые карточки этого товара по всем FBW-складам. Можно и <b>nmID</b> одной карточки (тогда добавим её imtID и тот же префикс). Доступный остаток = склад + возвраты + едущее к клиенту × (1 − выкуп%).</div>
       <div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Название</th><th>Ключ WB (артикул продавца без цвета / nmID)</th></tr></thead><tbody>
         ${activeArticles().map((a) => `<tr><td>${seEsc(a.id)}</td><td class="mini">${seEsc(a.name || '')}</td><td><input type="text" data-wbkey="${seEsc(a.id)}" value="${seEsc(a.wbKey || '')}" placeholder="напр. 023_рвп" style="width:260px"></td></tr>`).join('')}
       </tbody></table></div>
-      <div class="matrix-io" style="margin-top:8px"><button id="sup-wb-vendors" class="btn btn-subtle">🔎 Показать мои артикулы WB (подобрать ключ)</button></div>
       ${wbVendors ? `<div class="mini" style="margin-top:8px">Твои артикулы продавца (${wbVendors.cardsCount} карточек) сгруппированы по префиксу — <b>копируй нужный префикс в «Ключ WB»</b>:
         <div class="matrix-scroll" style="max-height:220px;overflow:auto"><table class="matrix-table"><thead><tr><th>Префикс (ключ)</th><th class="num">Карточек</th><th>Примеры артикулов продавца</th></tr></thead><tbody>
         ${(wbVendors.prefixes || []).slice(0, 60).map((p) => `<tr><td><b>${seEsc(p.prefix)}</b></td><td class="num">${p.count}</td><td class="mini">${(p.samples || []).map(seEsc).join(', ')}</td></tr>`).join('')}
@@ -2255,6 +2270,7 @@ function renderSupply() {
 
     <div class="panel">
       <div class="se-chk-head" style="border:0;margin:0 0 8px;padding:0">Текущее предложение (${sup.length})</div>
+      ${supImportNote ? `<div class="mini" style="margin-bottom:8px;padding:6px 10px;border:1px solid var(--line);border-radius:8px">📥 Последний импорт — ${supImportNote}</div>` : ''}
       ${sup.length ? `<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th>Источник</th><th class="num">Объём</th><th>На WB</th><th>Детализация (размер → кол-во)</th><th></th></tr></thead><tbody>${recRows}</tbody></table></div>
       <div class="matrix-io" style="margin-top:8px"><button id="sup-clear" class="btn btn-danger">🗑 Очистить всё</button></div>`
       : '<div class="mini">Пока пусто. Загрузи данные выше (или подключи Google-таблицу).</div>'}
@@ -2282,13 +2298,13 @@ function renderSupply() {
   root.querySelector('#sup-tpl')?.addEventListener('click', () => downloadText('supply_template.csv', supplyTemplateCSV()));
   root.querySelector('#sup-tpl-xlsx')?.addEventListener('click', downloadSupplyXlsx);
   root.querySelector('#sup-file')?.addEventListener('change', (e) => importSupplyFile(e.target.files && e.target.files[0]));
-  root.querySelector('#sup-import')?.addEventListener('click', () => importSupplyRows(parseSupplyCSV(document.getElementById('sup-csv').value)));
+  root.querySelector('#sup-import')?.addEventListener('click', () => importSupplyParsed(parseSupplyCSV(document.getElementById('sup-csv').value)));
   root.querySelector('#sup-url')?.addEventListener('change', (e) => { state.settings.supplyCsvUrl = e.target.value.trim(); dirty = true; });
   root.querySelector('#sup-url-fetch')?.addEventListener('click', async () => {
     const u = (document.getElementById('sup-url').value || '').trim();
     if (!u) { toast('Вставь ссылку на опубликованный CSV', true); return; }
     state.settings.supplyCsvUrl = u; dirty = true;
-    try { const r = await api('/api/supply/csv?url=' + encodeURIComponent(u)); importSupplyRows(parseSupplyCSV(r.text)); }
+    try { const r = await api('/api/supply/csv?url=' + encodeURIComponent(u)); importSupplyParsed(parseSupplyCSV(r.text)); }
     catch (e) { toast('Не удалось загрузить: ' + e.message, true); }
   });
   root.querySelector('#sup-clear')?.addEventListener('click', () => {
