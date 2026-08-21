@@ -60,22 +60,39 @@ function cardColor(card) {
   return String((card && card.color) || '').trim();
 }
 
-const STOCKS_TTL = 60 * 60 * 1000; // остатки FBW — кэш 1 час (эндпоинт статистики жёстко лимитирован)
+const STOCKS_TTL = 60 * 60 * 1000; // остатки FBW — кэш 1 час (отчёт генерится и жёстко лимитирован)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Текущие остатки FBW (Statistics API). Возвращает сырые строки как есть. */
+/**
+ * Текущие остатки FBW через Seller Analytics «warehouse_remains» (отчёт: создать → дождаться →
+ * скачать). Старый /api/v1/supplier/stocks закрыт (deprecated). Отчёт уже сведён по всем складам
+ * (quantityWarehousesFull). Сгруппирован по nmId × размеру.
+ */
 export async function fetchStocks({ force = false } = {}) {
   if (!force) { const c = readCache('stocks.json', STOCKS_TTL); if (c) return c.data; }
   const c = client();
-  const dateFrom = '2020-01-01'; // WB отдаёт актуальные остатки на момент запроса
-  const { data } = await c.request('statistics', `/api/v1/supplier/stocks?dateFrom=${dateFrom}`, {
-    method: 'GET', methodLimit: { limit: 1, periodSec: 60, burst: 1 },
-  });
-  const rows = Array.isArray(data) ? data : [];
+  const q = 'locale=ru&groupByBrand=false&groupBySubject=false&groupBySa=false&groupByNm=true&groupByBarcode=false&groupBySize=true';
+  const created = await c.request('analytics', `/api/v1/warehouse_remains?${q}`, { method: 'GET', methodLimit: { limit: 1, periodSec: 60, burst: 1 } });
+  const cd = created && created.data;
+  const taskId = cd && (cd.taskId || (cd.data && cd.data.taskId));
+  if (!taskId) throw new Error('WB: не удалось создать отчёт по остаткам (нет taskId)');
+  let status = '';
+  for (let i = 0; i < 24; i++) { // ~2 минуты ожидания генерации
+    await sleep(5000);
+    const st = await c.request('analytics', `/api/v1/warehouse_remains/tasks/${taskId}/status`, { method: 'GET', methodLimit: { limit: 20, periodSec: 60, burst: 5 } });
+    const sd = st && st.data;
+    status = (sd && (sd.status || (sd.data && sd.data.status))) || '';
+    if (status === 'done') break;
+    if (status === 'purged' || status === 'canceled') throw new Error(`WB: отчёт по остаткам отменён (${status})`);
+  }
+  if (status !== 'done') throw new Error('WB: отчёт по остаткам не готов (таймаут ~2 мин). Нажми «свежие (без кэша)» чуть позже.');
+  const dl = await c.request('analytics', `/api/v1/warehouse_remains/tasks/${taskId}/download`, { method: 'GET', methodLimit: { limit: 10, periodSec: 60, burst: 5 } });
+  const rows = Array.isArray(dl.data) ? dl.data : (dl.data && Array.isArray(dl.data.data) ? dl.data.data : []);
   writeCache('stocks.json', rows);
   return rows;
 }
 
-/** Свести остатки по (nmId × techSize): суммируем количество/в пути к клиенту/возвраты по складам. */
+/** Свести остатки по (nmId × размер): quantityWarehousesFull (уже по всем складам) + в пути + возвраты. */
 export function aggregateStocks(rows) {
   const m = new Map();
   for (const r of (rows || [])) {
@@ -84,7 +101,7 @@ export function aggregateStocks(rows) {
     const ts = String(r.techSize != null ? r.techSize : '').trim();
     const key = nmId + '|' + ts;
     const cur = m.get(key) || { quantity: 0, inWayToClient: 0, inWayFromClient: 0 };
-    cur.quantity += +r.quantity || 0;
+    cur.quantity += (r.quantityWarehousesFull != null ? +r.quantityWarehousesFull : +r.quantity) || 0;
     cur.inWayToClient += +r.inWayToClient || 0;
     cur.inWayFromClient += +r.inWayFromClient || 0;
     m.set(key, cur);

@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'wb-link-by-prefix-2026-08-21d';
+const APP_BUILD = 'wb-warehouse-remains-2026-08-21e';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2140,7 +2140,8 @@ async function pullWbStocks(force) {
   if (!items.length) { toast('Ни у одного артикула нет привязки WB — впиши nmID или артикул продавца (023_рвп) в таблице ниже', true); return; }
   const bp = Math.max(0, Math.min(100, Math.round(+((document.getElementById('sup-buyout') || {}).value) || 37)));
   state.settings.wbBuyoutPct = bp; dirty = true;
-  const btn = document.getElementById('sup-wb-pull'); if (btn) { btn.disabled = true; btn.textContent = '⏳ Тяну остатки WB…'; }
+  const btn = document.getElementById('sup-wb-pull'); if (btn) { btn.disabled = true; btn.textContent = '⏳ Отчёт WB (до ~2 мин)…'; }
+  toast('WB формирует отчёт по остаткам — это может занять до ~2 минут, подожди…');
   try {
     const r = await api('/api/supply/wb-pull', { method: 'POST', body: JSON.stringify({ items, buyoutPct: bp, force: !!force }) });
     const recs = (r.supplies || []).filter((s) => s.units > 0);
