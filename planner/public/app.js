@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'weakcolor-drop-2026-08-22e';
+const APP_BUILD = 'sew-not-before-2026-08-22f';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1096,6 +1096,10 @@ function renderMatrix() {
           ${state.workshops.filter((w) => usedWs.has(w.id)).map((w) => `<option value="${w.id}"${matrixWsFilter === w.id ? ' selected' : ''}>${w.name}</option>`).join('')}
         </select>
       </label>
+      <label title="Сезонное окно: пошив этого артикула не ставится в график раньше этой даты. Гант и распределение по цехам это учтут (нагрузка балансируется по мощности).">Пошив не раньше:
+        <input type="date" id="mx-sewnotbefore" value="${a.sewNotBefore || ''}">
+      </label>
+      ${a.sewNotBefore ? '<button id="mx-sewnotbefore-clear" class="btn btn-subtle" type="button" title="Убрать ограничение старта пошива">✖ без огр.</button>' : ''}
       <button id="mx-add-partia" class="btn">＋ партия (ручная)</button>
       ${allParts.some((x) => x.status === 'plan') ? '<button id="mx-distribute-all" class="btn btn-accent" title="Раздробить все партии артикула по цехам пропорционально мощности, чтобы уложиться в сроки (свой цех первым; настил соблюдается)">⚙ Распределить по цехам</button>' : ''}
       ${allParts.length ? '<button id="mx-del-all" class="btn btn-danger" title="Удалить ВСЕ партии этого артикула">🗑 Удалить все партии</button>' : ''}
@@ -1554,6 +1558,19 @@ function bindMatrixControls(a) {
   document.getElementById('mx-article').addEventListener('change', (e) => { matrixArticleId = e.target.value; matrixPartiaId = null; matrixWsFilter = ''; renderMatrix(); });
   const wf = document.getElementById('mx-ws-filter');
   if (wf) wf.addEventListener('change', (e) => { matrixWsFilter = e.target.value; matrixPartiaId = null; renderMatrix(); });
+  const snb = document.getElementById('mx-sewnotbefore');
+  if (snb) snb.addEventListener('change', (e) => {
+    a.sewNotBefore = /^\d{4}-\d{2}-\d{2}$/.test(String(e.target.value || '')) ? e.target.value : '';
+    dirty = true;
+    recalc(true).then(() => { renderMatrix(); toast(a.sewNotBefore ? `Пошив ${a.id} — не раньше ${a.sewNotBefore}. Проверь «Диаграмму Ганта».` : `Ограничение старта пошива ${a.id} снято`); })
+      .catch((err) => toast('Ошибка пересчёта: ' + err.message, true));
+  });
+  const snbc = document.getElementById('mx-sewnotbefore-clear');
+  if (snbc) snbc.addEventListener('click', () => {
+    a.sewNotBefore = ''; dirty = true;
+    recalc(true).then(() => { renderMatrix(); toast(`Ограничение старта пошива ${a.id} снято`); })
+      .catch((err) => toast('Ошибка пересчёта: ' + err.message, true));
+  });
   const da = document.getElementById('mx-del-all');
   if (da) da.addEventListener('click', () => {
     const n = partiasOfArticle(a.id).length;

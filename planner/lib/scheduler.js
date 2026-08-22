@@ -179,12 +179,17 @@ export function buildSchedule(state) {
   // «Не начинать раньше» (пер-партия) — производственная пауза/окно из «Ритма производства».
   // Пустое/невалидное = нет ограничения (старт с seasonStart). Клампим к рабочему дню.
   const esOf = (j) => {
-    const s = j.partia && j.partia.earliestStart;
-    if (s && /^\d{4}-\d{2}-\d{2}$/.test(String(s).slice(0, 10))) {
-      const d = cal.nextWorkingDay(String(s).slice(0, 10));
-      return d > seasonStart ? d : seasonStart; // раньше старта сезона всё равно нельзя
+    // берём позднейшую из: пер-партийной earliestStart (ритм) и пер-артикульной sewNotBefore
+    // (сезонное окно артикула). Обе клампим к рабочему дню и к старту сезона.
+    let best = seasonStart;
+    for (const s of [j.partia && j.partia.earliestStart, j.article && j.article.sewNotBefore]) {
+      if (s && /^\d{4}-\d{2}-\d{2}$/.test(String(s).slice(0, 10))) {
+        const d = cal.nextWorkingDay(String(s).slice(0, 10));
+        const clamped = d > seasonStart ? d : seasonStart; // раньше старта сезона всё равно нельзя
+        if (clamped > best) best = clamped;
+      }
     }
-    return seasonStart;
+    return best;
   };
   // фактический старт цикла в цехе w для задания j = позже из {цех свободен, «не раньше»}
   const effStartOf = (w, j) => { const es = esOf(j); const fd = freeDate[w.id]; return fd > es ? fd : es; };

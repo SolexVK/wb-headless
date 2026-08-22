@@ -277,6 +277,10 @@ export function normalizeState(input) {
     a.unit = normalizeUnitArticle(a.unit);
     // ключ привязки к WB для авто-остатков: nmID ИЛИ префикс артикула продавца (023_рвп)
     a.wbKey = typeof a.wbKey === 'string' ? a.wbKey.trim().slice(0, 80) : '';
+    // «начинать пошив не раньше» (сезонное окно артикула): пошив этого артикула не ставится в
+    // график до этой даты. Пусто = без ограничения. Планировщик берёт позднейшую из этой и
+    // пер-партийной earliestStart, распределяя нагрузку по цехам по мощности.
+    a.sewNotBefore = /^\d{4}-\d{2}-\d{2}$/.test(String(a.sewNotBefore || '').slice(0, 10)) ? String(a.sewNotBefore).slice(0, 10) : '';
   }
   // автосортировка артикулов по номеру, от меньшего к большему (числовая)
   s.articles.sort(compareArticleId);
