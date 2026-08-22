@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'supply-net-export-2026-08-21n';
+const APP_BUILD = 'supply-net-cols-2026-08-22a';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1385,14 +1385,24 @@ function partiaReadyAoA(a, p) {
   const M = prodMatrixFor(p);                    // выгрузка для цеха — на НЕТТО (за вычетом остатков)
   const gross = matrixSum(p.planMatrix);         // спрос по плану
   const net = matrixSum(M);                       // к пошиву после вычета остатков
-  const cols = colsForMatrix(a, M);
-  const sizes = rowsForMatrix(a, M);
+  // колонки — ровно как на экране «План по размерам»: только цвета, включённые в ЭТОТ довоз
+  // (выключенные чипы/чужие цвета не выгружаем; голубой с нулём после вычета остаётся — он в плане был)
+  const cols = colsForMatrix(a, p.planMatrix || {}).filter((c) => colorOnInPartia(p, c));
+  const sizes = rowsForMatrix(a, p.planMatrix || {}, M);
   const ws = state.workshops.find((w) => w.id === p.workshopId);
   const meta = [`Артикул ${a.id} — ${a.name}`, `Партия ${p.no}${p.deliveryTag ? ' · ' + p.deliveryTag : ''}`];
   if (p.deadline) meta.push(`Срок WB: ${p.deadline}`);
   meta.push(`Цех: ${ws ? ws.name : 'авто'}`, `Статус: ${PARTIA_STATUS_RU[p.status] || p.status || '—'}`);
-  // если остатки что-то покрыли — явно показываем цеху, что это уже нетто
-  if (net < gross) meta.push(`К производству: ${net.toLocaleString('ru')} шт (спрос по плану ${gross.toLocaleString('ru')}, остатки вычтены)`);
+  // если остатки что-то покрыли — явно показываем цеху, что это уже нетто, и по каким цветам вычли
+  if (net < gross) {
+    meta.push(`К производству: ${net.toLocaleString('ru')} шт (спрос по плану ${gross.toLocaleString('ru')}, остатки вычтены)`);
+    const covered = cols.map((c) => {
+      const g = a.sizes.reduce((n, s) => n + cell(p.planMatrix, c, s), 0);
+      const nn = a.sizes.reduce((n, s) => n + cell(M, c, s), 0);
+      return (g - nn > 0) ? `${c} −${(g - nn).toLocaleString('ru')}` : null;
+    }).filter(Boolean);
+    if (covered.length) meta.push(`Покрыто остатками по цветам: ${covered.join(', ')}`);
+  }
   if (net === 0 && gross > 0) meta.push('⚠ Полностью покрыто остатками — шить не нужно');
   if (a.comment) meta.push(`Особенности: ${a.comment}`);
   const rows = meta.map((t) => [t]); // каждый пункт — своя строка, только колонка A → текст перетекает вправо
