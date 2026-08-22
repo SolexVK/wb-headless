@@ -28,6 +28,7 @@ async function main() {
   console.error(`Артикулы: ${skus.join(', ')} · период ${d1}…${d2}`);
   const data = await buildShirtsData({
     skus, d1, d2,
+    ...(process.env.SHIRTS_MINUS ? { marketMinus: process.env.SHIRTS_MINUS } : {}),
     onProgress: (stage, i, n) => process.stderr.write(stage === 'market' ? '  рынок (ниша, топ-300, размеры)…\r' : `  артикул ${i}/${n} (деньги, карточка, отзывы, сканирование)\r`),
   });
   console.error('');
