@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'batch-split-2026-08-22g';
+const APP_BUILD = 'color-coeff-2026-08-22h';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -3673,6 +3673,17 @@ function applyColorExclusions(cq, article) {
   const weak = (cq.weak || []).filter((r) => !set.has(r.name));
   return { ...cq, core, weak, grandTotal: core.reduce((s, r) => s + r.qty, 0) };
 }
+// Ручной коэффициент к «Кол-ву к пошиву» по РЫНОЧНОМУ цвету: article.colorAdjust = { цвет: % }.
+// 100 = как расчёт, 120 = +20%, 80 = −20%. Масштабирует только qty (объём к пошиву), продажи/долю
+// (реальные данные) не трогает. «Мои цвета» правятся своим редактором — их не касаемся.
+function applyColorAdjust(cq, article) {
+  const adj = (article && article.colorAdjust && typeof article.colorAdjust === 'object') ? article.colorAdjust : null;
+  if (!cq || !adj) return cq;
+  const scale = (r) => { const p = +adj[r.name]; if (r.custom || !(p > 0) || p === 100) return r; return { ...r, qty: Math.max(0, Math.round((r.qty || 0) * p / 100)) }; };
+  const core = cq.core.map(scale);
+  const weak = (cq.weak || []).map(scale);
+  return { ...cq, core, weak, grandTotal: core.reduce((s, r) => s + (r.qty || 0), 0) };
+}
 
 // Доли спроса по ЦВЕТАМ + количество к пошиву. Нормализованная доля = среднее на 1 артикул
 // (÷ Σсредних) — убирает перекос «белого больше выкладывают». Кол-во считается относительно
@@ -3683,7 +3694,7 @@ function seasonColorsBlock(rep, p) {
   const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
   const forecast = Math.round(((p && p.forecastDaily) || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
   const article = (state.articles || []).find((x) => x.id === seasonSelArticle) || null;
-  const cqBase = seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount);
+  const cqBase = applyColorAdjust(seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount), article);
   const analyzedNames = new Set(cqBase ? [...cqBase.core, ...cqBase.weak].map((r) => r.name) : ca.colors.map((c) => c.name));
   const cq = mergeCustomColors(cqBase, article, forecast); // + «мои цвета» в ядро (без фильтра исключений — для показа)
   const excluded = new Set((article && article.excludedColors) || []); // исключённые вручную (не шьём)
@@ -3727,11 +3738,12 @@ function seasonColorsBlock(rep, p) {
       <td class="num se-share-cell">${c.rawShare != null ? `<span class="se-share-bar" style="width:${Math.round((c.rawShare || 0) / maxRaw * 90)}px"></span>${c.rawShare}%` : '—'}</td>
       <td class="num">${c.avgPerSku == null ? '—' : numCell(fmt(c.avgPerSku), effNote, effNote ? 'Ср/арт выше, чем у лидера — цвет продаётся лучше на карточку при меньшем объёме: возможная недооценённая ниша' : '')}</td>
       <td class="num">${numCell(qtyCell, qtyNote)}</td>
+      <td class="num">${(!isCustom && !isExcl) ? `<input class="se-adj" data-adj="${seEsc(c.name)}" type="number" min="0" step="5" value="${(article && article.colorAdjust && +article.colorAdjust[c.name] > 0) ? Math.round(+article.colorAdjust[c.name]) : 100}" title="Коэффициент к количеству к пошиву, %: 100 = как расчёт, 120 = +20%, 80 = −20%" style="width:56px">` : '<span class="mini">—</span>'}</td>
     </tr>`;
   }).join('');
 
   const head = cq
-    ? `<div class="mini"><b>Логика количества:</b> база — <b>суммарный объём продаж</b> цвета (реальный спрос). «Выкупы (прогноз)» = ${fmt(forecast)} шт — это объём <b>лидера по объёму</b> (★ ${seEsc(cq.best.name)}). Остальные — меньше, <b>пропорционально своему объёму относительно лидера</b> (кол-во = прогноз × доля÷лидер). Ассортимент — минимум <b>${seasonColorMinCount}</b> расцветок (сперва надёжные ≥${ca.minCount} карточек, затем <b>⚑ добор</b>). <b>Ср/арт</b> — справочно; <b>▲ эфф</b> = продаётся лучше на карточку, чем лидер (возможная недооценённая ниша).</div>`
+    ? `<div class="mini"><b>Логика количества:</b> база — <b>суммарный объём продаж</b> цвета (реальный спрос). «Выкупы (прогноз)» = ${fmt(forecast)} шт — это объём <b>лидера по объёму</b> (★ ${seEsc(cq.best.name)}). Остальные — меньше, <b>пропорционально своему объёму относительно лидера</b> (кол-во = прогноз × доля÷лидер). Ассортимент — минимум <b>${seasonColorMinCount}</b> расцветок (сперва надёжные ≥${ca.minCount} карточек, затем <b>⚑ добор</b>). <b>Ср/арт</b> — справочно; <b>▲ эфф</b> = продаётся лучше на карточку, чем лидер (возможная недооценённая ниша). Не согласен с расчётным кол-вом — поправь <b>коэффициентом ±%</b> в последней колонке (100 = как расчёт, 120 = +20%, 80 = −20%); общий тираж пересчитается.</div>`
     : `<div class="mini">Доля объёма = суммарные продажи цвета ÷ все продажи. Кол-во появится, когда есть прогноз и доверенные цвета.</div>`;
   const producedCore = cq ? cq.core.filter((r) => !excluded.has(r.name)) : [];
   const producedTotal = producedCore.reduce((s, r) => s + r.qty, 0);
@@ -3774,14 +3786,14 @@ function seasonColorsBlock(rep, p) {
   const totQty = ordered.reduce((s, c) => { const q = qtyByName.get(c.name); return s + (q && !excluded.has(c.name) ? q.qty : 0); }, 0);
   const footCnt = ordered.filter((c) => qtyByName.get(c.name) && !excluded.has(c.name)).length;
   const footRow = cq
-    ? `<tfoot><tr class="mx-vsego"><th>ВСЕГО (${footCnt} цв.)</th><th class="num">${totSkus}</th><th class="num">${fmt(totUnits)}</th><th class="num">100%</th><th class="num">—</th><th class="num"><b>${fmt(totQty)}</b></th></tr></tfoot>`
+    ? `<tfoot><tr class="mx-vsego"><th>ВСЕГО (${footCnt} цв.)</th><th class="num">${totSkus}</th><th class="num">${fmt(totUnits)}</th><th class="num">100%</th><th class="num">—</th><th class="num"><b>${fmt(totQty)}</b></th><th class="num">—</th></tr></tfoot>`
     : '';
   return `<details class="se-comp" open>
     <summary>🎨 Цвета: доли спроса и кол-во к пошиву <span class="mini">(${poolNote})</span></summary>
     <div class="se-comp-body">
       ${head}
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table">
-        <thead><tr><th>Цвет</th><th class="num" title="Артикулов конкурентов этого цвета">Тов.</th><th class="num" title="Суммарные продажи цвета за период анализа (штук) — реальный спрос. Период определяется системой (лучший/заданный).">Продажи в период</th><th class="num" title="Доля суммарного объёма продаж цвета от всех — база плана">Доля объёма</th><th class="num" title="Средняя продажа на 1 карточку (справочно); ▲ эфф = выше лидера">Ср/арт</th><th class="num" title="Кол-во к пошиву = прогноз × доля объёма относительно лидера">Кол-во, шт</th></tr></thead>
+        <thead><tr><th>Цвет</th><th class="num" title="Артикулов конкурентов этого цвета">Тов.</th><th class="num" title="Суммарные продажи цвета за период анализа (штук) — реальный спрос. Период определяется системой (лучший/заданный).">Продажи в период</th><th class="num" title="Доля суммарного объёма продаж цвета от всех — база плана">Доля объёма</th><th class="num" title="Средняя продажа на 1 карточку (справочно); ▲ эфф = выше лидера">Ср/арт</th><th class="num" title="Кол-во к пошиву = прогноз × доля объёма относительно лидера">Кол-во, шт</th><th class="num" title="Ручной коэффициент к количеству, %: 100 = как расчёт, больше/меньше — вручную увеличить/уменьшить">±%</th></tr></thead>
         <tbody>${rows}</tbody>
         ${footRow}
       </table></div>
@@ -3954,7 +3966,7 @@ function reconcileInputs(rep, p, articleId) {
   if (!sa || !Array.isArray(sa.sizes) || !sa.sizes.length) return null;
   const forecast = Math.round(((p && p.forecastDaily) || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
   const article = (state.articles || []).find((x) => x.id === (articleId || seasonSelArticle)) || null;
-  const cq = applyColorExclusions(mergeCustomColors(seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount), article, forecast), article);
+  const cq = applyColorExclusions(mergeCustomColors(applyColorAdjust(seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount), article), article, forecast), article);
   if (!cq) return null;
   const core = sa.sizes.filter((s) => s.core);
   return {
@@ -4147,6 +4159,14 @@ function bindSeasonCustomColors(rep, p, articleId) {
     const name = e.currentTarget.dataset.cx; if (!name) return;
     const ex = article.excludedColors = Array.isArray(article.excludedColors) ? article.excludedColors : [];
     if (ex.includes(name)) article.excludedColors = ex.filter((x) => x !== name); else ex.push(name);
+    rerender();
+  }));
+  // Ручной коэффициент % к количеству рыночного цвета. Хранится в article.colorAdjust.
+  document.querySelectorAll('.se-adj').forEach((el) => el.addEventListener('change', (e) => {
+    const name = e.currentTarget.dataset.adj; if (!name) return;
+    const adj = article.colorAdjust = (article.colorAdjust && typeof article.colorAdjust === 'object') ? article.colorAdjust : {};
+    const v = Math.max(0, Math.round(+e.currentTarget.value || 100));
+    if (v === 100) delete adj[name]; else adj[name] = v;
     rerender();
   }));
 }
@@ -4539,7 +4559,7 @@ function seasonColorPlansData(rep, p) {
   if (!ca || !Array.isArray(ca.colors) || !ca.colors.length) return null;
   const forecast = Math.round((p.forecastDaily || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
   const article = (state.articles || []).find((x) => x.id === seasonSelArticle) || null;
-  const cq = applyColorExclusions(mergeCustomColors(seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount), article, forecast), article);
+  const cq = applyColorExclusions(mergeCustomColors(applyColorAdjust(seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount), article), article, forecast), article);
   if (!cq || !forecast) return null;
   // помесячная форма кривой (одинаковая для всех цветов, масштаб — по доле цвета)
   const byMonth = {};

@@ -287,6 +287,11 @@ export function normalizeState(input) {
     // график до этой даты. Пусто = без ограничения. Планировщик берёт позднейшую из этой и
     // пер-партийной earliestStart, распределяя нагрузку по цехам по мощности.
     a.sewNotBefore = /^\d{4}-\d{2}-\d{2}$/.test(String(a.sewNotBefore || '').slice(0, 10)) ? String(a.sewNotBefore).slice(0, 10) : '';
+    // ручные коэффициенты «Кол-ва к пошиву» по рыночным цветам: { цвет: % } (100 = как расчёт).
+    // Храним только валидные (цвет есть у артикула) и != 100.
+    { const cm = a.colorAdjust && typeof a.colorAdjust === 'object' ? a.colorAdjust : {};
+      const clean = {}; for (const [k, v] of Object.entries(cm)) { const p = Math.max(0, Math.round(+v || 0)); if (a.colors.includes(k) && p > 0 && p !== 100) clean[String(k)] = p; }
+      a.colorAdjust = clean; }
   }
   // автосортировка артикулов по номеру, от меньшего к большему (числовая)
   s.articles.sort(compareArticleId);
