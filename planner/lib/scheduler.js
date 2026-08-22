@@ -376,6 +376,7 @@ export function buildSchedule(state) {
       deliveryTag: job.partia.deliveryTag || '', // метка поставки (П1/П2/П3/подсорт) — если из прогноза
       batchIndex: job.batchIndex || 0,           // № партии в раздроблённом довозе (0-based)
       batchCount: job.batchCount || 1,           // сколько всего партий в довозе
+      batchMatrix: job.prodMatrix || {},         // матрица цвет×размер именно этой партии (для выгрузки/показа)
       articleId: job.article.id,
       articleName: job.article.name,
       workshopId: w.id,

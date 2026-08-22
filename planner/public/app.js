@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'exclude-hide-2026-08-22i';
+const APP_BUILD = 'batch-sheets-2026-08-22j';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1119,8 +1119,11 @@ function renderMatrix() {
   { const excl = new Set(a.excludedColors || []); // исключённые цвета не заводим в матрицу (не шьём)
     for (const c of a.colors) { if (excl.has(c)) { delete M[c]; continue; } M[c] = M[c] || {}; for (const s of a.sizes) if (M[c][s] == null) M[c][s] = 0; } }
   const hasGrid = a.colors.length && a.sizes.length;
-  const cyc = (schedule?.cycles || []).filter((c) => c.partiaId === p.id);
-  const cycInfo = cyc.length ? cyc.map((c) => `${c.workshopName} — ${c.units.toLocaleString('ru')} шт`).join(' · ') : 'не назначено (сохрани и пересчитай)';
+  const cyc = (schedule?.cycles || []).filter((c) => c.partiaId === p.id).sort((x, y) => (x.batchIndex - y.batchIndex));
+  const split = cyc.length && cyc[0].batchCount > 1;
+  const cycInfo = cyc.length
+    ? cyc.map((c) => `${c.batchCount > 1 ? `партия ${c.batchIndex + 1}/${c.batchCount} · ` : ''}${c.workshopName} — ${c.units.toLocaleString('ru')} шт${c.readyDate ? ` (гот. ${c.readyDate.slice(8, 10)}.${c.readyDate.slice(5, 7)})` : ''}`).join(' · ')
+    : 'не назначено (сохрани и пересчитай)';
 
   root.innerHTML = `${globalDistHTML()}
     <div class="panel">
@@ -1138,7 +1141,7 @@ function renderMatrix() {
         <button id="mx-del-partia" class="btn btn-danger">Удалить партию</button>
         <button id="mx-split-partia" class="btn btn-subtle" title="Разрезать эту партию надвое вручную (по правилам настила), без учёта мощностей">✂ разрезать вручную</button>
       </div>
-      <div class="mini" style="margin:2px 0 10px">Сейчас отшивает: <b>${cycInfo}</b>. Заполни количества в таблице и нажми <b>«Сохранить план»</b> (номер партии — свой у каждого цеха; статус и факт — на вкладке «Факт»).</div>
+      <div class="mini" style="margin:2px 0 10px">${split ? `Довоз дроблён на <b>${cyc.length} произв. партии</b> (≤ ${Math.max(0, Math.round(+(state.settings.batchSize) || 5000)).toLocaleString('ru')} шт) по цехам: ` : 'Сейчас отшивает: '}<b>${cycInfo}</b>. Заполни количества и нажми <b>«Сохранить план»</b> (эти партии — в выгрузке Excel для цеха; статус и факт — на «Факт»).</div>
       ${hasGrid ? seasonColorChipsHTML(a, p) : ''}
       ${(() => {
         if (!hasGrid) return '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>';
@@ -1169,8 +1172,8 @@ function renderMatrix() {
       ${(() => { const v = nestingViolations(M, nestingRules()); if (!v.length) return ''; const r = nestingRules(); return `<div style="margin-top:10px;padding:8px 10px;border:1px solid #d97706;border-radius:8px;background:rgba(245,158,11,.1)"><div class="mini"><b>Настил (ориентир):</b> ${v.map((x) => x.kind === 'color' ? `цвет «${x.color}» ${x.qty} шт (&lt;${r.minColorQty})` : `${x.color}/${x.size} ${x.qty} шт (&lt;${r.minSizeQty})`).join(' · ')}. Мягкое предупреждение — можно продолжать.</div></div>`; })()}
       <div class="matrix-io" style="margin-top:12px">
         <span class="mini"><b>План для цеха → Excel</b> <span title="Выгрузка идёт на НЕТТО: из плана вычтены загруженные остатки (WB/в пути/склад/производство). Полностью покрытые партии в «все партии» не попадают.">(нетто, за вычетом остатков ⓘ)</span>:</span>
-        <button id="mx-xlsx-partia" class="btn btn-accent" title="Скачать план этой партии в Excel (нетто: за вычетом остатков)">⤓ эта партия</button>
-        <button id="mx-xlsx-article" class="btn btn-accent" title="Скачать все партии этого артикула (нетто) — по листу на партию">⤓ все партии ${a.id}</button>
+        <button id="mx-xlsx-partia" class="btn btn-accent" title="Скачать этот довоз в Excel — лист на каждую произв. партию (нетто, по цехам)">⤓ этот довоз (партии)</button>
+        <button id="mx-xlsx-article" class="btn btn-accent" title="Скачать все довозы артикула — лист на каждую произв. партию (нетто, по цехам)">⤓ все партии ${a.id}</button>
         <span class="mini" style="margin-left:10px">Ввод: <b>Ctrl+V</b> из Excel в ячейку · шаблон:</span>
         <button id="mx-tpl-one" class="btn btn-subtle">⤓ ${a.id}</button>
         <button id="mx-tpl-all" class="btn btn-subtle">⤓ все</button>
@@ -1464,21 +1467,20 @@ function readySheetName(p, used) {
   let base = name, n = 2; while (used.has(name)) name = (base.slice(0, 25) + ' ' + n++);
   used.add(name); return name;
 }
-function appendReadySheet(wb, a, p, used) {
-  const { rows, cols, sizes, headerRowIdx } = partiaReadyAoA(a, p);
+// Оформить лист из готового AoA (стили: шапка артикула, цветные заголовки, тело, ВСЕГО).
+function styleReadySheet(wb, aoa, sheetName) {
+  const { rows, cols, sizes, headerRowIdx } = aoa;
   const sheet = XLSX.utils.aoa_to_sheet(rows);
   sheet['!cols'] = [{ wch: 18 }, ...cols.map(() => ({ wch: 12 })), { wch: 10 }];
   const set = (r, c, s) => { const cell = sheet[XLSX.utils.encode_cell({ r, c })]; if (cell) cell.s = s; };
   set(0, 0, { font: { bold: true, sz: 13 } }); // заголовок артикула
-  // шапка матрицы
   set(headerRowIdx, 0, { font: { bold: true }, alignment: { horizontal: 'left', vertical: 'center' }, border: XLSX_BORDER() });
   for (let i = 0; i < cols.length; i++) {
     const hex = xlsxColorHex(cols[i]);
     set(headerRowIdx, i + 1, { font: { bold: true, color: { rgb: xlsxTextOn(hex) } }, alignment: { horizontal: 'center', vertical: 'center' }, fill: { patternType: 'solid', fgColor: { rgb: hex } }, border: XLSX_BORDER() });
   }
   set(headerRowIdx, cols.length + 1, { font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center' }, border: XLSX_BORDER() });
-  // тело + строка ВСЕГО
-  const firstData = headerRowIdx + 1, lastRow = firstData + sizes.length; // sizes строк + строка ВСЕГО
+  const firstData = headerRowIdx + 1, lastRow = firstData + sizes.length;
   for (let r = firstData; r <= lastRow; r++) {
     const isTot = r === lastRow;
     set(r, 0, { font: { bold: isTot }, border: XLSX_BORDER() });
@@ -1487,29 +1489,57 @@ function appendReadySheet(wb, a, p, used) {
     }
     set(r, cols.length + 1, { alignment: { horizontal: 'center' }, font: { bold: true }, border: XLSX_BORDER() });
   }
-  XLSX.utils.book_append_sheet(wb, sheet, readySheetName(p, used));
+  XLSX.utils.book_append_sheet(wb, sheet, sheetName);
 }
-// Экспорт готового плана: одна партия (partia задан) или все партии артикула (лист на партию).
+// Собрать AoA (шапка-мета + матрица цвет×размер) из произвольной матрицы M.
+function buildReadyAoA(a, M, metaLines) {
+  const cols = (a.colors || []).filter((c) => a.sizes.reduce((n, s) => n + cell(M, c, s), 0) > 0);
+  const sizes = (a.sizes || []).filter((s) => cols.some((c) => cell(M, c, s) > 0));
+  const rows = metaLines.map((t) => [t]); rows.push([]);
+  const headerRowIdx = rows.length;
+  rows.push(['Размер \\ Цвет', ...cols, 'Итого']);
+  for (const s of sizes) { const row = [s]; let rt = 0; for (const c of cols) { const v = cell(M, c, s); row.push(v || 0); rt += v; } row.push(rt); rows.push(row); }
+  const tot = ['ВСЕГО']; let grand = 0; for (const c of cols) { const ct = a.sizes.reduce((n, s) => n + cell(M, c, s), 0); tot.push(ct); grand += ct; } tot.push(grand); rows.push(tot);
+  return { rows, cols, sizes, headerRowIdx };
+}
+// уникальное имя листа (Excel ≤ 31 символа, без : \ / ? * [ ])
+function uniqSheetName(base, used) { let n = String(base).replace(/[:\\/?*[\]]/g, ' ').slice(0, 28); const b = n; let k = 2; while (used.has(n)) n = (b.slice(0, 25) + ' ' + k++); used.add(n); return n; }
+// AoA одной ПРОИЗВОДСТВЕННОЙ ПАРТИИ (батча) из цикла расписания — матрица батча, довоз, цех, номер.
+function batchReadyAoA(a, c) {
+  const p = (state.partias || []).find((x) => x.id === c.partiaId) || {};
+  const M = c.batchMatrix || {};
+  const dvz = c.deliveryTag || p.deliveryTag || (`Партия ${c.partiaNo || p.no || ''}`);
+  const meta = [`Артикул ${a.id} — ${a.name}`,
+    c.batchCount > 1 ? `${dvz} · партия ${c.batchIndex + 1} из ${c.batchCount}` : `${dvz}`];
+  if (p.deadline) meta.push(`Срок WB: ${p.deadline}`);
+  if (c.readyDate) meta.push(`Готовность: ${c.readyDate}`);
+  meta.push(`Цех: ${c.workshopName || 'авто'}`, `К пошиву: ${matrixSum(M).toLocaleString('ru')} шт`);
+  if (a.comment) meta.push(`Особенности: ${a.comment}`);
+  return buildReadyAoA(a, M, meta);
+}
+// Производственные партии (батчи из расписания) артикула; можно ограничить одним довозом (partiaId).
+function batchesForExport(articleId, partiaId) {
+  return (schedule?.cycles || []).filter((c) => !c.historical && c.articleId === articleId && (!partiaId || c.partiaId === partiaId) && matrixSum(c.batchMatrix || {}) > 0)
+    .sort((x, y) => String(x.deliveryTag).localeCompare(String(y.deliveryTag)) || (x.partiaNo - y.partiaNo) || (x.batchIndex - y.batchIndex));
+}
+// Экспорт готового плана для цеха: ЛИСТ НА ПРОИЗВОДСТВЕННУЮ ПАРТИЮ (батч). Один довоз (partiaId) или все.
 function exportReadyPlanXlsx(articleId, partiaId) {
   if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу (Cmd+Shift+R)', true); return; }
   const a = state.articles.find((x) => x.id === articleId);
   if (!a) { toast('Артикул не найден', true); return; }
+  const batches = batchesForExport(articleId, partiaId);
+  if (!batches.length) { toast('Нечего шить: нет производственных партий (всё покрыто остатками или не пересчитано)', true); return; }
   const wb = XLSX.utils.book_new();
   const used = new Set();
-  if (partiaId) {
-    const p = (state.partias || []).find((x) => x.id === partiaId);
-    if (!p) { toast('Партия не найдена', true); return; }
-    appendReadySheet(wb, a, p, used);
-    XLSX.writeFile(wb, `план_${a.id}_партия_${p.no}.xlsx`);
-    return;
+  for (const c of batches) {
+    const dvz = c.deliveryTag || (`П${c.partiaNo}`);
+    const nm = c.batchCount > 1 ? `${dvz} п${c.batchIndex + 1}` : dvz;
+    styleReadySheet(wb, batchReadyAoA(a, c), uniqSheetName(nm, used));
   }
-  const all = partiasOfArticle(a.id).filter((p) => matrixSum(p.planMatrix) > 0);
-  const parts = all.filter((p) => matrixSum(prodMatrixFor(p)) > 0); // фул-покрытые остатками не выгружаем
-  if (!parts.length) { toast('Нечего шить: весь план этого артикула покрыт остатками', true); return; }
-  for (const p of parts) appendReadySheet(wb, a, p, used);
-  XLSX.writeFile(wb, `план_${a.id}_все_партии.xlsx`);
-  const covered = all.length - parts.length;
-  toast(`Выгружено партий: ${parts.length}${covered ? ` (${covered} полностью покрыто остатками — пропущены)` : ''}. Объёмы — нетто, за вычетом остатков.`);
+  const fname = partiaId ? `план_${a.id}_${(batches[0].deliveryTag || 'довоз').replace(/[^\wА-Яа-я]+/g, '_')}.xlsx` : `план_${a.id}_все_партии.xlsx`;
+  XLSX.writeFile(wb, fname);
+  const nDvz = new Set(batches.map((c) => c.partiaId)).size;
+  toast(`Выгружено производственных партий: ${batches.length} (по ${nDvz} довоз.). Объёмы — нетто, разложено по цехам.`);
 }
 // разобрать книгу .xlsx в структуру { articleId: { stageId: { color: { size: qty } } } }
 function parsePlanWorkbook(wb) {
