@@ -33,6 +33,7 @@ async function main() {
     ...(process.env.SHIRTS_PLUS ? { marketPlus: process.env.SHIRTS_PLUS } : {}),
     ...(process.env.SHIRTS_MINUS ? { marketMinus: process.env.SHIRTS_MINUS } : {}),
     ...(process.env.SHIRTS_NICHE_QUERIES ? { nicheQueries: process.env.SHIRTS_NICHE_QUERIES.split('|').map((s) => s.trim()).filter(Boolean) } : {}),
+    ...(process.env.SHIRTS_REFINE ? { refine: JSON.parse(process.env.SHIRTS_REFINE) } : {}),
     ...(process.env.SHIRTS_TITLE ? { title: process.env.SHIRTS_TITLE } : {}),
     ...(process.env.SHIRTS_NICHE_DESC ? { nicheDesc: process.env.SHIRTS_NICHE_DESC } : {}),
     onProgress: (stage, i, n) => process.stderr.write(stage === 'market' ? '  рынок (ниша, топ-300, размеры)…\r' : `  артикул ${i}/${n} (деньги, карточка, отзывы, сканирование)\r`),
