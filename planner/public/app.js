@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'supply-net-view-2026-08-22b';
+const APP_BUILD = 'supply-merge-2026-08-22c';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -953,6 +953,8 @@ let mxViewNet = true;    // «План по размерам»: показыва
 
 // ── настил (клиентские хелперы, зеркало lib/nesting.js) ──
 function nestingRules() { const n = state.settings.nesting || {}; return { minSizeQty: +n.minSizeQty || 20, minColorQty: +n.minColorQty || 400 }; }
+function minBatchQty() { return Math.max(0, Math.round(+(state.settings && state.settings.minBatch) || 2000)); }
+function supplyMerges() { return (schedule && schedule.supply && schedule.supply.merges) || []; }
 function colorSum(row) { let s = 0; for (const k in (row || {})) s += +row[k] || 0; return Math.round(s); }
 function matrixSum(M) { let s = 0; for (const c in (M || {})) s += colorSum(M[c]); return Math.round(s); }
 function nestingViolations(M, r) {
@@ -1136,16 +1138,27 @@ function renderMatrix() {
       ${(() => {
         if (!hasGrid) return '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>';
         const grossSum = sumMatrix(M), netSum = matrixSum(prodMatrixFor(p));
-        const hasCoverage = netSum < grossSum;                 // остатки что-то покрыли → есть что скрывать
+        const merges = supplyMerges();
+        const mergedAway = merges.find((m) => m.from === p.id);        // этот довоз слит в следующий
+        const absorbs = merges.filter((m) => m.into === p.id);         // этот довоз принял мелкие
+        const hasCoverage = netSum < grossSum || !!mergedAway || absorbs.length > 0;
         const showNet = hasCoverage && mxViewNet;
-        // тумблер показываем только когда есть покрытие (иначе спрос=нетто, прятать нечего)
+        const hiddenCovered = Math.max(0, grossSum - netSum);
+        // тумблер показываем только когда есть покрытие/объединение (иначе спрос=нетто, прятать нечего)
+        const hint = showNet
+          ? (mergedAway ? 'этот довоз объединён со следующим' : (hiddenCovered ? `скрыто покрытого остатками: <b>${hiddenCovered.toLocaleString('ru')}</b> шт` : 'нетто к пошиву') + '; для правки спроса переключи на «Спрос»')
+          : 'полный спрос (редактируемый); в цех и на Гант уходит нетто';
         const toggle = hasCoverage ? `<div class="mini" style="margin:0 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <span>Показать:</span>
             <button id="mx-view-net" class="btn ${showNet ? 'btn-accent' : 'btn-subtle'}" type="button">К производству (нетто)</button>
             <button id="mx-view-gross" class="btn ${showNet ? 'btn-subtle' : 'btn-accent'}" type="button">Спрос (правка)</button>
-            <span>${showNet ? `скрыто покрытого остатками: <b>${(grossSum - netSum).toLocaleString('ru')}</b> шт — это к пошиву; для правки спроса переключи на «Спрос»` : 'полный спрос (редактируемый); в цех и на Гант уходит нетто'}</span>
+            <span>${hint}</span>
           </div>` : '';
-        return toggle + (showNet ? matrixTableNet(a, p) : matrixTable(a, M, p));
+        if (showNet && mergedAway) {
+          return toggle + `<div class="mini" style="padding:10px 0">Довоз <b>объединён со следующим по сроку</b>: нетто-остаток <b>${mergedAway.units.toLocaleString('ru')}</b> шт был меньше мин. партии (${minBatchQty().toLocaleString('ru')} шт). Шьётся вместе со следующим довозом — объёмы смотри там (и на Ганте). Для правки спроса переключи на «Спрос».</div>`;
+        }
+        const absorbNote = (showNet && absorbs.length) ? `<div class="mini" style="margin:0 0 6px;color:#2563eb">Включает объединённые мелкие довозы: <b>+${absorbs.reduce((n, m) => n + m.units, 0).toLocaleString('ru')}</b> шт (после вычета остатков были меньше мин. партии).</div>` : '';
+        return toggle + absorbNote + (showNet ? matrixTableNet(a, p) : matrixTable(a, M, p));
       })()}
       ${hasGrid && !(mxViewNet && matrixSum(prodMatrixFor(p)) < sumMatrix(M)) ? (() => { const hidden = a.sizes.length - rowsForMatrix(a, M).length; if (!hidden) return ''; return `<div class="mini" style="margin-top:6px">${mxAllSizes ? `Показаны все размеры ряда. ` : `Пустые размеры скрыты (${hidden}). `}<button id="mx-all-sizes" class="btn btn-subtle" type="button">${mxAllSizes ? '▲ скрыть пустые' : '▽ показать все размеры'}</button></div>`; })() : ''}
       ${(() => { const v = nestingViolations(M, nestingRules()); if (!v.length) return ''; const r = nestingRules(); return `<div style="margin-top:10px;padding:8px 10px;border:1px solid #d97706;border-radius:8px;background:rgba(245,158,11,.1)"><div class="mini"><b>Настил (ориентир):</b> ${v.map((x) => x.kind === 'color' ? `цвет «${x.color}» ${x.qty} шт (&lt;${r.minColorQty})` : `${x.color}/${x.size} ${x.qty} шт (&lt;${r.minSizeQty})`).join(' · ')}. Мягкое предупреждение — можно продолжать.</div></div>`; })()}
@@ -1422,7 +1435,9 @@ function partiaReadyAoA(a, p) {
     }).filter(Boolean);
     if (covered.length) meta.push(`Покрыто остатками (не шьём): ${covered.join(', ')}`);
   }
-  if (net === 0 && gross > 0) meta.push('⚠ Полностью покрыто остатками — шить не нужно');
+  const mergedAway = supplyMerges().find((m) => m.from === p.id);
+  if (mergedAway) meta.push(`⚠ Довоз объединён со следующим по сроку (нетто ${mergedAway.units.toLocaleString('ru')} < мин. партии ${minBatchQty().toLocaleString('ru')}) — шьётся вместе с ним`);
+  else if (net === 0 && gross > 0) meta.push('⚠ Полностью покрыто остатками — шить не нужно');
   if (a.comment) meta.push(`Особенности: ${a.comment}`);
   const rows = meta.map((t) => [t]); // каждый пункт — своя строка, только колонка A → текст перетекает вправо
   rows.push([]);
@@ -2439,6 +2454,11 @@ function renderSupply() {
       ${artIds.length ? `<div class="matrix-scroll"><table class="matrix-table"><thead><tr><th>Артикул</th><th class="num">Спрос (план)</th><th class="num">Предложение</th><th class="num" title="Сколько предложения реально убрало из производства">Покрыто</th><th class="num">К производству</th><th class="num" title="Излишек: пришёл позже всех довозов или нет спроса под этот цвет×размер">Излишек</th><th class="num">Покрытие</th></tr></thead><tbody>${summaryRows}</tbody></table></div>
       <div class="mini" style="margin-top:6px">«К производству» = «Спрос» − «Покрыто». Это <b>уже применено</b>: остатки вычтены живьём, поэтому <b>план по размерам не меняем</b> — фактический пошив (нетто), разложенный по цехам, смотри на листе <b>«Диаграмма Ганта»</b> (там же метки прихода поставок). <b>Излишек</b> — предложение, которое НЕ уменьшило пошив: приходит позже всех довозов артикула или его цвет×размер нет в плане.</div>`
       : '<div class="mini">Нет плановых партий этого артикула. Перенеси «План по размерам из прогноза».</div>'}
+      ${(() => {
+        const mg = supplyMerges(); if (!mg.length) return '';
+        const lbl = (id) => { const p = (state.partias || []).find((x) => x.id === id); return p ? `${seEsc(p.articleId)} · ${seEsc(p.deliveryTag || ('Довоз ' + p.no))}` : id; };
+        return `<div class="mini" style="margin-top:8px;color:#2563eb">🔗 Объединено (нетто меньше мин. партии ${minBatchQty().toLocaleString('ru')} шт): ${mg.map((m) => `${lbl(m.from)} → ${lbl(m.into)} (${m.units.toLocaleString('ru')} шт)`).join('; ')}. Слитый довоз шьётся со следующим по сроку — Гант сдвинут.</div>`;
+      })()}
       ${unmatched.length ? `<div class="mini" style="margin-top:8px;color:#b45309">⚠ Не сопоставлено с артикулом (цвет не найден): ${unmatched.slice(0, 8).map((u) => `${seEsc(u.articleId)}/${seEsc(u.color)}/${seEsc(u.size)} — ${u.qty}`).join('; ')}${unmatched.length > 8 ? ' …' : ''}. Проверь названия цветов.</div>` : ''}
     </div>`;
 
@@ -3838,15 +3858,15 @@ function reconcileDeliveries(p) {
   return [{ date: end, qty: 1, tag: 'всё', title: 'вся партия одной поставкой' }];
 }
 
-// Мин. размер производственной партии (шт). Меньше — неэффективно: под каждый артикул
-// перенастраивается линия, а на 1 размер×цвет приходится совсем мало.
-const MIN_PROD_BATCH = 2000;
+// Мин. размер производственной партии (шт) — из настроек (settings.minBatch, по умолч. 2000).
+// Меньше — неэффективно: под каждый артикул перенастраивается линия, а на 1 размер×цвет мало.
 // Для ГОДОВОГО плана объединяем мелкие месячные довозы в производственные партии ≥ MIN_PROD_BATCH
 // (объединяем подряд идущие месяцы). ПЛАН ПРОДАЖ (помесячный) при этом не меняется — это только
 // про производство. Дата объединённой партии = самого раннего месяца (готова к началу периода).
 // Сезонный план (3 фикс. поставки) не трогаем.
 function mergeDeliveriesForProduction(dvs, totalPlanned, mode) {
   if (mode !== 'allseason' || !Array.isArray(dvs) || dvs.length <= 1) return dvs;
+  const MIN_PROD_BATCH = minBatchQty();
   const shareTot = dvs.reduce((s, d) => s + (+d.qty || 0), 0) || 1;
   const psize = (q) => Math.round(q / shareTot * (totalPlanned || 0)); // реальный размер партии = доля × тираж
   const MON = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -5336,6 +5356,7 @@ function dataSettingsPanel() {
       <div class="field"><label>Буфер «ткань раньше кроя», дней</label><input data-set="fabric.bufferDays" value="${f.bufferDays}"></div>
       <div class="field"><label title="Настил: ориентир минимума на размер (мягкий).">Настил: мин. на размер, шт</label><input data-set="nesting.minSizeQty" value="${state.settings.nesting.minSizeQty}"></div>
       <div class="field"><label title="Настил: ориентир минимума на цвет (мягкий).">Настил: мин. на цвет, шт</label><input data-set="nesting.minColorQty" value="${state.settings.nesting.minColorQty}"></div>
+      <div class="field"><label title="Мин. производственная партия. Довозы мельче (после вычета остатков) сливаются со следующим по сроку.">Мин. партия (объединение), шт</label><input data-set="minBatch" value="${minBatchQty()}"></div>
     </div>
     <div class="card"><div class="mini" style="margin-bottom:8px">Логистика до WB</div>
       <div class="field"><label>Мин. дней</label><input data-set="logistics.minDays" value="${l.minDays}"></div>

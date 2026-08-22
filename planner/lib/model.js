@@ -57,6 +57,9 @@ export function defaultSettings() {
     transferDays: 2,
     // правила настила (Фаза 2): ориентиры минимального кроя. Мягкие (предупреждают).
     nesting: { minSizeQty: 20, minColorQty: 400 },
+    // мин. производственная партия (шт): и для объединения месяцев в план, и для объединения
+    // довозов после вычета остатков (если нетто довоза < этого — сливаем со следующим довозом).
+    minBatch: 2000,
     // обученные синонимы цвета (Этап 3, слой примирения прогноз↔карточка):
     // { aliasKey(строка цвета) → канон-цвет }. Глобальный словарь, копится по мере
     // подтверждений пользователя. Расширяет COLOR_GROUPS частными случаями («небо»→голубой).
@@ -197,6 +200,7 @@ export function normalizeState(input) {
   s.settings.transferDays = Math.max(0, Math.round(+s.settings.transferDays || 2));
   { const n = s.settings.nesting && typeof s.settings.nesting === 'object' ? s.settings.nesting : {};
     s.settings.nesting = { minSizeQty: Math.max(1, Math.round(+n.minSizeQty || 20)), minColorQty: Math.max(1, Math.round(+n.minColorQty || 400)) }; }
+  s.settings.minBatch = Math.max(0, Math.round(+s.settings.minBatch || 2000)); // мин. производственная партия (шт)
   // словарь синонимов цвета: только пары строка→непустая-строка
   { const ca = s.settings.colorAliases && typeof s.settings.colorAliases === 'object' ? s.settings.colorAliases : {};
     const clean = {}; for (const [k, v] of Object.entries(ca)) if (k && typeof v === 'string' && v.trim()) clean[String(k)] = v.trim();

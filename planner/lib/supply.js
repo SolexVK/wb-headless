@@ -86,3 +86,41 @@ export function sumSupplyMatrix(M) {
   let s = 0; for (const c in (M || {})) for (const sz in M[c]) s += Math.max(0, Math.round(+M[c][sz] || 0));
   return s;
 }
+
+// прибавить матрицу src к dst (по ячейкам цвет×размер)
+function addMatrixInto(dst, src) {
+  for (const c in (src || {})) { dst[c] = dst[c] || {}; for (const sz in src[c]) dst[c][sz] = (+dst[c][sz] || 0) + (+src[c][sz] || 0); }
+}
+
+/**
+ * Объединение мелких довозов ПОСЛЕ вычета остатков. Если нетто-остаток план-партии (довоза)
+ * меньше минимальной производственной партии — сливаем его ВПЕРЁД, в следующий по сроку довоз
+ * того же артикула (накопительно). Мутирует `net` (обнуляет слитый довоз, наращивает следующий).
+ * Хвост (последний довоз) оставляем как есть — сливать некуда. Возвращает список слияний для меток.
+ * @returns {Array<{articleId, from, into, units}>}
+ */
+export function mergeSmallNetDeliveries(state, net, minBatch) {
+  const merges = [];
+  const min = Math.max(0, Math.round(+minBatch || 0));
+  if (min <= 0) return merges;
+  const byArt = {};
+  for (const p of (state.partias || [])) {
+    if (p.historical || p.status !== 'plan' || !p.deadline || !net[p.id]) continue;
+    (byArt[p.articleId] = byArt[p.articleId] || []).push(p);
+  }
+  for (const aid in byArt) {
+    const parts = byArt[aid].sort((x, y) => String(x.deadline).localeCompare(String(y.deadline)));
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts[i];
+      const u = sumSupplyMatrix(net[p.id]);
+      if (u > 0 && u < min) {                 // мал → сливаем в следующий довоз
+        const nx = parts[i + 1];
+        net[nx.id] = net[nx.id] || {};
+        addMatrixInto(net[nx.id], net[p.id]);
+        merges.push({ articleId: aid, from: p.id, into: nx.id, units: u });
+        net[p.id] = {};                        // довоз больше не шьётся отдельно
+      }
+    }
+  }
+  return merges;
+}

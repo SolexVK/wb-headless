@@ -15,7 +15,7 @@
 import { makeCalendar, addDays, diffDays, parseISO, toISO, dayOfWeek } from './calendar.js';
 import { partiasOf, partiaPlanUnits, partiaFactUnits, partiaEffectiveUnits, PARTIA_STATUS_RU, sumMatrixStage } from './model.js';
 import { validateMatrix } from './nesting.js';
-import { computeSupplyNetting } from './supply.js';
+import { computeSupplyNetting, mergeSmallNetDeliveries } from './supply.js';
 
 const OPS = ['cut', 'sew', 'iron', 'otk'];
 const OP_RU = { cut: 'Крой', sew: 'Пошив', iron: 'Утюжка', otk: 'ОТК' };
@@ -143,6 +143,9 @@ export function buildSchedule(state) {
   // НЕТТИНГ: к производству = план − уже существующее предложение (остатки/в пути/производство).
   // Живой слой — planMatrix не трогаем, считаем «к производству» на каждом расчёте.
   const netting = computeSupplyNetting(state, todayISO);
+  // Объединение мелких довозов после вычета остатков: если нетто довоза < мин. партии — сливаем
+  // его в следующий по сроку довоз (живой слой). Гант пересобирается на объединённых объёмах.
+  const supplyMerges = mergeSmallNetDeliveries(state, netting.net, (state.settings && state.settings.minBatch) || 0);
 
   // задания = партии (не прошлые, объём К ПРОИЗВОДСТВУ > 0 после неттинга)
   const jobs = [];
@@ -390,7 +393,7 @@ export function buildSchedule(state) {
 
   // netByPartia — матрица «к производству» (план − остатки) по каждой план-партии.
   // Нужна фронту, чтобы выгрузка «План по размерам → Excel для цеха» шла на нетто, а не на спрос.
-  return { cycles, warnings, fabricOrders, generatedFor: state.stages.map((s) => s.id), supply: { arrivals: netting.arrivals, unmatched: netting.unmatched, netByPartia: netting.net } };
+  return { cycles, warnings, fabricOrders, generatedFor: state.stages.map((s) => s.id), supply: { arrivals: netting.arrivals, unmatched: netting.unmatched, netByPartia: netting.net, merges: supplyMerges } };
 }
 
 function cycleId(partiaId, wsId, idx) {
