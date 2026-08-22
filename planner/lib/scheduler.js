@@ -147,6 +147,20 @@ export function buildSchedule(state) {
   // его в следующий по сроку довоз (живой слой). Гант пересобирается на объединённых объёмах.
   const supplyMerges = mergeSmallNetDeliveries(state, netting.net, (state.settings && state.settings.minBatch) || 0);
 
+  // макс. размер производственной партии: крупный довоз режем на партии ≤ batchSize и раскидываем
+  // по цехам (контроль процесса + отказоустойчивость — если цех отстаёт, остаток берут другие).
+  const batchSize = Math.max(0, Math.round((state.settings && state.settings.batchSize) || 0));
+  // разбить матрицу цвет×размер на n частей поровну (по каждой ячейке; остаток — в первые партии)
+  const splitMatrixEven = (M, n) => {
+    const out = Array.from({ length: n }, () => ({}));
+    for (const c in (M || {})) for (const z in M[c]) {
+      const v = Math.max(0, Math.round(+M[c][z] || 0));
+      const base = Math.floor(v / n), rem = v - base * n;
+      for (let b = 0; b < n; b++) { const q = base + (b < rem ? 1 : 0); if (q > 0) (out[b][c] = out[b][c] || {})[z] = q; }
+    }
+    return out;
+  };
+
   // задания = партии (не прошлые, объём К ПРОИЗВОДСТВУ > 0 после неттинга)
   const jobs = [];
   for (const p of state.partias) {
@@ -159,14 +173,24 @@ export function buildSchedule(state) {
     const units = sumMatrixStage(prodMatrix);
     if (units <= 0) continue; // полностью покрыто предложением — производить нечего
     const stage = stageById[p.stageId];
-    jobs.push({
-      partia: p, article, units, stage, prodMatrix,
+    const base = {
+      partia: p, article, stage,
       // дедлайн партии-поставки — собственный (дата прихода на WB); иначе дедлайн этапа (legacy).
       deadline: p.deadline || (stage ? stage.deadline : null),
       stageOrd: stageOrder[p.stageId] ?? 99,
       lockedWs: (p.workshopId && wsById[p.workshopId]) ? p.workshopId : null,
       done: false,
-    });
+    };
+    const nb = batchSize > 0 ? Math.max(1, Math.ceil(units / batchSize)) : 1;
+    if (nb <= 1) { jobs.push({ ...base, units, prodMatrix, batchIndex: 0, batchCount: 1 }); continue; }
+    const batches = splitMatrixEven(prodMatrix, nb);
+    let bi = 0;
+    for (const bm of batches) {
+      const bu = sumMatrixStage(bm);
+      if (bu <= 0) continue;
+      jobs.push({ ...base, units: bu, prodMatrix: bm, batchIndex: bi, batchCount: nb });
+      bi += 1;
+    }
   }
 
   // дата, когда цех свободен для след. кроя (изначально — старт сезона)
@@ -350,6 +374,8 @@ export function buildSchedule(state) {
       stageId: job.partia.stageId,
       stageName: job.stage ? job.stage.name : '',
       deliveryTag: job.partia.deliveryTag || '', // метка поставки (П1/П2/П3/подсорт) — если из прогноза
+      batchIndex: job.batchIndex || 0,           // № партии в раздроблённом довозе (0-based)
+      batchCount: job.batchCount || 1,           // сколько всего партий в довозе
       articleId: job.article.id,
       articleName: job.article.name,
       workshopId: w.id,

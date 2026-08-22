@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'sew-not-before-2026-08-22f';
+const APP_BUILD = 'batch-split-2026-08-22g';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1724,16 +1724,22 @@ function _autoPickApply(articleId, scope) {
     for (const c of artColors) { const s = shareOf(p, c); if (s != null && s < AUTO_COLOR_THRESH) off.add(c); }
     p.colorOff = [...off];
   }
-  // Слабый цвет (везде < порога) НЕ воскрешаем — его не шьём, объём выпадает из плана (по решению
-  // пользователя: «просто убрать»). Нишевые цвета (рынок не знает, share=null) шаг 1 не трогает —
-  // они остаются включёнными. Пустой довоз допустим (в его окно ничего ходового не приходит).
-  // 2) единственная страховка — от полностью пустого АРТИКУЛА (иначе он не шьётся вообще): если ни
-  //    в одном довозе не осталось ни одного цвета — вернуть самый сильный цвет в его лучший довоз.
-  const anyOn = allParts.some((p) => artColors.some((c) => colorOnInPartia(p, c)));
-  if (!anyOn) {
-    let bp = null, bc = null, bestS = -1;
-    for (const p of allParts) for (const c of artColors) { const s = shareOf(p, c); const v = (s == null ? 0 : s); if (v > bestS) { bestS = v; bp = p; bc = c; } }
-    if (bp && bc) bp.colorOff = (bp.colorOff || []).filter((x) => x !== bc);
+  // Авто-подбор НЕ удаляет цвет из плана насовсем (объём не теряем) — он лишь распределяет цвета
+  // по довозам по сезону. Насовсем убрать цвет (с пересчётом общего объёма) — вручную кнопкой ✕
+  // в блоке цветов «Ранга сезонности». Поэтому две страховки:
+  // 2) если цвет выключен во ВСЕХ довозах — вернуть туда, где он сильнее всего (тираж не пропадёт).
+  for (const c of artColors) {
+    if (allParts.some((p) => colorOnInPartia(p, c))) continue;
+    let best = null, bestS = -1;
+    for (const p of allParts) { const s = shareOf(p, c); const v = (s == null ? 0 : s); if (v > bestS) { bestS = v; best = p; } }
+    if (best) best.colorOff = (best.colorOff || []).filter((x) => x !== c);
+  }
+  // 3) довоз не должен остаться без единого цвета — вернуть сильнейший.
+  for (const p of target) {
+    if (artColors.some((c) => colorOnInPartia(p, c))) continue;
+    let best = null, bestS = -1;
+    for (const c of artColors) { const s = shareOf(p, c); const v = (s == null ? 0 : s); if (v > bestS) { bestS = v; best = c; } }
+    if (best) p.colorOff = (p.colorOff || []).filter((x) => x !== best);
   }
   // 4) пересчитать раскладку всех цветов, чьё состояние где-то изменилось
   const changed = new Set();
@@ -1926,7 +1932,7 @@ function seasonColorChipsHTML(a, p) {
       <button class="btn btn-primary" id="mx-autocolors-all" type="button" title="Автоматически по каждому довозу выключить цвета со спросом <${AUTO_COLOR_THRESH}% в его месяц продаж, оставить лучшие">✨ Авто-подбор по месяцам (все довозы)</button>
       <button class="btn" id="mx-autocolors-one" type="button" title="То же, но только для выбранного довоза">только этот довоз</button>
       <button class="btn btn-accent" id="mx-autocolors-allart" type="button" title="Применить авто-подбор ко ВСЕМ артикулам сразу (по всем довозам)">✨✨ По всем артикулам</button>
-      <span class="mini">Правило: в каждом довозе оставляем цвета со спросом ≥${AUTO_COLOR_THRESH}% в его окне продаж, слабые (красные) выключаем — <b>если цвет слабый во всех довозах, он не шьётся вовсе</b>. Итог можно поправить чипами вручную.</span>
+      <span class="mini">Правило: в каждом довозе оставляем цвета со спросом ≥${AUTO_COLOR_THRESH}% в его окне продаж, слабые (красные) выключаем — <b>объём цвета при этом не теряется</b> (уходит в довозы, где цвет в сезон). Совсем убрать цвет из плана — кнопкой <b>✕</b> у цвета в блоке выше (с пересчётом объёма). Итог можно поправить чипами вручную.</span>
     </div>` : '';
   return `<div class="mx-seasoncolors">
     <div class="mini" style="margin-bottom:6px"><b>Цвета этого довоза.</b> Отметь, какие цвета едут в этой партии. Тираж каждого цвета делится <b>только</b> между отмеченными довозами (по времени), суммы сохраняются — так можно везти осенью одни цвета, а зимой/весной другие.</div>
@@ -5400,6 +5406,7 @@ function dataSettingsPanel() {
       <div class="field"><label title="Настил: ориентир минимума на размер (мягкий).">Настил: мин. на размер, шт</label><input data-set="nesting.minSizeQty" value="${state.settings.nesting.minSizeQty}"></div>
       <div class="field"><label title="Настил: ориентир минимума на цвет (мягкий).">Настил: мин. на цвет, шт</label><input data-set="nesting.minColorQty" value="${state.settings.nesting.minColorQty}"></div>
       <div class="field"><label title="Мин. производственная партия. Довозы мельче (после вычета остатков) сливаются со следующим по сроку.">Мин. партия (объединение), шт</label><input data-set="minBatch" value="${minBatchQty()}"></div>
+      <div class="field"><label title="Макс. производственная партия. Крупные довозы режутся на партии не больше этого и раскидываются по цехам. 0 = не резать.">Макс. партия (дробление), шт</label><input data-set="batchSize" value="${Math.max(0, Math.round(+(state.settings.batchSize) || 5000))}"></div>
     </div>
     <div class="card"><div class="mini" style="margin-bottom:8px">Логистика до WB</div>
       <div class="field"><label>Мин. дней</label><input data-set="logistics.minDays" value="${l.minDays}"></div>

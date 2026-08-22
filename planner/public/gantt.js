@@ -207,7 +207,7 @@ function drawCycle(svg, c, row, ctx) {
   }
 
   // подпись
-  const label = `П${c.partiaNo} · ${c.articleId} · ${c.units} шт`;
+  const label = `П${c.partiaNo} · ${c.articleId} · ${c.units} шт${c.batchCount > 1 ? ` · п.${c.batchIndex + 1}/${c.batchCount}` : ''}`;
   const t = el('text', {
     x: x0 + 8, y: laneY + barH / 2 + 4, fill: '#fff', 'font-size': 11, 'font-weight': 700,
     stroke: 'rgba(0,0,0,0.75)', 'stroke-width': 2.5, 'paint-order': 'stroke', 'stroke-linejoin': 'round',
@@ -355,7 +355,7 @@ function openCycleDetail(c, onOverride, onProgress = () => {}) {
   head.style.cssText = 'padding:14px 16px 4px';
   const lateTxt = c.logistics.lateDays > 0 ? ` · <span style="color:var(--danger)">опоздание ${c.logistics.lateDays} дн</span>` : '';
   head.innerHTML = `<div style="font-size:15px;font-weight:700">Партия ${c.partiaNo} · ${c.articleId} — ${c.articleName}</div>
-    <div style="color:var(--muted);font-size:12px;margin-top:2px">${c.stageName} · ${c.units} шт · цех ${c.workshopName}${c.own ? ' (свой)' : ''} · статус ${c.statusRu || '—'}${lateTxt}</div>`;
+    <div style="color:var(--muted);font-size:12px;margin-top:2px">${c.stageName} · ${c.units} шт${c.batchCount > 1 ? ` · партия ${c.batchIndex + 1} из ${c.batchCount}` : ''} · цех ${c.workshopName}${c.own ? ' (свой)' : ''} · статус ${c.statusRu || '—'}${lateTxt}</div>`;
   modal.appendChild(head);
   modal.appendChild(svg);
 

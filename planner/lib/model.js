@@ -60,6 +60,9 @@ export function defaultSettings() {
     // мин. производственная партия (шт): и для объединения месяцев в план, и для объединения
     // довозов после вычета остатков (если нетто довоза < этого — сливаем со следующим довозом).
     minBatch: 2000,
+    // макс. производственная партия (шт): крупные довозы режутся на партии ≤ этого и раскидываются
+    // по цехам (контроль + отказоустойчивость). 0 = не резать.
+    batchSize: 5000,
     // обученные синонимы цвета (Этап 3, слой примирения прогноз↔карточка):
     // { aliasKey(строка цвета) → канон-цвет }. Глобальный словарь, копится по мере
     // подтверждений пользователя. Расширяет COLOR_GROUPS частными случаями («небо»→голубой).
@@ -201,6 +204,9 @@ export function normalizeState(input) {
   { const n = s.settings.nesting && typeof s.settings.nesting === 'object' ? s.settings.nesting : {};
     s.settings.nesting = { minSizeQty: Math.max(1, Math.round(+n.minSizeQty || 20)), minColorQty: Math.max(1, Math.round(+n.minColorQty || 400)) }; }
   s.settings.minBatch = Math.max(0, Math.round(+s.settings.minBatch || 2000)); // мин. производственная партия (шт)
+  // макс. размер производственной партии (шт): крупные довозы режутся на партии ≤ этого, чтобы
+  // распределить по цехам и контролировать процесс. 0 = не резать.
+  s.settings.batchSize = Math.max(0, Math.round(+s.settings.batchSize || 5000));
   // словарь синонимов цвета: только пары строка→непустая-строка
   { const ca = s.settings.colorAliases && typeof s.settings.colorAliases === 'object' ? s.settings.colorAliases : {};
     const clean = {}; for (const [k, v] of Object.entries(ca)) if (k && typeof v === 'string' && v.trim()) clean[String(k)] = v.trim();
