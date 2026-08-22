@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'supply-merge-2026-08-22c';
+const APP_BUILD = 'weakcolor-drop-2026-08-22e';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1224,6 +1224,7 @@ function renderMatrix() {
   }));
   document.getElementById('mx-autocolors-all')?.addEventListener('click', () => autoPickColorsByMonth(a.id, 'all'));
   document.getElementById('mx-autocolors-one')?.addEventListener('click', () => autoPickColorsByMonth(a.id, 'one'));
+  document.getElementById('mx-autocolors-allart')?.addEventListener('click', () => { if (confirm('Применить авто-подбор ко ВСЕМ артикулам? Слабые цвета (<' + AUTO_COLOR_THRESH + '% во всех довозах) перестанут шиться.')) autoPickColorsAllArticles(); });
   ensureColorMonthly(a.id); // ленивая подгрузка помесячного анализа цветов (из плана «Ранга сезонности»)
   applyCollapsibles();
 }
@@ -1674,17 +1675,19 @@ function toggleColorInPartia(articleId, partiaId, color, on) {
 // смотрим окно продаж ~1.5 мес и ВЫКЛЮЧАЕМ цвета со спросом < THRESH% (красные), оставляя лучшие.
 // Страховки: цвет не должен исчезнуть из ВСЕХ довозов; довоз не должен остаться без цветов.
 const AUTO_COLOR_THRESH = 3; // % — «красное», ниже которого цвет выключаем
-function autoPickColorsByMonth(articleId, scope) {
+// Применить авто-подбор к одному артикулу (мутирует colorOff + раскладку). БЕЗ recalc/render/toast.
+// Возвращает: -1 нет помесячного анализа; null нет довозов/цветов; иначе число затронутых цветов.
+function _autoPickApply(articleId, scope) {
   const cam = matrixColorMonthly[articleId];
-  if (cam === undefined) { toast('Помесячный анализ ещё загружается — повтори через секунду', true); return; }
-  if (!cam || cam.stale || !Array.isArray(cam.months) || !cam.months.length) { toast('Нет помесячного анализа цветов — пересобери план на «Ранге сезонности»', true); return; }
+  if (!cam || cam.stale || !Array.isArray(cam.months) || !cam.months.length) return -1;
   const a = state.articles.find((x) => x.id === articleId);
+  if (!a) return null;
   const allParts = articlePlanPartias(articleId).filter((p) => p.deadline);
-  if (!allParts.length) { toast('Нет довозов со сроком прихода на WB', true); return; }
+  if (!allParts.length) return null;
   const target = scope === 'all' ? allParts : allParts.filter((p) => p.id === matrixPartiaId);
-  if (!target.length) { toast('Выбери довоз', true); return; }
+  if (!target.length) return null;
   const artColors = activeColors(a);
-  if (!artColors.length) return;
+  if (!artColors.length) return null;
   // Цвета, которые рынок ВООБЩЕ знает (есть в каком-либо месяце). Свой нишевый цвет, которого рынок
   // не знает ни в одном месяце, авто-подбор НЕ трогает (оставляет вкл — пользователь решает сам).
   const marketKnown = new Set();
@@ -1704,29 +1707,51 @@ function autoPickColorsByMonth(articleId, scope) {
     for (const c of artColors) { const s = shareOf(p, c); if (s != null && s < AUTO_COLOR_THRESH) off.add(c); }
     p.colorOff = [...off];
   }
-  // 2) страховка: если цвет выключен во ВСЕХ довозах — вернуть туда, где он сильнее всего (иначе тираж пропадёт)
-  for (const c of artColors) {
-    if (allParts.some((p) => colorOnInPartia(p, c))) continue;
-    let best = null, bestS = -1;
-    for (const p of allParts) { const s = shareOf(p, c); const v = (s == null ? 0 : s); if (v > bestS) { bestS = v; best = p; } }
-    if (best) best.colorOff = (best.colorOff || []).filter((x) => x !== c);
-  }
-  // 3) страховка: довоз не должен остаться без единого цвета — вернуть сильнейший
-  for (const p of target) {
-    if (artColors.some((c) => colorOnInPartia(p, c))) continue;
-    let best = null, bestS = -1;
-    for (const c of artColors) { const s = shareOf(p, c); const v = (s == null ? 0 : s); if (v > bestS) { bestS = v; best = c; } }
-    if (best) p.colorOff = (p.colorOff || []).filter((x) => x !== best);
+  // Слабый цвет (везде < порога) НЕ воскрешаем — его не шьём, объём выпадает из плана (по решению
+  // пользователя: «просто убрать»). Нишевые цвета (рынок не знает, share=null) шаг 1 не трогает —
+  // они остаются включёнными. Пустой довоз допустим (в его окно ничего ходового не приходит).
+  // 2) единственная страховка — от полностью пустого АРТИКУЛА (иначе он не шьётся вообще): если ни
+  //    в одном довозе не осталось ни одного цвета — вернуть самый сильный цвет в его лучший довоз.
+  const anyOn = allParts.some((p) => artColors.some((c) => colorOnInPartia(p, c)));
+  if (!anyOn) {
+    let bp = null, bc = null, bestS = -1;
+    for (const p of allParts) for (const c of artColors) { const s = shareOf(p, c); const v = (s == null ? 0 : s); if (v > bestS) { bestS = v; bp = p; bc = c; } }
+    if (bp && bc) bp.colorOff = (bp.colorOff || []).filter((x) => x !== bc);
   }
   // 4) пересчитать раскладку всех цветов, чьё состояние где-то изменилось
   const changed = new Set();
   for (const p of allParts) { const now = new Set(p.colorOff || []); const old = oldOffById[p.id]; for (const c of artColors) if (now.has(c) !== old.has(c)) changed.add(c); }
-  if (!changed.size) { toast('Все цвета уже подобраны — менять нечего'); renderMatrix(); return; }
   for (const c of changed) redistributeArticleColor(articleId, c);
+  return changed.size;
+}
+function autoPickColorsByMonth(articleId, scope) {
+  const cam = matrixColorMonthly[articleId];
+  if (cam === undefined) { toast('Помесячный анализ ещё загружается — повтори через секунду', true); return; }
+  const r = _autoPickApply(articleId, scope);
+  if (r === -1) { toast('Нет помесячного анализа цветов — пересобери план на «Ранге сезонности»', true); return; }
+  if (r === null) { toast('Нет довозов со сроком прихода на WB (или цветов)', true); return; }
+  if (r === 0) { toast('Все цвета уже подобраны — менять нечего'); renderMatrix(); return; }
   recomputePartiaNumbers(); dirty = true;
   recalc(true)
-    .then(() => { renderMatrix(); toast(`Авто-подбор: довозов ${target.length}, цветов затронуто ${changed.size}. Проверь и поправь чипами при желании.`); })
+    .then(() => { renderMatrix(); toast(`Авто-подбор: цветов затронуто ${r}. Слабые (<${AUTO_COLOR_THRESH}%) выключены. Поправь чипами при желании.`); })
     .catch((err) => { renderMatrix(); toast('Ошибка: ' + err.message, true); });
+}
+// Авто-подбор по ВСЕМ артикулам сразу (одним пересчётом). Предзагружаем помесячный анализ каждого.
+async function autoPickColorsAllArticles() {
+  const arts = articlesSorted();
+  toast('Загружаю помесячный анализ по всем артикулам…');
+  await Promise.all(arts.map((a) => ensureColorMonthly(a.id).catch(() => {})));
+  let done = 0, totalChanged = 0, noCam = 0;
+  for (const a of arts) {
+    const r = _autoPickApply(a.id, 'all');
+    if (r === -1) { noCam++; continue; }
+    if (r === null) continue;
+    done++; totalChanged += r;
+  }
+  if (!done) { toast('Нет артикулов с помесячным анализом — пересобери планы на «Ранге сезонности»', true); return; }
+  recomputePartiaNumbers(); dirty = true;
+  try { await recalc(true); renderMatrix(); toast(`Авто-подбор по всем артикулам: обработано ${done}, цветов затронуто ${totalChanged}${noCam ? `, без анализа ${noCam}` : ''}.`); }
+  catch (err) { renderMatrix(); toast('Ошибка: ' + err.message, true); }
 }
 // ── Помесячный анализ цветов на «Плане по размерам» (Этап 3) ──
 // Данные считаются на «Ранге сезонности» (report.colorAnalysisByMonth) из дневных графиков
@@ -1883,7 +1908,8 @@ function seasonColorChipsHTML(a, p) {
   const autoBar = hasCam ? `<div class="mx-cc-auto">
       <button class="btn btn-primary" id="mx-autocolors-all" type="button" title="Автоматически по каждому довозу выключить цвета со спросом <${AUTO_COLOR_THRESH}% в его месяц продаж, оставить лучшие">✨ Авто-подбор по месяцам (все довозы)</button>
       <button class="btn" id="mx-autocolors-one" type="button" title="То же, но только для выбранного довоза">только этот довоз</button>
-      <span class="mini">Правило: в каждом довозе оставляем цвета со спросом ≥${AUTO_COLOR_THRESH}% в его окне продаж, слабые (красные) выключаем. Итог можно поправить чипами вручную.</span>
+      <button class="btn btn-accent" id="mx-autocolors-allart" type="button" title="Применить авто-подбор ко ВСЕМ артикулам сразу (по всем довозам)">✨✨ По всем артикулам</button>
+      <span class="mini">Правило: в каждом довозе оставляем цвета со спросом ≥${AUTO_COLOR_THRESH}% в его окне продаж, слабые (красные) выключаем — <b>если цвет слабый во всех довозах, он не шьётся вовсе</b>. Итог можно поправить чипами вручную.</span>
     </div>` : '';
   return `<div class="mx-seasoncolors">
     <div class="mini" style="margin-bottom:6px"><b>Цвета этого довоза.</b> Отметь, какие цвета едут в этой партии. Тираж каждого цвета делится <b>только</b> между отмеченными довозами (по времени), суммы сохраняются — так можно везти осенью одни цвета, а зимой/весной другие.</div>
