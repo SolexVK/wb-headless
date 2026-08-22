@@ -28,14 +28,21 @@ async function main() {
   console.error(`Артикулы: ${skus.join(', ')} · период ${d1}…${d2}`);
   const data = await buildShirtsData({
     skus, d1, d2,
+    ...(process.env.SHIRTS_CATEGORY ? { categoryPath: process.env.SHIRTS_CATEGORY } : {}),
+    ...(process.env.SHIRTS_SIZES_QUERY ? { sizesQuery: process.env.SHIRTS_SIZES_QUERY } : {}),
+    ...(process.env.SHIRTS_PLUS ? { marketPlus: process.env.SHIRTS_PLUS } : {}),
     ...(process.env.SHIRTS_MINUS ? { marketMinus: process.env.SHIRTS_MINUS } : {}),
+    ...(process.env.SHIRTS_NICHE_QUERIES ? { nicheQueries: process.env.SHIRTS_NICHE_QUERIES.split('|').map((s) => s.trim()).filter(Boolean) } : {}),
+    ...(process.env.SHIRTS_TITLE ? { title: process.env.SHIRTS_TITLE } : {}),
+    ...(process.env.SHIRTS_NICHE_DESC ? { nicheDesc: process.env.SHIRTS_NICHE_DESC } : {}),
     onProgress: (stage, i, n) => process.stderr.write(stage === 'market' ? '  рынок (ниша, топ-300, размеры)…\r' : `  артикул ${i}/${n} (деньги, карточка, отзывы, сканирование)\r`),
   });
   console.error('');
 
   // Консоль-сводка.
   const mk = data.market.market;
-  console.log(`\nРынок «мужские рубашки с длинным рукавом»: ${(mk.revenueSum / 1e9).toFixed(2)} млрд ₽ · упущено ${(mk.lostSum / 1e9).toFixed(2)} млрд ₽ (${(mk.lostShare * 100).toFixed(1)}%)`);
+  console.log(`\n${data.title}`);
+  console.log(`Рынок ниши: ${(mk.revenueSum / 1e9).toFixed(2)} млрд ₽ · упущено ${(mk.lostSum / 1e9).toFixed(2)} млрд ₽ (${(mk.lostShare * 100).toFixed(1)}%)`);
   console.log(`Тип: ${data.market.typeCount} карточек, с продажами ${data.market.withSalesCount}`);
   for (const a of data.articles) {
     console.log(`\nарт. ${a.sku} · ${a.brand} — ${a.name.slice(0, 44)}`);
