@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'supply-net-cols-2026-08-22a';
+const APP_BUILD = 'supply-net-view-2026-08-22b';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -949,6 +949,7 @@ function recomputePartiaNumbers() {
 let matrixStageId = null, matrixArticleId = null, matrixPartiaId = null;
 let matrixWsFilter = ''; // фильтр списка партий по цеху ('' = все, '__auto__' = не распределённые)
 let mxAllSizes = false;  // «План по размерам»: показывать ВСЕ размеры ряда (иначе — только с данными)
+let mxViewNet = true;    // «План по размерам»: показывать «К производству» (нетто, скрыв покрытые) vs «Спрос» (правка)
 
 // ── настил (клиентские хелперы, зеркало lib/nesting.js) ──
 function nestingRules() { const n = state.settings.nesting || {}; return { minSizeQty: +n.minSizeQty || 20, minColorQty: +n.minColorQty || 400 }; }
@@ -1132,8 +1133,21 @@ function renderMatrix() {
       </div>
       <div class="mini" style="margin:2px 0 10px">Сейчас отшивает: <b>${cycInfo}</b>. Заполни количества в таблице и нажми <b>«Сохранить план»</b> (номер партии — свой у каждого цеха; статус и факт — на вкладке «Факт»).</div>
       ${hasGrid ? seasonColorChipsHTML(a, p) : ''}
-      ${hasGrid ? matrixTable(a, M, p) : '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>'}
-      ${hasGrid ? (() => { const hidden = a.sizes.length - rowsForMatrix(a, M).length; if (!hidden) return ''; return `<div class="mini" style="margin-top:6px">${mxAllSizes ? `Показаны все размеры ряда. ` : `Пустые размеры скрыты (${hidden}). `}<button id="mx-all-sizes" class="btn btn-subtle" type="button">${mxAllSizes ? '▲ скрыть пустые' : '▽ показать все размеры'}</button></div>`; })() : ''}
+      ${(() => {
+        if (!hasGrid) return '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>';
+        const grossSum = sumMatrix(M), netSum = matrixSum(prodMatrixFor(p));
+        const hasCoverage = netSum < grossSum;                 // остатки что-то покрыли → есть что скрывать
+        const showNet = hasCoverage && mxViewNet;
+        // тумблер показываем только когда есть покрытие (иначе спрос=нетто, прятать нечего)
+        const toggle = hasCoverage ? `<div class="mini" style="margin:0 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span>Показать:</span>
+            <button id="mx-view-net" class="btn ${showNet ? 'btn-accent' : 'btn-subtle'}" type="button">К производству (нетто)</button>
+            <button id="mx-view-gross" class="btn ${showNet ? 'btn-subtle' : 'btn-accent'}" type="button">Спрос (правка)</button>
+            <span>${showNet ? `скрыто покрытого остатками: <b>${(grossSum - netSum).toLocaleString('ru')}</b> шт — это к пошиву; для правки спроса переключи на «Спрос»` : 'полный спрос (редактируемый); в цех и на Гант уходит нетто'}</span>
+          </div>` : '';
+        return toggle + (showNet ? matrixTableNet(a, p) : matrixTable(a, M, p));
+      })()}
+      ${hasGrid && !(mxViewNet && matrixSum(prodMatrixFor(p)) < sumMatrix(M)) ? (() => { const hidden = a.sizes.length - rowsForMatrix(a, M).length; if (!hidden) return ''; return `<div class="mini" style="margin-top:6px">${mxAllSizes ? `Показаны все размеры ряда. ` : `Пустые размеры скрыты (${hidden}). `}<button id="mx-all-sizes" class="btn btn-subtle" type="button">${mxAllSizes ? '▲ скрыть пустые' : '▽ показать все размеры'}</button></div>`; })() : ''}
       ${(() => { const v = nestingViolations(M, nestingRules()); if (!v.length) return ''; const r = nestingRules(); return `<div style="margin-top:10px;padding:8px 10px;border:1px solid #d97706;border-radius:8px;background:rgba(245,158,11,.1)"><div class="mini"><b>Настил (ориентир):</b> ${v.map((x) => x.kind === 'color' ? `цвет «${x.color}» ${x.qty} шт (&lt;${r.minColorQty})` : `${x.color}/${x.size} ${x.qty} шт (&lt;${r.minSizeQty})`).join(' · ')}. Мягкое предупреждение — можно продолжать.</div></div>`; })()}
       <div class="matrix-io" style="margin-top:12px">
         <span class="mini"><b>План для цеха → Excel</b> <span title="Выгрузка идёт на НЕТТО: из плана вычтены загруженные остатки (WB/в пути/склад/производство). Полностью покрытые партии в «все партии» не попадают.">(нетто, за вычетом остатков ⓘ)</span>:</span>
@@ -1149,6 +1163,8 @@ function renderMatrix() {
   bindMatrixControls(a);
   bindGlobalDist();
   document.getElementById('mx-all-sizes')?.addEventListener('click', () => { mxAllSizes = !mxAllSizes; renderMatrix(); });
+  document.getElementById('mx-view-net')?.addEventListener('click', () => { mxViewNet = true; renderMatrix(); });
+  document.getElementById('mx-view-gross')?.addEventListener('click', () => { mxViewNet = false; renderMatrix(); });
   document.getElementById('mx-xlsx-partia').addEventListener('click', () => exportReadyPlanXlsx(a.id, p.id));
   document.getElementById('mx-xlsx-article').addEventListener('click', () => exportReadyPlanXlsx(a.id, null));
   document.getElementById('mx-tpl-one').addEventListener('click', () => exportPlanXlsx([a.id], `plan_${a.id}.xlsx`));
@@ -1387,8 +1403,11 @@ function partiaReadyAoA(a, p) {
   const net = matrixSum(M);                       // к пошиву после вычета остатков
   // колонки — ровно как на экране «План по размерам»: только цвета, включённые в ЭТОТ довоз
   // (выключенные чипы/чужие цвета не выгружаем; голубой с нулём после вычета остаётся — он в плане был)
-  const cols = colsForMatrix(a, p.planMatrix || {}).filter((c) => colorOnInPartia(p, c));
-  const sizes = rowsForMatrix(a, p.planMatrix || {}, M);
+  // цвета довоза (включённые чипы), затем оставляем только те, что реально нужно шить (нетто>0):
+  // полностью покрытые остатками цвета в файл не выводим — на производство идёт только нужное.
+  const onCols = colsForMatrix(a, p.planMatrix || {}).filter((c) => colorOnInPartia(p, c));
+  const cols = onCols.filter((c) => a.sizes.reduce((n, s) => n + cell(M, c, s), 0) > 0);
+  const sizes = rowsForMatrix(a, M).filter((s) => cols.some((c) => cell(M, c, s) > 0));
   const ws = state.workshops.find((w) => w.id === p.workshopId);
   const meta = [`Артикул ${a.id} — ${a.name}`, `Партия ${p.no}${p.deliveryTag ? ' · ' + p.deliveryTag : ''}`];
   if (p.deadline) meta.push(`Срок WB: ${p.deadline}`);
@@ -1396,12 +1415,12 @@ function partiaReadyAoA(a, p) {
   // если остатки что-то покрыли — явно показываем цеху, что это уже нетто, и по каким цветам вычли
   if (net < gross) {
     meta.push(`К производству: ${net.toLocaleString('ru')} шт (спрос по плану ${gross.toLocaleString('ru')}, остатки вычтены)`);
-    const covered = cols.map((c) => {
+    const covered = onCols.map((c) => {   // покрытие считаем и по скрытым (полностью покрытым) цветам
       const g = a.sizes.reduce((n, s) => n + cell(p.planMatrix, c, s), 0);
       const nn = a.sizes.reduce((n, s) => n + cell(M, c, s), 0);
       return (g - nn > 0) ? `${c} −${(g - nn).toLocaleString('ru')}` : null;
     }).filter(Boolean);
-    if (covered.length) meta.push(`Покрыто остатками по цветам: ${covered.join(', ')}`);
+    if (covered.length) meta.push(`Покрыто остатками (не шьём): ${covered.join(', ')}`);
   }
   if (net === 0 && gross > 0) meta.push('⚠ Полностью покрыто остатками — шить не нужно');
   if (a.comment) meta.push(`Особенности: ${a.comment}`);
@@ -1883,6 +1902,39 @@ function matrixTable(a, M, p) {
       <tr><th class="mx-size mx-vsego">ВСЕГО</th>
         ${cols.map((c) => `<td class="num mx-coltot" data-coltot="${encodeURIComponent(c)}">${a.sizes.reduce((n, s) => n + cell(M, c, s), 0)}</td>`).join('')}
         <td class="num mx-grand" data-grand>${sumMatrix(M)}</td>
+      </tr>
+    </tfoot>
+  </table>
+  </div>`;
+}
+
+// «К производству» (нетто): матрица только с тем, что реально нужно шить (план − остатки).
+// Полностью покрытые остатками цвета/размеры скрыты. Только чтение — правка спроса в режиме «Спрос».
+function matrixTableNet(a, p) {
+  const M = prodMatrixFor(p);
+  const onCols = colsForMatrix(a, p.planMatrix || {}).filter((c) => colorOnInPartia(p, c));
+  const cols = onCols.filter((c) => a.sizes.reduce((n, s) => n + cell(M, c, s), 0) > 0);
+  if (!cols.length) return '<div class="mini" style="padding:10px 0">Вся партия покрыта остатками — шить ничего не нужно.</div>';
+  const sizes = (mxAllSizes ? a.sizes : rowsForMatrix(a, M)).filter((s) => cols.some((c) => cell(M, c, s) > 0));
+  return `
+  <div class="matrix-scroll">
+  <table class="matrix-table">
+    <thead>
+      <tr><th class="mx-corner">Размер \\ Цвет</th>
+        ${cols.map((c) => `<th class="mx-color">${swatchTag(a, c, 72, 34)}<div>${c}</div></th>`).join('')}
+        <th class="mx-rowtot-h">Итого по размеру</th></tr>
+    </thead>
+    <tbody>
+      ${sizes.map((s) => `<tr>
+        <th class="mx-size">${s}</th>
+        ${cols.map((c) => `<td class="num">${cell(M, c, s)}</td>`).join('')}
+        <td class="num mx-rowtot">${cols.reduce((n, c) => n + cell(M, c, s), 0)}</td>
+      </tr>`).join('')}
+    </tbody>
+    <tfoot>
+      <tr><th class="mx-size mx-vsego">ВСЕГО</th>
+        ${cols.map((c) => `<td class="num mx-coltot">${a.sizes.reduce((n, s) => n + cell(M, c, s), 0)}</td>`).join('')}
+        <td class="num mx-grand">${cols.reduce((n, c) => n + a.sizes.reduce((m, s) => m + cell(M, c, s), 0), 0)}</td>
       </tr>
     </tfoot>
   </table>
