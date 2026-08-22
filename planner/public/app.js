@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'color-coeff-2026-08-22h';
+const APP_BUILD = 'exclude-hide-2026-08-22i';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1116,7 +1116,8 @@ function renderMatrix() {
   }
 
   const M = (p.planMatrix = p.planMatrix || {});
-  for (const c of a.colors) { M[c] = M[c] || {}; for (const s of a.sizes) if (M[c][s] == null) M[c][s] = 0; }
+  { const excl = new Set(a.excludedColors || []); // исключённые цвета не заводим в матрицу (не шьём)
+    for (const c of a.colors) { if (excl.has(c)) { delete M[c]; continue; } M[c] = M[c] || {}; for (const s of a.sizes) if (M[c][s] == null) M[c][s] = 0; } }
   const hasGrid = a.colors.length && a.sizes.length;
   const cyc = (schedule?.cycles || []).filter((c) => c.partiaId === p.id);
   const cycInfo = cyc.length ? cyc.map((c) => `${c.workshopName} — ${c.units.toLocaleString('ru')} шт`).join(' · ') : 'не назначено (сохрани и пересчитай)';
@@ -1925,7 +1926,8 @@ function colorForPartiaHTML(a, p, parts) {
 function seasonColorChipsHTML(a, p) {
   const plans = articlePlanPartias(a.id);
   if (plans.length < 2) return '';
-  const cols = activeColors(a);
+  const excl = new Set(a.excludedColors || []);   // исключённые в «Ранге» цвета — не показываем чипом
+  const cols = activeColors(a).filter((c) => !excl.has(c));
   if (!cols.length) return '';
   const hasCam = matrixColorMonthly[a.id] && !matrixColorMonthly[a.id].stale && (matrixColorMonthly[a.id].months || []).length;
   const autoBar = hasCam ? `<div class="mx-cc-auto">
@@ -3885,8 +3887,10 @@ function activeColors(a) {
 // реальные количества. Архивные-пустые скрываются. Порядок — как в a.colors.
 function colsForMatrix(a, ...mats) {
   const arch = new Set((a && a.archivedColors) || []);
+  const excl = new Set((a && a.excludedColors) || []); // исключённые в «Ранге» цвета — не шьём, прячем
+  const hidden = (c) => arch.has(c) || excl.has(c);
   return ((a && a.colors) || []).filter((c) =>
-    !arch.has(c) || mats.some((M) => M && M[c] && Object.values(M[c]).some((v) => (+v || 0) > 0)));
+    !hidden(c) || mats.some((M) => M && M[c] && Object.values(M[c]).some((v) => (+v || 0) > 0)));
 }
 // Размеры для показа: только те, в которых ЕСТЬ данные (ненулевые в любой из матриц). Если данных
 // нет вообще (пустая партия) — показываем весь ряд, чтобы было куда вводить. Порядок — как в a.sizes.

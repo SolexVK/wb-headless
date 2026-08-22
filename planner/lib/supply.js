@@ -25,12 +25,18 @@ export function computeSupplyNetting(state, todayISO) {
   const supByArt = {};
   for (const s of (state.supplies || [])) (supByArt[s.articleId] = supByArt[s.articleId] || []).push(s);
 
+  // исключённые в «Ранге» цвета по артикулу — их НЕ производим (вырезаем из плана перед неттингом)
+  const exclByArt = {};
+  for (const a of (state.articles || [])) if (Array.isArray(a.excludedColors) && a.excludedColors.length) exclByArt[a.id] = new Set(a.excludedColors);
+
   // план-партии (будущее производство) по артикулам; уже начатые (не 'plan') не неттингуем
   const partsByArt = {};
   for (const p of (state.partias || [])) {
     if (p.historical || p.status !== 'plan' || !p.deadline) continue;
     (partsByArt[p.articleId] = partsByArt[p.articleId] || []).push(p);
-    net[p.id] = JSON.parse(JSON.stringify(p.planMatrix || {})); // старт: net = план
+    const m = JSON.parse(JSON.stringify(p.planMatrix || {})); // старт: net = план
+    const ex = exclByArt[p.articleId]; if (ex) for (const c of ex) delete m[c]; // исключённые цвета не шьём
+    net[p.id] = m;
   }
 
   for (const a of (state.articles || [])) {
