@@ -50,18 +50,21 @@ async function main() {
   const slug = `shirts-analysis-${skus.join('-')}-${d1}_${d2}`.slice(0, 120);
   const htmlPath = path.join(outDir, `${slug}.html`);
   const jsonPath = path.join(outDir, `${slug}.json`);
-  const html = buildShirtsReportHtml(data);
+  const html = buildShirtsReportHtml(data);               // широкий интерактивный HTML
+  const bookHtml = buildShirtsReportHtml(data, { book: true }); // книжный (портретный) под PDF
+  const bookHtmlPath = path.join(outDir, `${slug}-book.html`);
   fs.writeFileSync(htmlPath, html);
+  fs.writeFileSync(bookHtmlPath, bookHtml);
   fs.writeFileSync(jsonPath, JSON.stringify({
     ...data,
     articles: data.articles.map(({ img, ...a }) => ({ ...a, hasImg: !!img, reviews: { ...a.reviews, } })),
     market: { ...data.market, top10: data.market.top10.map(({ img, ...p }) => ({ ...p, hasImg: !!img })) },
   }, null, 2));
 
-  const files = [htmlPath, jsonPath];
+  const files = [htmlPath, bookHtmlPath, jsonPath];
   if (process.env.SHIRTS_PDF !== '0') {
     const pdfPath = path.join(outDir, `${slug}.pdf`);
-    try { htmlToPdf(html, pdfPath); files.unshift(pdfPath); } catch (e) { console.error('PDF не отрендерен:', e.message); }
+    try { htmlToPdf(bookHtml, pdfPath); files.unshift(pdfPath); } catch (e) { console.error('PDF не отрендерен:', e.message); }
   }
   console.log('\nФайлы:');
   for (const f of files) console.log('  ' + f);
