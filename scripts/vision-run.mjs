@@ -73,8 +73,11 @@ centre-front button placket. A top lacking either is "blouse_non_shirt".`,
 // на карточку): Ollama переиспользует уже обработанное изображение между
 // запросами с одинаковым префиксом.
 //
-// Второй выигрыш: признаки перестали мешать друг другу, поэтому вернулись
-// низ, длина изделия и линия плеча — в общей схеме они рушили манжету.
+// Спрашиваем пять признаков. Проверка расширения до семи показала, что режим
+// «по одному» не лечит признак, который модель просто не берёт: низ (hem)
+// остался константой `straight` при любой формулировке — 1/6 — и выброшен.
+// Длина изделия 3/6 — тоже выброшена. Линия плеча 5/6 — оставлена.
+// По признакам: воротник 6/6, рукав 5/6, плечо 5/6, рисунок 5/6, манжета 2/6.
 const ATTRS = {
   photos: 2,
   numPredict: 40,
@@ -108,23 +111,6 @@ Embroidery or eyelet holes in the same colour are NOT a pattern either.
 A pattern means printed or woven stripes, checks or figures in
 a contrasting colour. What pattern does the fabric have?`,
       ['solid', 'stripe', 'check', 'floral', 'other', 'unknown'],
-    ],
-    hem: [
-      `Look ONLY at the bottom edge of the garment. Ignore everything else.
-A shirt tail hem is curved: longer at the centre front and back,
-rising at the side seams. A straight hem is level all the way round.
-If the garment is tucked in, knotted or cropped out of frame so the
-bottom edge is not visible, answer unknown.
-What is the shape of the bottom edge?`,
-      ['rounded_shirt_tail', 'straight', 'unknown'],
-    ],
-    body_length: [
-      `Look ONLY at how far down the body the garment reaches.
-elongated = past the hip, onto the thigh. regular = around the hip.
-cropped = above the waist. If the bottom edge is not visible or the
-garment is tucked in, answer unknown.
-How long is the garment?`,
-      ['elongated', 'regular', 'cropped', 'unknown'],
     ],
     shoulder: [
       `Look ONLY at the shoulder seam of the garment. Ignore everything else.
