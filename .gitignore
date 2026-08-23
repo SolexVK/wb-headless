@@ -4,3 +4,5 @@ reports-output/
 .env
 *.log
 bench-images/
+__pycache__/
+*.pyc
