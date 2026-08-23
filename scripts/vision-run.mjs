@@ -83,6 +83,11 @@ centre-front button placket. A top lacking either is "blouse_non_shirt".`,
 // остался константой `straight` при любой формулировке — 1/6 — и выброшен.
 // Длина изделия 3/6 — тоже выброшена. Линия плеча 5/6 — оставлена.
 // По признакам: воротник 6/6, рукав 5/6, плечо 5/6, рисунок 5/6, манжета 2/6.
+//
+// Ткань вернули после боевого прогона: она весит 20, а из текста определялась
+// содержательно лишь у части карточек — «хлопок 70 %» не отличает марлевку от
+// фланели. Текст по-прежнему главнее, когда называет материал прямо
+// (марлевка, муслин, атлас, лён); расплывчатый состав уступает зрению.
 const ATTRS = {
   photos: 2,
   numPredict: 40,
@@ -116,6 +121,16 @@ Embroidery or eyelet holes in the same colour are NOT a pattern either.
 A pattern means printed or woven stripes, checks or figures in
 a contrasting colour. What pattern does the fabric have?`,
       ['solid', 'stripe', 'check', 'floral', 'other', 'unknown'],
+    ],
+    fabric_texture: [
+      `Look ONLY at the surface and drape of the fabric. Ignore everything else.
+crinkled_gauze = light, matte, crinkled, slightly see-through, like muslin
+  or cotton gauze. satin_shiny = smooth with a glossy sheen.
+smooth_matte = smooth, opaque, no sheen, like poplin. flannel = brushed,
+  soft and thick. knit = stretchy jersey. denim = woven cotton twill.
+What is the fabric like?`,
+      ['crinkled_gauze', 'satin_shiny', 'smooth_matte', 'flannel', 'knit',
+       'denim', 'unknown'],
     ],
     shoulder: [
       `Look ONLY at the shoulder seam of the garment. Ignore everything else.
