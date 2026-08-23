@@ -94,6 +94,65 @@ ATTRS_SCHEMA = {
 }
 
 
+# ── Режим «по одному признаку за запрос» ─────────────────────────────────────
+# Гипотеза: когда модель отвечает сразу на несколько вопросов, ответы влияют
+# друг на друга — схема из 8 полей давала манжету 6/6, из 4 полей 1/6 при
+# том же изображении и temperature 0. Здесь каждый признак спрашивается
+# отдельным запросом с прицельным промптом: модель смотрит только на одну
+# деталь и ни на что больше не отвлекается.
+#
+# Цена: изображение обрабатывается заново на каждый вопрос, поэтому время
+# растёт примерно вдвое-втрое. Точность важнее.
+
+ATTR_QUESTIONS = {
+    "collar": (
+        "Look ONLY at the neckline and collar of this garment. Ignore everything else.\n"
+        "A classic turn-down shirt collar has a stand at the neck and two points\n"
+        "folding down and outwards. A stand collar has no folding points.\n"
+        "Which collar does this garment have?",
+        ["classic_turn_down", "stand", "mandarin", "polo", "round_neck",
+         "v_neck", "bow", "lapel", "unknown"],
+    ),
+    "sleeve_length": (
+        "Look ONLY at the sleeves of this garment. Ignore everything else.\n"
+        "How far down the arm does the sleeve reach?",
+        ["long", "three_quarter", "short", "sleeveless", "unknown"],
+    ),
+    "cuff": (
+        "Look ONLY at the wrist end of the sleeves. Ignore everything else.\n"
+        "A shirt cuff is a separate band of fabric sewn to the sleeve, usually\n"
+        "fastened with a button. An elastic sleeve end gathers without a band.\n"
+        "A folded end is the sleeve simply rolled or turned up.\n"
+        "If the sleeves are rolled up so the cuff cannot be judged, answer unknown.\n"
+        "What is at the wrist end?",
+        ["separate_shirt_cuff", "elastic", "folded", "none", "unknown"],
+    ),
+    "pattern": (
+        "Look ONLY at the surface of the fabric. Ignore everything else.\n"
+        "A crinkled or wrinkled texture is NOT a pattern — it is the weave.\n"
+        "A pattern means printed or woven stripes, checks or figures.\n"
+        "What pattern does the fabric have?",
+        ["solid", "stripe", "check", "floral", "other", "unknown"],
+    ),
+}
+
+
+def one_field_schema(field, values):
+    return {"type": "object",
+            "properties": {field: {"type": "string", "enum": values}},
+            "required": [field]}
+
+
+# Вариант «сначала посмотри, потом отвечай»: свободное поле observation идёт
+# первым, и модель успевает описать увиденное до того, как схема заставит её
+# зафиксировать значение из списка.
+def observe_schema(base):
+    props = {"observation": {"type": "string"}}
+    props.update(base["properties"])
+    return {"type": "object", "properties": props,
+            "required": ["observation"] + list(base["required"])}
+
+
 def http_json(url, payload=None, timeout=600):
     """POST/GET JSON. При HTTP-ошибке поднимает RuntimeError с телом ответа —
     без тела диагностировать 500 от Ollama невозможно."""
@@ -171,6 +230,21 @@ def ask(model, prompt, image_paths, num_predict, schema=None, num_ctx=None):
         return None, dt, raw
 
 
+def ask_each(model, image_paths, num_predict, num_ctx):
+    """Спрашивает каждый признак отдельным запросом. Возвращает (dict, сек, ошибки)."""
+    out, total, bad = {}, 0.0, 0
+    for field, (prompt, values) in ATTR_QUESTIONS.items():
+        got, dt, raw = ask(model, prompt, image_paths, min(num_predict, 40),
+                           one_field_schema(field, values), num_ctx)
+        total += dt
+        if got and field in got:
+            out[field] = got[field]
+        else:
+            out[field] = None
+            bad += 1
+    return out, total, bad
+
+
 def unload(model):
     try:
         http_json(f"{OLLAMA}/api/generate",
@@ -203,6 +277,10 @@ def main():
     ap.add_argument("--test", choices=["gate", "attrs", "both"], default="both")
     ap.add_argument("--size", choices=SIZES, default="c516x688",
                     help="размер фото WB; c246x328 быстрее и дешевле, big детальнее")
+    ap.add_argument("--one-by-one", action="store_true",
+                    help="разбор: каждый признак отдельным запросом")
+    ap.add_argument("--observe", action="store_true",
+                    help="добавить свободное поле observation перед значениями")
     ap.add_argument("--num-ctx", type=int, default=None,
                     help="размер контекста Ollama; для vision иногда мало 4096")
     ap.add_argument("--num-predict", type=int, default=400, help="потолок токенов ответа")
@@ -219,7 +297,10 @@ def main():
 
     known = {m["name"]: m.get("size", 0) for m in tags}
     print(f"Модели в Ollama: {', '.join(sorted(known))}")
-    print(f"Размер фото: {args.size}   потолок ответа: {args.num_predict} токенов\n")
+    mode = ("по одному признаку" if args.one_by_one
+            else "с полем observation" if args.observe else "все признаки разом")
+    print(f"Размер фото: {args.size}   потолок ответа: {args.num_predict} токенов")
+    print(f"Режим разбора: {mode}\n")
 
     if args.models:
         models = [m.strip() for m in args.models.split(",")]
@@ -262,8 +343,16 @@ def main():
             for nm, meta in CARDS.items():
                 if nm not in photos:
                     continue
-                got, dt, raw = ask(model, prompt, photos[nm][:n_img],
-                                   args.num_predict, schema, args.num_ctx)
+                if test_name == "attrs" and args.one_by_one:
+                    got, dt, nbad = ask_each(model, photos[nm][:n_img],
+                                             args.num_predict, args.num_ctx)
+                    raw = json.dumps(got, ensure_ascii=False)
+                    if nbad == len(ATTR_QUESTIONS):
+                        got = None
+                else:
+                    use = observe_schema(schema) if args.observe else schema
+                    got, dt, raw = ask(model, prompt, photos[nm][:n_img],
+                                       args.num_predict, use, args.num_ctx)
                 times.append(dt)
                 answers.append(got or {})
                 exp = meta[test_name]
