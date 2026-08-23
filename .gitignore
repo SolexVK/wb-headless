@@ -7,3 +7,4 @@ bench-images/
 __pycache__/
 *.pyc
 cache/
+out/
