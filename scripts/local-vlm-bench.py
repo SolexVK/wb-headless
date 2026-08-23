@@ -35,52 +35,46 @@ SIZES = ("c246x328", "c516x688", "big")
 # ошибка «выбросил нужное» — потеря товара навсегда.
 CARDS = {
     237194752: dict(label="марлевка оверсайз — ЦЕЛЕВАЯ", must_pass=True,
-                    gate=dict(is_womens_shirt=True, full_front_button_placket=True,
-                              long_sleeves=True, loose_fit=True),
+                    gate=dict(garment_type="shirt", sleeve_length="long", fit="oversize", photo_usable=True),
                     attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="oversize",
                                hem="rounded_shirt_tail", chest_pocket=False,
                                fabric_texture="crinkled_gauze", pattern="solid")),
     227781398: dict(label="муслин оверсайз — ЦЕЛЕВАЯ", must_pass=True,
-                    gate=dict(is_womens_shirt=True, full_front_button_placket=True,
-                              long_sleeves=True, loose_fit=True),
+                    gate=dict(garment_type="shirt", sleeve_length="long", fit="oversize", photo_usable=True),
                     attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="oversize",
                                hem="rounded_shirt_tail", chest_pocket=False,
                                fabric_texture="crinkled_gauze", pattern="solid")),
     608341673: dict(label="атлас — крой совпал, ткань противоположна", must_pass=True,
-                    gate=dict(is_womens_shirt=True, full_front_button_placket=True,
-                              long_sleeves=True, loose_fit=True),
+                    gate=dict(garment_type="shirt", sleeve_length="long", fit="relaxed", photo_usable=True),
                     attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="relaxed",
                                hem="rounded_shirt_tail", chest_pocket=False,
                                fabric_texture="satin_shiny", pattern="solid")),
     328892062: dict(label="клетка/фланель оверсайз — смежное", must_pass=True,
-                    gate=dict(is_womens_shirt=True, full_front_button_placket=True,
-                              long_sleeves=True, loose_fit=True),
+                    gate=dict(garment_type="shirt", sleeve_length="long", fit="oversize", photo_usable=True),
                     attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="oversize",
                                hem="unknown", chest_pocket=False,
                                fabric_texture="flannel", pattern="check")),
     179331048: dict(label="приталенная офисная — НЕ подходит", must_pass=True,
-                    gate=dict(is_womens_shirt=True, full_front_button_placket=True,
-                              long_sleeves=True, loose_fit=False),
+                    gate=dict(garment_type="shirt", sleeve_length="long", fit="fitted", photo_usable=True),
                     attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="fitted",
                                hem="unknown", chest_pocket=False,
                                fabric_texture="smooth_matte", pattern="solid")),
     327286708: dict(label="блузка, стойка+V, рукав 3/4 — отсев на гейте", must_pass=False,
-                    gate=dict(is_womens_shirt=False, full_front_button_placket=False,
-                              long_sleeves=False, loose_fit=True),
+                    gate=dict(garment_type="blouse_non_shirt", sleeve_length="three_quarter", fit="straight", photo_usable=True),
                     attrs=dict(collar="stand", sleeve_length="three_quarter", fit="straight",
                                hem="straight", chest_pocket=False,
                                fabric_texture="smooth_matte", pattern="solid")),
 }
 
-GATE_PROMPT = """You are grading one product photo from an online marketplace.
+GATE_PROMPT = """You are sorting one product photo from an online marketplace.
 Look only at the garment. Ignore the model, background, text overlays and styling.
-Reply with JSON only, no prose:
-{"is_womens_shirt": bool,          // women's shirt or shirt-style blouse; false for dress, jacket, t-shirt, knitwear, suit
- "full_front_button_placket": bool,// continuous centre-front opening fastened with buttons
- "long_sleeves": bool,             // sleeves reach the wrist
- "loose_fit": bool,                // relaxed or oversized, not body-hugging
- "photo_usable": bool,             // the garment is actually visible, not just an infographic
- "confidence": "low"|"medium"|"high"}"""
+Choose exactly one value per field. Reply with JSON only, no prose:
+{"garment_type": "shirt"|"blouse_non_shirt"|"dress"|"jacket"|"tshirt"|"knitwear"|"suit"|"other",
+    // "shirt" = classic shirt construction: turn-down collar AND a full centre-front button placket.
+    // "blouse_non_shirt" = a top that lacks either of those (stand collar, V-neck, pullover, tie-neck).
+ "sleeve_length": "long"|"three_quarter"|"short"|"sleeveless"|"unknown",
+ "fit": "oversize"|"relaxed"|"straight"|"fitted"|"unknown",
+ "photo_usable": true|false}"""
 
 ATTRS_PROMPT = """You are cataloguing one garment from marketplace photos.
 Ignore colour, the model, background, text overlays and styling. Judge construction only.
@@ -277,7 +271,7 @@ def main():
                     else:
                         wrong.append(f"{k}={got.get(k)!r}≠{want!r}")
                 if test_name == "gate":
-                    passed = bool(got.get("is_womens_shirt"))
+                    passed = norm(got.get("garment_type")) == "shirt"
                     if meta["must_pass"] and not passed:
                         lost.append(nm)
                     if not meta["must_pass"] and passed:

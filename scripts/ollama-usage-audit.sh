@@ -40,7 +40,7 @@ if [ -n "$LOG" ]; then
   sub "Сколько раз каждая модель встречается в логе"
   while read -r name _; do
     [ -z "$name" ] && continue
-    n=$(grep -c -- "$name" "$LOG" 2>/dev/null || echo 0)
+    n=$(grep -c -F -- "$name" "$LOG" 2>/dev/null); n=${n:-0}
     printf '    %-26s упоминаний в логе: %s\n' "$name" "$n"
   done < <(ollama list 2>/dev/null | tail -n +2)
 else
@@ -72,9 +72,14 @@ while read -r name size unit _; do
     verdict="ОСТАВИТЬ — нужна для визуального поиска"
   else
     used=""
-    [ -n "$LOG" ] && [ "$(grep -c -- "$name" "$LOG" 2>/dev/null || echo 0)" -gt 0 ] && used="лог"
-    grep -rIlq --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=bench-images \
-         -F "$name" "$HOME" 2>/dev/null && used="${used:+$used, }код"
+    if [ -n "$LOG" ]; then c=$(grep -c -F -- "$name" "$LOG" 2>/dev/null); [ "${c:-0}" -gt 0 ] && used="лог"; fi
+    # ищем ТОЛЬКО в исполняемом коде и конфигах: истории, логи, заметки и
+    # сессии агентов — это архив, а не активное использование
+    if grep -rIlq --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=bench-images \
+         --exclude-dir=sessions --exclude-dir=memory --exclude-dir=archive --exclude-dir=Logs \
+         --exclude='*.log' --exclude='*.jsonl*' --exclude='*.md' --exclude='.zsh_history' \
+         --exclude='*.bak*' --exclude='*.clobbered.*' \
+         -F "$name" "$HOME" 2>/dev/null; then used="${used:+$used, }АКТИВНЫЙ КОД"; fi
     if [ -n "$used" ]; then
       verdict="ПРОВЕРИТЬ ВРУЧНУЮ — есть следы: $used"
     else
