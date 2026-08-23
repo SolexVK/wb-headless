@@ -12,9 +12,12 @@
 // заполняют каждую характеристику. Это нужно, чтобы понимать, на какие поля
 // вообще можно опираться в текстовом гейте.
 
+import { loadEnv } from '../lib/loadEnv.js';
 import {
   fetchCard, photoUrls, hardRejectByOptions, attributesFromOptions, mapLimit,
 } from '../lib/wbCard.js';
+
+loadEnv();
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');

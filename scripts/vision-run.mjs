@@ -18,8 +18,13 @@
 
 import fs from 'fs';
 import path from 'path';
+import { loadEnv, requireEnv } from '../lib/loadEnv.js';
 import { fetchCard, photoUrls, hardRejectByOptions, mapLimit } from '../lib/wbCard.js';
 import { ask, unload, memory, waitForMemory, loaded, sleep } from '../lib/ollamaClient.js';
+
+// .env в .gitignore, поэтому в git worktree его нет — подхватываем из
+// соседнего основного клона. Уже выставленные переменные не трогаем.
+const envInfo = loadEnv();
 
 // ── Аргументы ────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -138,6 +143,7 @@ async function loadIds() {
       .filter((x) => /^\d{5,}$/.test(x)).map(Number);
   }
   if (TOP > 0) {
+    requireEnv('MPSTATS_TOKEN');
     const { fetchCategory } = await import('../lib/mpstats.js');
     const d2 = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
     const d1 = new Date(Date.now() - 91 * 86400000).toISOString().slice(0, 10);
@@ -198,7 +204,9 @@ const queue = ids.filter((id) => !done.has(id));
 console.log(`Ступень: ${STAGE}   модель: ${MODEL}   фото: ${SPEC.photos}×${SIZE}`);
 console.log(`Всего артикулов: ${ids.length}, уже сделано: ${done.size}, в очереди: ${queue.length}`);
 console.log(`Кластер: ${CLUSTER} карточек, затем выгрузка модели из памяти`);
-console.log(`Результат: ${OUT_FILE}\n`);
+console.log(`Результат: ${OUT_FILE}`);
+if (envInfo.file) console.log(`Переменные из: ${envInfo.file} (${envInfo.loaded.length} шт.)`);
+console.log('');
 
 const m0 = await memory();
 console.log(`Память на старте: свободно ${m0.freeGb.toFixed(1)} ГБ, своп ${Math.round(m0.swapUsedMb)} МБ`);
