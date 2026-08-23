@@ -67,40 +67,81 @@ centre-front button placket. A top lacking either is "blouse_non_shirt".`,
   },
 };
 
-// Только признаки, которых нет в характеристиках карточки и которые модель
-// берёт уверенно. Каждое лишнее поле в схеме стоит точности на остальных:
-// добавление body_length и shoulder обрушило манжету с 6/6 до 1/6.
+// Разбор идёт ПО ОДНОМУ ПРИЗНАКУ ЗА ЗАПРОС. Замерено на размеченном наборе:
+// все признаки разом — 62 %, с полем observation — 58 %, по одному — 75 %.
+// Воротник при этом вырос с 4/6 до 6/6. Время почти не растёт (14,6 → 17,1 с
+// на карточку): Ollama переиспользует уже обработанное изображение между
+// запросами с одинаковым префиксом.
+//
+// Второй выигрыш: признаки перестали мешать друг другу, поэтому вернулись
+// низ, длина изделия и линия плеча — в общей схеме они рушили манжету.
 const ATTRS = {
   photos: 2,
-  numPredict: 200,
-  prompt: `Catalogue this garment from the photos.
-Ignore colour, the model, background, text overlays and styling — judge construction only.
-Combine evidence from all photos: a feature hidden on one may be visible on another.
-If a feature is hidden by pose, tucking or cropping in every photo, answer "unknown".`,
-  schema: {
-    type: 'object',
-    properties: {
-      collar: {
-        type: 'string',
-        enum: ['classic_turn_down', 'stand', 'mandarin', 'polo', 'round_neck',
-               'v_neck', 'bow', 'lapel', 'unknown'],
-      },
-      sleeve_length: {
-        type: 'string',
-        enum: ['long', 'three_quarter', 'short', 'sleeveless', 'unknown'],
-      },
-      cuff: {
-        type: 'string',
-        enum: ['separate_shirt_cuff', 'elastic', 'folded', 'none', 'unknown'],
-      },
-      pattern: {
-        type: 'string',
-        enum: ['solid', 'stripe', 'check', 'floral', 'other', 'unknown'],
-      },
-    },
-    required: ['collar', 'sleeve_length', 'cuff', 'pattern'],
+  numPredict: 40,
+  questions: {
+    collar: [
+      `Look ONLY at the neckline and collar of this garment. Ignore everything else.
+A classic turn-down shirt collar has a stand at the neck and two points
+folding down and outwards. A stand collar has no folding points.
+Which collar does this garment have?`,
+      ['classic_turn_down', 'stand', 'mandarin', 'polo', 'round_neck',
+       'v_neck', 'bow', 'lapel', 'unknown'],
+    ],
+    sleeve_length: [
+      `Look ONLY at the sleeves of this garment. Ignore everything else.
+How far down the arm does the sleeve reach?`,
+      ['long', 'three_quarter', 'short', 'sleeveless', 'unknown'],
+    ],
+    cuff: [
+      `Look ONLY at the wrist end of the sleeves. Ignore everything else.
+A shirt cuff is a separate band of fabric sewn to the sleeve, usually
+fastened with a button. An elastic sleeve end gathers without a band.
+A folded end is the sleeve simply rolled or turned up.
+If the sleeves are rolled up so the cuff cannot be judged, answer unknown.
+What is at the wrist end?`,
+      ['separate_shirt_cuff', 'elastic', 'folded', 'none', 'unknown'],
+    ],
+    pattern: [
+      `Look ONLY at the surface of the fabric. Ignore everything else.
+A crinkled or wrinkled texture is NOT a pattern — it is the weave.
+Embroidery or eyelet holes in the same colour are NOT a pattern either.
+A pattern means printed or woven stripes, checks or figures in
+a contrasting colour. What pattern does the fabric have?`,
+      ['solid', 'stripe', 'check', 'floral', 'other', 'unknown'],
+    ],
+    hem: [
+      `Look ONLY at the bottom edge of the garment. Ignore everything else.
+A shirt tail hem is curved: longer at the centre front and back,
+rising at the side seams. A straight hem is level all the way round.
+If the garment is tucked in, knotted or cropped out of frame so the
+bottom edge is not visible, answer unknown.
+What is the shape of the bottom edge?`,
+      ['rounded_shirt_tail', 'straight', 'unknown'],
+    ],
+    body_length: [
+      `Look ONLY at how far down the body the garment reaches.
+elongated = past the hip, onto the thigh. regular = around the hip.
+cropped = above the waist. If the bottom edge is not visible or the
+garment is tucked in, answer unknown.
+How long is the garment?`,
+      ['elongated', 'regular', 'cropped', 'unknown'],
+    ],
+    shoulder: [
+      `Look ONLY at the shoulder seam of the garment. Ignore everything else.
+soft_dropped = the seam sits below the natural shoulder point and the
+line is soft. set_in = the seam sits at the shoulder point.
+structured = the shoulder is padded or sharply built.
+Where does the shoulder seam sit?`,
+      ['soft_dropped', 'set_in', 'structured', 'unknown'],
+    ],
   },
 };
+
+const oneFieldSchema = (field, values) => ({
+  type: 'object',
+  properties: { [field]: { type: 'string', enum: values } },
+  required: [field],
+});
 
 const SPEC = STAGE === 'gate' ? GATE : ATTRS;
 
@@ -217,9 +258,28 @@ for (let start = 0; start < queue.length; start += CLUSTER) {
     }
 
     try {
-      const { data, ms, raw } = await ask(MODEL, SPEC.prompt, imgs, {
-        schema: SPEC.schema, numPredict: SPEC.numPredict, numCtx: 2048,
-      });
+      let data; let ms; let raw;
+      if (STAGE === 'attrs') {
+        data = {}; ms = 0;
+        let asked = 0; let failed = 0;
+        for (const [field, [prompt, values]] of Object.entries(ATTRS.questions)) {
+          const r = await ask(MODEL, prompt, imgs, {
+            schema: oneFieldSchema(field, values),
+            numPredict: ATTRS.numPredict, numCtx: 2048,
+          });
+          ms += r.ms;
+          asked += 1;
+          if (r.data && field in r.data) data[field] = r.data[field];
+          else { data[field] = 'unknown'; failed += 1; }
+        }
+        raw = JSON.stringify(data);
+        if (failed === asked) data = null;
+      } else {
+        const r = await ask(MODEL, SPEC.prompt, imgs, {
+          schema: SPEC.schema, numPredict: SPEC.numPredict, numCtx: 2048,
+        });
+        data = r.data; ms = r.ms; raw = r.raw;
+      }
       if (!data) {
         append({ nmId: nm, stage: STAGE, error: 'ответ не JSON', raw: raw.slice(0, 200) });
         errors += 1;

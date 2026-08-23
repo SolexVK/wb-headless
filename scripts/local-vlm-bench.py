@@ -104,6 +104,16 @@ ATTRS_SCHEMA = {
 # Цена: изображение обрабатывается заново на каждый вопрос, поэтому время
 # растёт примерно вдвое-втрое. Точность важнее.
 
+# Ручные метки для расширенного набора (режим --one-by-one).
+ATTRS_FULL_TRUTH = {
+    237194752: dict(hem="rounded_shirt_tail", body_length="elongated", shoulder="soft_dropped"),
+    227781398: dict(hem="rounded_shirt_tail", body_length="elongated", shoulder="soft_dropped"),
+    608341673: dict(hem="rounded_shirt_tail", body_length="regular", shoulder="set_in"),
+    328892062: dict(hem="unknown", body_length="unknown", shoulder="soft_dropped"),
+    179331048: dict(hem="unknown", body_length="unknown", shoulder="set_in"),
+    327286708: dict(hem="straight", body_length="regular", shoulder="set_in"),
+}
+
 ATTR_QUESTIONS = {
     "collar": (
         "Look ONLY at the neckline and collar of this garment. Ignore everything else.\n"
@@ -130,9 +140,37 @@ ATTR_QUESTIONS = {
     "pattern": (
         "Look ONLY at the surface of the fabric. Ignore everything else.\n"
         "A crinkled or wrinkled texture is NOT a pattern — it is the weave.\n"
-        "A pattern means printed or woven stripes, checks or figures.\n"
-        "What pattern does the fabric have?",
+        "Embroidery or eyelet holes in the same colour are NOT a pattern either.\n"
+        "A pattern means printed or woven stripes, checks or figures in\n"
+        "a contrasting colour. What pattern does the fabric have?",
         ["solid", "stripe", "check", "floral", "other", "unknown"],
+    ),
+    # Ниже — признаки, которые в общей схеме приходилось выбрасывать: в режиме
+    # «по одному» они не отнимают точность у соседей, значит можно вернуть.
+    "hem": (
+        "Look ONLY at the bottom edge of the garment. Ignore everything else.\n"
+        "A shirt tail hem is curved: longer at the centre front and back,\n"
+        "rising at the side seams. A straight hem is level all the way round.\n"
+        "If the garment is tucked in, knotted or cropped out of frame so the\n"
+        "bottom edge is not visible, answer unknown.\n"
+        "What is the shape of the bottom edge?",
+        ["rounded_shirt_tail", "straight", "unknown"],
+    ),
+    "body_length": (
+        "Look ONLY at how far down the body the garment reaches.\n"
+        "elongated = past the hip, onto the thigh. regular = around the hip.\n"
+        "cropped = above the waist. If the bottom edge is not visible or the\n"
+        "garment is tucked in, answer unknown.\n"
+        "How long is the garment?",
+        ["elongated", "regular", "cropped", "unknown"],
+    ),
+    "shoulder": (
+        "Look ONLY at the shoulder seam of the garment. Ignore everything else.\n"
+        "soft_dropped = the seam sits below the natural shoulder point and the\n"
+        "line is soft. set_in = the seam sits at the shoulder point.\n"
+        "structured = the shoulder is padded or sharply built.\n"
+        "Where does the shoulder seam sit?",
+        ["soft_dropped", "set_in", "structured", "unknown"],
     ),
 }
 
@@ -356,6 +394,8 @@ def main():
                 times.append(dt)
                 answers.append(got or {})
                 exp = meta[test_name]
+                if test_name == "attrs" and args.one_by_one:
+                    exp = {**exp, **ATTRS_FULL_TRUTH.get(nm, {})}
                 if got is None:
                     bad_json += 1
                     total += len(exp)
