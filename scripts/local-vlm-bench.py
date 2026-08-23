@@ -36,34 +36,28 @@ SIZES = ("c246x328", "c516x688", "big")
 CARDS = {
     237194752: dict(label="марлевка оверсайз — ЦЕЛЕВАЯ", must_pass=True,
                     gate=dict(garment_type="shirt", photo_usable=True),
-                    attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="oversize",
-                               hem="rounded_shirt_tail", chest_pocket="no",
-                               fabric_texture="crinkled_gauze", pattern="solid")),
+                    attrs=dict(collar="classic_turn_down", sleeve_length="long", cuff="separate_shirt_cuff",
+                               pattern="solid", body_length="elongated", shoulder="soft_dropped")),
     227781398: dict(label="муслин оверсайз — ЦЕЛЕВАЯ", must_pass=True,
                     gate=dict(garment_type="shirt", photo_usable=True),
-                    attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="oversize",
-                               hem="rounded_shirt_tail", chest_pocket="no",
-                               fabric_texture="crinkled_gauze", pattern="solid")),
+                    attrs=dict(collar="classic_turn_down", sleeve_length="long", cuff="unknown",
+                               pattern="solid", body_length="elongated", shoulder="soft_dropped")),
     608341673: dict(label="атлас — крой совпал, ткань противоположна", must_pass=True,
                     gate=dict(garment_type="shirt", photo_usable=True),
-                    attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="relaxed",
-                               hem="rounded_shirt_tail", chest_pocket="no",
-                               fabric_texture="satin_shiny", pattern="solid")),
+                    attrs=dict(collar="classic_turn_down", sleeve_length="long", cuff="separate_shirt_cuff",
+                               pattern="solid", body_length="regular", shoulder="set_in")),
     328892062: dict(label="клетка/фланель оверсайз — смежное", must_pass=True,
                     gate=dict(garment_type="shirt", photo_usable=True),
-                    attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="oversize",
-                               hem="unknown", chest_pocket="no",
-                               fabric_texture="flannel", pattern="check")),
+                    attrs=dict(collar="classic_turn_down", sleeve_length="long", cuff="unknown",
+                               pattern="check", body_length="unknown", shoulder="soft_dropped")),
     179331048: dict(label="приталенная офисная — НЕ подходит", must_pass=True,
                     gate=dict(garment_type="shirt", photo_usable=True),
-                    attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="fitted",
-                               hem="unknown", chest_pocket="no",
-                               fabric_texture="smooth_matte", pattern="solid")),
+                    attrs=dict(collar="classic_turn_down", sleeve_length="long", cuff="separate_shirt_cuff",
+                               pattern="solid", body_length="unknown", shoulder="set_in")),
     327286708: dict(label="блузка, стойка+V, рукав 3/4 — отсев на гейте", must_pass=False,
                     gate=dict(garment_type="blouse_non_shirt", photo_usable=True),
-                    attrs=dict(collar="stand", sleeve_length="three_quarter", fit="straight",
-                               hem="straight", chest_pocket="no",
-                               fabric_texture="smooth_matte", pattern="solid")),
+                    attrs=dict(collar="stand", sleeve_length="three_quarter", cuff="none",
+                               pattern="solid", body_length="regular", shoulder="set_in")),
 }
 
 GATE_TYPES = ["shirt", "blouse_non_shirt", "dress", "jacket", "tshirt",
@@ -85,27 +79,26 @@ GATE_SCHEMA = {
 
 ATTRS_PROMPT = """Catalogue this garment from the photos.
 Ignore colour, the model, background, text overlays and styling — judge construction only.
-If a feature is hidden by pose, tucking or cropping, answer "unknown". Never guess."""
+Combine evidence from all photos: a feature hidden on one may be visible on another.
+If a feature is hidden by pose, tucking or cropping in every photo, answer "unknown"."""
 
 def _enum(*v):
     return {"type": "string", "enum": list(v)}
 
+# Ткань, силуэт и карманы берём из характеристик карточки — там они точнее.
+# Низ (hem) исключён: модель отвечает "straight" на все карточки подряд.
 ATTRS_SCHEMA = {
     "type": "object",
     "properties": {
         "collar": _enum("classic_turn_down", "stand", "mandarin", "polo", "round_neck",
                         "v_neck", "bow", "lapel", "unknown"),
         "sleeve_length": _enum("long", "three_quarter", "short", "sleeveless", "unknown"),
-        "fit": _enum("oversize", "relaxed", "straight", "fitted", "unknown"),
         "cuff": _enum("separate_shirt_cuff", "elastic", "folded", "none", "unknown"),
-        "hem": _enum("rounded_shirt_tail", "straight", "unknown"),
-        "chest_pocket": _enum("yes", "no", "unknown"),
-        "fabric_texture": _enum("crinkled_gauze", "smooth_matte", "satin_shiny", "knit",
-                                "denim", "flannel", "unknown"),
         "pattern": _enum("solid", "stripe", "check", "floral", "other", "unknown"),
+        "body_length": _enum("elongated", "regular", "cropped", "unknown"),
+        "shoulder": _enum("soft_dropped", "set_in", "structured", "unknown"),
     },
-    "required": list("collar sleeve_length fit cuff hem chest_pocket "
-                     "fabric_texture pattern".split()),
+    "required": ["collar", "sleeve_length", "cuff", "pattern", "body_length", "shoulder"],
 }
 
 
