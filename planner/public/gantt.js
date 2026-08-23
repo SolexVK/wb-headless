@@ -206,13 +206,15 @@ function drawCycle(svg, c, row, ctx) {
     chk.textContent = c.status === 'shipped' ? '📦' : '✓';
   }
 
-  // подпись
-  const label = `П${c.partiaNo} · ${c.articleId} · ${c.units} шт${c.batchCount > 1 ? ` · п.${c.batchIndex + 1}/${c.batchCount}` : ''}`;
+  // подпись: НОМЕР АРТИКУЛА — первым, крупно и жёлтым; затем номер партии (prodNo) и объём.
   const t = el('text', {
-    x: x0 + 8, y: laneY + barH / 2 + 4, fill: '#fff', 'font-size': 11, 'font-weight': 700,
-    stroke: 'rgba(0,0,0,0.75)', 'stroke-width': 2.5, 'paint-order': 'stroke', 'stroke-linejoin': 'round',
+    x: x0 + 8, y: laneY + barH / 2 + 4, 'font-weight': 700,
+    stroke: 'rgba(0,0,0,0.8)', 'stroke-width': 2.8, 'paint-order': 'stroke', 'stroke-linejoin': 'round',
   }, g);
-  t.textContent = label;
+  const art = el('tspan', { fill: '#ffd23f', 'font-size': 16 }, t); // артикул — крупный, жёлтый
+  art.textContent = c.articleId;
+  const rest = el('tspan', { fill: '#fff', 'font-size': 11 }, t);
+  rest.textContent = ` · п${c.prodNo || c.partiaNo} · ${c.units} шт`;
 
   // значок отставания (⏱ +Nд) на правом краю блока — видно без двойного клика
   if (c.delay && c.delay.days > 0) {
@@ -354,8 +356,8 @@ function openCycleDetail(c, onOverride, onProgress = () => {}) {
   const head = document.createElement('div');
   head.style.cssText = 'padding:14px 16px 4px';
   const lateTxt = c.logistics.lateDays > 0 ? ` · <span style="color:var(--danger)">опоздание ${c.logistics.lateDays} дн</span>` : '';
-  head.innerHTML = `<div style="font-size:15px;font-weight:700">Партия ${c.partiaNo} · ${c.articleId} — ${c.articleName}</div>
-    <div style="color:var(--muted);font-size:12px;margin-top:2px">${c.stageName} · ${c.units} шт${c.batchCount > 1 ? ` · партия ${c.batchIndex + 1} из ${c.batchCount}` : ''} · цех ${c.workshopName}${c.own ? ' (свой)' : ''} · статус ${c.statusRu || '—'}${lateTxt}</div>`;
+  head.innerHTML = `<div style="font-size:15px;font-weight:700"><span style="color:#d97706">Артикул ${c.articleId}</span> — ${c.articleName} · партия ${c.prodNo || c.partiaNo}</div>
+    <div style="color:var(--muted);font-size:12px;margin-top:2px">${c.deliveryTag ? c.deliveryTag + (c.batchCount > 1 ? ` · часть ${c.batchIndex + 1}/${c.batchCount}` : '') + ' · ' : ''}${c.stageName} · ${c.units} шт · цех ${c.workshopName}${c.own ? ' (свой)' : ''} · статус ${c.statusRu || '—'}${lateTxt}</div>`;
   modal.appendChild(head);
   modal.appendChild(svg);
 
@@ -424,8 +426,8 @@ function showTip(tip, e, c) {
   const late = c.logistics.lateDays > 0 ? `<div class="row" style="color:var(--danger)">⚠ Опоздание на WB: ${c.logistics.lateDays} дн</div>` : '';
   const tag = c.own ? ' · <span style="color:var(--accent-2)">свой</span>' : (c.locked ? ' · <span style="color:var(--accent-2)">закреплён</span>' : '');
   tip.innerHTML = `
-    <div><b>Партия ${c.partiaNo}</b> · ${c.articleId} ${c.articleName}</div>
-    <div class="row">${c.stageName} · ${c.units.toLocaleString('ru')} шт · цех ${c.workshopName}${tag} · <b>${c.statusRu || '—'}</b></div>
+    <div><b style="color:#d97706">Артикул ${c.articleId}</b> ${c.articleName} · партия ${c.prodNo || c.partiaNo}</div>
+    <div class="row">${c.deliveryTag ? c.deliveryTag + (c.batchCount > 1 ? ` · часть ${c.batchIndex + 1}/${c.batchCount}` : '') + ' · ' : ''}${c.stageName} · ${c.units.toLocaleString('ru')} шт · цех ${c.workshopName}${tag} · <b>${c.statusRu || '—'}</b></div>
     <div class="row">Производство: <b>${fmt(c.ops.cut.start)}</b> (крой) → <b>${fmt(c.readyDate)}</b> (готовность)</div>
     <div class="row">Приход на WB: <b>${fmt(c.logistics.wbArrival)}</b> · дедлайн ${fmt(c.logistics.deadline)}</div>
     <div class="row">На WB: <b>${(c.hasFact ? c.wbUnits : c.units).toLocaleString('ru')} шт</b>${c.hasFact ? ` <span style="color:var(--accent-2)">(факт)</span>` : ' (план)'}</div>

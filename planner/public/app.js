@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'batch-sheets-2026-08-22j';
+const APP_BUILD = 'prod-numbering-2026-08-22k';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1121,9 +1121,6 @@ function renderMatrix() {
   const hasGrid = a.colors.length && a.sizes.length;
   const cyc = (schedule?.cycles || []).filter((c) => c.partiaId === p.id).sort((x, y) => (x.batchIndex - y.batchIndex));
   const split = cyc.length && cyc[0].batchCount > 1;
-  const cycInfo = cyc.length
-    ? cyc.map((c) => `${c.batchCount > 1 ? `партия ${c.batchIndex + 1}/${c.batchCount} · ` : ''}${c.workshopName} — ${c.units.toLocaleString('ru')} шт${c.readyDate ? ` (гот. ${c.readyDate.slice(8, 10)}.${c.readyDate.slice(5, 7)})` : ''}`).join(' · ')
-    : 'не назначено (сохрани и пересчитай)';
 
   root.innerHTML = `${globalDistHTML()}
     <div class="panel">
@@ -1141,7 +1138,13 @@ function renderMatrix() {
         <button id="mx-del-partia" class="btn btn-danger">Удалить партию</button>
         <button id="mx-split-partia" class="btn btn-subtle" title="Разрезать эту партию надвое вручную (по правилам настила), без учёта мощностей">✂ разрезать вручную</button>
       </div>
-      <div class="mini" style="margin:2px 0 10px">${split ? `Довоз дроблён на <b>${cyc.length} произв. партии</b> (≤ ${Math.max(0, Math.round(+(state.settings.batchSize) || 5000)).toLocaleString('ru')} шт) по цехам: ` : 'Сейчас отшивает: '}<b>${cycInfo}</b>. Заполни количества и нажми <b>«Сохранить план»</b> (эти партии — в выгрузке Excel для цеха; статус и факт — на «Факт»).</div>
+      ${cyc.length ? `<div class="mini" style="margin:2px 0 10px">
+        ${split ? `Этот довоз дроблён на <b>${cyc.length} произв. партии</b> (≤ ${Math.max(0, Math.round(+(state.settings.batchSize) || 5000)).toLocaleString('ru')} шт) и разложен по цехам — они уходят в Excel и на Гант:` : 'Отшивается:'}
+        <div class="matrix-scroll" style="margin-top:4px"><table class="matrix-table"><thead><tr><th>Партия</th><th>Довоз</th><th>Цех</th><th class="num">Шт</th><th>Крой → готовность</th></tr></thead><tbody>
+        ${cyc.map((c) => `<tr><td><b>${seEsc(a.id)}·п${c.prodNo || c.partiaNo}</b></td><td class="mini">${seEsc(c.deliveryTag || p.deliveryTag || '')}${c.batchCount > 1 ? ` <span class="mini">(часть ${c.batchIndex + 1}/${c.batchCount})</span>` : ''}</td><td>${seEsc(c.workshopName || 'авто')}</td><td class="num">${c.units.toLocaleString('ru')}</td><td class="mini">${c.cutStart ? `${c.cutStart.slice(8, 10)}.${c.cutStart.slice(5, 7)}` : '—'} → ${c.readyDate ? `${c.readyDate.slice(8, 10)}.${c.readyDate.slice(5, 7)}` : '—'}</td></tr>`).join('')}
+        </tbody></table></div>
+        <span class="mini">Правь количества выше и жми <b>«Сохранить план»</b> — дробление и номера партий пересчитаются сами. Номер: <b>артикул·партия</b> (сквозной по цеху для этого артикула).</span>
+      </div>` : '<div class="mini" style="margin:2px 0 10px">Партии появятся после «Сохранить план» и пересчёта.</div>'}
       ${hasGrid ? seasonColorChipsHTML(a, p) : ''}
       ${(() => {
         if (!hasGrid) return '<div class="mini">У артикула не заданы цвета или размерный ряд — добавь их во вкладке «Данные».</div>';
@@ -1508,19 +1511,19 @@ function uniqSheetName(base, used) { let n = String(base).replace(/[:\\/?*[\]]/g
 function batchReadyAoA(a, c) {
   const p = (state.partias || []).find((x) => x.id === c.partiaId) || {};
   const M = c.batchMatrix || {};
-  const dvz = c.deliveryTag || p.deliveryTag || (`Партия ${c.partiaNo || p.no || ''}`);
-  const meta = [`Артикул ${a.id} — ${a.name}`,
-    c.batchCount > 1 ? `${dvz} · партия ${c.batchIndex + 1} из ${c.batchCount}` : `${dvz}`];
+  const dvz = c.deliveryTag || p.deliveryTag || '';
+  const meta = [`Артикул ${a.id} — ${a.name} · цех ${c.workshopName || 'авто'} · партия ${c.prodNo || c.partiaNo}`,
+    `${dvz}${dvz ? ' · ' : ''}${c.batchCount > 1 ? `часть ${c.batchIndex + 1}/${c.batchCount}` : ''}`.trim() || '—'];
   if (p.deadline) meta.push(`Срок WB: ${p.deadline}`);
   if (c.readyDate) meta.push(`Готовность: ${c.readyDate}`);
-  meta.push(`Цех: ${c.workshopName || 'авто'}`, `К пошиву: ${matrixSum(M).toLocaleString('ru')} шт`);
+  meta.push(`К пошиву: ${matrixSum(M).toLocaleString('ru')} шт`);
   if (a.comment) meta.push(`Особенности: ${a.comment}`);
   return buildReadyAoA(a, M, meta);
 }
 // Производственные партии (батчи из расписания) артикула; можно ограничить одним довозом (partiaId).
 function batchesForExport(articleId, partiaId) {
   return (schedule?.cycles || []).filter((c) => !c.historical && c.articleId === articleId && (!partiaId || c.partiaId === partiaId) && matrixSum(c.batchMatrix || {}) > 0)
-    .sort((x, y) => String(x.deliveryTag).localeCompare(String(y.deliveryTag)) || (x.partiaNo - y.partiaNo) || (x.batchIndex - y.batchIndex));
+    .sort((x, y) => String(x.workshopName || '').localeCompare(String(y.workshopName || '')) || ((x.prodNo || 0) - (y.prodNo || 0)) || (x.cutStart < y.cutStart ? -1 : 1));
 }
 // Экспорт готового плана для цеха: ЛИСТ НА ПРОИЗВОДСТВЕННУЮ ПАРТИЮ (батч). Один довоз (partiaId) или все.
 function exportReadyPlanXlsx(articleId, partiaId) {
@@ -1532,8 +1535,7 @@ function exportReadyPlanXlsx(articleId, partiaId) {
   const wb = XLSX.utils.book_new();
   const used = new Set();
   for (const c of batches) {
-    const dvz = c.deliveryTag || (`П${c.partiaNo}`);
-    const nm = c.batchCount > 1 ? `${dvz} п${c.batchIndex + 1}` : dvz;
+    const nm = `${a.id} ${c.workshopName || 'авто'} п${c.prodNo || c.partiaNo}`;
     styleReadySheet(wb, batchReadyAoA(a, c), uniqSheetName(nm, used));
   }
   const fname = partiaId ? `план_${a.id}_${(batches[0].deliveryTag || 'довоз').replace(/[^\wА-Яа-я]+/g, '_')}.xlsx` : `план_${a.id}_все_партии.xlsx`;

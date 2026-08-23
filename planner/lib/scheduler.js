@@ -406,6 +406,18 @@ export function buildSchedule(state) {
 
   cycles.sort((a, b) => (a.cutStart < b.cutStart ? -1 : a.cutStart > b.cutStart ? 1 : 0));
 
+  // Номер производственной партии prodNo: сквозной по (ЦЕХ × АРТИКУЛ), по порядку кроя (1,2,3…).
+  // Т.е. в каждом цехе партии одного артикула нумеруются подряд, у другого артикула — снова с 1.
+  // Считается после раскладки всех артикулов по цехам (cycles уже отсортированы по cutStart).
+  { const seq = {};
+    for (const c of cycles) {
+      if (c.historical) continue;
+      const k = (c.workshopId || '') + '|' + c.articleId;
+      seq[k] = (seq[k] || 0) + 1;
+      c.prodNo = seq[k];
+    }
+  }
+
   // Валидация настила (Фаза 2): мягкие предупреждения по партиям (ориентиры кроя).
   const nestingRules = state.settings.nesting || { minSizeQty: 20, minColorQty: 400 };
   for (const p of state.partias || []) {
