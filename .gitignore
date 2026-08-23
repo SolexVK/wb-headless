@@ -6,3 +6,4 @@ reports-output/
 bench-images/
 __pycache__/
 *.pyc
+cache/
