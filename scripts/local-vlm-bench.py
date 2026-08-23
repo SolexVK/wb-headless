@@ -35,59 +35,78 @@ SIZES = ("c246x328", "c516x688", "big")
 # ошибка «выбросил нужное» — потеря товара навсегда.
 CARDS = {
     237194752: dict(label="марлевка оверсайз — ЦЕЛЕВАЯ", must_pass=True,
-                    gate=dict(garment_type="shirt", sleeve_length="long", fit="oversize", photo_usable=True),
+                    gate=dict(garment_type="shirt", photo_usable=True),
                     attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="oversize",
-                               hem="rounded_shirt_tail", chest_pocket=False,
+                               hem="rounded_shirt_tail", chest_pocket="no",
                                fabric_texture="crinkled_gauze", pattern="solid")),
     227781398: dict(label="муслин оверсайз — ЦЕЛЕВАЯ", must_pass=True,
-                    gate=dict(garment_type="shirt", sleeve_length="long", fit="oversize", photo_usable=True),
+                    gate=dict(garment_type="shirt", photo_usable=True),
                     attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="oversize",
-                               hem="rounded_shirt_tail", chest_pocket=False,
+                               hem="rounded_shirt_tail", chest_pocket="no",
                                fabric_texture="crinkled_gauze", pattern="solid")),
     608341673: dict(label="атлас — крой совпал, ткань противоположна", must_pass=True,
-                    gate=dict(garment_type="shirt", sleeve_length="long", fit="relaxed", photo_usable=True),
+                    gate=dict(garment_type="shirt", photo_usable=True),
                     attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="relaxed",
-                               hem="rounded_shirt_tail", chest_pocket=False,
+                               hem="rounded_shirt_tail", chest_pocket="no",
                                fabric_texture="satin_shiny", pattern="solid")),
     328892062: dict(label="клетка/фланель оверсайз — смежное", must_pass=True,
-                    gate=dict(garment_type="shirt", sleeve_length="long", fit="oversize", photo_usable=True),
+                    gate=dict(garment_type="shirt", photo_usable=True),
                     attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="oversize",
-                               hem="unknown", chest_pocket=False,
+                               hem="unknown", chest_pocket="no",
                                fabric_texture="flannel", pattern="check")),
     179331048: dict(label="приталенная офисная — НЕ подходит", must_pass=True,
-                    gate=dict(garment_type="shirt", sleeve_length="long", fit="fitted", photo_usable=True),
+                    gate=dict(garment_type="shirt", photo_usable=True),
                     attrs=dict(collar="classic_turn_down", sleeve_length="long", fit="fitted",
-                               hem="unknown", chest_pocket=False,
+                               hem="unknown", chest_pocket="no",
                                fabric_texture="smooth_matte", pattern="solid")),
     327286708: dict(label="блузка, стойка+V, рукав 3/4 — отсев на гейте", must_pass=False,
-                    gate=dict(garment_type="blouse_non_shirt", sleeve_length="three_quarter", fit="straight", photo_usable=True),
+                    gate=dict(garment_type="blouse_non_shirt", photo_usable=True),
                     attrs=dict(collar="stand", sleeve_length="three_quarter", fit="straight",
-                               hem="straight", chest_pocket=False,
+                               hem="straight", chest_pocket="no",
                                fabric_texture="smooth_matte", pattern="solid")),
 }
 
-GATE_PROMPT = """You are sorting one product photo from an online marketplace.
-Look only at the garment. Ignore the model, background, text overlays and styling.
-Choose exactly one value per field. Reply with JSON only, no prose:
-{"garment_type": "shirt"|"blouse_non_shirt"|"dress"|"jacket"|"tshirt"|"knitwear"|"suit"|"other",
-    // "shirt" = classic shirt construction: turn-down collar AND a full centre-front button placket.
-    // "blouse_non_shirt" = a top that lacks either of those (stand collar, V-neck, pullover, tie-neck).
- "sleeve_length": "long"|"three_quarter"|"short"|"sleeveless"|"unknown",
- "fit": "oversize"|"relaxed"|"straight"|"fitted"|"unknown",
- "photo_usable": true|false}"""
+GATE_TYPES = ["shirt", "blouse_non_shirt", "dress", "jacket", "tshirt",
+              "knitwear", "suit", "other"]
 
-ATTRS_PROMPT = """You are cataloguing one garment from marketplace photos.
-Ignore colour, the model, background, text overlays and styling. Judge construction only.
-If a feature is hidden by pose, tucking or cropping, answer "unknown" — never guess.
-Reply with JSON only, no prose:
-{"collar": "classic_turn_down"|"stand"|"mandarin"|"polo"|"round_neck"|"v_neck"|"bow"|"lapel"|"unknown",
- "sleeve_length": "long"|"three_quarter"|"short"|"sleeveless"|"unknown",
- "fit": "oversize"|"relaxed"|"straight"|"fitted"|"unknown",
- "cuff": "separate_shirt_cuff"|"elastic"|"folded"|"none"|"unknown",
- "hem": "rounded_shirt_tail"|"straight"|"unknown",
- "chest_pocket": true|false|"unknown",
- "fabric_texture": "crinkled_gauze"|"smooth_matte"|"satin_shiny"|"knit"|"denim"|"flannel"|"unknown",
- "pattern": "solid"|"stripe"|"check"|"floral"|"other"|"unknown"}"""
+GATE_PROMPT = """Classify the garment in this product photo.
+Ignore the model, background, text overlays and styling — judge the garment only.
+"shirt" means classic shirt construction: a turn-down collar AND a full
+centre-front button placket. A top lacking either is "blouse_non_shirt"."""
+
+GATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "garment_type": {"type": "string", "enum": GATE_TYPES},
+        "photo_usable": {"type": "boolean"},
+    },
+    "required": ["garment_type", "photo_usable"],
+}
+
+ATTRS_PROMPT = """Catalogue this garment from the photos.
+Ignore colour, the model, background, text overlays and styling — judge construction only.
+If a feature is hidden by pose, tucking or cropping, answer "unknown". Never guess."""
+
+def _enum(*v):
+    return {"type": "string", "enum": list(v)}
+
+ATTRS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "collar": _enum("classic_turn_down", "stand", "mandarin", "polo", "round_neck",
+                        "v_neck", "bow", "lapel", "unknown"),
+        "sleeve_length": _enum("long", "three_quarter", "short", "sleeveless", "unknown"),
+        "fit": _enum("oversize", "relaxed", "straight", "fitted", "unknown"),
+        "cuff": _enum("separate_shirt_cuff", "elastic", "folded", "none", "unknown"),
+        "hem": _enum("rounded_shirt_tail", "straight", "unknown"),
+        "chest_pocket": _enum("yes", "no", "unknown"),
+        "fabric_texture": _enum("crinkled_gauze", "smooth_matte", "satin_shiny", "knit",
+                                "denim", "flannel", "unknown"),
+        "pattern": _enum("solid", "stripe", "check", "floral", "other", "unknown"),
+    },
+    "required": list("collar sleeve_length fit cuff hem chest_pocket "
+                     "fabric_texture pattern".split()),
+}
 
 
 def http_json(url, payload=None, timeout=600):
@@ -145,12 +164,15 @@ def b64(path):
     return base64.b64encode(open(path, "rb").read()).decode()
 
 
-def ask(model, prompt, image_paths, num_predict):
+def ask(model, prompt, image_paths, num_predict, schema=None, num_ctx=None):
     """Один запрос к Ollama. Возвращает (dict|None, секунды, сырой текст/ошибка)."""
     payload = {"model": model, "prompt": prompt,
                "images": [b64(p) for p in image_paths],
-               "stream": False, "format": "json", "keep_alive": "5m",
+               "stream": False, "keep_alive": "5m",
+               "format": schema if schema else "json",
                "options": {"temperature": 0, "num_predict": num_predict}}
+    if num_ctx:
+        payload["options"]["num_ctx"] = num_ctx
     t0 = time.time()
     try:
         resp = http_json(f"{OLLAMA}/api/generate", payload)
@@ -196,6 +218,8 @@ def main():
     ap.add_argument("--test", choices=["gate", "attrs", "both"], default="both")
     ap.add_argument("--size", choices=SIZES, default="c516x688",
                     help="размер фото WB; c246x328 быстрее и дешевле, big детальнее")
+    ap.add_argument("--num-ctx", type=int, default=None,
+                    help="размер контекста Ollama; для vision иногда мало 4096")
     ap.add_argument("--num-predict", type=int, default=400, help="потолок токенов ответа")
     ap.add_argument("--max-gb", type=float, default=None,
                     help="пропустить модели тяжелее N ГБ на диске (напр. --max-gb 5)")
@@ -235,8 +259,8 @@ def main():
             print(f"  {nm}: фото не найдены, карточка пропущена")
     print(f"  готово: {len(photos)} карточек\n")
 
-    tests = {"gate": [("gate", GATE_PROMPT, 1)], "attrs": [("attrs", ATTRS_PROMPT, 2)],
-             "both": [("gate", GATE_PROMPT, 1), ("attrs", ATTRS_PROMPT, 2)]}[args.test]
+    G, A = ("gate", GATE_PROMPT, 1, GATE_SCHEMA), ("attrs", ATTRS_PROMPT, 2, ATTRS_SCHEMA)
+    tests = {"gate": [G], "attrs": [A], "both": [G, A]}[args.test]
 
     summary = []
     for model in models:
@@ -244,7 +268,7 @@ def main():
         print("=" * 78)
         print(f"МОДЕЛЬ: {model}   ({gb:.1f} ГБ на диске)")
         print("=" * 78)
-        for test_name, prompt, n_img in tests:
+        for test_name, prompt, n_img, schema in tests:
             hits = total = bad_json = 0
             times, answers = [], []
             # для гейта: сколько нужных карточек модель бы выбросила
@@ -253,14 +277,15 @@ def main():
             for nm, meta in CARDS.items():
                 if nm not in photos:
                     continue
-                got, dt, raw = ask(model, prompt, photos[nm][:n_img], args.num_predict)
+                got, dt, raw = ask(model, prompt, photos[nm][:n_img],
+                                   args.num_predict, schema, args.num_ctx)
                 times.append(dt)
                 answers.append(got or {})
                 exp = meta[test_name]
                 if got is None:
                     bad_json += 1
                     total += len(exp)
-                    print(f"  {nm} {meta['label'][:38]:<38} {dt:5.1f}s  ✗ {raw[:80]}")
+                    print(f"  {nm} {meta['label'][:38]:<38} {dt:5.1f}s  ✗ {raw[:200]}")
                     continue
                 ok, wrong = 0, []
                 for k, want in exp.items():
