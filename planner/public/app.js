@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'mergeoff-2026-08-24s';
+const APP_BUILD = 'calc-log-2026-08-24t';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1177,6 +1177,7 @@ function renderMatrix() {
         <span class="mini"><b>План для цеха → Excel</b> <span title="Выгрузка идёт на НЕТТО: из плана вычтены загруженные остатки (WB/в пути/склад/производство). Полностью покрытые партии в «все партии» не попадают.">(нетто, за вычетом остатков ⓘ)</span>:</span>
         <button id="mx-xlsx-partia" class="btn btn-accent" title="Скачать этот довоз в Excel — лист на каждую произв. партию (нетто, по цехам)">⤓ этот довоз (партии)</button>
         <button id="mx-xlsx-article" class="btn btn-accent" title="Скачать все довозы артикула — лист на каждую произв. партию (нетто, по цехам)">⤓ все партии ${a.id}</button>
+        <button id="mx-log" class="btn btn-subtle" title="Скачать подробный лог расчёта: как считается каждое число — прогноз → цвета → размеры → примирение → брутто/спрос → вычет остатков → нетто → Excel. Показывает, почему Excel (нетто) отличается от «Спроса» (брутто).">⤓ Лог расчёта</button>
         <span class="mini" style="margin-left:10px">Ввод: <b>Ctrl+V</b> из Excel в ячейку · шаблон:</span>
         <button id="mx-tpl-one" class="btn btn-subtle">⤓ ${a.id}</button>
         <button id="mx-tpl-all" class="btn btn-subtle">⤓ все</button>
@@ -1191,6 +1192,12 @@ function renderMatrix() {
   document.getElementById('mx-view-gross')?.addEventListener('click', () => { mxViewNet = false; renderMatrix(); });
   document.getElementById('mx-xlsx-partia').addEventListener('click', () => exportReadyPlanXlsx(a.id, p.id));
   document.getElementById('mx-xlsx-article').addEventListener('click', () => exportReadyPlanXlsx(a.id, null));
+  document.getElementById('mx-log')?.addEventListener('click', async () => {
+    const btn = document.getElementById('mx-log'); const old = btn.textContent; btn.disabled = true; btn.textContent = '⏳ собираю лог…';
+    try { const txt = await buildComputeLog(a.id); downloadTextFile(`лог_расчёта_${a.id}.txt`, txt); toast('Лог расчёта скачан'); }
+    catch (e) { toast('Ошибка сбора лога: ' + e.message, true); }
+    finally { btn.disabled = false; btn.textContent = old; }
+  });
   document.getElementById('mx-tpl-one').addEventListener('click', () => exportPlanXlsx([a.id], `plan_${a.id}.xlsx`));
   document.getElementById('mx-tpl-all').addEventListener('click', () => exportPlanXlsx(activeArticles().map((x) => x.id), 'plan_all.xlsx'));
   document.getElementById('mx-import').addEventListener('change', (e) => importPlanAnyFile(e.target.files && e.target.files[0]));
@@ -1543,6 +1550,152 @@ function exportReadyPlanXlsx(articleId, partiaId) {
   const nDvz = new Set(batches.map((c) => c.partiaId)).size;
   toast(`Выгружено производственных партий: ${batches.length} (по ${nDvz} довоз.). Объёмы — нетто, разложено по цехам.`);
 }
+
+// Скачать текст файлом (для лога расчёта).
+function downloadTextFile(filename, text) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const el = document.createElement('a'); el.href = url; el.download = filename;
+  document.body.appendChild(el); el.click(); el.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+// ЛОГ РАСЧЁТА: пошагово, откуда берётся каждое число — прогноз (Ранг сезонности) → цвета → размеры →
+// примирение (матрица) → план по размерам (брутто/спрос) → вычет остатков → нетто → что уходит в
+// Excel. Возвращает готовый текст. Асинхронно — подгружает план сезонности для Части 1–2.
+async function buildComputeLog(articleId) {
+  const a = state.articles.find((x) => x.id === articleId);
+  if (!a) return 'Артикул не найден: ' + articleId;
+  const L = []; const line = (s = '') => L.push(s);
+  const money = (n) => Math.round(+n || 0).toLocaleString('ru');
+  // печать матрицы цвет×размер (только непустые цвета/размеры) с выравниванием
+  const matStr = (M, indent = '    ') => {
+    const cols = (a.colors || []).filter((c) => a.sizes.reduce((n, s) => n + cell(M, c, s), 0) > 0);
+    if (!cols.length) return indent + '(пусто)';
+    const out = [];
+    out.push(indent + ['размер\\цвет', ...cols, 'Σ'].join(' · '));
+    for (const s of a.sizes) {
+      const vals = cols.map((c) => cell(M, c, s));
+      if (!vals.some((v) => v > 0)) continue;
+      out.push(indent + [s, ...vals, vals.reduce((x, y) => x + y, 0)].join(' · '));
+    }
+    const totals = cols.map((c) => a.sizes.reduce((n, s) => n + cell(M, c, s), 0));
+    out.push(indent + ['ВСЕГО', ...totals, totals.reduce((x, y) => x + y, 0)].join(' · '));
+    return out.join('\n');
+  };
+
+  line('═══════════════════════════════════════════════════════════════');
+  line(`ЛОГ РАСЧЁТА ПЛАНА · Артикул ${a.id} — ${a.name}`);
+  line(`Билд: ${APP_BUILD}`);
+  line('Легенда: БРУТТО (спрос) → минус ОСТАТКИ (WB/в пути/склад/произв.) = НЕТТО (к пошиву) = Excel.');
+  line('═══════════════════════════════════════════════════════════════');
+  line('');
+
+  // ── ЧАСТЬ 1–2: РАНГ СЕЗОННОСТИ ──
+  line('─── ЧАСТЬ 1. РАНГ СЕЗОННОСТИ: прогноз → цвета → размеры ───');
+  let rep = null, p = null;
+  try { const rec = await api('/api/season/plan?articleId=' + encodeURIComponent(articleId)); rep = rec.report; p = rep.plan || {}; }
+  catch (e) { line('  ⚠ План сезонности не загружен (Часть 1–2 пропущена): ' + e.message); }
+  if (rep) {
+    const rawOrders = Math.round(((p && p.forecastDaily) || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
+    const buyout = seasonFcBuyout(articleId);
+    const factor = seasonFcFactor(articleId);
+    line(`  Прогноз ЗАКАЗОВ (Σ plannedOrders, MPStats): ${money(rawOrders)}`);
+    line(`  % выкупа (заказы→выкупы): ${buyout}%   (множитель к прогнозу = ${factor.toFixed(4)})`);
+    line(`  Прогноз К ПОШИВУ (лидер по объёму) = заказы × %выкупа = ${money(Math.round(rawOrders * factor))}`);
+    line('');
+    const excl = a.excludedColors || [];
+    if (excl.length) line(`  Исключены вручную (✕, НЕ шьём): ${excl.join(', ')}`);
+    const adj = a.colorAdjust || {}; if (Object.keys(adj).length) line(`  Ручной ±% по цвету: ${Object.entries(adj).map(([k, v]) => `${k}=${v}%`).join(', ')}`);
+    const sadj = a.sizeAdjust || {}; if (Object.keys(sadj).length) line(`  Ручной ±% доли размера по цвету: ${Object.entries(sadj).map(([k, r]) => `${k}{${Object.entries(r).map(([s, v]) => s + '=' + v + '%').join(',')}}`).join('; ')}`);
+    if ((a.forceSizes || []).length) line(`  Принудительные размеры (forceSizes): ${a.forceSizes.join(', ')}`);
+    if (Object.keys(a.forceShare || {}).length) line(`  Целевой % размера (forceShare): ${Object.entries(a.forceShare).map(([s, v]) => s + '=' + v + '%').join(', ')}`);
+    line('');
+    const inp = reconcileInputs(rep, p, articleId);
+    if (inp) {
+      line('  ЦВЕТА → количество к пошиву (после ±%/исключений/кастомных):');
+      let csum = 0; for (const r of inp.colorRows) { line(`    ${r.name}: ${money(r.qty)} шт`); csum += r.qty; }
+      line(`    Σ по цветам: ${money(csum)}`);
+      line('');
+      line('  РАЗМЕРЫ → доли спроса (из анализа конкурентов):');
+      for (const s of inp.sizeRows) line(`    ${s.size}${s.origin ? ` (${s.origin})` : ''}: ${(+s.share || 0)}%`);
+      line('');
+    }
+    line('─── ЧАСТЬ 2. ПРИМИРЕНИЕ (reconcilePlan): прогноз → матрица цвет×размер ───');
+    const rr = runReconcile(rep, p, articleId);
+    if (rr && rr.result) {
+      line('  Матрица примирения (ВЕСЬ тираж, БРУТТО):');
+      line(matStr(rr.result.matrix));
+      line(`  Итого примирено (totalPlanned): ${money(rr.result.totalPlanned)}`);
+      const routed = (rr.result.sizes || []).filter((s) => !s.covered);
+      if (routed.length) {
+        line('  Непокрытые размеры спроса → куда ушла доля:');
+        for (const s of routed) line(`    ${s.demand}${s.origin ? ` (${s.origin})` : ''} ${s.share}% → ${s.routedTo ? ('крайний размер ' + s.routedTo) : 'общая нормировка (пропорц.)'}`);
+      }
+      if (rr.result.unassigned && rr.result.unassigned.total > 0) line(`  Не размещено (ждёт решения по цвету): ${money(rr.result.unassigned.total)}`);
+    }
+    line('');
+  }
+
+  // ── ЧАСТЬ 3: ПЛАН ПО РАЗМЕРАМ → НЕТТО → EXCEL ──
+  line('─── ЧАСТЬ 3. ПЛАН ПО РАЗМЕРАМ: спрос(брутто) → вычет остатков → нетто → Excel ───');
+  const parts = partiasOfArticle(articleId).filter((x) => !x.historical);
+  const netBy = (schedule && schedule.supply && schedule.supply.netByPartia) || {};
+  const merges = supplyMerges();
+  const cycles = (schedule && schedule.cycles || []).filter((c) => !c.historical && c.articleId === articleId);
+  let totGross = 0, totNet = 0, totExcel = 0;
+  for (const pt of parts) {
+    const gm = pt.planMatrix || {}; const gross = matrixSum(gm);
+    const nm = netBy[pt.id] || gm; const net = matrixSum(nm);
+    totGross += gross;
+    line('');
+    line(`▶ Партия №${pt.no}${pt.deliveryTag ? ' · ' + pt.deliveryTag : ''} · срок WB ${pt.deadline || '—'} · статус ${PARTIA_STATUS_RU[pt.status] || pt.status}`);
+    line(`  БРУТТО (planMatrix, «Спрос (правка)») Σ=${money(gross)}:`);
+    line(matStr(gm, '      '));
+    // вычет остатков по цветам
+    const covered = (a.colors || []).map((c) => {
+      const g = a.sizes.reduce((n, s) => n + cell(gm, c, s), 0);
+      const nn = a.sizes.reduce((n, s) => n + cell(nm, c, s), 0);
+      return (g - nn > 0) ? `${c} −${g - nn}` : null;
+    }).filter(Boolean);
+    const mrg = merges.find((m) => m.from === pt.id);
+    const mrgInto = merges.filter((m) => m.into === pt.id);
+    if (mrg) {
+      line(`  ⚠ Этот довоз ОБЪЕДИНЁН с предыдущим (нетто ${money(mrg.units)} < мин. партии ${minBatchQty()}) — его нетто ушло в другой довоз, отдельно не шьётся.`);
+    }
+    if (mrgInto.length) line(`  ↩ В этот довоз влиты мелкие: ${mrgInto.map((m) => '+' + money(m.units)).join(', ')} (пришли из более поздних довозов).`);
+    if (covered.length) line(`  Вычтены остатки по ячейкам (брутто−нетто): ${covered.join(', ')}`);
+    else if (net === gross) line('  Остатков нет — нетто = брутто.');
+    line(`  НЕТТО (prodMatrixFor, «К производству») Σ=${money(net)}:`);
+    line(matStr(nm, '      '));
+    if (!mrg) totNet += net;
+    // Excel: производственные партии (батчи) этого довоза
+    const ptCycles = cycles.filter((c) => c.partiaId === pt.id && matrixSum(c.batchMatrix || {}) > 0);
+    if (ptCycles.length) {
+      line(`  EXCEL — листов (произв. партий): ${ptCycles.length}:`);
+      for (const c of ptCycles) {
+        const bs = matrixSum(c.batchMatrix || {});
+        totExcel += bs;
+        line(`    • лист «${a.id} ${c.workshopName || 'авто'} п${c.prodNo || c.partiaNo}» · цех ${c.workshopName || 'авто'}${c.batchCount > 1 ? ` · часть ${c.batchIndex + 1}/${c.batchCount}` : ''} · Σ=${money(bs)}:`);
+        line(matStr(c.batchMatrix || {}, '        '));
+      }
+    } else if (net > 0) {
+      line('  EXCEL: производственных партий нет (не пересчитано? нажми «Рассчитать»/сохрани план).');
+    }
+  }
+  line('');
+  line('─── СВЕРКА ИТОГОВ ───');
+  line(`  БРУТТО (сумма «Спрос» по всем довозам): ${money(totGross)}`);
+  line(`  НЕТТО (к пошиву, за вычетом остатков и без слитых довозов): ${money(totNet)}`);
+  line(`  EXCEL (сумма всех листов «все партии»): ${money(totExcel)}`);
+  line('');
+  line('  ⓘ Если Excel (нетто) МЕНЬШЕ «Спроса» — это НЕ ошибка: разница = ваши остатки, вычтенные');
+  line('     по цветам/размерам (см. «Вычтены остатки» у каждого довоза). Чтобы матрица на экране');
+  line('     совпала с Excel — переключите «План по размерам» на «К производству (нетто)».');
+  line(`  Сформировано на билде ${APP_BUILD}.`);
+  return L.join('\n');
+}
+
 // разобрать книгу .xlsx в структуру { articleId: { stageId: { color: { size: qty } } } }
 function parsePlanWorkbook(wb) {
   const res = {};
