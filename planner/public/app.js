@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'size-cyr-2026-08-24u';
+const APP_BUILD = 'stock-log-2026-08-24v';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1633,6 +1633,43 @@ async function buildComputeLog(articleId) {
         for (const s of routed) line(`    ${s.demand}${s.origin ? ` (${s.origin})` : ''} ${s.share}% → ${s.routedTo ? ('крайний размер ' + s.routedTo) : 'общая нормировка (пропорц.)'}`);
       }
       if (rr.result.unassigned && rr.result.unassigned.total > 0) line(`  Не размещено (ждёт решения по цвету): ${money(rr.result.unassigned.total)}`);
+    }
+    line('');
+  }
+
+  // ── ОСТАТКИ (что вычитается) — чтобы видеть, реальны ли стоки по размерам (откуда нули) ──
+  line('─── ОСТАТКИ (state.supplies): ровно то, что вычитается из спроса ───');
+  {
+    const sups = (state.supplies || []).filter((s) => s.articleId === articleId);
+    if (!sups.length) line('  Остатков для этого артикула НЕТ → нетто = брутто (нулей от вычета быть не должно).');
+    else {
+      const bySrc = {}; const canonToArt = new Map();
+      for (const c of (a.colors || [])) { const cn = normColor(c); if (!canonToArt.has(cn)) canonToArt.set(cn, c); }
+      const agg = {}; const mismatch = [];
+      for (const s of sups) {
+        bySrc[s.source] = (bySrc[s.source] || 0) + supplyMatrixSum(s.matrix);
+        for (const rc of Object.keys(s.matrix || {})) {
+          const ac = (a.colors || []).includes(rc) ? rc : canonToArt.get(normColor(rc));
+          for (const sz of Object.keys(s.matrix[rc] || {})) {
+            const q = Math.max(0, Math.round(+s.matrix[rc][sz] || 0));
+            if (q <= 0) continue;
+            if (ac && (a.sizes || []).includes(sz)) { (agg[ac] = agg[ac] || {})[sz] = (agg[ac][sz] || 0) + q; }
+            else mismatch.push(`${rc}/${sz}=${q}${ac ? '' : ' [цвет не сопоставлен]'}${(a.sizes || []).includes(sz) ? '' : ' [размер не в ряду]'}`);
+          }
+        }
+      }
+      line('  По источникам: ' + (Object.entries(bySrc).map(([k, v]) => `${SUP_SRC_RU[k] || k}=${money(v)}`).join(', ') || '—') + `  ·  всего строк остатков: ${sups.length}`);
+      line('  Матрица остатков (цвет×размер) — вычитается из спроса хронологически (ранние довозы гасятся первыми):');
+      line(matStr(agg, '    '));
+      const perColor = (a.colors || []).map((c) => { const t = (a.sizes || []).reduce((n, s) => n + ((agg[c] || {})[s] || 0), 0); return t > 0 ? `${c}=${money(t)}` : null; }).filter(Boolean);
+      line('  Итого остатков по цвету: ' + (perColor.join(', ') || '—'));
+      if (mismatch.length) {
+        line('  ⚠ ОСТАТКИ, НЕ сопоставленные с рядом/цветами (в вычет НЕ идут — проверьте привязку номенклатуры):');
+        line('    ' + mismatch.slice(0, 40).join('; ') + (mismatch.length > 40 ? ` … и ещё ${mismatch.length - 40}` : ''));
+      }
+      line('  ⓘ Нули в НЕТТО у цвета/размера = здесь остаток ≥ спроса (обычно деадсток непопулярных');
+      line('     размеров нишевых цветов). Если цифра остатка тут выглядит НЕверной — это вопрос к');
+      line('     загрузке остатков (WB API / импорт) на листе «Остатки и поставки», а не к расчёту.');
     }
     line('');
   }
