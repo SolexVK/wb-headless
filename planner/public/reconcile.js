@@ -8,8 +8,20 @@
 import { canonColor } from './colorNorm.js';
 
 // ── Размеры: числовой интервал и буквенный индекс (XXL==2XL, XXXL==3XL) ──
+// Латинизация кириллических двойников в размерных метках: MPStats нередко отдаёт «ХL» с
+// кириллической Х (U+0425) вместо латинской X — тогда буквенный размер не распознаётся и XL-спрос
+// «размазывается» вместо попадания на XL. Заменяем только визуальные двойники, только в метках
+// размеров (цветов это не касается — они идут через colorNorm).
+const CYR2LAT = { а: 'a', в: 'b', е: 'e', к: 'k', м: 'm', н: 'h', о: 'o', р: 'p', с: 'c', т: 't', х: 'x', у: 'y' };
+function latinizeSize(s) {
+  return String(s || '').replace(/[А-Яа-яЁё]/g, (ch) => {
+    const lat = CYR2LAT[ch.toLowerCase()];
+    if (!lat) return ch;
+    return ch === ch.toUpperCase() ? lat.toUpperCase() : lat;
+  });
+}
 function parseNum(name) {
-  const s = String(name || '');
+  const s = latinizeSize(String(name || ''));
   const r = s.match(/(\d{2,3})\s*[-–—]\s*(\d{2,3})/);
   if (r) { let a = +r[1], b = +r[2]; if (a > b) [a, b] = [b, a]; return { lo: a, hi: b }; }
   const m = s.match(/(\d{2,3})/);
@@ -18,7 +30,7 @@ function parseNum(name) {
 }
 const BASE = { XXXS: -2, XXS: -1, XS: 0, S: 1, M: 2, L: 3, XL: 4 };
 function letterIdx(s) {
-  const t = String(s || '').toUpperCase().replace(/\s+/g, '');
+  const t = latinizeSize(String(s || '')).toUpperCase().replace(/\s+/g, '');
   if (t in BASE) return BASE[t];
   let m = t.match(/^(\d+)XL$/); if (m) return 4 + (+m[1]) - 1;   // 2XL→5, 3XL→6…
   m = t.match(/^(X+)L$/); if (m) return 4 + m[1].length - 1;     // XXL→5, XXXL→6…
@@ -32,7 +44,7 @@ function letterSpan(s) {
   if (!parts.length) return null;
   return [Math.min(...parts), Math.max(...parts)];
 }
-const normLabel = (s) => String(s || '').trim().toLowerCase().replace(/\s*[-–—]\s*/g, '-');
+const normLabel = (s) => latinizeSize(String(s || '')).trim().toLowerCase().replace(/\s*[-–—]\s*/g, '-');
 
 // Покрывает ли размер спроса (диапазон size_name + origin-буквы) дискретный размер ряда.
 function sizeCovers(demandName, demandOrigin, artSize) {
