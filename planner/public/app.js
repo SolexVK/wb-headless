@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'mergeback-2026-08-24r';
+const APP_BUILD = 'mergeoff-2026-08-24s';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -5548,7 +5548,7 @@ function dataSettingsPanel() {
       <div class="field"><label>Буфер «ткань раньше кроя», дней</label><input data-set="fabric.bufferDays" value="${f.bufferDays}"></div>
       <div class="field"><label title="Настил: ориентир минимума на размер (мягкий).">Настил: мин. на размер, шт</label><input data-set="nesting.minSizeQty" value="${state.settings.nesting.minSizeQty}"></div>
       <div class="field"><label title="Настил: ориентир минимума на цвет (мягкий).">Настил: мин. на цвет, шт</label><input data-set="nesting.minColorQty" value="${state.settings.nesting.minColorQty}"></div>
-      <div class="field"><label title="Мин. производственная партия. Довозы мельче (после вычета остатков) сливаются со следующим по сроку.">Мин. партия (объединение), шт</label><input data-set="minBatch" value="${minBatchQty()}"></div>
+      <div class="field"><label title="Целевой минимум довоза при сборке плана продаж: соседние МЕСЯЦЫ прогноза объединяются в довоз не меньше этого (по брутто-спросу, ДО вычета остатков). После вычета остатков нетто довоза может стать меньше — это нормально (мягкое предупреждение по настилу), объём между довозами НЕ переносится.">Мин. довоз (сборка плана), шт</label><input data-set="minBatch" value="${minBatchQty()}"></div>
       <div class="field"><label title="Размер производственной партии для дробления. Крупные довозы режутся на РАВНЫЕ партии не меньше этого и раскидываются по цехам (последняя в цепочке слияния может быть меньше). 0 = не резать.">Размер партии (дробление), шт</label><input data-set="batchSize" value="${Math.max(0, Math.round(+(state.settings.batchSize) || 5000))}"></div>
     </div>
     <div class="card"><div class="mini" style="margin-bottom:8px">Логистика до WB</div>

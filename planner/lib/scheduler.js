@@ -15,7 +15,7 @@
 import { makeCalendar, addDays, diffDays, parseISO, toISO, dayOfWeek } from './calendar.js';
 import { partiasOf, partiaPlanUnits, partiaFactUnits, partiaEffectiveUnits, PARTIA_STATUS_RU, sumMatrixStage } from './model.js';
 import { validateMatrix } from './nesting.js';
-import { computeSupplyNetting, mergeSmallNetDeliveries } from './supply.js';
+import { computeSupplyNetting } from './supply.js';
 
 const OPS = ['cut', 'sew', 'iron', 'otk'];
 const OP_RU = { cut: 'Крой', sew: 'Пошив', iron: 'Утюжка', otk: 'ОТК' };
@@ -145,7 +145,12 @@ export function buildSchedule(state) {
   const netting = computeSupplyNetting(state, todayISO);
   // Объединение мелких довозов после вычета остатков: если нетто довоза < мин. партии — сливаем
   // его в следующий по сроку довоз (живой слой). Гант пересобирается на объединённых объёмах.
-  const supplyMerges = mergeSmallNetDeliveries(state, netting.net, (state.settings && state.settings.minBatch) || 0);
+  // Слияние мелких довозов на уровне НЕТТО отключено (по решению пользователя): оно перекладывало
+  // объём между довозами, из-за чего нетто одного довоза превышал его спрос и в него подмешивались
+  // цвета/сезоны из соседних. Теперь инвариант: нетто довоза = спрос − остатки, ВСЕГДА ≤ спрос.
+  // Мелкий довоз после вычета остатков остаётся мелким (мягкое предупреждение по настилу). Комфорт
+  // настила даёт только ДРОБЛЕНИЕ крупных довозов на партии ≥ batchSize (ниже), без переноса объёма.
+  const supplyMerges = []; // mergeSmallNetDeliveries(...) — намеренно не вызываем
 
   // размер производственной партии: крупный довоз режем на РАВНЫЕ партии НЕ МЕНЬШЕ batchSize
   // (настил: комфортная партия одного цвета/размера) и раскидываем по цехам (контроль процесса +
