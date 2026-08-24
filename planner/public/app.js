@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'prod-numbering-2026-08-22k';
+const APP_BUILD = 'forecast-buyout-2026-08-22l';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -3726,7 +3726,8 @@ function seasonColorsBlock(rep, p) {
   const ca = rep.colorAnalysis;
   if (!ca || !Array.isArray(ca.colors) || !ca.colors.length) return '';
   const fmt = (n) => Math.round(+n || 0).toLocaleString('ru');
-  const forecast = Math.round(((p && p.forecastDaily) || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
+  // прогноз MPStats = ЗАКАЗЫ; к пошиву нужны ВЫКУПЫ = заказы × %выкупа (seasonFcFactor).
+  const forecast = Math.round(((p && p.forecastDaily) || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0) * seasonFcFactor(seasonSelArticle));
   const article = (state.articles || []).find((x) => x.id === seasonSelArticle) || null;
   const cqBase = applyColorAdjust(seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount), article);
   const analyzedNames = new Set(cqBase ? [...cqBase.core, ...cqBase.weak].map((r) => r.name) : ca.colors.map((c) => c.name));
@@ -3777,15 +3778,16 @@ function seasonColorsBlock(rep, p) {
   }).join('');
 
   const head = cq
-    ? `<div class="mini"><b>Логика количества:</b> база — <b>суммарный объём продаж</b> цвета (реальный спрос). «Выкупы (прогноз)» = ${fmt(forecast)} шт — это объём <b>лидера по объёму</b> (★ ${seEsc(cq.best.name)}). Остальные — меньше, <b>пропорционально своему объёму относительно лидера</b> (кол-во = прогноз × доля÷лидер). Ассортимент — минимум <b>${seasonColorMinCount}</b> расцветок (сперва надёжные ≥${ca.minCount} карточек, затем <b>⚑ добор</b>). <b>Ср/арт</b> — справочно; <b>▲ эфф</b> = продаётся лучше на карточку, чем лидер (возможная недооценённая ниша). Не согласен с расчётным кол-вом — поправь <b>коэффициентом ±%</b> в последней колонке (100 = как расчёт, 120 = +20%, 80 = −20%); общий тираж пересчитается.</div>`
+    ? `<div class="mini"><b>Логика количества:</b> база — <b>суммарный объём</b> цвета. Прогноз MPStats = <b>заказы</b>; к пошиву берём <b>выкупы = заказы × %выкупа ${seasonFcBuyout(seasonSelArticle)}%</b> (поле ниже). «К пошиву (лидер)» = ${fmt(forecast)} шт — объём <b>лидера по объёму</b> (★ ${seEsc(cq.best.name)}). Остальные — меньше, <b>пропорционально своему объёму относительно лидера</b> (кол-во = прогноз × доля÷лидер). Ассортимент — минимум <b>${seasonColorMinCount}</b> расцветок (сперва надёжные ≥${ca.minCount} карточек, затем <b>⚑ добор</b>). <b>Ср/арт</b> — справочно; <b>▲ эфф</b> = продаётся лучше на карточку, чем лидер (возможная недооценённая ниша). Не согласен с расчётным кол-вом — поправь <b>коэффициентом ±%</b> в последней колонке (100 = как расчёт, 120 = +20%, 80 = −20%); общий тираж пересчитается.</div>`
     : `<div class="mini">Доля объёма = суммарные продажи цвета ÷ все продажи. Кол-во появится, когда есть прогноз и доверенные цвета.</div>`;
   const producedCore = cq ? cq.core.filter((r) => !excluded.has(r.name)) : [];
   const producedTotal = producedCore.reduce((s, r) => s + r.qty, 0);
   const exclCount = cq ? cq.core.length - producedCore.length : 0;
   const totalLine = cq
-    ? `<div class="se-color-total"><b>Общий тираж (${producedCore.length} цвет. ассортимента): ${fmt(producedTotal)} шт</b> — больше прогноза, т.к. прогноз = только лидер по объёму.${exclCount ? ` <span style="color:var(--danger)">Исключено вручную: ${exclCount}.</span>` : ''}${cq.weakSummary ? ` Доп. (${cq.weakSummary.count}): ${seEsc(cq.weakSummary.names.join(', '))} — ещё ~${fmt(cq.weakSummary.qty)} шт, если расширять.` : ''}
+    ? `<div class="se-color-total"><b>Общий тираж к пошиву (${producedCore.length} цвет. ассортимента): ${fmt(producedTotal)} шт</b> <span class="mini">(= выкупы: заказы MPStats × %выкупа ${seasonFcBuyout(seasonSelArticle)}%, сумма по всем цветам)</span>.${exclCount ? ` <span style="color:var(--danger)">Исключено вручную: ${exclCount}.</span>` : ''}${cq.weakSummary ? ` Доп. (${cq.weakSummary.count}): ${seEsc(cq.weakSummary.names.join(', '))} — ещё ~${fmt(cq.weakSummary.qty)} шт, если расширять.` : ''}
         <label class="mini" style="margin-left:8px">цветов в ассортименте: <input id="se-color-count" type="number" min="1" max="20" step="1" value="${seasonColorMinCount}" style="width:52px" title="Гарантированный минимум расцветок — движок добирает даже слабые"></label>
-        <label class="mini" style="margin-left:8px">порог силы: <input id="se-color-thr" type="number" min="5" max="100" step="5" value="${seasonColorMinRel}" style="width:52px" title="Цвета сильнее этого % от лучшего входят сверх минимума"> %</label></div>`
+        <label class="mini" style="margin-left:8px">порог силы: <input id="se-color-thr" type="number" min="5" max="100" step="5" value="${seasonColorMinRel}" style="width:52px" title="Цвета сильнее этого % от лучшего входят сверх минимума"> %</label>
+        <label class="mini" style="margin-left:8px" title="MPStats даёт ЗАКАЗЫ. К пошиву нужны ВЫКУПЫ = заказы × %выкупа. Впиши измеренный по личному кабинету WB процент выкупа. 100 = не изменять (прогноз = к пошиву)."><b>% выкупа (заказы→выкупы):</b> <input id="se-fbuyout" type="number" min="1" max="100" step="1" value="${seasonFcBuyout(seasonSelArticle)}" style="width:52px"> %</label></div>`
     : '';
   // Редактор «моих цветов» (нет в рыночной выборке, но есть у продавца).
   const ccList = (article && Array.isArray(article.customColors)) ? article.customColors : [];
@@ -4000,7 +4002,8 @@ function reconcileInputs(rep, p, articleId) {
   const ca = rep.colorAnalysis, sa = rep.sizeAnalysis;
   if (!ca || !Array.isArray(ca.colors) || !ca.colors.length) return null;
   if (!sa || !Array.isArray(sa.sizes) || !sa.sizes.length) return null;
-  const forecast = Math.round(((p && p.forecastDaily) || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
+  // прогноз MPStats = заказы; в план идут выкупы = заказы × %выкупа
+  const forecast = Math.round(((p && p.forecastDaily) || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0) * seasonFcFactor(articleId || seasonSelArticle));
   const article = (state.articles || []).find((x) => x.id === (articleId || seasonSelArticle)) || null;
   const cq = applyColorExclusions(mergeCustomColors(applyColorAdjust(seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount), article), article, forecast), article);
   if (!cq) return null;
@@ -4366,6 +4369,13 @@ function seasonBuyoutOf(articleId) {
   const a = (state.articles || []).find((x) => x.id === articleId);
   return a && +a.buyoutPct > 0 ? +a.buyoutPct : 40;
 }
+// % выкупа для ПЛАНА производства (MPStats даёт заказы → к пошиву нужны выкупы). 100 = не менять.
+function seasonFcBuyout(articleId) {
+  const a = (state.articles || []).find((x) => x.id === articleId);
+  const v = a && +a.forecastBuyoutPct;
+  return (v > 0 && v <= 100) ? v : 100;
+}
+function seasonFcFactor(articleId) { return seasonFcBuyout(articleId) / 100; }
 // таймлайн выбранных движком дат фаз + блок самопроверки плана
 function seasonPlanChecks(rep, p) {
   const ph = p.phaseDates || {}, val = p.validation || {};
@@ -4593,7 +4603,7 @@ const SE_MON_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн'
 function seasonColorPlansData(rep, p) {
   const ca = rep.colorAnalysis;
   if (!ca || !Array.isArray(ca.colors) || !ca.colors.length) return null;
-  const forecast = Math.round((p.forecastDaily || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0));
+  const forecast = Math.round((p.forecastDaily || []).reduce((s, d) => s + (+d.plannedOrders || 0), 0) * seasonFcFactor(seasonSelArticle));
   const article = (state.articles || []).find((x) => x.id === seasonSelArticle) || null;
   const cq = applyColorExclusions(mergeCustomColors(applyColorAdjust(seasonColorQuantities(ca.colors, forecast, seasonColorMinRel, ca.minCount, seasonColorMinCount), article), article, forecast), article);
   if (!cq || !forecast) return null;
@@ -4905,6 +4915,14 @@ function bindSeasonView(rep, p) {
   const ccnt = document.getElementById('se-color-count');
   ccnt?.addEventListener('change', (e) => {
     seasonColorMinCount = Math.max(1, Math.min(20, Math.round(+e.target.value || 5)));
+    renderSeasonView(seasonSelArticle);
+  });
+  // % выкупа для плана: заказы MPStats × %выкупа = выкупы к пошиву. Хранится в article.forecastBuyoutPct.
+  const fbo = document.getElementById('se-fbuyout');
+  fbo?.addEventListener('change', (e) => {
+    const v = Math.max(1, Math.min(100, Math.round(+e.target.value || 100)));
+    const a = (state.articles || []).find((x) => x.id === seasonSelArticle);
+    if (a) { a.forecastBuyoutPct = v; dirty = true; setStatus(); }
     renderSeasonView(seasonSelArticle);
   });
   document.querySelectorAll('.se-svg[data-chart]').forEach((svg) => attachSeasonTip(svg));
