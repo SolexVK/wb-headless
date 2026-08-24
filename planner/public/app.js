@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'stock-log-2026-08-24v';
+const APP_BUILD = 'tail-split-2026-08-24w';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -4235,7 +4235,7 @@ function runReconcile(rep, p, articleId) {
   const article = state.articles.find((x) => x.id === articleId);
   if (!inp || !article) return null;
   const sr = (seasonReconcile && seasonReconcile.articleId === articleId) ? seasonReconcile : { choices: {}, newNames: {} };
-  const opts = { aliases: (state.settings && state.settings.colorAliases) || {}, sizeSplit: 'equal', forceSizes: article.forceSizes || [], forceShare: article.forceShare || {}, sizeAdjust: article.sizeAdjust || {} };
+  const opts = { aliases: (state.settings && state.settings.colorAliases) || {}, sizeSplit: 'equal', forceSizes: article.forceSizes || [], forceShare: article.forceShare || {}, sizeAdjust: article.sizeAdjust || {}, tailToExtremePct: (state.settings && state.settings.tailToExtremePct != null) ? state.settings.tailToExtremePct : 50 };
   const res1 = reconcilePlan(reconcileEffectiveArticle(article, sr.choices, sr.newNames), inp.colorRows, inp.sizeRows, opts);
   const choices = resolveChoices(res1, sr); // новые цвета по умолчанию создаются
   const eff = reconcileEffectiveArticle(article, choices, sr.newNames);
@@ -5740,6 +5740,7 @@ function dataSettingsPanel() {
       <div class="field"><label title="Настил: ориентир минимума на цвет (мягкий).">Настил: мин. на цвет, шт</label><input data-set="nesting.minColorQty" value="${state.settings.nesting.minColorQty}"></div>
       <div class="field"><label title="Целевой минимум довоза при сборке плана продаж: соседние МЕСЯЦЫ прогноза объединяются в довоз не меньше этого (по брутто-спросу, ДО вычета остатков). После вычета остатков нетто довоза может стать меньше — это нормально (мягкое предупреждение по настилу), объём между довозами НЕ переносится.">Мин. довоз (сборка плана), шт</label><input data-set="minBatch" value="${minBatchQty()}"></div>
       <div class="field"><label title="Размер производственной партии для дробления. Крупные довозы режутся на РАВНЫЕ партии не меньше этого и раскидываются по цехам (последняя в цепочке слияния может быть меньше). 0 = не резать.">Размер партии (дробление), шт</label><input data-set="batchSize" value="${Math.max(0, Math.round(+(state.settings.batchSize) || 5000))}"></div>
+      <div class="field"><label title="Спрос на размеры БОЛЬШЕ/МЕНЬШЕ вашего ряда (напр. 2XL/3XL при ряде до XL). Какую долю этого «хвоста» тянуть на крайний размер (XL/XS), а сколько распределить по ряду пропорционально. 0 = всё пропорционально по ряду (крайние размеры не раздуваются, XS/M получают больше). 100 = весь хвост на крайний размер. По умолчанию 50.">Хвост размеров на край, % (0=проп., 100=на край)</label><input data-set="tailToExtremePct" value="${(state.settings.tailToExtremePct != null ? state.settings.tailToExtremePct : 50)}"></div>
     </div>
     <div class="card"><div class="mini" style="margin-bottom:8px">Логистика до WB</div>
       <div class="field"><label>Мин. дней</label><input data-set="logistics.minDays" value="${l.minDays}"></div>

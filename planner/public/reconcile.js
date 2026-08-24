@@ -80,7 +80,7 @@ function apportion(total, keys, weightOf) {
  * @param {Array<{size:string, origin?:string, share:number}>} sizeRows — ядро размеров (доли, %).
  * @param {{aliases?:Object, sizeSplit?:string}} [opts] — aliases: глобальный словарь; sizeSplit='equal'.
  */
-export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, sizeSplit = 'equal', forceSizes = [], forceShare = {}, sizeAdjust = {} } = {}) {
+export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, sizeSplit = 'equal', forceSizes = [], forceShare = {}, sizeAdjust = {}, tailToExtremePct = 50 } = {}) {
   const artColors = Array.isArray(article.colors) ? article.colors : [];
   const artSizes = Array.isArray(article.sizes) ? article.sizes : [];
   const colorMap = (article.colorMap && typeof article.colorMap === 'object') ? article.colorMap : {};
@@ -133,6 +133,9 @@ export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, size
     return 'amb';
   };
 
+  // Доля непокрытого хвоста, уводимая на КРАЙНИЙ размер (по направлению); остальное — пропорционально
+  // весам ряда (через нормировку). 0 = всё пропорционально (крайние не раздуваются), 100 = всё на край.
+  const ef = Math.max(0, Math.min(1, (+tailToExtremePct === 0 ? 0 : (+tailToExtremePct || 50)) / 100));
   let toMax = 0, toMin = 0; // непокрытая доля к самому большому / самому маленькому размеру ряда
   const sizes = rows.map((r) => {
     const norm = (+r.share || 0) / totShare;
@@ -141,25 +144,25 @@ export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, size
     let routedTo = '';
     if (!covered.length) {
       const d = dirOf(r);
-      if (d === 'above') { toMax += norm; routedTo = maxS || ''; }
-      else if (d === 'below') { toMin += norm; routedTo = minS || ''; }
+      if (d === 'above') { toMax += norm; routedTo = ef > 0 ? (maxS || '') : ''; }
+      else if (d === 'below') { toMin += norm; routedTo = ef > 0 ? (minS || '') : ''; }
       // 'amb' — оставляем общей нормировке (размажется пропорционально существующим весам)
     }
     return { demand: r.size, origin: r.origin || '', share: r.share, articleSizes: covered, covered: covered.length > 0, routedTo };
   });
-  // Непокрытую спросом долю НЕ теряем и НЕ размазываем по серединным размерам, а по умолчанию уводим
-  // на КРАЙНИЕ размеры ряда ПО НАПРАВЛЕНИЮ: спрос крупнее ряда → на самый большой размер, мельче ряда
-  // → на самый маленький. Так «хвостовой» спрос (обычно у крайних размеров с малой долей) попадает
-  // туда, где ему место, а крайний размер не выпадает в ноль. Неоднозначное (amb) — на общую
-  // нормировку. forceSizes (ручной выбор размеров) имеет приоритет над авто-роутингом на края.
+  // Непокрытую спросом долю НЕ теряем. По направлению: спрос крупнее ряда → «хвост» тянет на самый
+  // большой размер, мельче ряда → на самый маленький. НО тянем на край лишь долю `ef` (настройка
+  // tailToExtremePct); остальное (1−ef) уходит в общую нормировку — т.е. распределяется по ряду
+  // ПРОПОРЦИОНАЛЬНО существующим весам (поднимает и XS/M, не раздувает один XL). Неоднозначное (amb)
+  // — тоже пропорционально. forceSizes (ручной выбор размеров) имеет приоритет над авто-роутингом.
   const forced = (forceSizes || []).filter((s) => artSizes.includes(s));
   if (forced.length) {
     const coveredW = artSizes.reduce((s, as) => s + sizeWeights[as], 0);
     const unmapped = Math.max(0, 1 - coveredW);
     if (unmapped > 1e-9) { const per = unmapped / forced.length; for (const s of forced) sizeWeights[s] += per; }
   } else {
-    if (toMax > 1e-9 && maxS) sizeWeights[maxS] += toMax;
-    if (toMin > 1e-9 && minS) sizeWeights[minS] += toMin;
+    if (toMax > 1e-9 && maxS) sizeWeights[maxS] += toMax * ef; // (1−ef) останется на нормировку → пропорционально
+    if (toMin > 1e-9 && minS) sizeWeights[minS] += toMin * ef;
   }
   const wSum = artSizes.reduce((s, as) => s + sizeWeights[as], 0);
   if (wSum > 0) for (const as of artSizes) sizeWeights[as] /= wSum;

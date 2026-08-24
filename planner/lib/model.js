@@ -208,6 +208,11 @@ export function normalizeState(input) {
   // макс. размер производственной партии (шт): крупные довозы режутся на партии ≤ этого, чтобы
   // распределить по цехам и контролировать процесс. 0 = не резать.
   s.settings.batchSize = Math.max(0, Math.round(+s.settings.batchSize || 5000));
+  // доля непокрытого спросом «хвоста» размеров (спрос вне ряда), уводимая на КРАЙНИЙ размер по
+  // направлению; остальное распределяется по ряду пропорционально. 0 = всё пропорционально (крайние
+  // не раздуваются), 100 = весь хвост на край. По умолчанию 50 (половина на край, половина по ряду).
+  s.settings.tailToExtremePct = (s.settings.tailToExtremePct === 0 || s.settings.tailToExtremePct === '0')
+    ? 0 : Math.max(0, Math.min(100, Math.round(+s.settings.tailToExtremePct || 50)));
   // словарь синонимов цвета: только пары строка→непустая-строка
   { const ca = s.settings.colorAliases && typeof s.settings.colorAliases === 'object' ? s.settings.colorAliases : {};
     const clean = {}; for (const [k, v] of Object.entries(ca)) if (k && typeof v === 'string' && v.trim()) clean[String(k)] = v.trim();
