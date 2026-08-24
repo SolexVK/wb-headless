@@ -68,7 +68,7 @@ function apportion(total, keys, weightOf) {
  * @param {Array<{size:string, origin?:string, share:number}>} sizeRows — ядро размеров (доли, %).
  * @param {{aliases?:Object, sizeSplit?:string}} [opts] — aliases: глобальный словарь; sizeSplit='equal'.
  */
-export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, sizeSplit = 'equal' } = {}) {
+export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, sizeSplit = 'equal', forceSizes = [] } = {}) {
   const artColors = Array.isArray(article.colors) ? article.colors : [];
   const artSizes = Array.isArray(article.sizes) ? article.sizes : [];
   const colorMap = (article.colorMap && typeof article.colorMap === 'object') ? article.colorMap : {};
@@ -108,6 +108,15 @@ export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, size
   // Непокрытые размерные доли (размер спроса, которого нет в ряду) НЕ теряем, а перераспределяем на
   // существующие размеры: нормируем веса к 1. Тогда ПОЛНОЕ кол-во цвета попадает в матрицу — суммы
   // по цвету в 🧩 совпадают с 🎨. Полностью неразмещённым цвет остаётся только если ряд пуст (wSum=0).
+  // Принудительно включённые размеры ряда (forceSizes): непокрытую спросом долю (размеры спроса,
+  // которых нет в ряду) отдаём ИМ поровну — иначе она размажется по всем размерам, а форс-размер
+  // (напр. XL) останется с нулём. Без forceSizes — прежнее поведение (размазать по всем).
+  const forced = (forceSizes || []).filter((s) => artSizes.includes(s));
+  if (forced.length) {
+    const coveredW = artSizes.reduce((s, as) => s + sizeWeights[as], 0);
+    const unmapped = Math.max(0, 1 - coveredW);
+    if (unmapped > 1e-9) { const per = unmapped / forced.length; for (const s of forced) sizeWeights[s] += per; }
+  }
   const wSum = artSizes.reduce((s, as) => s + sizeWeights[as], 0);
   if (wSum > 0) for (const as of artSizes) sizeWeights[as] /= wSum;
   const assignedFraction = wSum > 0 ? 1 : 0;

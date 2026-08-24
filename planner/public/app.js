@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'forecast-buyout-2026-08-22l';
+const APP_BUILD = 'force-size-2026-08-24m';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -4045,7 +4045,7 @@ function runReconcile(rep, p, articleId) {
   const article = state.articles.find((x) => x.id === articleId);
   if (!inp || !article) return null;
   const sr = (seasonReconcile && seasonReconcile.articleId === articleId) ? seasonReconcile : { choices: {}, newNames: {} };
-  const opts = { aliases: (state.settings && state.settings.colorAliases) || {}, sizeSplit: 'equal' };
+  const opts = { aliases: (state.settings && state.settings.colorAliases) || {}, sizeSplit: 'equal', forceSizes: article.forceSizes || [] };
   const res1 = reconcilePlan(reconcileEffectiveArticle(article, sr.choices, sr.newNames), inp.colorRows, inp.sizeRows, opts);
   const choices = resolveChoices(res1, sr); // новые цвета по умолчанию создаются
   const eff = reconcileEffectiveArticle(article, choices, sr.newNames);
@@ -4113,8 +4113,11 @@ function reconcilePanelHTML(rep, p, articleId) {
   const colorsTbl = `<table class="se-comp-table"><thead><tr><th>Цвет спроса</th><th>Куда в карточке</th></tr></thead><tbody>${result.colors.map(colorRow).join('')}</tbody></table>`;
 
   // — размеры: диапазон спроса → размеры ряда
-  const sizeRows = result.sizes.map((s) => `<tr><td><b>${seEsc(s.demand)}</b>${s.origin ? ` <span class="mini">${seEsc(s.origin)}</span>` : ''} <span class="mini">${s.share}%</span></td><td>${s.covered ? '→ ' + s.articleSizes.map(seEsc).join(', ') : '<span class="mini">нет в ряду → доля перераспределена на другие размеры</span>'}</td></tr>`).join('');
-  const sizesTbl = `<table class="se-comp-table"><thead><tr><th>Размер спроса</th><th>Размеры ряда</th></tr></thead><tbody>${sizeRows}</tbody></table>`;
+  const forcedSet = new Set(article.forceSizes || []);
+  const unmappedTo = forcedSet.size ? [...forcedSet].join(', ') : '';
+  const sizeRows = result.sizes.map((s) => `<tr><td><b>${seEsc(s.demand)}</b>${s.origin ? ` <span class="mini">${seEsc(s.origin)}</span>` : ''} <span class="mini">${s.share}%</span></td><td>${s.covered ? '→ ' + s.articleSizes.map(seEsc).join(', ') : (unmappedTo ? `<span class="mini">нет в ряду → принудительно на: <b>${seEsc(unmappedTo)}</b></span>` : '<span class="mini">нет в ряду → доля перераспределена на другие размеры</span>')}</td></tr>`).join('');
+  const sizesTbl = `<table class="se-comp-table"><thead><tr><th>Размер спроса</th><th>Размеры ряда</th></tr></thead><tbody>${sizeRows}</tbody></table>
+    <div class="mini" style="margin-top:6px">Принудительно включить размер ряда (получит долю спроса, не легшего ни на один размер): ${(article.sizes || []).map((s) => `<label class="se-force-lbl" style="display:inline-flex;align-items:center;gap:3px;margin:2px 6px 2px 0;padding:2px 6px;border:1px solid var(--line);border-radius:6px;cursor:pointer"><input type="checkbox" data-forcesize="${seEsc(s)}"${forcedSet.has(s) ? ' checked' : ''}> ${seEsc(s)}</label>`).join('')}</div>`;
 
   // — АРХИВ: активные цвета карточки, которым новый план не дал объёма → предложить архивировать.
   const idle = activeColors(article).filter((c) => colUnits(c) <= 0);
@@ -4244,6 +4247,14 @@ function bindReconcilePanel(rep, p, articleId) {
     seasonReconcile.archive = seasonReconcile.archive || {};
     seasonReconcile.archive[cb.dataset.arch] = cb.checked;
     rerenderReconcile(rep, p, articleId); // обновить счётчик архива в строке применения
+  }));
+  // Принудительное включение размера ряда — ловит непокрытую спросом долю (иначе размер выпадал).
+  document.querySelectorAll('input[data-forcesize]').forEach((cb) => cb.addEventListener('change', () => {
+    const a = state.articles.find((x) => x.id === articleId); if (!a) return;
+    const fs = new Set(Array.isArray(a.forceSizes) ? a.forceSizes : []);
+    if (cb.checked) fs.add(cb.dataset.forcesize); else fs.delete(cb.dataset.forcesize);
+    a.forceSizes = [...fs]; dirty = true; setStatus();
+    rerenderReconcile(rep, p, articleId); // пересобрать матрицу с учётом форс-размера
   }));
   const applyBtn = document.getElementById('se-rec-apply');
   if (applyBtn) applyBtn.addEventListener('click', async () => {

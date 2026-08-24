@@ -287,6 +287,10 @@ export function normalizeState(input) {
     // график до этой даты. Пусто = без ограничения. Планировщик берёт позднейшую из этой и
     // пер-партийной earliestStart, распределяя нагрузку по цехам по мощности.
     a.sewNotBefore = /^\d{4}-\d{2}-\d{2}$/.test(String(a.sewNotBefore || '').slice(0, 10)) ? String(a.sewNotBefore).slice(0, 10) : '';
+    // принудительно включённые размеры ряда: даже если авто-маппинг спроса не накрыл размер, он
+    // получит долю непокрытого спроса (иначе размер молча выпадал из плана). Только валидные размеры.
+    { const fs = Array.isArray(a.forceSizes) ? a.forceSizes : [];
+      a.forceSizes = [...new Set(fs.filter((s) => a.sizes.includes(s)))]; }
     // % выкупа для ПЛАНА производства: MPStats даёт заказы, к пошиву нужны выкупы = заказы × %выкупа.
     // 100 = не изменять (прогноз уже = к пошиву). Пользователь вписывает измеренный по ЛК процент.
     a.forecastBuyoutPct = (+a.forecastBuyoutPct > 0 && +a.forecastBuyoutPct <= 100) ? Math.round(+a.forecastBuyoutPct) : 100;
