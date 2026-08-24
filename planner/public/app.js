@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'force-share-2026-08-24n';
+const APP_BUILD = 'partia-min5k-2026-08-24o';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1139,7 +1139,7 @@ function renderMatrix() {
         <button id="mx-split-partia" class="btn btn-subtle" title="Разрезать эту партию надвое вручную (по правилам настила), без учёта мощностей">✂ разрезать вручную</button>
       </div>
       ${cyc.length ? `<div class="mini" style="margin:2px 0 10px">
-        ${split ? `Этот довоз дроблён на <b>${cyc.length} произв. партии</b> (≤ ${Math.max(0, Math.round(+(state.settings.batchSize) || 5000)).toLocaleString('ru')} шт) и разложен по цехам — они уходят в Excel и на Гант:` : 'Отшивается:'}
+        ${split ? `Этот довоз дроблён на <b>${cyc.length} равных произв. партии</b> (≥ ${Math.max(0, Math.round(+(state.settings.batchSize) || 5000)).toLocaleString('ru')} шт) и разложен по цехам — они уходят в Excel и на Гант:` : 'Отшивается:'}
         <div class="matrix-scroll" style="margin-top:4px"><table class="matrix-table"><thead><tr><th>Партия</th><th>Довоз</th><th>Цех</th><th class="num">Шт</th><th>Крой → готовность</th></tr></thead><tbody>
         ${cyc.map((c) => `<tr><td><b>${seEsc(a.id)}·п${c.prodNo || c.partiaNo}</b></td><td class="mini">${seEsc(c.deliveryTag || p.deliveryTag || '')}${c.batchCount > 1 ? ` <span class="mini">(часть ${c.batchIndex + 1}/${c.batchCount})</span>` : ''}</td><td>${seEsc(c.workshopName || 'авто')}</td><td class="num">${c.units.toLocaleString('ru')}</td><td class="mini">${c.cutStart ? `${c.cutStart.slice(8, 10)}.${c.cutStart.slice(5, 7)}` : '—'} → ${c.readyDate ? `${c.readyDate.slice(8, 10)}.${c.readyDate.slice(5, 7)}` : '—'}</td></tr>`).join('')}
         </tbody></table></div>
@@ -5516,7 +5516,7 @@ function dataSettingsPanel() {
       <div class="field"><label title="Настил: ориентир минимума на размер (мягкий).">Настил: мин. на размер, шт</label><input data-set="nesting.minSizeQty" value="${state.settings.nesting.minSizeQty}"></div>
       <div class="field"><label title="Настил: ориентир минимума на цвет (мягкий).">Настил: мин. на цвет, шт</label><input data-set="nesting.minColorQty" value="${state.settings.nesting.minColorQty}"></div>
       <div class="field"><label title="Мин. производственная партия. Довозы мельче (после вычета остатков) сливаются со следующим по сроку.">Мин. партия (объединение), шт</label><input data-set="minBatch" value="${minBatchQty()}"></div>
-      <div class="field"><label title="Макс. производственная партия. Крупные довозы режутся на партии не больше этого и раскидываются по цехам. 0 = не резать.">Макс. партия (дробление), шт</label><input data-set="batchSize" value="${Math.max(0, Math.round(+(state.settings.batchSize) || 5000))}"></div>
+      <div class="field"><label title="Размер производственной партии для дробления. Крупные довозы режутся на РАВНЫЕ партии не меньше этого и раскидываются по цехам (последняя в цепочке слияния может быть меньше). 0 = не резать.">Размер партии (дробление), шт</label><input data-set="batchSize" value="${Math.max(0, Math.round(+(state.settings.batchSize) || 5000))}"></div>
     </div>
     <div class="card"><div class="mini" style="margin-bottom:8px">Логистика до WB</div>
       <div class="field"><label>Мин. дней</label><input data-set="logistics.minDays" value="${l.minDays}"></div>

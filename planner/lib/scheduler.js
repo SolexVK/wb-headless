@@ -147,8 +147,10 @@ export function buildSchedule(state) {
   // его в следующий по сроку довоз (живой слой). Гант пересобирается на объединённых объёмах.
   const supplyMerges = mergeSmallNetDeliveries(state, netting.net, (state.settings && state.settings.minBatch) || 0);
 
-  // макс. размер производственной партии: крупный довоз режем на партии ≤ batchSize и раскидываем
-  // по цехам (контроль процесса + отказоустойчивость — если цех отстаёт, остаток берут другие).
+  // размер производственной партии: крупный довоз режем на РАВНЫЕ партии НЕ МЕНЬШЕ batchSize
+  // (настил: комфортная партия одного цвета/размера) и раскидываем по цехам (контроль процесса +
+  // отказоустойчивость). floor(units/batchSize): каждая часть = units/nb ∈ [batchSize, 2·batchSize),
+  // т.е. никогда не уходим ПОД batchSize (ceil давал равные части МЕНЬШЕ batchSize — партии мельчали).
   const batchSize = Math.max(0, Math.round((state.settings && state.settings.batchSize) || 0));
   // разбить матрицу цвет×размер на n частей поровну (по каждой ячейке; остаток — в первые партии)
   const splitMatrixEven = (M, n) => {
@@ -181,7 +183,7 @@ export function buildSchedule(state) {
       lockedWs: (p.workshopId && wsById[p.workshopId]) ? p.workshopId : null,
       done: false,
     };
-    const nb = batchSize > 0 ? Math.max(1, Math.ceil(units / batchSize)) : 1;
+    const nb = batchSize > 0 ? Math.max(1, Math.floor(units / batchSize)) : 1;
     if (nb <= 1) { jobs.push({ ...base, units, prodMatrix, batchIndex: 0, batchCount: 1 }); continue; }
     const batches = splitMatrixEven(prodMatrix, nb);
     let bi = 0;
