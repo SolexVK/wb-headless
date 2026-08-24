@@ -68,7 +68,7 @@ function apportion(total, keys, weightOf) {
  * @param {Array<{size:string, origin?:string, share:number}>} sizeRows — ядро размеров (доли, %).
  * @param {{aliases?:Object, sizeSplit?:string}} [opts] — aliases: глобальный словарь; sizeSplit='equal'.
  */
-export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, sizeSplit = 'equal', forceSizes = [] } = {}) {
+export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, sizeSplit = 'equal', forceSizes = [], forceShare = {} } = {}) {
   const artColors = Array.isArray(article.colors) ? article.colors : [];
   const artSizes = Array.isArray(article.sizes) ? article.sizes : [];
   const colorMap = (article.colorMap && typeof article.colorMap === 'object') ? article.colorMap : {};
@@ -119,6 +119,27 @@ export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, size
   }
   const wSum = artSizes.reduce((s, as) => s + sizeWeights[as], 0);
   if (wSum > 0) for (const as of artSizes) sizeWeights[as] /= wSum;
+  // Ручной целевой % тиража цвета для размера (forceShare, {размер:%}). Приоритет над авто-весом:
+  // размеру ГАРАНТИРУЕТСЯ ровно этот вес, остаток (1−Σцелей) делится между прочими размерами
+  // пропорционально их авто-весам (а если у прочих ноль — поровну). Σцелей>1 → цели ужимаются к 1.
+  if (wSum > 0) {
+    const targets = {}; let tSum = 0;
+    for (const [s, v] of Object.entries(forceShare || {})) {
+      if (artSizes.includes(s) && +v > 0) { targets[s] = +v / 100; tSum += targets[s]; }
+    }
+    const expl = Object.keys(targets);
+    if (expl.length) {
+      if (tSum > 1) { for (const s of expl) targets[s] /= tSum; tSum = 1; } // ужать к 1
+      const rest = artSizes.filter((as) => !(as in targets));
+      const restW = rest.reduce((s, as) => s + sizeWeights[as], 0);
+      const remain = Math.max(0, 1 - tSum);
+      for (const s of expl) sizeWeights[s] = targets[s];
+      if (rest.length) {
+        if (restW > 0) for (const as of rest) sizeWeights[as] = (sizeWeights[as] / restW) * remain;
+        else for (const as of rest) sizeWeights[as] = remain / rest.length;
+      }
+    }
+  }
   const assignedFraction = wSum > 0 ? 1 : 0;
   const unassignedSizeFraction = wSum > 0 ? 0 : 1;
 

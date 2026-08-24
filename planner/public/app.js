@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'force-size-2026-08-24m';
+const APP_BUILD = 'force-share-2026-08-24n';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -4045,7 +4045,7 @@ function runReconcile(rep, p, articleId) {
   const article = state.articles.find((x) => x.id === articleId);
   if (!inp || !article) return null;
   const sr = (seasonReconcile && seasonReconcile.articleId === articleId) ? seasonReconcile : { choices: {}, newNames: {} };
-  const opts = { aliases: (state.settings && state.settings.colorAliases) || {}, sizeSplit: 'equal', forceSizes: article.forceSizes || [] };
+  const opts = { aliases: (state.settings && state.settings.colorAliases) || {}, sizeSplit: 'equal', forceSizes: article.forceSizes || [], forceShare: article.forceShare || {} };
   const res1 = reconcilePlan(reconcileEffectiveArticle(article, sr.choices, sr.newNames), inp.colorRows, inp.sizeRows, opts);
   const choices = resolveChoices(res1, sr); // новые цвета по умолчанию создаются
   const eff = reconcileEffectiveArticle(article, choices, sr.newNames);
@@ -4114,10 +4114,22 @@ function reconcilePanelHTML(rep, p, articleId) {
 
   // — размеры: диапазон спроса → размеры ряда
   const forcedSet = new Set(article.forceSizes || []);
+  const forceShare = (article.forceShare && typeof article.forceShare === 'object') ? article.forceShare : {};
   const unmappedTo = forcedSet.size ? [...forcedSet].join(', ') : '';
+  const finW = (result.sizeWeights && typeof result.sizeWeights === 'object') ? result.sizeWeights : {};
   const sizeRows = result.sizes.map((s) => `<tr><td><b>${seEsc(s.demand)}</b>${s.origin ? ` <span class="mini">${seEsc(s.origin)}</span>` : ''} <span class="mini">${s.share}%</span></td><td>${s.covered ? '→ ' + s.articleSizes.map(seEsc).join(', ') : (unmappedTo ? `<span class="mini">нет в ряду → принудительно на: <b>${seEsc(unmappedTo)}</b></span>` : '<span class="mini">нет в ряду → доля перераспределена на другие размеры</span>')}</td></tr>`).join('');
+  const forceChips = (article.sizes || []).map((s) => {
+    const on = forcedSet.has(s);
+    const pct = +forceShare[s] > 0 ? +forceShare[s] : '';
+    const eff = Math.round((finW[s] || 0) * 1000) / 10; // итоговый % тиража цвета
+    return `<label class="se-force-lbl" style="display:inline-flex;align-items:center;gap:4px;margin:2px 6px 2px 0;padding:2px 6px;border:1px solid var(--line);border-radius:6px;cursor:pointer">
+      <input type="checkbox" data-forcesize="${seEsc(s)}"${on ? ' checked' : ''}> <b>${seEsc(s)}</b>
+      <input type="number" data-forceshare="${seEsc(s)}" min="0" max="100" step="1" placeholder="авто" value="${pct}" title="Целевой % тиража цвета для этого размера (пусто = только ничейная доля)" ${on ? '' : 'disabled'} style="width:52px;padding:1px 3px" onclick="event.preventDefault();event.stopPropagation()">%
+      <span class="mini" style="opacity:.7">= ${eff}%</span>
+    </label>`;
+  }).join('');
   const sizesTbl = `<table class="se-comp-table"><thead><tr><th>Размер спроса</th><th>Размеры ряда</th></tr></thead><tbody>${sizeRows}</tbody></table>
-    <div class="mini" style="margin-top:6px">Принудительно включить размер ряда (получит долю спроса, не легшего ни на один размер): ${(article.sizes || []).map((s) => `<label class="se-force-lbl" style="display:inline-flex;align-items:center;gap:3px;margin:2px 6px 2px 0;padding:2px 6px;border:1px solid var(--line);border-radius:6px;cursor:pointer"><input type="checkbox" data-forcesize="${seEsc(s)}"${forcedSet.has(s) ? ' checked' : ''}> ${seEsc(s)}</label>`).join('')}</div>`;
+    <div class="mini" style="margin-top:6px">Принудительно включить размер ряда. Галочка — размер получит долю спроса, не легшего ни на один размер (по умолчанию мизерную). Чтобы задать вручную — впишите целевой <b>% тиража цвета</b> в поле (тогда «ничейной» долей не ограничиваемся, остаток делится между прочими размерами). «= N%» справа — итоговая доля размера сейчас.<div style="margin-top:4px">${forceChips}</div></div>`;
 
   // — АРХИВ: активные цвета карточки, которым новый план не дал объёма → предложить архивировать.
   const idle = activeColors(article).filter((c) => colUnits(c) <= 0);
@@ -4252,9 +4264,22 @@ function bindReconcilePanel(rep, p, articleId) {
   document.querySelectorAll('input[data-forcesize]').forEach((cb) => cb.addEventListener('change', () => {
     const a = state.articles.find((x) => x.id === articleId); if (!a) return;
     const fs = new Set(Array.isArray(a.forceSizes) ? a.forceSizes : []);
-    if (cb.checked) fs.add(cb.dataset.forcesize); else fs.delete(cb.dataset.forcesize);
+    const sz = cb.dataset.forcesize;
+    if (cb.checked) fs.add(sz);
+    else { fs.delete(sz); if (a.forceShare && typeof a.forceShare === 'object') delete a.forceShare[sz]; } // снятие галочки убирает и ручной %
     a.forceSizes = [...fs]; dirty = true; setStatus();
     rerenderReconcile(rep, p, articleId); // пересобрать матрицу с учётом форс-размера
+  }));
+  // Ручной целевой % тиража цвета для форс-размера — гарантирует размеру именно этот вес.
+  document.querySelectorAll('input[data-forceshare]').forEach((inp) => inp.addEventListener('change', () => {
+    const a = state.articles.find((x) => x.id === articleId); if (!a) return;
+    const sz = inp.dataset.forceshare;
+    const fsh = (a.forceShare && typeof a.forceShare === 'object') ? a.forceShare : {};
+    const p2 = Math.max(0, Math.min(100, Math.round(+inp.value || 0)));
+    if (p2 > 0) { fsh[sz] = p2; const set = new Set(a.forceSizes || []); set.add(sz); a.forceSizes = [...set]; } // % подразумевает включённый размер
+    else delete fsh[sz];
+    a.forceShare = fsh; dirty = true; setStatus();
+    rerenderReconcile(rep, p, articleId);
   }));
   const applyBtn = document.getElementById('se-rec-apply');
   if (applyBtn) applyBtn.addEventListener('click', async () => {

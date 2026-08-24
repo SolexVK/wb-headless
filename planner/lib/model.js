@@ -291,6 +291,11 @@ export function normalizeState(input) {
     // получит долю непокрытого спроса (иначе размер молча выпадал из плана). Только валидные размеры.
     { const fs = Array.isArray(a.forceSizes) ? a.forceSizes : [];
       a.forceSizes = [...new Set(fs.filter((s) => a.sizes.includes(s)))]; }
+    // ручной целевой % тиража цвета для принудительно включённого размера: { размер: 1..100 }.
+    // Пусто/0 = размер берёт только «ничейную» долю (непокрытый спрос). Валидные размеры, 1..100.
+    { const fh = a.forceShare && typeof a.forceShare === 'object' ? a.forceShare : {};
+      const clean = {}; for (const [k, v] of Object.entries(fh)) { const p = Math.max(0, Math.min(100, Math.round(+v || 0))); if (a.sizes.includes(k) && p > 0) clean[String(k)] = p; }
+      a.forceShare = clean; }
     // % выкупа для ПЛАНА производства: MPStats даёт заказы, к пошиву нужны выкупы = заказы × %выкупа.
     // 100 = не изменять (прогноз уже = к пошиву). Пользователь вписывает измеренный по ЛК процент.
     a.forecastBuyoutPct = (+a.forecastBuyoutPct > 0 && +a.forecastBuyoutPct <= 100) ? Math.round(+a.forecastBuyoutPct) : 100;
