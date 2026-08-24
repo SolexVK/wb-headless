@@ -169,7 +169,17 @@ export async function runForecast(cfg = {}) {
     if (report.dailyLimit) {
       throw new Error(`Суточный лимит MPStats исчерпан — аналоги не собраны (${report.dailyLimit}). Попробуйте позже (лимит сбрасывается раз в сутки) или поднимите лимит и нажмите «Построить план» снова.`);
     }
-    throw new Error(`MPStats не вернул товаров-аналогов по фразам [${phrases.join(', ')}] — план построить не из чего (сделано ${report.requests || 0} запросов к MPStats). Проверьте: (1) действителен ли токен MPSTATS_TOKEN; (2) не слишком ли строгие фразы / минус-слова / коридор цены / мин. выручка; (3) доступ службы к api.mpstats.io. Подробности — в логе сервера (planner.log) и по кнопке «Скачать лог».`);
+    // Реальная причина «0 запросов» почти всегда — ошибка HTTP от MPStats (401 токен / 403 доступ /
+    // 429 лимит / сеть), которую fetchSerp бросает, а сборщик глотает в лог. Достаём её из report.log
+    // и показываем прямо в ошибке, чтобы не гадать (иначе «0 запросов» вводит в заблуждение).
+    const serpErrs = [...new Set((report.log || [])
+      .filter((l) => typeof l === 'string' && /ошибка SERP|HTTP\s*\d|MPSTATS_TOKEN|api\.mpstats|токен|unauthor|forbidden|лимит/i.test(l))
+      .map((l) => String(l).replace(/^Фраза «[^»]*»:\s*/, '').replace(/\s+$/, '')))].slice(0, 4);
+    const detail = serpErrs.length ? `\nЧто ответил MPStats: ${serpErrs.join(' | ')}` : '';
+    const hint = /401|unauthor|токен|MPSTATS_TOKEN/i.test(serpErrs.join(' ')) ? ' Похоже на недействительный токен — обнови его в ⚙ (шапка).'
+      : /403|forbidden|доступ/i.test(serpErrs.join(' ')) ? ' Похоже на отсутствие доступа к api.mpstats.io (подписка/IP).'
+      : '';
+    throw new Error(`MPStats не вернул товаров-аналогов по фразам [${phrases.join(', ')}] — план построить не из чего (успешных запросов к MPStats: ${report.requests || 0}).${detail}${hint}\nПроверьте: (1) действителен ли токен MPSTATS_TOKEN; (2) не слишком ли строгие фразы / минус-слова / коридор цены / мин. выручка; (3) доступ службы к api.mpstats.io. Полный лог — по кнопке «Скачать лог».`);
   }
   return report;
 }
