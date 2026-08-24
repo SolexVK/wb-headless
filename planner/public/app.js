@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'mpstats-diag-2026-08-24q';
+const APP_BUILD = 'mergeback-2026-08-24r';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1166,7 +1166,7 @@ function renderMatrix() {
             <span>${hint}</span>
           </div>` : '';
         if (showNet && mergedAway) {
-          return toggle + `<div class="mini" style="padding:10px 0">Довоз <b>объединён со следующим по сроку</b>: нетто-остаток <b>${mergedAway.units.toLocaleString('ru')}</b> шт был меньше мин. партии (${minBatchQty().toLocaleString('ru')} шт). Шьётся вместе со следующим довозом — объёмы смотри там (и на Ганте). Для правки спроса переключи на «Спрос».</div>`;
+          return toggle + `<div class="mini" style="padding:10px 0">Довоз <b>объединён с предыдущим по сроку</b>: нетто-остаток <b>${mergedAway.units.toLocaleString('ru')}</b> шт был меньше мин. партии (${minBatchQty().toLocaleString('ru')} шт). Шьётся вместе с предыдущим довозом (привозится чуть раньше) — объёмы смотри там (и на Ганте). Для правки спроса переключи на «Спрос».</div>`;
         }
         const absorbNote = (showNet && absorbs.length) ? `<div class="mini" style="margin:0 0 6px;color:#2563eb">Включает объединённые мелкие довозы: <b>+${absorbs.reduce((n, m) => n + m.units, 0).toLocaleString('ru')}</b> шт (после вычета остатков были меньше мин. партии).</div>` : '';
         return toggle + absorbNote + (showNet ? matrixTableNet(a, p) : matrixTable(a, M, p));
@@ -1448,7 +1448,7 @@ function partiaReadyAoA(a, p) {
     if (covered.length) meta.push(`Покрыто остатками (не шьём): ${covered.join(', ')}`);
   }
   const mergedAway = supplyMerges().find((m) => m.from === p.id);
-  if (mergedAway) meta.push(`⚠ Довоз объединён со следующим по сроку (нетто ${mergedAway.units.toLocaleString('ru')} < мин. партии ${minBatchQty().toLocaleString('ru')}) — шьётся вместе с ним`);
+  if (mergedAway) meta.push(`⚠ Довоз объединён с предыдущим по сроку (нетто ${mergedAway.units.toLocaleString('ru')} < мин. партии ${minBatchQty().toLocaleString('ru')}) — шьётся вместе с ним`);
   else if (net === 0 && gross > 0) meta.push('⚠ Полностью покрыто остатками — шить не нужно');
   if (a.comment) meta.push(`Особенности: ${a.comment}`);
   const rows = meta.map((t) => [t]); // каждый пункт — своя строка, только колонка A → текст перетекает вправо
@@ -2540,7 +2540,7 @@ function renderSupply() {
       ${(() => {
         const mg = supplyMerges(); if (!mg.length) return '';
         const lbl = (id) => { const p = (state.partias || []).find((x) => x.id === id); return p ? `${seEsc(p.articleId)} · ${seEsc(p.deliveryTag || ('Довоз ' + p.no))}` : id; };
-        return `<div class="mini" style="margin-top:8px;color:#2563eb">🔗 Объединено (нетто меньше мин. партии ${minBatchQty().toLocaleString('ru')} шт): ${mg.map((m) => `${lbl(m.from)} → ${lbl(m.into)} (${m.units.toLocaleString('ru')} шт)`).join('; ')}. Слитый довоз шьётся со следующим по сроку — Гант сдвинут.</div>`;
+        return `<div class="mini" style="margin-top:8px;color:#2563eb">🔗 Объединено (нетто меньше мин. партии ${minBatchQty().toLocaleString('ru')} шт): ${mg.map((m) => `${lbl(m.from)} → ${lbl(m.into)} (${m.units.toLocaleString('ru')} шт)`).join('; ')}. Слитый довоз шьётся с предыдущим по сроку (раньше) — Гант сдвинут.</div>`;
       })()}
       ${unmatched.length ? `<div class="mini" style="margin-top:8px;color:#b45309">⚠ Не сопоставлено с артикулом (цвет не найден): ${unmatched.slice(0, 8).map((u) => `${seEsc(u.articleId)}/${seEsc(u.color)}/${seEsc(u.size)} — ${u.qty}`).join('; ')}${unmatched.length > 8 ? ' …' : ''}. Проверь названия цветов.</div>` : ''}
     </div>`;
