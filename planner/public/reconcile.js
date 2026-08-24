@@ -68,7 +68,7 @@ function apportion(total, keys, weightOf) {
  * @param {Array<{size:string, origin?:string, share:number}>} sizeRows — ядро размеров (доли, %).
  * @param {{aliases?:Object, sizeSplit?:string}} [opts] — aliases: глобальный словарь; sizeSplit='equal'.
  */
-export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, sizeSplit = 'equal', forceSizes = [], forceShare = {} } = {}) {
+export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, sizeSplit = 'equal', forceSizes = [], forceShare = {}, sizeAdjust = {} } = {}) {
   const artColors = Array.isArray(article.colors) ? article.colors : [];
   const artSizes = Array.isArray(article.sizes) ? article.sizes : [];
   const colorMap = (article.colorMap && typeof article.colorMap === 'object') ? article.colorMap : {};
@@ -149,7 +149,13 @@ export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, size
   for (const c of colors) {
     if (c.status === 'matched') {
       const placeTotal = Math.round(c.qty * assignedFraction);
-      const { alloc, placed } = apportion(placeTotal, artSizes, (as) => sizeWeights[as]);
+      // Ручная правка долей размера ПО ЦВЕТУ (sizeAdjust[цвет карточки] = {размер:%}, множитель к
+      // весу; 100 = как расчёт). Перенормировка внутри цвета (apportion делит по Σвесов) — тираж
+      // цвета НЕ меняется, доли между размерами перераспределяются. Множитель к нулевому весу = 0.
+      const adj = (sizeAdjust && sizeAdjust[c.articleColor]) || null;
+      const wOf = adj ? (as) => sizeWeights[as] * ((+adj[as] > 0 ? +adj[as] : 100) / 100)
+                      : (as) => sizeWeights[as];
+      const { alloc, placed } = apportion(placeTotal, artSizes, wOf);
       matrix[c.articleColor] = matrix[c.articleColor] || Object.fromEntries(artSizes.map((s) => [s, 0]));
       for (const as of artSizes) matrix[c.articleColor][as] += alloc[as];
       const leftover = c.qty - placed; // непокрытые размеры + округление

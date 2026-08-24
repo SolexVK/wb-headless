@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'partia-min5k-2026-08-24o';
+const APP_BUILD = 'sizeadj-2026-08-24p';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -4045,7 +4045,7 @@ function runReconcile(rep, p, articleId) {
   const article = state.articles.find((x) => x.id === articleId);
   if (!inp || !article) return null;
   const sr = (seasonReconcile && seasonReconcile.articleId === articleId) ? seasonReconcile : { choices: {}, newNames: {} };
-  const opts = { aliases: (state.settings && state.settings.colorAliases) || {}, sizeSplit: 'equal', forceSizes: article.forceSizes || [], forceShare: article.forceShare || {} };
+  const opts = { aliases: (state.settings && state.settings.colorAliases) || {}, sizeSplit: 'equal', forceSizes: article.forceSizes || [], forceShare: article.forceShare || {}, sizeAdjust: article.sizeAdjust || {} };
   const res1 = reconcilePlan(reconcileEffectiveArticle(article, sr.choices, sr.newNames), inp.colorRows, inp.sizeRows, opts);
   const choices = resolveChoices(res1, sr); // новые цвета по умолчанию создаются
   const eff = reconcileEffectiveArticle(article, choices, sr.newNames);
@@ -4095,6 +4095,24 @@ function reconcilePanelHTML(rep, p, articleId) {
     return `<tr><td><b>${seEsc(col)}</b></td>${artSizes.map((s) => `<td class="num">${row[s] ? fmt(row[s]) : '<span class="mini">·</span>'}</td>`).join('')}<td class="num"><b>${fmt(sum)}</b></td></tr>`;
   }).join('');
   const matrixTbl = `<div class="se-comp-scroll"><table class="se-comp-table se-seg-table"><thead>${head}</thead><tbody>${body || `<tr><td colspan="${artSizes.length + 2}" class="mini">пусто — сопоставь цвета ниже</td></tr>`}</tbody></table></div>`;
+
+  // — ручная правка долей размера ПО ЦВЕТУ (±% множитель к доле внутри цвета; тираж цвета не меняется).
+  // Общая кривая размеров одна на все цвета — этот блок позволяет подкрутить перекос по конкретному цвету.
+  const szAdj = (article.sizeAdjust && typeof article.sizeAdjust === 'object') ? article.sizeAdjust : {};
+  const adjBody = artColors.map((col) => {
+    const sum = colUnits(col); if (!sum) return '';
+    const cells = artSizes.map((s) => {
+      const has = (result.matrix[col] || {})[s] > 0;
+      const v = (szAdj[col] && +szAdj[col][s] > 0) ? Math.round(+szAdj[col][s]) : 100;
+      return `<td class="num"><input class="se-szadj" data-szadj-col="${seEsc(col)}" data-szadj-size="${seEsc(s)}" type="number" min="0" step="10" value="${v}"${has ? '' : ' disabled title="у этого цвета размер нулевой — множитель не поможет (нужен forceSize/доли выше)"'} style="width:50px${v !== 100 ? ';border-color:#2563eb;font-weight:600' : ''}"></td>`;
+    }).join('');
+    return `<tr><td><b>${seEsc(col)}</b></td>${cells}<td class="num mini">${fmt(sum)}</td></tr>`;
+  }).join('');
+  const sizeAdjTbl = adjBody
+    ? `<details class="se-comp se-szadj-det" style="margin-top:6px"${(seasonReconcile && seasonReconcile.szAdjOpen) ? ' open' : ''}><summary class="mini" style="cursor:pointer">⚙ Доли размера по цвету (±%) — подкрутить, если перекос</summary>
+      <div class="mini" style="margin:4px 0">Множитель к доле размера <b>внутри цвета</b>: 100 = как расчёт, 130 = +30%, 70 = −30%. Тираж цвета <b>не меняется</b> — доли перераспределяются между размерами. Меняем один размер — остальные подстраиваются. После правки жми «Применить», чтобы ушло в план.</div>
+      <div class="se-comp-scroll"><table class="se-comp-table se-seg-table"><thead>${head}</thead><tbody>${adjBody}</tbody></table></div></details>`
+    : '';
 
   // — ЦВЕТА: единый выбор у КАЖДОГО цвета (сменить/отвязать/создать). Дефолт — авто-решение движка.
   const colorRow = (c) => {
@@ -4173,7 +4191,7 @@ function reconcilePanelHTML(rep, p, articleId) {
     <button id="se-rec-apply" class="btn btn-primary"${result.totalPlanned ? '' : ' disabled'}>Применить: ${dvs.length} ${dvs.length === 1 ? 'партия' : 'партии-поставки'} · ${fmt(result.totalPlanned)} шт</button>
     <span class="mini">цех — авто (распределит конвейер); ручной выбор цеха — на листе «План по размерам»</span></div>${notes}`;
 
-  return `${matrixTbl}
+  return `${matrixTbl}${sizeAdjTbl}
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
       <div style="flex:1;min-width:260px"><div class="mini"><b>Цвета</b> (спрос → карточка)</div>${colorsTbl}</div>
       <div style="flex:1;min-width:220px"><div class="mini"><b>Размеры</b> (диапазон → ряд, поровну)</div>${sizesTbl}</div>
@@ -4269,6 +4287,21 @@ function bindReconcilePanel(rep, p, articleId) {
     else { fs.delete(sz); if (a.forceShare && typeof a.forceShare === 'object') delete a.forceShare[sz]; } // снятие галочки убирает и ручной %
     a.forceSizes = [...fs]; dirty = true; setStatus();
     rerenderReconcile(rep, p, articleId); // пересобрать матрицу с учётом форс-размера
+  }));
+  // Ручная правка долей размера по цвету (±%): множитель к доле размера ВНУТРИ цвета.
+  document.querySelectorAll('.se-szadj').forEach((el) => el.addEventListener('change', () => {
+    const a = state.articles.find((x) => x.id === articleId); if (!a) return;
+    const col = el.dataset.szadjCol, sz = el.dataset.szadjSize; if (!col || !sz) return;
+    if (seasonReconcile) seasonReconcile.szAdjOpen = true; // не схлопывать блок при перерисовке
+    const sa = a.sizeAdjust = (a.sizeAdjust && typeof a.sizeAdjust === 'object') ? a.sizeAdjust : {};
+    const row = sa[col] = (sa[col] && typeof sa[col] === 'object') ? sa[col] : {};
+    const v = Math.max(0, Math.round(+el.value || 100));
+    if (v === 100) { delete row[sz]; if (!Object.keys(row).length) delete sa[col]; } else row[sz] = v;
+    dirty = true; setStatus(); rerenderReconcile(rep, p, articleId);
+  }));
+  // запоминаем, открыт ли блок долей размера (чтобы перерисовка не схлопывала)
+  document.querySelectorAll('details.se-szadj-det').forEach((d) => d.addEventListener('toggle', () => {
+    if (seasonReconcile) seasonReconcile.szAdjOpen = d.open;
   }));
   // Ручной целевой % тиража цвета для форс-размера — гарантирует размеру именно этот вес.
   document.querySelectorAll('input[data-forceshare]').forEach((inp) => inp.addEventListener('change', () => {
