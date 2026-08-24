@@ -99,23 +99,55 @@ export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, size
   const rows = (sizeRows || []).filter((s) => (+s.share || 0) > 0);
   const totShare = rows.reduce((s, r) => s + (+r.share || 0), 0) || 1;
   const sizeWeights = Object.fromEntries(artSizes.map((s) => [s, 0]));
+
+  // Крайние размеры ряда и его границы — для роутинга непокрытого спросом хвоста на края.
+  const rankOf = (s) => { const n = parseNum(s); if (n) return n.lo; const l = letterIdx(s); return l != null ? l : null; };
+  const ranked = artSizes.map((s) => ({ s, r: rankOf(s) })).filter((x) => x.r != null).sort((a, b) => a.r - b.r);
+  const minS = ranked.length ? ranked[0].s : (artSizes[0] || null);         // самый маленький размер ряда
+  const maxS = ranked.length ? ranked[ranked.length - 1].s : (artSizes[artSizes.length - 1] || null); // самый большой
+  const artNums = artSizes.map(parseNum).filter(Boolean);
+  const rowNumMin = artNums.length ? Math.min(...artNums.map((x) => x.lo)) : null;
+  const rowNumMax = artNums.length ? Math.max(...artNums.map((x) => x.hi)) : null;
+  const artLet = artSizes.map(letterIdx).filter((x) => x != null);
+  const rowLetMin = artLet.length ? Math.min(...artLet) : null;
+  const rowLetMax = artLet.length ? Math.max(...artLet) : null;
+  // направление непокрытого размера спроса относительно ряда: 'above' (крупнее всего ряда) /
+  // 'below' (мельче) / 'amb' (пересекается либо не определить). Числа приоритетнее букв.
+  const dirOf = (r) => {
+    const dN = parseNum(r.size);
+    if (dN && rowNumMin != null) { if (dN.lo > rowNumMax) return 'above'; if (dN.hi < rowNumMin) return 'below'; return 'amb'; }
+    const dS = letterSpan(r.origin) || letterSpan(r.size);
+    if (dS && rowLetMin != null) { if (dS[0] > rowLetMax) return 'above'; if (dS[1] < rowLetMin) return 'below'; return 'amb'; }
+    return 'amb';
+  };
+
+  let toMax = 0, toMin = 0; // непокрытая доля к самому большому / самому маленькому размеру ряда
   const sizes = rows.map((r) => {
     const norm = (+r.share || 0) / totShare;
     const covered = artSizes.filter((as) => sizeCovers(r.size, r.origin, as));
     if (covered.length) { const per = norm / covered.length; for (const as of covered) sizeWeights[as] += per; } // ПОРОВНУ между накрытыми
-    return { demand: r.size, origin: r.origin || '', share: r.share, articleSizes: covered, covered: covered.length > 0 };
+    let routedTo = '';
+    if (!covered.length) {
+      const d = dirOf(r);
+      if (d === 'above') { toMax += norm; routedTo = maxS || ''; }
+      else if (d === 'below') { toMin += norm; routedTo = minS || ''; }
+      // 'amb' — оставляем общей нормировке (размажется пропорционально существующим весам)
+    }
+    return { demand: r.size, origin: r.origin || '', share: r.share, articleSizes: covered, covered: covered.length > 0, routedTo };
   });
-  // Непокрытые размерные доли (размер спроса, которого нет в ряду) НЕ теряем, а перераспределяем на
-  // существующие размеры: нормируем веса к 1. Тогда ПОЛНОЕ кол-во цвета попадает в матрицу — суммы
-  // по цвету в 🧩 совпадают с 🎨. Полностью неразмещённым цвет остаётся только если ряд пуст (wSum=0).
-  // Принудительно включённые размеры ряда (forceSizes): непокрытую спросом долю (размеры спроса,
-  // которых нет в ряду) отдаём ИМ поровну — иначе она размажется по всем размерам, а форс-размер
-  // (напр. XL) останется с нулём. Без forceSizes — прежнее поведение (размазать по всем).
+  // Непокрытую спросом долю НЕ теряем и НЕ размазываем по серединным размерам, а по умолчанию уводим
+  // на КРАЙНИЕ размеры ряда ПО НАПРАВЛЕНИЮ: спрос крупнее ряда → на самый большой размер, мельче ряда
+  // → на самый маленький. Так «хвостовой» спрос (обычно у крайних размеров с малой долей) попадает
+  // туда, где ему место, а крайний размер не выпадает в ноль. Неоднозначное (amb) — на общую
+  // нормировку. forceSizes (ручной выбор размеров) имеет приоритет над авто-роутингом на края.
   const forced = (forceSizes || []).filter((s) => artSizes.includes(s));
   if (forced.length) {
     const coveredW = artSizes.reduce((s, as) => s + sizeWeights[as], 0);
     const unmapped = Math.max(0, 1 - coveredW);
     if (unmapped > 1e-9) { const per = unmapped / forced.length; for (const s of forced) sizeWeights[s] += per; }
+  } else {
+    if (toMax > 1e-9 && maxS) sizeWeights[maxS] += toMax;
+    if (toMin > 1e-9 && minS) sizeWeights[minS] += toMin;
   }
   const wSum = artSizes.reduce((s, as) => s + sizeWeights[as], 0);
   if (wSum > 0) for (const as of artSizes) sizeWeights[as] /= wSum;

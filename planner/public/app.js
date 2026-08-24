@@ -4135,7 +4135,7 @@ function reconcilePanelHTML(rep, p, articleId) {
   const forceShare = (article.forceShare && typeof article.forceShare === 'object') ? article.forceShare : {};
   const unmappedTo = forcedSet.size ? [...forcedSet].join(', ') : '';
   const finW = (result.sizeWeights && typeof result.sizeWeights === 'object') ? result.sizeWeights : {};
-  const sizeRows = result.sizes.map((s) => `<tr><td><b>${seEsc(s.demand)}</b>${s.origin ? ` <span class="mini">${seEsc(s.origin)}</span>` : ''} <span class="mini">${s.share}%</span></td><td>${s.covered ? '→ ' + s.articleSizes.map(seEsc).join(', ') : (unmappedTo ? `<span class="mini">нет в ряду → принудительно на: <b>${seEsc(unmappedTo)}</b></span>` : '<span class="mini">нет в ряду → доля перераспределена на другие размеры</span>')}</td></tr>`).join('');
+  const sizeRows = result.sizes.map((s) => `<tr><td><b>${seEsc(s.demand)}</b>${s.origin ? ` <span class="mini">${seEsc(s.origin)}</span>` : ''} <span class="mini">${s.share}%</span></td><td>${s.covered ? '→ ' + s.articleSizes.map(seEsc).join(', ') : (unmappedTo ? `<span class="mini">нет в ряду → принудительно на: <b>${seEsc(unmappedTo)}</b></span>` : (s.routedTo ? `<span class="mini">нет в ряду → на крайний размер <b>${seEsc(s.routedTo)}</b></span>` : '<span class="mini">нет в ряду → доля перераспределена на другие размеры</span>'))}</td></tr>`).join('');
   const forceChips = (article.sizes || []).map((s) => {
     const on = forcedSet.has(s);
     const pct = +forceShare[s] > 0 ? +forceShare[s] : '';
