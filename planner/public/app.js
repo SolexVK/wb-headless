@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-rank-zip-2026-08-25';
+const APP_BUILD = 'season-rank-zip-daily-2026-08-25';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1610,7 +1610,7 @@ async function exportAllSeasonRanksZip(onProgress) {
       if (!rep || !Array.isArray(p.forecastDaily) || !p.forecastDaily.length) { skipped++; continue; }
       seasonSelArticle = articleId;
       const buyout = seasonBuyoutOf(articleId);
-      const baseRows = seasonAgg(p.forecastDaily, 'month', buyout); // месяцы — читаемо для Excel
+      const baseRows = seasonAgg(p.forecastDaily, 'day', buyout); // ЕЖЕДНЕВНО на весь период (без сжатия)
       const D = seasonColorPlansData(rep, p);
       const colors = (D && D.assortment) ? D.assortment : [];
       if (!colors.length || !D.forecast) { skipped++; continue; }
