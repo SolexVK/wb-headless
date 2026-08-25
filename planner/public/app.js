@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'jit-measure-2026-08-26';
+const APP_BUILD = 'jit-safe-2026-08-26';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2485,12 +2485,14 @@ async function openJitDialog() {
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.innerHTML = `<div style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;max-width:min(680px,96vw);width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:20px">
     <h2 style="margin:0 0 6px">💰 Экономная раскладка</h2>
-    <div class="mini" style="color:var(--muted);margin-bottom:14px">Собирает работу в свой цех + немного дополнительных и пакует НЕПРЕРЫВНЫМ потоком (без разрывов, одна модель за раз, сдвижки этапов соблюдены). Весь блок цеха сдвигается позже, насколько позволяет самый срочный дедлайн (экономия без разрывов). Летние — к 15.04. Обратимо «↺ Сбросить раскладку». <b>Если 4 цеха не успевают к срокам — увидишь опоздания ниже; тогда добавь цех или ослабь буфер.</b></div>
+    <div class="mini" style="color:var(--muted);margin-bottom:14px"><b>По умолчанию</b> — безопасная экономия: цеха и порядок НЕ меняем (значит опозданий/перестроек/разрывов не добавится), но каждый блок цеха сдвигаем позже к своему дедлайну (заморозка падает). Летние — к 15.04. Производство непрерывно, изделия не меняются. <b>Чтобы СОКРАТИТЬ число цехов</b> — включи галочку ниже: модели съедутся в свой+N цехов (тогда возможны опоздания — увидишь их). Обратимо «↺ Сбросить раскладку».</div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">
-      <label title="Сколько ДОПОЛНИТЕЛЬНЫХ цехов (кроме своего) максимум задействовать. 2 = свой+2 (3 всего), 3 = свой+3 (4 всего).">Доп. цехов (кроме своего): <input type="number" id="jit-maxws" value="${JIT_DEFAULTS.maxExtraWorkshops}" min="0" max="6" style="width:56px"></label>
       <label title="Товар готов на нашем складе за столько дней до дедлайна ВБ (доставка + форс-мажор).">Буфер доставки, дн: <input type="number" id="jit-delivery" value="${JIT_DEFAULTS.deliveryBufferDays}" min="0" max="120" style="width:56px"></label>
       <label title="Не-летние финишируют минимум за столько дней до дедлайна (подушка на продажи/сбои).">Подушка не-летних, дн: <input type="number" id="jit-cushion" value="${JIT_DEFAULTS.nonSummerCushionDays}" min="0" max="240" style="width:56px"></label>
-      <label title="Сводить в минимум цехов ДАЖЕ вопреки матрице «кто шьёт». Включи, если цехов остаётся больше желаемого — модели переедут в целевые цеха, игнорируя ограничения матрицы."><input type="checkbox" id="jit-ignore-allow"> Ужать вопреки матрице «кто шьёт»</label>
+    </div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;padding:8px 10px;border:1px dashed var(--line);border-radius:8px">
+      <label title="ВКЛючи, чтобы реально сократить число цехов (иначе цеха не меняются). Модели съедутся в свой + N цехов, игнорируя матрицу «кто шьёт». Возможны опоздания — смотри метрику ниже."><input type="checkbox" id="jit-ignore-allow"> <b>Сократить число цехов</b> (съехать в свой + N)</label>
+      <label title="Сколько ДОПОЛНИТЕЛЬНЫХ цехов (кроме своего) оставить при сокращении. 2 = свой+2 (3 всего), 3 = свой+3 (4 всего).">N доп. цехов: <input type="number" id="jit-maxws" value="${JIT_DEFAULTS.maxExtraWorkshops}" min="0" max="6" style="width:52px"></label>
     </div>
     <div id="jit-preview" style="margin:10px 0 16px">Считаю предпросмотр…</div>
     <div style="display:flex;gap:8px;justify-content:flex-end">

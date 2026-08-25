@@ -72,26 +72,25 @@ export function computeJitLayout(state, opts = {}) {
   const allowedSet = new Set(allowedWs);
   const capById = Object.fromEntries(wsAll.map((w) => [w.id, sewCap(w) || 1]));
 
-  // объёмы по артикулам + допустимые цеха артикула (ручная матрица «кто шьёт»)
-  const artVol = {}, artAllow = {};
-  for (const c of base.cycles) { if (c.historical) continue; artVol[c.articleId] = (artVol[c.articleId] || 0) + c.units; }
-  for (const a of state.articles || []) artAllow[a.id] = (Array.isArray(a.allowedWorkshops) && a.allowedWorkshops.length) ? a.allowedWorkshops : null;
-
-  // жадная балансировка: крупные артикулы — в наименее загруженный из допустимых цехов (целиком)
-  const loadWd = Object.fromEntries(allowedWs.map((w) => [w, 0])); // «дни пошива» = объём/мощность
-  const artWs = {};
-  const artsSorted = Object.keys(artVol).sort((a, b) => artVol[b] - artVol[a]);
-  for (const art of artsSorted) {
-    // цеха-кандидаты: пересечение allowedWs и allowedWorkshops артикула; если пусто — allowedWs.
-    // При ignoreAllowedMatrix матрицу «кто шьёт» игнорируем и берём целевые цеха (для ужатия до N).
-    let cand = allowedWs;
-    if (!ignoreAllowedMatrix && artAllow[art]) { const inter = allowedWs.filter((w) => artAllow[art].includes(w)); if (inter.length) cand = inter; else cand = artAllow[art].slice(0, 1); }
-    const dest = cand.slice().sort((a, b) => (loadWd[a] || 0) - (loadWd[b] || 0))[0];
-    artWs[art] = dest;
-    loadWd[dest] = (loadWd[dest] || 0) + artVol[art] / (capById[dest] || 1);
-  }
+  // Режим СОКРАЩЕНИЯ цехов включается ТОЛЬКО явно (ignoreAllowedMatrix / «Ужать вопреки матрице»).
+  // Иначе — НЕ трогаем распределение по цехам (иначе балансировка добавляла опоздания и перестройки).
+  // По умолчанию: базовые цеха + только безопасный сдвиг блоков (чистый выигрыш, без регресса).
+  const reduceMode = !!ignoreAllowedMatrix;
   const wsByBatch = {};
-  for (const c of base.cycles) { if (c.historical) continue; wsByBatch[c.batchKey] = artWs[c.articleId] || c.workshopId; }
+  for (const c of base.cycles) { if (c.historical) continue; wsByBatch[c.batchKey] = c.workshopId; } // база
+  if (reduceMode) {
+    const artVol = {}, artAllow = {};
+    for (const c of base.cycles) { if (c.historical) continue; artVol[c.articleId] = (artVol[c.articleId] || 0) + c.units; }
+    for (const a of state.articles || []) artAllow[a.id] = (Array.isArray(a.allowedWorkshops) && a.allowedWorkshops.length) ? a.allowedWorkshops : null;
+    const loadWd = Object.fromEntries(allowedWs.map((w) => [w, 0]));
+    const artsSorted = Object.keys(artVol).sort((a, b) => artVol[b] - artVol[a]);
+    const artWs = {};
+    for (const art of artsSorted) {
+      const dest = allowedWs.slice().sort((a, b) => (loadWd[a] || 0) - (loadWd[b] || 0))[0]; // игнорируем матрицу — ужимаем
+      artWs[art] = dest; loadWd[dest] = (loadWd[dest] || 0) + artVol[art] / (capById[dest] || 1);
+    }
+    for (const c of base.cycles) if (!c.historical) wsByBatch[c.batchKey] = artWs[c.articleId] || c.workshopId;
+  }
 
   // ── 2. НЕПРЕРЫВНАЯ упаковка в этих цехах (без jitStart ⇒ 0 разрывов), затем ЕДИНЫЙ сдвиг блока цеха ──
   const s1 = buildSchedule(withPins(state, wsByBatch, {}));
@@ -139,13 +138,21 @@ export function computeJitLayout(state, opts = {}) {
     if (!bad.size) break;
     for (const c of s1.cycles) if (!c.historical && bad.has(c.workshopId)) delete jitStarts[c.partiaId]; // снимаем сдвиг проблемного цеха
   }
-  const after = layoutMetrics(afterSch, summerIds);
+  let after = layoutMetrics(afterSch, summerIds);
+
+  // ФИНАЛЬНАЯ СТРАХОВКА (без режима сокращения): движок НЕ ДОЛЖЕН быть хуже базы по опозданиям/разрывам.
+  // Если вдруг стало хуже — откатываем весь сдвиг (тождество), лучше без экономии, чем с регрессом.
+  if (!reduceMode && (after.lateUnits > before.lateUnits || after.idleGaps > before.idleGaps)) {
+    for (const k of Object.keys(jitStarts)) delete jitStarts[k];
+    afterSch = buildSchedule(withJit(state, jitStarts, items));
+    after = layoutMetrics(afterSch, summerIds);
+  }
 
   const wsPins = {};
   for (const it of items) wsPins[it.batchKey] = { ws: it.ws };
   for (const k of Object.keys(jitStarts)) if (!jitStarts[k]) delete jitStarts[k];
 
-  return { jitStarts, wsPins, before, after, allowedWorkshops: allowedWs.length };
+  return { jitStarts, wsPins, before, after, allowedWorkshops: allowedWs.length, reduceMode };
 }
 
 function withPins(state, wsByBatch, jitStarts) {

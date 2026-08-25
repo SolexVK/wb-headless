@@ -1,7 +1,7 @@
 # Handoff — planner / Этап 3 (остатки, неттинг, план по цветам/размерам/партиям)
 
 Ветка: `claude/production-plan-twv8ki` · репо `solexvk/wb-headless` · приложение в `planner/`.
-Билд на конец сессии: **`jit-measure-2026-08-26`** (APP_BUILD в `public/app.js`, BACKEND_BUILD в
+Билд на конец сессии: **`jit-safe-2026-08-26`** (APP_BUILD в `public/app.js`, BACKEND_BUILD в
 `server.js` — держим равными; бампаем вместе с каждой правкой).
 JIT-довесок к v4 (`jit-measure`): в метрики добавлены `totalUnits` (📦 изделий — ДОЛЖНЫ сохраняться,
 в превью строка с зелёным «=0» или красным при расхождении) и `prodDays` (Σ длин полос крой→готовность,
