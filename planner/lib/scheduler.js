@@ -178,7 +178,7 @@ export function buildSchedule(state) {
   const applyPin = (job) => {
     const pin = batchPins[job.batchKey];
     if (!pin) return job;
-    if (pin.ws && wsById[pin.ws]) job.lockedWs = pin.ws; // форс цеха (вертикальный drag)
+    if (pin.ws && wsById[pin.ws]) { job.lockedWs = pin.ws; job.pinnedWs = true; } // форс цеха (вертикальный drag) — перекрывает даже allowedWorkshops (пользователь явно так перетащил)
     if (pin.cut && /^\d{4}-\d{2}-\d{2}$/.test(String(pin.cut).slice(0, 10))) job.pinCut = String(pin.cut).slice(0, 10); // якорь даты
     return job;
   };
@@ -251,7 +251,9 @@ export function buildSchedule(state) {
       if (j.done) continue;
       if (j.lockedWs && j.lockedWs !== w.id) continue; // закреплён за другим цехом
       const allow = j.article.allowedWorkshops; // ручное закрепление «цех умеет шить эту модель»
-      if (Array.isArray(allow) && allow.length && !allow.includes(w.id)) continue; // цех не шьёт этот артикул
+      // Пин-цех (ручное перетаскивание на Ганте) старше ограничения allowedWorkshops: если пользователь
+      // явно перетащил батч в этот цех — не выкидываем его (иначе блок «исчезал» с диаграммы).
+      if (Array.isArray(allow) && allow.length && !allow.includes(w.id) && !(j.pinnedWs && j.lockedWs === w.id)) continue; // цех не шьёт этот артикул
       const eff = effStartOf(w, j);
       if (best === null) { best = j; bestEff = eff; continue; }
       const c = cmp(eff, bestEff)
@@ -429,6 +431,17 @@ export function buildSchedule(state) {
     startedUnits[job.article.id] = (startedUnits[job.article.id] || 0) + job.units;
     job.done = true;
     remaining--;
+  }
+
+  // Страховка: если какое-то задание не удалось разместить (например, закреплено за цехом, который
+  // не умеет шить артикул, и это НЕ ручной пин) — не роняем блок молча, а сигналим. Ручной пин выше
+  // уже перекрывает allowedWorkshops, так что перетащенный блок сюда не попадёт.
+  for (const j of jobs) {
+    if (j.done) continue;
+    warnings.push({
+      level: 'warn', kind: 'unscheduled', stage: j.partia.stageId, article: j.article.id, workshop: j.lockedWs || '',
+      message: `Не удалось разместить партию ${j.article.id} (${j.units} шт): закреплённый цех не может её шить. Проверьте «цех умеет шить артикул» или снимите закрепление партии.`,
+    });
   }
 
   cycles.sort((a, b) => (a.cutStart < b.cutStart ? -1 : a.cutStart > b.cutStart ? 1 : 0));
