@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'gantt-autoallow-2026-08-25';
+const APP_BUILD = 'jit-snapshot-2026-08-25';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1536,6 +1536,77 @@ function batchesForExport(articleId, partiaId) {
     .sort((x, y) => String(x.workshopName || '').localeCompare(String(y.workshopName || '')) || ((x.prodNo || 0) - (y.prodNo || 0)) || (x.cutStart < y.cutStart ? -1 : 1));
 }
 // Экспорт готового плана для цеха: ЛИСТ НА ПРОИЗВОДСТВЕННУЮ ПАРТИЮ (батч). Один довоз (partiaId) или все.
+// летние строго-сезонные модели (гарантированно успеть, доотшив к 15.04) — задел под JIT-раскладку
+const SUMMER_ARTICLE_IDS = ['005', '006', '007', '014', '022', '032', '033', '034'];
+const isSummerArticle = (id) => SUMMER_ARTICLE_IDS.includes(String(id).trim());
+
+// разница в днях между двумя ISO-датами (b - a); '' → null
+function isoDiffDays(a, b) {
+  if (!a || !b) return null;
+  const d = Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+  return Number.isFinite(d) ? d : null;
+}
+
+// ── СЛЕПОК ТЕКУЩЕЙ РАСКЛАДКИ (для анализа JIT: где деньги залёживаются) ──
+// Один плоский лист: строка = (артикул × цвет × производственная партия). Всё, что нужно, чтобы
+// понять, насколько рано товар готов относительно дедлайна ВБ и сколько лежит замороженным.
+function exportLayoutSnapshotXlsx() {
+  if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу (Cmd+Shift+R)', true); return; }
+  const cycles = (schedule && schedule.cycles || []).filter((c) => !c.historical);
+  if (!cycles.length) { toast('Нет раскладки: пересчитай план (кнопка «Пересчитать»)', true); return; }
+  const header = [
+    'Артикул', 'Название', 'Сезон', 'Цвет', 'Цех', 'Партия №', 'Довоз (метка)',
+    'Объём цвета, шт', 'Объём партии, шт',
+    'Крой старт', 'Пошив старт', 'Готовность (склад)', 'Отгрузка карго', 'Приход ВБ', 'Дедлайн ВБ',
+    'Готово раньше дедлайна ВБ, дн', 'Пролежит до прихода ВБ, дн', 'Опоздание, дн',
+  ];
+  const rows = [header];
+  // сортировка: артикул → дедлайн → цех → партия
+  const sorted = cycles.slice().sort((x, y) =>
+    String(x.articleId).localeCompare(String(y.articleId)) ||
+    String(x.logistics?.deadline || '9999').localeCompare(String(y.logistics?.deadline || '9999')) ||
+    String(x.workshopName || '').localeCompare(String(y.workshopName || '')) ||
+    (x.prodNo || 0) - (y.prodNo || 0));
+  for (const c of sorted) {
+    const M = c.batchMatrix || {};
+    const colors = Object.keys(M).filter((col) => colorSum(M[col]) > 0);
+    const deadline = c.logistics?.deadline || '';
+    const wbArrival = c.logistics?.wbArrival || '';
+    const ready = c.readyDate || (c.ops?.otk?.end) || '';
+    const earlyBeforeDeadline = isoDiffDays(wbArrival, deadline); // >0 = приходит с запасом; период «лежит» до дедлайна
+    const sitDays = isoDiffDays(ready, wbArrival);                 // готово на складе → приход ВБ (транзит+ожидание)
+    const late = c.logistics?.lateDays > 0 ? c.logistics.lateDays : 0;
+    const partiaTag = (c.deliveryTag || '') + (c.batchCount > 1 ? ` · ${(c.batchIndex || 0) + 1}/${c.batchCount}` : '');
+    const cols = colors.length ? colors : ['—'];
+    for (const col of cols) {
+      const colQty = col === '—' ? c.units : Math.round(colorSum(M[col]) || 0);
+      rows.push([
+        c.articleId, c.articleName || '', isSummerArticle(c.articleId) ? 'ЛЕТО' : '', col,
+        c.workshopName || '', c.prodNo || c.partiaNo || '', partiaTag,
+        colQty, c.units,
+        c.ops?.cut?.start || '', c.ops?.sew?.start || '', ready, c.logistics?.shipment || '', wbArrival, deadline,
+        earlyBeforeDeadline == null ? '' : earlyBeforeDeadline,
+        sitDays == null ? '' : sitDays,
+        late || '',
+      ]);
+    }
+  }
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  sheet['!cols'] = [
+    { wch: 9 }, { wch: 22 }, { wch: 7 }, { wch: 16 }, { wch: 12 }, { wch: 8 }, { wch: 16 },
+    { wch: 13 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 13 }, { wch: 12 }, { wch: 12 },
+    { wch: 16 }, { wch: 16 }, { wch: 12 },
+  ];
+  // жирная шапка
+  const hdrStyle = { font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, fill: { patternType: 'solid', fgColor: { rgb: 'E8ECF0' } }, border: XLSX_BORDER() };
+  for (let i = 0; i < header.length; i++) { const cell = sheet[XLSX.utils.encode_cell({ r: 0, c: i })]; if (cell) cell.s = hdrStyle; }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, sheet, 'Слепок раскладки');
+  const today = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `слепок_раскладки_${today}.xlsx`);
+  toast(`Слепок готов: ${sorted.length} произв. партий, ${rows.length - 1} строк (артикул×цвет×партия).`);
+}
+
 function exportReadyPlanXlsx(articleId, partiaId) {
   if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу (Cmd+Shift+R)', true); return; }
   const a = state.articles.find((x) => x.id === articleId);
@@ -6330,6 +6401,7 @@ async function init() {
   document.getElementById('settings-modal')?.addEventListener('click', (e) => { if (e.target.id === 'settings-modal') e.target.hidden = true; });
   document.getElementById('zoom').addEventListener('input', (e) => { pxPerDay = +e.target.value; if (activeTab === 'gantt') renderCurrent(); });
   document.getElementById('btn-compact')?.addEventListener('click', () => compactGantt());
+  document.getElementById('btn-snapshot')?.addEventListener('click', () => exportLayoutSnapshotXlsx());
   document.getElementById('btn-clear-pins')?.addEventListener('click', () => clearAllPins());
   // Старт производства (точка отсчёта расписания) — прямо на Ганте, применяется сразу.
   const prodStart = document.getElementById('prod-start');
