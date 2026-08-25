@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'view-per-article-2026-08-25';
+const APP_BUILD = 'season-rank-zip-2026-08-25';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1555,10 +1555,89 @@ function exportReadyPlanXlsx(articleId, partiaId) {
 // Скачать текст файлом (для лога расчёта).
 function downloadTextFile(filename, text) {
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  downloadBlobFile(filename, blob);
+}
+function downloadBlobFile(filename, blob) {
   const url = URL.createObjectURL(blob);
   const el = document.createElement('a'); el.href = url; el.download = filename;
   document.body.appendChild(el); el.click(); el.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// ── Минимальный ZIP-архиватор (метод STORE, без сжатия): .xlsx уже сжаты внутри, так что
+// упаковка «как есть» ок и не тянет внешнюю зависимость. files: [{name, data:Uint8Array}]. ──
+function crc32(buf) {
+  if (!crc32._t) { const t = crc32._t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; } }
+  const t = crc32._t; let crc = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ t[(crc ^ buf[i]) & 0xFF];
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files) {
+  const enc = new TextEncoder();
+  const u16 = (n) => [n & 255, (n >> 8) & 255];
+  const u32 = (n) => [n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >>> 24) & 255];
+  const chunks = []; const central = []; let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name); const data = f.data; const crc = crc32(data);
+    // флаг 0x0800 (bit 11) = имена файлов в UTF-8 (кириллица извлекается корректно).
+    const lfh = new Uint8Array([].concat(u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0)));
+    chunks.push(lfh, name, data);
+    central.push(new Uint8Array([].concat(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset))), name);
+    offset += lfh.length + name.length + data.length;
+  }
+  const centralStart = offset; let centralSize = 0;
+  for (const c of central) { chunks.push(c); centralSize += c.length; }
+  chunks.push(new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(centralSize), u32(centralStart), u16(0))));
+  return new Blob(chunks, { type: 'application/zip' });
+}
+
+// Выгрузка рангов сезонности ВСЕХ артикулов с планом: один .xlsx на артикул (лист на цвет,
+// таблица ранга: Период/Этап/Выкупы/Заказы/Цена/Благопр.), всё в единый .zip. Без плана — пропуск.
+async function exportAllSeasonRanksZip(onProgress) {
+  if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу (Cmd+Shift+R)', true); return; }
+  const list = (seasonPlansIndex || []).slice();
+  if (!list.length) { toast('Нет сохранённых планов сезонности', true); return; }
+  const prevSel = seasonSelArticle; // функции ранга читают глобальный seasonSelArticle — временно подменяем
+  const files = []; let skipped = 0;
+  try {
+    for (let i = 0; i < list.length; i++) {
+      const articleId = list[i].articleId;
+      if (onProgress) onProgress(i + 1, list.length);
+      let rec;
+      try { rec = await api('/api/season/plan?articleId=' + encodeURIComponent(articleId)); }
+      catch { skipped++; continue; }
+      const rep = rec.report, p = (rep && rep.plan) || {};
+      if (!rep || !Array.isArray(p.forecastDaily) || !p.forecastDaily.length) { skipped++; continue; }
+      seasonSelArticle = articleId;
+      const buyout = seasonBuyoutOf(articleId);
+      const baseRows = seasonAgg(p.forecastDaily, 'month', buyout); // месяцы — читаемо для Excel
+      const D = seasonColorPlansData(rep, p);
+      const colors = (D && D.assortment) ? D.assortment : [];
+      if (!colors.length || !D.forecast) { skipped++; continue; }
+      const wb = XLSX.utils.book_new(); const used = new Set(); let sheets = 0;
+      for (const c of colors) {
+        const ratio = D.forecast ? c.qty / D.forecast : 0;
+        const aoa = [[`Артикул ${articleId} · цвет ${c.name} · ${Math.round(c.qty).toLocaleString('ru')} шт`], [],
+          ['Период', 'Этап сезона', 'Выкупы, шт', 'Заказы, шт', 'Цена, ₽', 'Благопр.']];
+        let tU = 0, tO = 0;
+        for (const r of baseRows) { const u = Math.round(r.units * ratio), o = Math.round(r.orders * ratio); tU += u; tO += o; aoa.push([r.label, r.stage || '', u, o, r.price || '', r.favorable ? '⭐' : '']); }
+        aoa.push(['ИТОГО', '', tU, tO, '', '']);
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws['!cols'] = [{ wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 9 }];
+        // жирная шапка таблицы (строка 3, индекс 2)
+        for (let cc = 0; cc < 6; cc++) { const ref = XLSX.utils.encode_cell({ r: 2, c: cc }); if (ws[ref]) ws[ref].s = { font: { bold: true }, alignment: { horizontal: cc >= 2 && cc <= 4 ? 'center' : 'left' } }; }
+        const t0 = ws[XLSX.utils.encode_cell({ r: 0, c: 0 })]; if (t0) t0.s = { font: { bold: true, sz: 12 } };
+        XLSX.utils.book_append_sheet(wb, ws, uniqSheetName(c.name || ('цвет ' + (sheets + 1)), used));
+        sheets++;
+      }
+      if (!sheets) { skipped++; continue; }
+      const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+      files.push({ name: `ранг_${String(articleId).replace(/[^\wА-Яа-яЁё .-]+/g, '_')}.xlsx`, data: new Uint8Array(bytes) });
+    }
+  } finally { seasonSelArticle = prevSel; }
+  if (!files.length) { toast('Нет артикулов с рангом и цветами для выгрузки', true); return; }
+  downloadBlobFile('ранги_сезонности.zip', zipStore(files));
+  toast(`Выгружено артикулов: ${files.length}${skipped ? ` (пропущено без данных: ${skipped})` : ''}. Архив: ранги_сезонности.zip`);
 }
 
 // ЛОГ РАСЧЁТА: пошагово, откуда берётся каждое число — прогноз (Ранг сезонности) → цвета → размеры →
@@ -3534,7 +3613,7 @@ function seasonStorePanel() {
   const plans = seasonPlansIndex;
   const opts = plans.map((p) => `<option value="${p.articleId}"${p.articleId === seasonSelArticle ? ' selected' : ''}>${p.articleId}${p.label ? ' — ' + seEsc(p.label) : ''}${p.forecastPeriod ? ` (${p.forecastPeriod.from}…${p.forecastPeriod.to})` : ''}</option>`).join('');
   return `<div class="panel season-store">
-    <div class="subhead"><h3>Часть 2 — Сохранённые планы (накопитель)</h3></div>
+    <div class="subhead"><h3>Часть 2 — Сохранённые планы (накопитель)</h3>${plans.length ? `<button class="btn btn-accent" id="se-export-zip" type="button" title="Выгрузить ранги сезонности ВСЕХ артикулов с построенным планом: один Excel на артикул (лист на цвет), всё в один .zip">⤓ Выгрузить все ранги (.zip)</button>` : ''}</div>
     ${plans.length ? `<div class="season-form se-view-pick">
         <div class="field grow"><label>Артикул с построенным планом</label>
           <select id="se-view-article"><option value="">— выбери артикул —</option>${opts}</select></div>
@@ -3554,6 +3633,13 @@ function bindSeasonStore() {
       await api('/api/season/plan?articleId=' + encodeURIComponent(seasonSelArticle), { method: 'DELETE' });
       toast('План удалён'); seasonSelArticle = null; renderSeason();
     } catch (e) { toast('Ошибка: ' + e.message, true); }
+  });
+  document.getElementById('se-export-zip')?.addEventListener('click', async () => {
+    const btn = document.getElementById('se-export-zip'); const old = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳ собираю…';
+    try { await exportAllSeasonRanksZip((n, tot) => { btn.textContent = `⏳ ${n}/${tot}…`; }); }
+    catch (e) { toast('Ошибка выгрузки: ' + e.message, true); }
+    finally { btn.disabled = false; btn.textContent = old; }
   });
 }
 
