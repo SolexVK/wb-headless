@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'bordo-color-2026-08-24x';
+const APP_BUILD = 'state-versions-2026-08-25y';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -5561,11 +5561,63 @@ function renderData() {
     ${dataSeasonsPanel()}
     ${dataStagesPanel()}
     ${dataSettingsPanel()}
+    ${dataVersionsPanel()}
     <div class="panel"><button class="btn btn-danger" id="btn-reset">Сбросить к примеру</button></div>
   `;
   bindDataEvents();
   applyCollapsibles();
   loadResponsibles();
+  loadVersions();
+}
+
+// ── Версии / резервные копии состояния (снимок всего state в БД, восстановление) ──
+function dataVersionsPanel() {
+  return `<details class="panel se-comp" id="data-versions"><summary><h3 style="display:inline">🗄 Версии / резервные копии</h3></summary>
+    <div class="mini" style="margin:8px 0">Ваши данные (артикулы, цвета, размеры, планы, настройки) хранятся в базе на этом компьютере и <b>НЕ теряются при обновлении кода</b> (обновляется только код, база не трогается). Здесь можно вручную сохранить <b>именованную версию</b> и в любой момент к ней вернуться — полезно перед крупными правками. Снимок при старте сервера делается автоматически (храним последние 20).</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <input id="ver-label" placeholder="название версии (напр. «до правки размеров 023»)" style="flex:1;min-width:240px">
+      <button class="btn btn-primary" id="ver-save">💾 Сохранить версию</button>
+    </div>
+    <div id="data-versions-list"><div class="mini">Загрузка версий…</div></div>
+  </details>`;
+}
+async function loadVersions() {
+  const box = document.getElementById('data-versions-list');
+  if (!box) return;
+  let r;
+  try { r = await api('/api/state/snapshots'); }
+  catch (e) { box.innerHTML = `<div class="mini bad">Не удалось загрузить версии: ${seEsc(e.message)}</div>`; return; }
+  if (!r.available) { box.innerHTML = '<div class="mini">Версии недоступны (нет БД — состояние в файле state.json).</div>'; return; }
+  const snaps = r.snapshots || [];
+  if (!snaps.length) { box.innerHTML = '<div class="mini">Пока нет сохранённых версий. Нажмите «Сохранить версию», чтобы создать точку возврата.</div>'; return; }
+  const fmtDate = (s) => { const d = String(s || ''); return d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)} ${d.slice(11, 16)}` : '—'; };
+  const kb = (n) => (n >= 1024 ? (n / 1024).toFixed(0) + ' КБ' : (n || 0) + ' Б');
+  box.innerHTML = `<table><thead><tr><th>Версия</th><th>Тип</th><th class="num">Дата</th><th class="num">Размер</th><th></th></tr></thead>
+    <tbody>${snaps.map((s) => `<tr>
+      <td><b>${seEsc(s.label || '—')}</b></td>
+      <td><span class="mini">${s.kind === 'manual' ? '✋ ручная' : '⚙ авто'}</span></td>
+      <td class="num mini">${fmtDate(s.createdAt)}</td>
+      <td class="num mini">${kb(s.size)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-accent" data-ver-restore="${s.id}" title="Заменить текущее состояние этой версией (текущее сохранится авто-снимком)">↩ Восстановить</button>
+        <button class="btn btn-danger" data-ver-del="${s.id}" title="Удалить эту версию">✕</button>
+      </td>
+    </tr>`).join('')}</tbody></table>`;
+  box.querySelectorAll('[data-ver-restore]').forEach((b) => b.addEventListener('click', async () => {
+    const id = b.dataset.verRestore;
+    if (dirty && !confirm('Есть несохранённые изменения — они пропадут. Восстановить версию?')) return;
+    if (!confirm('Восстановить эту версию? Текущее состояние заменится (оно сохранится авто-снимком «перед восстановлением»).')) return;
+    b.disabled = true;
+    try {
+      const r2 = await api(`/api/state/snapshots/${id}/restore`, { method: 'POST' });
+      state = r2.state; dirty = false; await recalc(false); renderData(); toast('Версия восстановлена');
+    } catch (e) { toast('Ошибка восстановления: ' + e.message, true); b.disabled = false; }
+  }));
+  box.querySelectorAll('[data-ver-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Удалить эту версию безвозвратно?')) return;
+    try { await api(`/api/state/snapshots/${b.dataset.verDel}`, { method: 'DELETE' }); loadVersions(); }
+    catch (e) { toast('Ошибка удаления: ' + e.message, true); }
+  }));
 }
 
 function dataResponsiblesPanel() {
@@ -5628,7 +5680,7 @@ function dataArticleCard(a, i) {
           <option value="">— не задан —</option>
           ${state.suppliers.map((sup) => `<option value="${sup.id}"${sup.id === a.supplierId ? ' selected' : ''}>${sup.name}</option>`).join('')}
         </select></div>
-        <div class="field"><label>Размерный ряд (через запятую)</label><input data-art="${i}" data-f="sizes" value="${(a.sizes || []).join(', ')}"></div>
+        <div class="field"><label title="Ряд задаёте ВЫ. Можно добавить размеры, которых нет у конкурентов/в карточке (напр. 5XL, 6XL) — они появятся в плане продаж и производства; спрос на большие/малые размеры вне ряда подтянется на них. Лишние — удалите. Порядок сохраняется.">Размерный ряд (через запятую) — можно добавить свои (5XL, 6XL) или убрать лишние</label><input data-art="${i}" data-f="sizes" value="${(a.sizes || []).join(', ')}" placeholder="напр.: XS, S, M, L, XL, 2XL, 3XL, 4XL, 5XL, 6XL"></div>
         <div class="field"><label>Цвета и образцы ткани (название · образец 80×40 · № планшета · № цвета)</label>
           <div class="swatch-row">${(a.colors || []).map((c, ci) => { const fi = (a.fabricInfo && a.fabricInfo[c]) || {}; const isArch = (a.archivedColors || []).includes(c); const needFab = !isArch && colorNeedsFabric(a, c); return `<div class="swatch-item${isArch ? ' swatch-archived' : ''}" data-swatch-art="${i}" data-swatch-idx="${ci}">
             <span class="swatch-drag" draggable="true" data-color-drag data-art="${i}" data-idx="${ci}" title="перетащи, чтобы изменить порядок">⠿</span>
@@ -5993,6 +6045,18 @@ function bindDataEvents() {
     if (!confirm('Сбросить все данные к примеру?')) return;
     const r = await api('/api/state/reset', { method: 'POST' });
     state = r.state; dirty = false; await recalc(false); renderData(); toast('Сброшено к примеру');
+  });
+  root.querySelector('#ver-save')?.addEventListener('click', async () => {
+    const label = (document.getElementById('ver-label')?.value || '').trim();
+    const btn = document.getElementById('ver-save'); if (btn) btn.disabled = true;
+    try {
+      // сначала сохраняем текущее состояние на сервер (чтобы в версию попали свежие правки), затем снимок
+      if (dirty) { const r = await api('/api/state', { method: 'PUT', body: JSON.stringify(state) }); state = r.state; dirty = false; setStatus(); }
+      await api('/api/state/snapshots', { method: 'POST', body: JSON.stringify({ label }) });
+      const inp = document.getElementById('ver-label'); if (inp) inp.value = '';
+      toast('Версия сохранена'); loadVersions();
+    } catch (e) { toast('Ошибка сохранения версии: ' + e.message, true); }
+    finally { if (btn) btn.disabled = false; }
   });
 }
 function num(v) { const n = +v; return Number.isFinite(n) ? n : v; }

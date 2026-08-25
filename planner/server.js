@@ -12,7 +12,7 @@ import { findRescues } from './lib/rescue.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates, getSubjectPhrases, budgetStatus } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse, buildWbSupply, listVendorPrefixes } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
-import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList, metaGet, metaSet } from './lib/db.js';
+import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList, metaGet, metaSet, snapshotSave, snapshotList, snapshotGet, snapshotDelete, snapshotPrune } from './lib/db.js';
 import { installAuth, requireView, requireEdit } from './lib/authMiddleware.js';
 import { applyWritePolicy, filterStateForRead, canEditAnything } from './lib/permissions.js';
 
@@ -22,7 +22,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'bordo-color-2026-08-24x';
+const BACKEND_BUILD = 'state-versions-2026-08-25y';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -240,9 +240,44 @@ app.put('/api/state', (req, res) => {
   }
 });
 
-// сбросить к сиду
+// сбросить к сиду (перед сбросом — авто-снимок, чтобы можно было вернуться)
 app.post('/api/state/reset', requireEdit('data'), (req, res) => {
+  try { if (dbAvailable()) { const cur = stateLoadJson(); if (cur) { snapshotSave(cur, 'перед сбросом к примеру', 'auto'); snapshotPrune(20); } } } catch { /* снимок не критичен */ }
   res.json({ ok: true, state: saveState(defaultState()) });
+});
+
+// ── Версии/резервные копии состояния ──
+// список версий (без тел — только метаданные)
+app.get('/api/state/snapshots', requireView('data'), (req, res) => {
+  if (!dbAvailable()) return res.json({ ok: true, available: false, snapshots: [] });
+  res.json({ ok: true, available: true, snapshots: snapshotList() });
+});
+// сохранить текущее состояние как именованную версию
+app.post('/api/state/snapshots', requireEdit('data'), (req, res) => {
+  if (!dbAvailable()) return res.status(400).json({ ok: false, error: 'нет БД — версии недоступны' });
+  const cur = stateLoadJson();
+  if (!cur) return res.status(400).json({ ok: false, error: 'нет сохранённого состояния' });
+  const label = (req.body && req.body.label ? String(req.body.label) : '').trim() || 'без названия';
+  const id = snapshotSave(cur, label, 'manual');
+  res.json({ ok: true, id, snapshots: snapshotList() });
+});
+// восстановить состояние из версии (перед этим — авто-снимок текущего, чтобы откат был обратим)
+app.post('/api/state/snapshots/:id/restore', requireEdit('data'), (req, res) => {
+  if (!dbAvailable()) return res.status(400).json({ ok: false, error: 'нет БД — версии недоступны' });
+  const json = snapshotGet(+req.params.id);
+  if (!json) return res.status(404).json({ ok: false, error: 'версия не найдена' });
+  try {
+    const cur = stateLoadJson(); if (cur) snapshotSave(cur, 'перед восстановлением', 'auto');
+    snapshotPrune(20);
+    const norm = saveState(normalizeState(JSON.parse(json)));
+    res.json({ ok: true, state: req.perms ? filterStateForRead(norm, req.perms) : norm });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+// удалить версию
+app.delete('/api/state/snapshots/:id', requireEdit('data'), (req, res) => {
+  if (!dbAvailable()) return res.status(400).json({ ok: false, error: 'нет БД' });
+  snapshotDelete(+req.params.id);
+  res.json({ ok: true, snapshots: snapshotList() });
 });
 
 // ответственные (цех × роль → пользователь) + лёгкий список пользователей для выбора
@@ -440,8 +475,19 @@ app.get('/api/wb/logistics', requireView('unit'), async (req, res) => {
 
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'planner', backendBuild: BACKEND_BUILD }));
 
+// Авто-снимок состояния при старте сервера — точка возврата ДО любых правок этой сессии
+// (в т.ч. после обновления кода). Ротация: держим последние 20 авто-снимков; ручные не трогаем.
+function snapshotOnBoot() {
+  try {
+    if (!dbAvailable()) return;
+    const cur = stateLoadJson();
+    if (cur && cur.length > 2) { snapshotSave(cur, `старт сервера · ${BACKEND_BUILD}`, 'auto'); snapshotPrune(20); }
+  } catch { /* снимок не критичен для загрузки */ }
+}
+
 app.listen(PORT, HOST, () => {
   console.log(`[planner] backend build: ${BACKEND_BUILD}`);
   console.log(`[planner] слушает ${HOST}:${PORT}`);
   console.log(`[planner] локально: http://localhost:${PORT}`);
+  snapshotOnBoot();
 });

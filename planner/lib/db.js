@@ -52,6 +52,12 @@ function migrate(db) {
       id INTEGER PRIMARY KEY CHECK (id = 1),
       json TEXT, updatedAt TEXT
     );
+    -- Версии/резервные копии состояния: ручные (пользователь «Сохранить версию») и авто
+    -- (снимок при старте сервера / перед восстановлением / сбросом). Восстановление — из любой.
+    CREATE TABLE IF NOT EXISTS state_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT, kind TEXT, json TEXT NOT NULL, createdAt TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS feature_dict (
       path TEXT PRIMARY KEY, json TEXT, fetchedAt TEXT
     );
@@ -520,6 +526,35 @@ export function stateSaveJson(json) {
   db.prepare('INSERT INTO app_state(id,json,updatedAt) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET json=excluded.json, updatedAt=excluded.updatedAt')
     .run(String(json), new Date().toISOString());
   return true;
+}
+
+// ── Версии/резервные копии состояния ──
+export function snapshotSave(json, label, kind) {
+  const db = getDb(); if (!db) return null;
+  if (!json || String(json).length < 2) return null; // не сохраняем пустое
+  const info = db.prepare('INSERT INTO state_snapshots(label,kind,json,createdAt) VALUES(?,?,?,?)')
+    .run(label ? String(label).slice(0, 200) : null, kind === 'auto' ? 'auto' : 'manual', String(json), new Date().toISOString());
+  return info.lastInsertRowid;
+}
+// список без тела (для UI): id, label, kind, дата, размер в байтах
+export function snapshotList() {
+  const db = getDb(); if (!db) return [];
+  return db.prepare('SELECT id,label,kind,createdAt,length(json) AS size FROM state_snapshots ORDER BY id DESC').all();
+}
+export function snapshotGet(id) {
+  const db = getDb(); if (!db) return null;
+  const r = db.prepare('SELECT json FROM state_snapshots WHERE id=?').get(id);
+  return r ? r.json : null;
+}
+export function snapshotDelete(id) {
+  const db = getDb(); if (!db) return false;
+  db.prepare('DELETE FROM state_snapshots WHERE id=?').run(id);
+  return true;
+}
+// оставить только последние keepN авто-снимков (ручные не трогаем)
+export function snapshotPrune(keepN = 20) {
+  const db = getDb(); if (!db) return;
+  db.prepare("DELETE FROM state_snapshots WHERE kind='auto' AND id NOT IN (SELECT id FROM state_snapshots WHERE kind='auto' ORDER BY id DESC LIMIT ?)").run(Math.max(1, keepN));
 }
 
 // ── Журнал производственных событий (append-only) ──
