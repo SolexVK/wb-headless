@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'state-versions-2026-08-25y';
+const APP_BUILD = 'sizeadj-target-2026-08-25z';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -4286,21 +4286,23 @@ function reconcilePanelHTML(rep, p, articleId) {
   }).join('');
   const matrixTbl = `<div class="se-comp-scroll"><table class="se-comp-table se-seg-table"><thead>${head}</thead><tbody>${body || `<tr><td colspan="${artSizes.length + 2}" class="mini">пусто — сопоставь цвета ниже</td></tr>`}</tbody></table></div>`;
 
-  // — ручная правка долей размера ПО ЦВЕТУ (±% множитель к доле внутри цвета; тираж цвета не меняется).
-  // Общая кривая размеров одна на все цвета — этот блок позволяет подкрутить перекос по конкретному цвету.
+  // — ручная правка долей размера ПО ЦВЕТУ: целевой % тиража цвета для размера (пусто = авто).
+  // Абсолютная цель, а не множитель → работает для ЛЮБОГО размера, даже с нулевым спросом (L/3XL/4XL).
   const szAdj = (article.sizeAdjust && typeof article.sizeAdjust === 'object') ? article.sizeAdjust : {};
   const adjBody = artColors.map((col) => {
     const sum = colUnits(col); if (!sum) return '';
     const cells = artSizes.map((s) => {
-      const has = (result.matrix[col] || {})[s] > 0;
-      const v = (szAdj[col] && +szAdj[col][s] > 0) ? Math.round(+szAdj[col][s]) : 100;
-      return `<td class="num"><input class="se-szadj" data-szadj-col="${seEsc(col)}" data-szadj-size="${seEsc(s)}" type="number" min="0" step="10" value="${v}"${has ? '' : ' disabled title="у этого цвета размер нулевой — множитель не поможет (нужен forceSize/доли выше)"'} style="width:50px${v !== 100 ? ';border-color:#2563eb;font-weight:600' : ''}"></td>`;
+      const set = szAdj[col] && +szAdj[col][s] > 0;
+      const v = set ? Math.round(+szAdj[col][s]) : '';
+      const cur = (result.matrix[col] || {})[s] || 0;
+      const curPct = sum ? Math.round(cur / sum * 100) : 0;
+      return `<td class="num"><input class="se-szadj" data-szadj-col="${seEsc(col)}" data-szadj-size="${seEsc(s)}" type="number" min="0" max="100" step="1" value="${v}" placeholder="${curPct}" title="Целевой % тиража цвета «${seEsc(col)}» для размера ${seEsc(s)}. Пусто = авто (сейчас ${curPct}%). Работает для любого размера, даже нулевого." style="width:52px${set ? ';border-color:#2563eb;font-weight:600' : ''}">%</td>`;
     }).join('');
     return `<tr><td><b>${seEsc(col)}</b></td>${cells}<td class="num mini">${fmt(sum)}</td></tr>`;
   }).join('');
   const sizeAdjTbl = adjBody
-    ? `<details class="se-comp se-szadj-det" style="margin-top:6px"${(seasonReconcile && seasonReconcile.szAdjOpen) ? ' open' : ''}><summary class="mini" style="cursor:pointer">⚙ Доли размера по цвету (±%) — подкрутить, если перекос</summary>
-      <div class="mini" style="margin:4px 0">Множитель к доле размера <b>внутри цвета</b>: 100 = как расчёт, 130 = +30%, 70 = −30%. Тираж цвета <b>не меняется</b> — доли перераспределяются между размерами. Меняем один размер — остальные подстраиваются. После правки жми «Применить», чтобы ушло в план.</div>
+    ? `<details class="se-comp se-szadj-det" style="margin-top:6px"${(seasonReconcile && seasonReconcile.szAdjOpen) ? ' open' : ''}><summary class="mini" style="cursor:pointer">⚙ Доли размера по цвету — задать вручную (для любых размеров, включая нулевые)</summary>
+      <div class="mini" style="margin:4px 0"><b>Целевой % тиража цвета</b> для размера. Пусто = авто (в поле серым — текущая доля). Вписал число — размеру назначается ровно этот % (работает и для размеров без спроса — L/3XL/4XL), остаток делится между <b>незаполненными</b> размерами пропорционально. Тираж цвета не меняется. После правки жми «Применить».</div>
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table"><thead>${head}</thead><tbody>${adjBody}</tbody></table></div></details>`
     : '';
 
@@ -4478,15 +4480,16 @@ function bindReconcilePanel(rep, p, articleId) {
     a.forceSizes = [...fs]; dirty = true; setStatus();
     rerenderReconcile(rep, p, articleId); // пересобрать матрицу с учётом форс-размера
   }));
-  // Ручная правка долей размера по цвету (±%): множитель к доле размера ВНУТРИ цвета.
+  // Ручная правка долей размера по цвету: целевой % тиража цвета для размера (пусто/0 = авто).
   document.querySelectorAll('.se-szadj').forEach((el) => el.addEventListener('change', () => {
     const a = state.articles.find((x) => x.id === articleId); if (!a) return;
     const col = el.dataset.szadjCol, sz = el.dataset.szadjSize; if (!col || !sz) return;
     if (seasonReconcile) seasonReconcile.szAdjOpen = true; // не схлопывать блок при перерисовке
     const sa = a.sizeAdjust = (a.sizeAdjust && typeof a.sizeAdjust === 'object') ? a.sizeAdjust : {};
     const row = sa[col] = (sa[col] && typeof sa[col] === 'object') ? sa[col] : {};
-    const v = Math.max(0, Math.round(+el.value || 100));
-    if (v === 100) { delete row[sz]; if (!Object.keys(row).length) delete sa[col]; } else row[sz] = v;
+    const raw = String(el.value).trim();
+    const v = raw === '' ? 0 : Math.max(0, Math.min(100, Math.round(+el.value || 0)));
+    if (v <= 0) { delete row[sz]; if (!Object.keys(row).length) delete sa[col]; } else row[sz] = v; // пусто/0 = авто
     dirty = true; setStatus(); rerenderReconcile(rep, p, articleId);
   }));
   // запоминаем, открыт ли блок долей размера (чтобы перерисовка не схлопывала)
