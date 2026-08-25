@@ -321,6 +321,18 @@ export function normalizeState(input) {
         if (Object.keys(cr).length) clean[String(col)] = cr;
       }
       a.sizeAdjust = clean; }
+    // ОТДЕЛЬНОЕ поле: целевой % доли размера ПО ЦВЕТУ карточки: { цвет: { размер: 1..100 } }.
+    // Абсолютная цель (не множитель): работает для любых размеров, вкл. нулевые. Пусто/0 = авто.
+    // НЕ пересекается с sizeAdjust — чтобы старые данные-множители не переосмысливались.
+    { const st = a.sizeTarget && typeof a.sizeTarget === 'object' ? a.sizeTarget : {};
+      const clean = {};
+      for (const [col, row] of Object.entries(st)) {
+        if (!a.colors.includes(col) || !row || typeof row !== 'object') continue;
+        const cr = {};
+        for (const [sz, v] of Object.entries(row)) { const p = Math.max(0, Math.min(100, Math.round(+v || 0))); if (a.sizes.includes(sz) && p > 0) cr[String(sz)] = p; }
+        if (Object.keys(cr).length) clean[String(col)] = cr;
+      }
+      a.sizeTarget = clean; }
   }
   // автосортировка артикулов по номеру, от меньшего к большему (числовая)
   s.articles.sort(compareArticleId);

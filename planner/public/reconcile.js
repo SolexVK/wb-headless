@@ -80,7 +80,7 @@ function apportion(total, keys, weightOf) {
  * @param {Array<{size:string, origin?:string, share:number}>} sizeRows — ядро размеров (доли, %).
  * @param {{aliases?:Object, sizeSplit?:string}} [opts] — aliases: глобальный словарь; sizeSplit='equal'.
  */
-export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, sizeSplit = 'equal', forceSizes = [], forceShare = {}, sizeAdjust = {}, tailToExtremePct = 50 } = {}) {
+export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, sizeSplit = 'equal', forceSizes = [], forceShare = {}, sizeAdjust = {}, sizeTarget = {}, tailToExtremePct = 50 } = {}) {
   const artColors = Array.isArray(article.colors) ? article.colors : [];
   const artSizes = Array.isArray(article.sizes) ? article.sizes : [];
   const colorMap = (article.colorMap && typeof article.colorMap === 'object') ? article.colorMap : {};
@@ -190,18 +190,39 @@ export function reconcilePlan(article, colorRows, sizeRows, { aliases = {}, size
   const assignedFraction = wSum > 0 ? 1 : 0;
   const unassignedSizeFraction = wSum > 0 ? 0 : 1;
 
+  // Целевой % доли размера ПО ЦВЕТУ (sizeTarget[цвет] = {размер: 1..100}). АБСОЛЮТНАЯ цель — работает
+  // для ЛЮБОГО размера, даже с нулевым спросом (L/3XL/4XL). Отдельное поле, НЕ пересекается с
+  // множителем sizeAdjust. Заданному размеру назначается ровно этот % тиража цвета; остаток
+  // (100−Σцелей) делится между НЕзаданными размерами пропорционально их весам (поровну, если у тех
+  // ноль). Σцелей>1 → цели ужимаются к 1. Тираж цвета сохраняется.
+  const perColorTargets = (baseW, targets, sizes) => {
+    const tSizes = sizes.filter((s) => +targets[s] > 0);
+    if (!tSizes.length) return baseW;
+    let tSum = 0; const tgt = {};
+    for (const s of tSizes) { tgt[s] = +targets[s] / 100; tSum += tgt[s]; }
+    if (tSum > 1) { for (const s of tSizes) tgt[s] /= tSum; tSum = 1; }
+    const rest = sizes.filter((s) => !(s in tgt));
+    const restW = rest.reduce((a, s) => a + (baseW[s] || 0), 0);
+    const remain = Math.max(0, 1 - tSum);
+    const out = Object.fromEntries(sizes.map((s) => [s, 0]));
+    for (const s of tSizes) out[s] = tgt[s];
+    if (rest.length) { if (restW > 0) for (const s of rest) out[s] = (baseW[s] || 0) / restW * remain; else for (const s of rest) out[s] = remain / rest.length; }
+    return out;
+  };
+
   // ── МАТРИЦА: для сопоставленных цветов раскидываем qty×assignedFraction по размерам (Хэмилтон).
   const matrix = {};
   const unItems = [];
   for (const c of colors) {
     if (c.status === 'matched') {
       const placeTotal = Math.round(c.qty * assignedFraction);
-      // Ручная правка долей размера ПО ЦВЕТУ (sizeAdjust[цвет карточки] = {размер:%}, множитель к
-      // весу; 100 = как расчёт). Перенормировка внутри цвета (apportion делит по Σвесов) — тираж
-      // цвета НЕ меняется, доли между размерами перераспределяются. Множитель к нулевому весу = 0.
+      // 1) целевой % (sizeTarget) — абсолютные цели по цвету (для любых размеров, вкл. нулевые);
+      // 2) множитель (sizeAdjust) — ±% нюанс поверх. Оба независимы, применяются в этом порядке.
+      const tgt = (sizeTarget && sizeTarget[c.articleColor]) || null;
+      const wBase = tgt ? perColorTargets(sizeWeights, tgt, artSizes) : sizeWeights;
       const adj = (sizeAdjust && sizeAdjust[c.articleColor]) || null;
-      const wOf = adj ? (as) => sizeWeights[as] * ((+adj[as] > 0 ? +adj[as] : 100) / 100)
-                      : (as) => sizeWeights[as];
+      const wOf = adj ? (as) => (wBase[as] || 0) * ((+adj[as] > 0 ? +adj[as] : 100) / 100)
+                      : (as) => wBase[as];
       const { alloc, placed } = apportion(placeTotal, artSizes, wOf);
       matrix[c.articleColor] = matrix[c.articleColor] || Object.fromEntries(artSizes.map((s) => [s, 0]));
       for (const as of artSizes) matrix[c.articleColor][as] += alloc[as];

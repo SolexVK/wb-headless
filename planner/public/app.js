@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'hotfix-sizeadj-revert-2026-08-25';
+const APP_BUILD = 'sizetarget-2026-08-25';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -4235,7 +4235,7 @@ function runReconcile(rep, p, articleId) {
   const article = state.articles.find((x) => x.id === articleId);
   if (!inp || !article) return null;
   const sr = (seasonReconcile && seasonReconcile.articleId === articleId) ? seasonReconcile : { choices: {}, newNames: {} };
-  const opts = { aliases: (state.settings && state.settings.colorAliases) || {}, sizeSplit: 'equal', forceSizes: article.forceSizes || [], forceShare: article.forceShare || {}, sizeAdjust: article.sizeAdjust || {}, tailToExtremePct: (state.settings && state.settings.tailToExtremePct != null) ? state.settings.tailToExtremePct : 50 };
+  const opts = { aliases: (state.settings && state.settings.colorAliases) || {}, sizeSplit: 'equal', forceSizes: article.forceSizes || [], forceShare: article.forceShare || {}, sizeAdjust: article.sizeAdjust || {}, sizeTarget: article.sizeTarget || {}, tailToExtremePct: (state.settings && state.settings.tailToExtremePct != null) ? state.settings.tailToExtremePct : 50 };
   const res1 = reconcilePlan(reconcileEffectiveArticle(article, sr.choices, sr.newNames), inp.colorRows, inp.sizeRows, opts);
   const choices = resolveChoices(res1, sr); // новые цвета по умолчанию создаются
   const eff = reconcileEffectiveArticle(article, choices, sr.newNames);
@@ -4302,6 +4302,25 @@ function reconcilePanelHTML(rep, p, articleId) {
     ? `<details class="se-comp se-szadj-det" style="margin-top:6px"${(seasonReconcile && seasonReconcile.szAdjOpen) ? ' open' : ''}><summary class="mini" style="cursor:pointer">⚙ Доли размера по цвету (±%) — подкрутить, если перекос</summary>
       <div class="mini" style="margin:4px 0">Множитель к доле размера <b>внутри цвета</b>: 100 = как расчёт, 130 = +30%, 70 = −30%. Тираж цвета <b>не меняется</b> — доли перераспределяются между размерами. Меняем один размер — остальные подстраиваются. После правки жми «Применить», чтобы ушло в план.</div>
       <div class="se-comp-scroll"><table class="se-comp-table se-seg-table"><thead>${head}</thead><tbody>${adjBody}</tbody></table></div></details>`
+    : '';
+
+  // — ОТДЕЛЬНЫЙ блок: точный целевой % размера ПО ЦВЕТУ (для ЛЮБЫХ размеров, включая нулевые L/3XL/4XL).
+  const szTgt = (article.sizeTarget && typeof article.sizeTarget === 'object') ? article.sizeTarget : {};
+  const tgtBody = artColors.map((col) => {
+    const sum = colUnits(col); if (!sum) return '';
+    const cells = artSizes.map((s) => {
+      const set = szTgt[col] && +szTgt[col][s] > 0;
+      const v = set ? Math.round(+szTgt[col][s]) : '';
+      const cur = (result.matrix[col] || {})[s] || 0;
+      const curPct = sum ? Math.round(cur / sum * 100) : 0;
+      return `<td class="num"><input class="se-sztgt" data-sztgt-col="${seEsc(col)}" data-sztgt-size="${seEsc(s)}" type="number" min="0" max="100" step="1" value="${v}" placeholder="${curPct}" title="Целевой % тиража цвета «${seEsc(col)}» для размера ${seEsc(s)}. Пусто = авто (сейчас ${curPct}%). Работает для любого размера, даже нулевого." style="width:50px${set ? ';border-color:#16a34a;font-weight:600' : ''}">%</td>`;
+    }).join('');
+    return `<tr><td><b>${seEsc(col)}</b></td>${cells}<td class="num mini">${fmt(sum)}</td></tr>`;
+  }).join('');
+  const sizeTgtTbl = tgtBody
+    ? `<details class="se-comp se-sztgt-det" style="margin-top:6px"${(seasonReconcile && seasonReconcile.szTgtOpen) ? ' open' : ''}><summary class="mini" style="cursor:pointer">🎯 Точный % размера по цвету — задать вручную (работает для любых размеров, включая нулевые)</summary>
+      <div class="mini" style="margin:4px 0"><b>Целевой % тиража цвета</b> для размера. Пусто = авто (серым в поле — текущая доля). Вписал число — размеру назначается <b>ровно этот %</b> тиража цвета (в т.ч. для L/3XL/4XL без спроса). Остаток (100−Σзаданных) делится между <b>незаполненными</b> размерами пропорционально. Тираж цвета не меняется. Это отдельно от «±%» выше и с вашими прежними настройками не пересекается. После правки — «Применить».</div>
+      <div class="se-comp-scroll"><table class="se-comp-table se-seg-table"><thead>${head}</thead><tbody>${tgtBody}</tbody></table></div></details>`
     : '';
 
   // — ЦВЕТА: единый выбор у КАЖДОГО цвета (сменить/отвязать/создать). Дефолт — авто-решение движка.
@@ -4381,7 +4400,7 @@ function reconcilePanelHTML(rep, p, articleId) {
     <button id="se-rec-apply" class="btn btn-primary"${result.totalPlanned ? '' : ' disabled'}>Применить: ${dvs.length} ${dvs.length === 1 ? 'партия' : 'партии-поставки'} · ${fmt(result.totalPlanned)} шт</button>
     <span class="mini">цех — авто (распределит конвейер); ручной выбор цеха — на листе «План по размерам»</span></div>${notes}`;
 
-  return `${matrixTbl}${sizeAdjTbl}
+  return `${matrixTbl}${sizeAdjTbl}${sizeTgtTbl}
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
       <div style="flex:1;min-width:260px"><div class="mini"><b>Цвета</b> (спрос → карточка)</div>${colorsTbl}</div>
       <div style="flex:1;min-width:220px"><div class="mini"><b>Размеры</b> (диапазон → ряд, поровну)</div>${sizesTbl}</div>
@@ -4492,6 +4511,21 @@ function bindReconcilePanel(rep, p, articleId) {
   // запоминаем, открыт ли блок долей размера (чтобы перерисовка не схлопывала)
   document.querySelectorAll('details.se-szadj-det').forEach((d) => d.addEventListener('toggle', () => {
     if (seasonReconcile) seasonReconcile.szAdjOpen = d.open;
+  }));
+  // Точный целевой % размера по цвету (sizeTarget) — работает для любых размеров, вкл. нулевые.
+  document.querySelectorAll('.se-sztgt').forEach((el) => el.addEventListener('change', () => {
+    const a = state.articles.find((x) => x.id === articleId); if (!a) return;
+    const col = el.dataset.sztgtCol, sz = el.dataset.sztgtSize; if (!col || !sz) return;
+    if (seasonReconcile) seasonReconcile.szTgtOpen = true; // не схлопывать блок при перерисовке
+    const st = a.sizeTarget = (a.sizeTarget && typeof a.sizeTarget === 'object') ? a.sizeTarget : {};
+    const row = st[col] = (st[col] && typeof st[col] === 'object') ? st[col] : {};
+    const raw = String(el.value).trim();
+    const v = raw === '' ? 0 : Math.max(0, Math.min(100, Math.round(+el.value || 0)));
+    if (v <= 0) { delete row[sz]; if (!Object.keys(row).length) delete st[col]; } else row[sz] = v; // пусто/0 = авто
+    dirty = true; setStatus(); rerenderReconcile(rep, p, articleId);
+  }));
+  document.querySelectorAll('details.se-sztgt-det').forEach((d) => d.addEventListener('toggle', () => {
+    if (seasonReconcile) seasonReconcile.szTgtOpen = d.open;
   }));
   // Ручной целевой % тиража цвета для форс-размера — гарантирует размеру именно этот вес.
   document.querySelectorAll('input[data-forceshare]').forEach((inp) => inp.addEventListener('change', () => {
