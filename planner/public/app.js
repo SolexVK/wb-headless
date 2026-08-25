@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'sizetarget-2026-08-25';
+const APP_BUILD = 'view-per-article-2026-08-25';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -949,7 +949,8 @@ function recomputePartiaNumbers() {
 let matrixStageId = null, matrixArticleId = null, matrixPartiaId = null;
 let matrixWsFilter = ''; // фильтр списка партий по цеху ('' = все, '__auto__' = не распределённые)
 let mxAllSizes = false;  // «План по размерам»: показывать ВСЕ размеры ряда (иначе — только с данными)
-let mxViewNet = true;    // «План по размерам»: показывать «К производству» (нетто, скрыв покрытые) vs «Спрос» (правка)
+let mxViewNetByArticle = {}; // «План по размерам»: тумблер нетто/спрос — ПЕР-АРТИКУЛ (у каждого свой)
+const isViewNet = (id) => mxViewNetByArticle[id] !== false; // по умолчанию «К производству (нетто)»
 
 // ── настил (клиентские хелперы, зеркало lib/nesting.js) ──
 function nestingRules() { const n = state.settings.nesting || {}; return { minSizeQty: +n.minSizeQty || 20, minColorQty: +n.minColorQty || 400 }; }
@@ -1153,7 +1154,7 @@ function renderMatrix() {
         const mergedAway = merges.find((m) => m.from === p.id);        // этот довоз слит в следующий
         const absorbs = merges.filter((m) => m.into === p.id);         // этот довоз принял мелкие
         const hasCoverage = netSum < grossSum || !!mergedAway || absorbs.length > 0;
-        const showNet = hasCoverage && mxViewNet;
+        const showNet = hasCoverage && isViewNet(a.id);
         const hiddenCovered = Math.max(0, grossSum - netSum);
         // тумблер показываем только когда есть покрытие/объединение (иначе спрос=нетто, прятать нечего)
         const hint = showNet
@@ -1171,7 +1172,7 @@ function renderMatrix() {
         const absorbNote = (showNet && absorbs.length) ? `<div class="mini" style="margin:0 0 6px;color:#2563eb">Включает объединённые мелкие довозы: <b>+${absorbs.reduce((n, m) => n + m.units, 0).toLocaleString('ru')}</b> шт (после вычета остатков были меньше мин. партии).</div>` : '';
         return toggle + absorbNote + (showNet ? matrixTableNet(a, p) : matrixTable(a, M, p));
       })()}
-      ${hasGrid && !(mxViewNet && matrixSum(prodMatrixFor(p)) < sumMatrix(M)) ? (() => { const hidden = a.sizes.length - rowsForMatrix(a, M).length; if (!hidden) return ''; return `<div class="mini" style="margin-top:6px">${mxAllSizes ? `Показаны все размеры ряда. ` : `Пустые размеры скрыты (${hidden}). `}<button id="mx-all-sizes" class="btn btn-subtle" type="button">${mxAllSizes ? '▲ скрыть пустые' : '▽ показать все размеры'}</button></div>`; })() : ''}
+      ${hasGrid && !(isViewNet(a.id) && matrixSum(prodMatrixFor(p)) < sumMatrix(M)) ? (() => { const hidden = a.sizes.length - rowsForMatrix(a, M).length; if (!hidden) return ''; return `<div class="mini" style="margin-top:6px">${mxAllSizes ? `Показаны все размеры ряда. ` : `Пустые размеры скрыты (${hidden}). `}<button id="mx-all-sizes" class="btn btn-subtle" type="button">${mxAllSizes ? '▲ скрыть пустые' : '▽ показать все размеры'}</button></div>`; })() : ''}
       ${(() => { const v = nestingViolations(M, nestingRules()); if (!v.length) return ''; const r = nestingRules(); return `<div style="margin-top:10px;padding:8px 10px;border:1px solid #d97706;border-radius:8px;background:rgba(245,158,11,.1)"><div class="mini"><b>Настил (ориентир):</b> ${v.map((x) => x.kind === 'color' ? `цвет «${x.color}» ${x.qty} шт (&lt;${r.minColorQty})` : `${x.color}/${x.size} ${x.qty} шт (&lt;${r.minSizeQty})`).join(' · ')}. Мягкое предупреждение — можно продолжать.</div></div>`; })()}
       <div class="matrix-io" style="margin-top:12px">
         <span class="mini"><b>План для цеха → Excel</b> <span title="Выгрузка идёт на НЕТТО: из плана вычтены загруженные остатки (WB/в пути/склад/производство). Полностью покрытые партии в «все партии» не попадают.">(нетто, за вычетом остатков ⓘ)</span>:</span>
@@ -1188,8 +1189,8 @@ function renderMatrix() {
   bindMatrixControls(a);
   bindGlobalDist();
   document.getElementById('mx-all-sizes')?.addEventListener('click', () => { mxAllSizes = !mxAllSizes; renderMatrix(); });
-  document.getElementById('mx-view-net')?.addEventListener('click', () => { mxViewNet = true; renderMatrix(); });
-  document.getElementById('mx-view-gross')?.addEventListener('click', () => { mxViewNet = false; renderMatrix(); });
+  document.getElementById('mx-view-net')?.addEventListener('click', () => { mxViewNetByArticle[a.id] = true; renderMatrix(); });
+  document.getElementById('mx-view-gross')?.addEventListener('click', () => { mxViewNetByArticle[a.id] = false; renderMatrix(); });
   document.getElementById('mx-xlsx-partia').addEventListener('click', () => exportReadyPlanXlsx(a.id, p.id));
   document.getElementById('mx-xlsx-article').addEventListener('click', () => exportReadyPlanXlsx(a.id, null));
   document.getElementById('mx-log')?.addEventListener('click', async () => {
