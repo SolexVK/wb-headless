@@ -310,15 +310,14 @@ export function normalizeState(input) {
     { const cm = a.colorAdjust && typeof a.colorAdjust === 'object' ? a.colorAdjust : {};
       const clean = {}; for (const [k, v] of Object.entries(cm)) { const p = Math.max(0, Math.round(+v || 0)); if (a.colors.includes(k) && p > 0 && p !== 100) clean[String(k)] = p; }
       a.colorAdjust = clean; }
-    // ручная правка долей размера ПО ЦВЕТУ карточки: { цвет: { размер: целевой % тиража } }.
-    // Это АБСОЛЮТНАЯ цель (не множитель): размеру назначается ровно этот % тиража цвета — работает и
-    // для размеров с нулевым спросом. Пусто/отсутствует = авто. Храним валидные размеры, 1..100.
+    // ручная правка долей размера ПО ЦВЕТУ карточки: { цвет: { размер: % } } (100/пусто = как расчёт).
+    // Множитель к весу размера внутри цвета; тираж цвета сохраняется (перенормировка). Валидные размеры.
     { const sm = a.sizeAdjust && typeof a.sizeAdjust === 'object' ? a.sizeAdjust : {};
       const clean = {};
       for (const [col, row] of Object.entries(sm)) {
         if (!a.colors.includes(col) || !row || typeof row !== 'object') continue;
         const cr = {};
-        for (const [sz, v] of Object.entries(row)) { const p = Math.max(0, Math.min(100, Math.round(+v || 0))); if (a.sizes.includes(sz) && p > 0) cr[String(sz)] = p; }
+        for (const [sz, v] of Object.entries(row)) { const p = Math.max(0, Math.round(+v || 0)); if (a.sizes.includes(sz) && p > 0 && p !== 100) cr[String(sz)] = p; }
         if (Object.keys(cr).length) clean[String(col)] = cr;
       }
       a.sizeAdjust = clean; }
