@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'jit-continuous-2026-08-26';
+const APP_BUILD = 'jit-twoclass-2026-08-26';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2485,7 +2485,7 @@ async function openJitDialog() {
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.innerHTML = `<div style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;max-width:min(680px,96vw);width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:20px">
     <h2 style="margin:0 0 6px">💰 Экономная раскладка</h2>
-    <div class="mini" style="color:var(--muted);margin-bottom:14px">Непрерывные сезонные блоки: производство не встаёт (одна модель за раз, без параллели, сдвижки этапов соблюдены), но стартует позже — товар готов к сроку, а не лежит месяцами. Летние — к 15.04, «одна модель — один цех». Обратимо кнопкой «↺ Сбросить раскладку».</div>
+    <div class="mini" style="color:var(--muted);margin-bottom:14px">Несезонные (демисезон) шьём строго JIT — как можно позже, но в срок (максимум экономии). Летние — «наполнитель»: ими затыкаем простои, чтобы поток был непрерывным (они всё равно лежат до продаж с апреля), крайний срок — 15.04. Одна модель — один цех. Производство не встаёт, одна модель за раз, сдвижки этапов соблюдены. Обратимо «↺ Сбросить раскладку».</div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">
       <label title="Товар готов на нашем складе за столько дней до дедлайна ВБ (доставка + форс-мажор).">Буфер доставки, дн: <input type="number" id="jit-delivery" value="${JIT_DEFAULTS.deliveryBufferDays}" min="0" max="120" style="width:60px"></label>
       <label title="Не-летние финишируют минимум за столько дней до дедлайна (подушка на продажи/сбои).">Подушка не-летних, дн: <input type="number" id="jit-cushion" value="${JIT_DEFAULTS.nonSummerCushionDays}" min="0" max="240" style="width:60px"></label>
@@ -2518,7 +2518,8 @@ function jitMetricRow(before, after) {
   return `<table style="width:100%;border-collapse:collapse">
     <thead><tr style="border-bottom:1px solid var(--line)"><th style="text-align:left;padding:4px 10px">Показатель</th><th style="text-align:right;padding:4px 10px">Сейчас</th><th style="text-align:right;padding:4px 10px">После</th><th style="text-align:right;padding:4px 10px">Δ</th></tr></thead>
     <tbody>
-      ${row('💸 Заморозка (млн шт·дней)', before.freezeMlnUnitDays, after.freezeMlnUnitDays, '', true)}
+      ${row('💸 Заморозка НЕСЕЗОН (экономим), млн шт·дн', before.freezeNsMln ?? before.freezeMlnUnitDays, after.freezeNsMln ?? after.freezeMlnUnitDays, '', true)}
+      ${row('🌞 Заморозка ЛЕТО (неизбежна, к 15.04)', before.freezeSuMln ?? 0, after.freezeSuMln ?? 0, '', true)}
       ${row('🏭 Задействовано цехов', before.workshops, after.workshops, '', true)}
       ${row('🔧 Перестроек (смен модели)', before.changeovers, after.changeovers, '', true)}
       ${row('⛔ Наложений (параллель)', before.overlaps, after.overlaps, '', true)}
@@ -2544,7 +2545,7 @@ async function applyJit(close) {
     state = r.state; schedule = r.schedule;
     if (close) close();
     renderCurrent(); setStatus();
-    toast(`Экономная раскладка применена: заморозка ${r.before.freezeMlnUnitDays}→${r.after.freezeMlnUnitDays} млн шт·дн, цехов ${r.before.workshops}→${r.after.workshops}.`);
+    toast(`Экономная раскладка применена: заморозка несезона ${r.before.freezeNsMln ?? r.before.freezeMlnUnitDays}→${r.after.freezeNsMln ?? r.after.freezeMlnUnitDays} млн шт·дн, перестроек ${r.before.changeovers}→${r.after.changeovers}, цехов ${r.before.workshops}→${r.after.workshops}.`);
   } catch (e) { toast('Ошибка: ' + e.message, true); }
 }
 
