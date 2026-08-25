@@ -22,7 +22,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'gantt-pin-nodrop-2026-08-25';
+const BACKEND_BUILD = 'gantt-autoallow-2026-08-25';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -339,6 +339,14 @@ app.post('/api/pin', requireEdit('gantt'), (req, res) => {
     const { batchKey, ws, cut, clear, clearAll, pins } = req.body || {};
     const state = loadState();
     state.batchPins = state.batchPins || {};
+    // одиночный перенос батча в другой цех — до применения пина запомним артикул и ИСХОДНЫЙ цех
+    // (по текущему расписанию), чтобы потом авто-синхронизировать галочки «Кто шьёт».
+    const singleWsMove = !!(batchKey && ws && !clear && !clearAll && !pins);
+    let moveArticle = null, sourceWs = null;
+    if (singleWsMove) {
+      const before = buildSchedule(state).cycles.find((c) => c.batchKey === batchKey);
+      if (before) { moveArticle = before.articleId; sourceWs = before.workshopId; }
+    }
     if (clearAll) {
       state.batchPins = {};
     } else if (pins && typeof pins === 'object') {
@@ -356,8 +364,34 @@ app.post('/api/pin', requireEdit('gantt'), (req, res) => {
         state.batchPins[batchKey] = cur;
       }
     }
-    const norm = saveState(state);
-    res.json({ ok: true, schedule: buildSchedule(norm), state: norm });
+    let norm = saveState(state);
+    let schedule = buildSchedule(norm);
+    // Авто-синхронизация «Кто шьёт этот артикул» при переносе блока в другой цех.
+    // Зеркалим галочки на РЕАЛЬНОЕ размещение блоков: цех с блоками — отмечен, без блоков — снят.
+    // Трогаем только артикул с ЯВНЫМ списком цехов; «любой цех» ([]) оставляем гибким.
+    // Чтобы перетаскивание ОДНОГО блока не утащило следом другие батчи этого артикула (каскад при
+    // расширении списка цехов), сперва «замораживаем» распределение прочих батчей — цех-пин на их
+    // текущий цех (без даты, дата считается автоматически). Так двигается только тот блок, что тянул
+    // пользователь, а галочки точно отражают, где что шьётся.
+    if (singleWsMove && moveArticle && ws !== sourceWs) {
+      const a = norm.articles.find((x) => x.id === moveArticle);
+      if (a && Array.isArray(a.allowedWorkshops) && a.allowedWorkshops.length) {
+        norm.batchPins = norm.batchPins || {};
+        // 1) заморозить прочие батчи этого артикула на их текущих цехах (не трогаем уже пиненные по цеху)
+        for (const c of schedule.cycles) {
+          if (c.historical || c.articleId !== moveArticle) continue;
+          const ex = norm.batchPins[c.batchKey];
+          if (!ex || !ex.ws) norm.batchPins[c.batchKey] = { ...(ex || {}), ws: c.workshopId };
+        }
+        // 2) зеркалим allowedWorkshops = цеха, где реально есть блоки этого артикула
+        const wsWith = new Set(schedule.cycles.filter((c) => !c.historical && c.articleId === moveArticle).map((c) => c.workshopId));
+        const sewIds = norm.workshops.filter((w) => (w.capacities && w.capacities.sew) > 0).map((w) => w.id);
+        a.allowedWorkshops = (sewIds.length && sewIds.every((id) => wsWith.has(id))) ? [] : [...wsWith]; // все шьющие → [] («любой»)
+        norm = saveState(norm);
+        schedule = buildSchedule(norm);
+      }
+    }
+    res.json({ ok: true, schedule, state: norm });
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.message || e) });
   }
