@@ -1,16 +1,13 @@
-// jitLayout.js — «Экономная раскладка» v3: ДВУХКЛАССОВЫЙ НЕПРЕРЫВНЫЙ ПОТОК.
+// jitLayout.js — «Экономная раскладка» v4: НЕПРЕРЫВНО + МИНИМУМ ЦЕХОВ.
 //
-// Ключевая идея (уточнение собственника): летние сезонные модели ВСЁ РАВНО шьются заранее и лежат
-// (продажи с конца марта/апреля). Значит летние — гибкий «НАПОЛНИТЕЛЬ»: ими затыкаем простои, чтобы
-// поток был непрерывным, лишь бы всё летнее было готово к 15.04. А несезонные (демисезон) — шьём строго
-// JIT (как можно позже, но в срок) ради экономии денег. Тогда:
-//   • несезон задаёт «скелет» по дедлайнам (максимальная экономия, минимум заморозки);
-//   • летнее заполняет промежутки (до/между/после несезонных волн) → производство не встаёт;
-//   • всё летнее — к 15.04; несезон — к своим дедлайнам ВБ (с буфером).
+// Жёсткие требования собственника: (1) производство БЕЗ РАЗРЫВОВ (непрерывный поток), (2) свой цех +
+// максимум 2–3 дополнительных. Экономия — вторична (сначала непрерывность и мало цехов).
 //
-// Механика — БЕЗ пинов дат (v1 так ломал непрерывность). Задаём аддитивный пол `partia.jitStart`
-// (отдельно от ручного earliestStart) + распределение по цехам. Планировщик сам сериализует поток
-// (freeDate ⇒ непрерывность, одна модель за раз, сдвижки этапов). Всё обратимо «Сбросить раскладку».
+// Как гарантируем НЕПРЕРЫВНОСТЬ: НЕ распыляем партии по срокам (это давало разрывы). Собираем работу в
+// немного цехов и даём планировщику паковать поток ВПЕРЁД встык (freeDate ⇒ 0 разрывов, одна модель за
+// раз, сдвижки этапов). Экономия — лишь ЕДИНЫМ сдвигом всего блока цеха вправо (ALAP), насколько
+// позволяет самый срочный дедлайн, БЕЗ появления разрывов. Всё аддитивно (partia.jitStart + ws-пины),
+// ручной earliestStart не трогаем, обратимо «Сбросить раскладку».
 
 import { buildSchedule } from './scheduler.js';
 import { makeCalendar, addDays, diffDays, toISO } from './calendar.js';
@@ -45,10 +42,7 @@ export function layoutMetrics(schedule, summerSet = null) {
   return {
     workshops: wsUsed.size, changeovers, overlaps, idleGaps, idleGapDays,
     lateBatches: late, lateUnits,
-    freezeUnitDays: Math.round(freezeUnitDays),
-    freezeMlnUnitDays: ml(freezeUnitDays),
-    freezeNsMln: ml(freezeNs),   // несезон — экономим
-    freezeSuMln: ml(freezeSu),   // лето — неизбежная заморозка (к 15.04)
+    freezeMlnUnitDays: ml(freezeUnitDays), freezeNsMln: ml(freezeNs), freezeSuMln: ml(freezeSu),
   };
 }
 
@@ -56,139 +50,104 @@ export function computeJitLayout(state, opts = {}) {
   const deliveryBufferDays = num(opts.deliveryBufferDays, 30);
   const nonSummerCushionDays = num(opts.nonSummerCushionDays, 60);
   const summerMMDD = /^\d{2}-\d{2}$/.test(opts.summerFinishMMDD || '') ? opts.summerFinishMMDD : '04-15';
-  const groupByArticle = opts.groupByArticle !== false;
+  const maxExtra = Math.max(0, Math.round(num(opts.maxExtraWorkshops, 3))); // свой + столько доп. цехов (деф. 3 → 4 всего)
   const summerIds = new Set((opts.summerIds && opts.summerIds.length ? opts.summerIds : SUMMER_ARTICLE_IDS).map((x) => String(x).trim()));
 
   const cal = makeCalendar(state.settings.calendar);
-  const wdBetween = (a, b) => { let n = 0, cur = a, g = 0; while (diffDays(cur, b) >= 0 && g++ < 100000) { if (cal.isWorkingDay(cur)) n++; cur = addDays(cur, 1); } return n; };
   const subWD = (iso, n) => { let cur = cal.nextWorkingDay(iso), left = Math.max(0, Math.ceil(n)), g = 0; while (left > 0 && g++ < 100000) { cur = addDays(cur, -1); while (!cal.isWorkingDay(cur)) cur = addDays(cur, -1); left--; } return cur; };
-  const addWD = (iso, n) => cal.addWorkingDays(iso, Math.max(0, Math.ceil(n)));
-  const laterOf = (a, b) => (diffDays(a, b) > 0 ? b : a);
-
-  let seasonStart = null;
-  const psd = state.settings && state.settings.productionStartDate;
-  if (psd && /^\d{4}-\d{2}-\d{2}$/.test(String(psd).slice(0, 10))) seasonStart = cal.nextWorkingDay(String(psd).slice(0, 10));
-  else { for (const s of state.stages || []) { if (!s.productionMonth) continue; const d = cal.nextWorkingDay(`${s.productionMonth}-01`); if (seasonStart === null || d < seasonStart) seasonStart = d; } if (!seasonStart) seasonStart = cal.nextWorkingDay(toISO(new Date())); }
 
   const base = buildSchedule(state);
   const before = layoutMetrics(base, summerIds);
 
-  // КОНЦЕНТРАЦИЯ «одна модель — один цех» (с защитой от опозданий) — сохраняет смешение лето/несезон в цехе.
-  let wsByBatch = Object.fromEntries(base.cycles.filter((c) => !c.historical).map((c) => [c.batchKey, c.workshopId]));
-  if (groupByArticle) {
-    const ownId = (state.workshops.find((w) => w.own) || {}).id;
-    const volByArtWs = {};
-    for (const c of base.cycles) { if (c.historical) continue; ((volByArtWs[c.articleId] = volByArtWs[c.articleId] || {}))[c.workshopId] = (volByArtWs[c.articleId][c.workshopId] || 0) + c.units; }
-    const baseLate = before.lateUnits;
-    for (const art of Object.keys(volByArtWs)) {
-      const cur = volByArtWs[art];
-      if (Object.keys(cur).length <= 1) continue;
-      const dest = Object.keys(cur).sort((a, b) => (cur[b] - cur[a]) || (a === ownId ? -1 : b === ownId ? 1 : 0))[0];
-      const trial = { ...wsByBatch };
-      for (const c of base.cycles) if (!c.historical && c.articleId === art) trial[c.batchKey] = dest;
-      if (layoutMetrics(buildSchedule(withWsPins(state, trial))).lateUnits <= baseLate) wsByBatch = trial;
-    }
-  }
-  const s1 = buildSchedule(withWsPins(state, wsByBatch));
+  // ── 1. РАСПРЕДЕЛЕНИЕ по немногим цехам: свой + топ по мощности пошива (не больше maxExtra доп.) ──
+  const wsAll = (state.workshops || []).slice();
+  const ownId = (wsAll.find((w) => w.own) || wsAll.find((w) => w.role === 'main') || wsAll[0] || {}).id;
+  const sewCap = (w) => (w.capacities && +w.capacities.sew) || 0;
+  const ranked = wsAll.filter((w) => w.id !== ownId).sort((a, b) => sewCap(b) - sewCap(a));
+  const allowedWs = [ownId, ...ranked.slice(0, maxExtra).map((w) => w.id)].filter(Boolean);
+  const allowedSet = new Set(allowedWs);
+  const capById = Object.fromEntries(wsAll.map((w) => [w.id, sewCap(w) || 1]));
 
-  // агрегируем БАТЧИ → ПАРТИИ (планировщик шьёт батчи партии подряд): занятость и «крой→готовность» партии
-  const byPartia = {};
+  // объёмы по артикулам + допустимые цеха артикула (ручная матрица «кто шьёт»)
+  const artVol = {}, artAllow = {};
+  for (const c of base.cycles) { if (c.historical) continue; artVol[c.articleId] = (artVol[c.articleId] || 0) + c.units; }
+  for (const a of state.articles || []) artAllow[a.id] = (Array.isArray(a.allowedWorkshops) && a.allowedWorkshops.length) ? a.allowedWorkshops : null;
+
+  // жадная балансировка: крупные артикулы — в наименее загруженный из допустимых цехов (целиком)
+  const loadWd = Object.fromEntries(allowedWs.map((w) => [w, 0])); // «дни пошива» = объём/мощность
+  const artWs = {};
+  const artsSorted = Object.keys(artVol).sort((a, b) => artVol[b] - artVol[a]);
+  for (const art of artsSorted) {
+    // цеха-кандидаты: пересечение allowedWs и allowedWorkshops артикула; если пусто — allowedWs
+    let cand = allowedWs;
+    if (artAllow[art]) { const inter = allowedWs.filter((w) => artAllow[art].includes(w)); if (inter.length) cand = inter; else cand = artAllow[art].slice(0, 1); }
+    const dest = cand.slice().sort((a, b) => (loadWd[a] || 0) - (loadWd[b] || 0))[0];
+    artWs[art] = dest;
+    loadWd[dest] = (loadWd[dest] || 0) + artVol[art] / (capById[dest] || 1);
+  }
+  const wsByBatch = {};
+  for (const c of base.cycles) { if (c.historical) continue; wsByBatch[c.batchKey] = artWs[c.articleId] || c.workshopId; }
+
+  // ── 2. НЕПРЕРЫВНАЯ упаковка в этих цехах (без jitStart ⇒ 0 разрывов), затем ЕДИНЫЙ сдвиг блока цеха ──
+  const s1 = buildSchedule(withPins(state, wsByBatch, {}));
+
+  // per-цех: самый срочный запас (effSlack) — насколько можно сдвинуть ВЕСЬ блок вправо, не опоздав.
+  // effDeadline: летние — не позже 15.04 года продаж.
+  const effDl = (dl, isSummer) => { if (!dl) return '2099-01-01'; if (!isSummer) return dl; const cap = `${dl.slice(0, 4)}-${summerMMDD}`; return diffDays(cap, dl) < 0 ? cap : dl; };
+  const wsFirstCut = {}, wsMinSlack = {};
   for (const c of s1.cycles) {
     if (c.historical) continue;
-    const k = c.partiaId;
-    const it = byPartia[k] || (byPartia[k] = { partiaId: k, articleId: c.articleId, ws: c.workshopId, isSummer: summerIds.has(String(c.articleId).trim()), dl: (c.logistics && c.logistics.deadline) || '', cut: c.ops.cut.start, sewEnd: c.ops.sew.end, otkEnd: c.ops.otk.end });
-    if (c.ops.cut.start < it.cut) it.cut = c.ops.cut.start;
-    if (c.ops.sew.end > it.sewEnd) it.sewEnd = c.ops.sew.end;
-    if (c.ops.otk.end > it.otkEnd) it.otkEnd = c.ops.otk.end;
+    const w = c.workshopId;
+    if (!wsFirstCut[w] || c.ops.cut.start < wsFirstCut[w]) wsFirstCut[w] = c.ops.cut.start;
+    const isS = summerIds.has(String(c.articleId).trim());
+    const dl = (c.logistics && c.logistics.deadline) || '';
+    const buf = isS ? deliveryBufferDays : Math.max(deliveryBufferDays, nonSummerCushionDays);
+    // запас = насколько поздно можно прийти на ВБ: effDeadline − буфер − текущий приход
+    const target = subWD(effDl(dl, isS), 0); // effDeadline как дата
+    const slack = diffDays(c.logistics.wbArrival, target) - buf; // >0 — есть куда сдвигать
+    if (wsMinSlack[w] === undefined || slack < wsMinSlack[w]) wsMinSlack[w] = slack;
   }
-  const partias = Object.values(byPartia).map((it) => {
-    const sewSpanWD = Math.max(1, wdBetween(it.cut, it.sewEnd) - 1);   // занятость цеха партией
-    const otkSpanWD = Math.max(1, wdBetween(it.cut, it.otkEnd) - 1);   // крой→готовность
-    // «готов к» (otk): несезон = дедлайн − подушка; лето = min(дедлайн, 15.04 года) − буфер доставки
-    let readyBy;
-    if (it.dl) {
-      if (it.isSummer) { const cap = `${it.dl.slice(0, 4)}-${summerMMDD}`; const base2 = diffDays(cap, it.dl) < 0 ? cap : it.dl; readyBy = addDays(base2, -deliveryBufferDays); }
-      else readyBy = addDays(it.dl, -Math.max(deliveryBufferDays, nonSummerCushionDays));
-    } else readyBy = '2099-01-01';
-    let latestCut = subWD(cal.nextWorkingDay(readyBy), otkSpanWD);
-    if (diffDays(latestCut, seasonStart) > 0) latestCut = seasonStart; // пол: не раньше старта сезона
-    return { ...it, sewSpanWD, otkSpanWD, readyBy, latestCut };
-  });
-
-  // ── двухклассовый планировщик по каждому цеху → jitStart на партию ──
+  // единый сдвиг блока цеха = min запас (в раб.днях), не меньше 0
   const jitStarts = {};
-  const wsGroups = {};
-  for (const p of partias) (wsGroups[p.ws] = wsGroups[p.ws] || []).push(p);
-  for (const ws in wsGroups) {
-    const grp = wsGroups[ws];
-    const ns = grp.filter((p) => !p.isSummer);
-    const su = grp.filter((p) => p.isSummer);
-    // ALAP несезона (обратный ход): самый поздний старт, не срывая срок и не налезая на следующий
-    ns.sort((a, b) => (a.latestCut < b.latestCut ? -1 : a.latestCut > b.latestCut ? 1 : 0));
-    let nextStart = null;
-    for (let i = ns.length - 1; i >= 0; i--) {
-      const p = ns[i];
-      let latest = p.latestCut;
-      if (nextStart) { const byNext = subWD(nextStart, p.sewSpanWD); if (diffDays(byNext, latest) > 0) latest = byNext; }
-      if (diffDays(latest, seasonStart) > 0) latest = seasonStart;
-      p.startAt = latest; nextStart = latest;
-    }
-    // ЛЕТО — наполнитель. Форвард-симуляция: несезон стартует не раньше своего startAt (JIT),
-    // промежутки затыкаем летом (к 15.04). Порядок лета — по «tightest» latestCut.
-    const nsQ = ns.slice().sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : 0));
-    const suQ = su.slice().sort((a, b) => (a.latestCut < b.latestCut ? -1 : a.latestCut > b.latestCut ? 1 : 0));
-    const nsDone = new Set(), suDone = new Set();
-    let T = seasonStart, guard = 0;
-    const place = (p) => { jitStarts[p.partiaId] = laterOf(seasonStart, T); T = addWD(T, p.sewSpanWD); };
-    while ((nsDone.size < nsQ.length || suDone.size < suQ.length) && guard++ < grp.length + 5) {
-      // 1) есть ли «созревший» несезон (T достиг его позднего старта startAt)? берём самый срочный
-      const dueNs = nsQ.filter((p) => !nsDone.has(p.partiaId) && diffDays(p.startAt, T) >= 0); // T ≥ startAt
-      if (dueNs.length) { const p = dueNs[0]; place(p); nsDone.add(p.partiaId); continue; }
-      const nextNs = nsQ.find((p) => !nsDone.has(p.partiaId));
-      const nextNsStart = nextNs ? nextNs.startAt : null;
-      const suLeft = suQ.filter((p) => !suDone.has(p.partiaId));
-      if (suLeft.length) {
-        if (nextNsStart === null) { const p = suLeft[0]; place(p); suDone.add(p.partiaId); continue; } // несезона нет — просто шьём лето
-        // подобрать лето, которое ВЛЕЗАЕТ до старта следующего несезона (не задержит его) — берём максимально длинное
-        const fits = suLeft.filter((p) => diffDays(addWD(T, p.sewSpanWD), nextNsStart) <= 0).sort((a, b) => b.sewSpanWD - a.sewSpanWD);
-        if (fits.length) { const p = fits[0]; place(p); suDone.add(p.partiaId); continue; }
-        // ничего не влезло — прыжок к следующему несезону (пауза), если она есть; иначе шьём лето подряд
-        if (diffDays(T, nextNsStart) > 0) { T = nextNsStart; continue; }
-        const p = suLeft[0]; place(p); suDone.add(p.partiaId); continue;
-      }
-      // только несезон, не созрел — прыжок к нему (пауза)
-      if (nextNsStart && diffDays(T, nextNsStart) > 0) { T = nextNsStart; continue; }
-      break;
-    }
-    // подстраховка: если кто-то не размещён (guard) — без пола (ранний старт)
-    for (const p of grp) if (jitStarts[p.partiaId] === undefined) jitStarts[p.partiaId] = '';
+  for (const w of Object.keys(wsFirstCut)) {
+    const shift = Math.max(0, Math.floor(wsMinSlack[w] || 0));
+    if (shift <= 0) continue;
+    const start = cal.addWorkingDays(wsFirstCut[w], shift); // новый старт блока (позже), поток пакуется встык от него
+    // ставим один и тот же пол всем партиям цеха: гейтит только первую, остальные пакуются freeDate (без разрывов)
+    for (const c of s1.cycles) if (!c.historical && c.workshopId === w) jitStarts[c.partiaId] = start;
   }
 
-  // ЗАЩИТА ОТ ОПОЗДАНИЙ (приоритет #1): снимаем пол у партий, у которых он породил новое опоздание.
-  const baseLatePart = new Set(s1.cycles.filter((c) => !c.historical && c.logistics.lateDays > 0).map((c) => c.partiaId));
-  const items = s1.cycles.filter((c) => !c.historical).map((c) => ({ batchKey: c.batchKey, ws: c.workshopId }));
+  // ── 3. применяем; защита: если сдвиг дал разрыв ИЛИ новое опоздание в цехе — убираем сдвиг этого цеха ──
+  const items = s1.cycles.filter((c) => !c.historical).map((c) => ({ batchKey: c.batchKey, ws: c.workshopId, partiaId: c.partiaId }));
+  const baseLate = new Set(s1.cycles.filter((c) => !c.historical && c.logistics.lateDays > 0).map((c) => c.partiaId));
   let afterSch, guard = 0;
-  while (guard++ < 60) {
+  while (guard++ < 30) {
     afterSch = buildSchedule(withJit(state, jitStarts, items));
-    const nowLate = afterSch.cycles.filter((c) => !c.historical && c.logistics.lateDays > 0 && !baseLatePart.has(c.partiaId));
-    const offenders = [...new Set(nowLate.map((c) => c.partiaId))].filter((pid) => jitStarts[pid]);
-    if (!offenders.length) break;
-    for (const pid of offenders) jitStarts[pid] = '';
+    const bad = new Set();
+    const byWs = {};
+    for (const c of afterSch.cycles) { if (c.historical) continue; (byWs[c.workshopId] = byWs[c.workshopId] || []).push(c); }
+    for (const w in byWs) {
+      const arr = byWs[w].sort((a, b) => (a.ops.cut.start < b.ops.cut.start ? -1 : 1));
+      for (let i = 1; i < arr.length; i++) if (diffDays(arr[i - 1].ops.sew.end, arr[i].ops.cut.start) > 1) bad.add(w); // разрыв в цехе
+    }
+    for (const c of afterSch.cycles) if (!c.historical && c.logistics.lateDays > 0 && !baseLate.has(c.partiaId)) bad.add(c.workshopId); // новое опоздание
+    if (!bad.size) break;
+    for (const c of s1.cycles) if (!c.historical && bad.has(c.workshopId)) delete jitStarts[c.partiaId]; // снимаем сдвиг проблемного цеха
   }
   const after = layoutMetrics(afterSch, summerIds);
 
   const wsPins = {};
   for (const it of items) wsPins[it.batchKey] = { ws: it.ws };
-  // чистим пустые полы
   for (const k of Object.keys(jitStarts)) if (!jitStarts[k]) delete jitStarts[k];
 
-  return { jitStarts, wsPins, before, after };
+  return { jitStarts, wsPins, before, after, allowedWorkshops: allowedWs.length };
 }
 
-function withWsPins(state, wsByBatch) {
+function withPins(state, wsByBatch, jitStarts) {
+  const partias = (state.partias || []).map((p) => (jitStarts[p.id] ? { ...p, jitStart: jitStarts[p.id] } : { ...p, jitStart: '' }));
   const bp = { ...(state.batchPins || {}) };
   for (const k in wsByBatch) bp[k] = { ...(bp[k] || {}), ws: wsByBatch[k] };
-  return { ...state, batchPins: bp };
+  return { ...state, partias, batchPins: bp };
 }
 function withJit(state, jitStarts, items) {
   const partias = (state.partias || []).map((p) => (jitStarts[p.id] ? { ...p, jitStart: jitStarts[p.id] } : { ...p, jitStart: '' }));

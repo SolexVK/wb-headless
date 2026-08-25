@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'jit-twoclass-2026-08-26';
+const APP_BUILD = 'jit-fewshops-2026-08-26';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2467,15 +2467,14 @@ async function compactGantt() {
 }
 
 // «Экономная раскладка (JIT)» — окно предпросмотра «до/после», затем применение.
-const JIT_DEFAULTS = { deliveryBufferDays: 30, nonSummerCushionDays: 60, summerFinishMMDD: '04-15', waveGapDays: 45, groupByArticle: true };
+const JIT_DEFAULTS = { deliveryBufferDays: 30, nonSummerCushionDays: 60, summerFinishMMDD: '04-15', maxExtraWorkshops: 3 };
 function jitOpts() {
   const g = (id) => document.getElementById(id);
   return {
     deliveryBufferDays: +(g('jit-delivery')?.value) || JIT_DEFAULTS.deliveryBufferDays,
     nonSummerCushionDays: +(g('jit-cushion')?.value) || JIT_DEFAULTS.nonSummerCushionDays,
-    waveGapDays: +(g('jit-wave')?.value) || JIT_DEFAULTS.waveGapDays,
+    maxExtraWorkshops: g('jit-maxws') ? Math.max(0, +g('jit-maxws').value || 0) : JIT_DEFAULTS.maxExtraWorkshops,
     summerFinishMMDD: JIT_DEFAULTS.summerFinishMMDD,
-    groupByArticle: g('jit-group') ? g('jit-group').checked : true,
   };
 }
 async function openJitDialog() {
@@ -2485,12 +2484,11 @@ async function openJitDialog() {
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.innerHTML = `<div style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;max-width:min(680px,96vw);width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:20px">
     <h2 style="margin:0 0 6px">💰 Экономная раскладка</h2>
-    <div class="mini" style="color:var(--muted);margin-bottom:14px">Несезонные (демисезон) шьём строго JIT — как можно позже, но в срок (максимум экономии). Летние — «наполнитель»: ими затыкаем простои, чтобы поток был непрерывным (они всё равно лежат до продаж с апреля), крайний срок — 15.04. Одна модель — один цех. Производство не встаёт, одна модель за раз, сдвижки этапов соблюдены. Обратимо «↺ Сбросить раскладку».</div>
+    <div class="mini" style="color:var(--muted);margin-bottom:14px">Собирает работу в свой цех + немного дополнительных и пакует НЕПРЕРЫВНЫМ потоком (без разрывов, одна модель за раз, сдвижки этапов соблюдены). Весь блок цеха сдвигается позже, насколько позволяет самый срочный дедлайн (экономия без разрывов). Летние — к 15.04. Обратимо «↺ Сбросить раскладку». <b>Если 4 цеха не успевают к срокам — увидишь опоздания ниже; тогда добавь цех или ослабь буфер.</b></div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">
-      <label title="Товар готов на нашем складе за столько дней до дедлайна ВБ (доставка + форс-мажор).">Буфер доставки, дн: <input type="number" id="jit-delivery" value="${JIT_DEFAULTS.deliveryBufferDays}" min="0" max="120" style="width:60px"></label>
-      <label title="Не-летние финишируют минимум за столько дней до дедлайна (подушка на продажи/сбои).">Подушка не-летних, дн: <input type="number" id="jit-cushion" value="${JIT_DEFAULTS.nonSummerCushionDays}" min="0" max="240" style="width:60px"></label>
-      <label title="Порог паузы: зазор меньше этого — «склеиваем» в один непрерывный блок; больше — допускаем сезонную паузу. Больше значение = меньше пауз (но чуть больше заморозки).">Мин. пауза, дн: <input type="number" id="jit-wave" value="${JIT_DEFAULTS.waveGapDays}" min="0" max="365" style="width:60px"></label>
-      <label title="Собирать каждую модель в один цех (меньше перестроек, меньше задействованных цехов). Отключается только если модель не помещается в один цех к сроку."><input type="checkbox" id="jit-group" checked> Одна модель — один цех</label>
+      <label title="Сколько ДОПОЛНИТЕЛЬНЫХ цехов (кроме своего) максимум задействовать. 2 = свой+2 (3 всего), 3 = свой+3 (4 всего).">Доп. цехов (кроме своего): <input type="number" id="jit-maxws" value="${JIT_DEFAULTS.maxExtraWorkshops}" min="0" max="6" style="width:56px"></label>
+      <label title="Товар готов на нашем складе за столько дней до дедлайна ВБ (доставка + форс-мажор).">Буфер доставки, дн: <input type="number" id="jit-delivery" value="${JIT_DEFAULTS.deliveryBufferDays}" min="0" max="120" style="width:56px"></label>
+      <label title="Не-летние финишируют минимум за столько дней до дедлайна (подушка на продажи/сбои).">Подушка не-летних, дн: <input type="number" id="jit-cushion" value="${JIT_DEFAULTS.nonSummerCushionDays}" min="0" max="240" style="width:56px"></label>
     </div>
     <div id="jit-preview" style="margin:10px 0 16px">Считаю предпросмотр…</div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -2523,7 +2521,7 @@ function jitMetricRow(before, after) {
       ${row('🏭 Задействовано цехов', before.workshops, after.workshops, '', true)}
       ${row('🔧 Перестроек (смен модели)', before.changeovers, after.changeovers, '', true)}
       ${row('⛔ Наложений (параллель)', before.overlaps, after.overlaps, '', true)}
-      ${row('⏸ Пауз между блоками', before.idleGaps, after.idleGaps, '', true)}
+      ${row('🚧 РАЗРЫВОВ в производстве', before.idleGaps, after.idleGaps, '', true)}
       ${row('⏰ Опоздания (шт)', before.lateUnits, after.lateUnits, '', true)}
     </tbody></table>`;
 }
@@ -2534,8 +2532,8 @@ async function runJitPreview() {
   try {
     const r = await api('/api/jit-layout', { method: 'POST', body: JSON.stringify({ apply: false, opts: jitOpts() }) });
     box.innerHTML = jitMetricRow(r.before, r.after);
-    const worseLate = r.after.lateUnits > r.before.lateUnits;
-    if (worseLate) box.innerHTML += `<div class="mini" style="color:var(--danger);margin-top:8px">⚠ Внимание: выросли опоздания — увеличь буфер/подушку или отключи «минимум цехов».</div>`;
+    if (r.after.idleGaps > 0) box.innerHTML += `<div class="mini" style="color:var(--danger);margin-top:8px">⚠ Остались разрывы (${r.after.idleGaps}) — сообщи мне, докрутим.</div>`;
+    if (r.after.lateUnits > r.before.lateUnits) box.innerHTML += `<div class="mini" style="color:var(--danger);margin-top:8px">⚠ Выросли опоздания (${(r.after.lateUnits - r.before.lateUnits).toLocaleString('ru')} шт): в столько цехов объём не помещается к срокам (особенно летние к 15.04). Добавь ещё цех («Доп. цехов») или ослабь буфер/подушку.</div>`;
     if (applyBtn) applyBtn.disabled = false;
   } catch (e) { box.innerHTML = `<span style="color:var(--danger)">Ошибка: ${e.message}</span>`; }
 }
