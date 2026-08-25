@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'jit-snapshot-2026-08-25';
+const APP_BUILD = 'jit-engine-2026-08-25';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2463,6 +2463,86 @@ async function compactGantt() {
     state = r.state; schedule = r.schedule;
     renderCurrent(); setStatus();
     toast('Уплотнено: блоки поставлены встык без лишних разрывов');
+  } catch (e) { toast('Ошибка: ' + e.message, true); }
+}
+
+// «Экономная раскладка (JIT)» — окно предпросмотра «до/после», затем применение.
+const JIT_DEFAULTS = { deliveryBufferDays: 30, nonSummerCushionDays: 60, summerFinishMMDD: '04-15', minimizeWorkshops: true, groupByArticle: true };
+function jitOpts() {
+  const g = (id) => document.getElementById(id);
+  return {
+    deliveryBufferDays: +(g('jit-delivery')?.value) || JIT_DEFAULTS.deliveryBufferDays,
+    nonSummerCushionDays: +(g('jit-cushion')?.value) || JIT_DEFAULTS.nonSummerCushionDays,
+    summerFinishMMDD: JIT_DEFAULTS.summerFinishMMDD,
+    minimizeWorkshops: g('jit-minws') ? g('jit-minws').checked : true,
+    groupByArticle: JIT_DEFAULTS.groupByArticle,
+  };
+}
+async function openJitDialog() {
+  document.querySelector('.g-modal-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'g-modal-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML = `<div style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;max-width:min(680px,96vw);width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:20px">
+    <h2 style="margin:0 0 6px">💰 Экономная раскладка (JIT)</h2>
+    <div class="mini" style="color:var(--muted);margin-bottom:14px">Пересобирает даты старта пошива так, чтобы товар был готов точно к сроку (дедлайн ВБ − буфер), а не лежал готовым месяцами. Сроки не срываются, летние — к 15.04. Раскладка пишется как ручные закрепления — обратимо кнопкой «Сбросить раскладку».</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">
+      <label title="Товар должен быть готов на нашем складе за столько дней до дедлайна ВБ (доставка + форс-мажор).">Буфер доставки, дн: <input type="number" id="jit-delivery" value="${JIT_DEFAULTS.deliveryBufferDays}" min="0" max="120" style="width:64px"></label>
+      <label title="Не-летние финишируют минимум за столько дней до дедлайна (подушка на продажи/сбои).">Подушка не-летних, дн: <input type="number" id="jit-cushion" value="${JIT_DEFAULTS.nonSummerCushionDays}" min="0" max="240" style="width:64px"></label>
+      <label title="Свести к минимуму число задействованных цехов (кроме своего), не жертвуя сроками и заморозкой."><input type="checkbox" id="jit-minws" checked> Минимум цехов</label>
+    </div>
+    <div id="jit-preview" style="margin:10px 0 16px">Считаю предпросмотр…</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button id="jit-cancel" class="btn btn-subtle">Отмена</button>
+      <button id="jit-recalc" class="btn">↻ Пересчитать предпросмотр</button>
+      <button id="jit-apply" class="btn btn-primary" disabled>Применить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
+  document.getElementById('jit-cancel').addEventListener('click', close);
+  document.getElementById('jit-recalc').addEventListener('click', () => runJitPreview());
+  document.getElementById('jit-apply').addEventListener('click', () => applyJit(close));
+  runJitPreview();
+}
+function jitMetricRow(before, after) {
+  const fmt = (n) => (n || 0).toLocaleString('ru');
+  const delta = (b, a, unit, goodDown = true) => {
+    const d = a - b; const good = goodDown ? d <= 0 : d >= 0;
+    const arrow = d === 0 ? '=' : (d < 0 ? '▼' : '▲');
+    return `<span style="color:${good ? 'var(--accent-2)' : 'var(--danger)'}">${arrow} ${fmt(Math.abs(d))}${unit}</span>`;
+  };
+  const row = (label, b, a, unit, goodDown) => `<tr><td style="padding:4px 10px">${label}</td><td class="num" style="padding:4px 10px">${fmt(b)}${unit}</td><td class="num" style="padding:4px 10px">${fmt(a)}${unit}</td><td class="num" style="padding:4px 10px">${delta(b, a, unit, goodDown)}</td></tr>`;
+  return `<table style="width:100%;border-collapse:collapse">
+    <thead><tr style="border-bottom:1px solid var(--line)"><th style="text-align:left;padding:4px 10px">Показатель</th><th style="text-align:right;padding:4px 10px">Сейчас</th><th style="text-align:right;padding:4px 10px">После</th><th style="text-align:right;padding:4px 10px">Δ</th></tr></thead>
+    <tbody>
+      ${row('💸 Заморозка (млн шт·дней)', before.freezeMlnUnitDays, after.freezeMlnUnitDays, '', true)}
+      ${row('🏭 Задействовано цехов', before.workshops, after.workshops, '', true)}
+      ${row('🔧 Перестроек (смен модели)', before.changeovers, after.changeovers, '', true)}
+      ${row('⏰ Опоздания (партий)', before.lateBatches, after.lateBatches, '', true)}
+      ${row('⏰ Опоздания (шт)', before.lateUnits, after.lateUnits, '', true)}
+    </tbody></table>`;
+}
+async function runJitPreview() {
+  const box = document.getElementById('jit-preview'); const applyBtn = document.getElementById('jit-apply');
+  if (!box) return;
+  box.innerHTML = 'Считаю предпросмотр…'; if (applyBtn) applyBtn.disabled = true;
+  try {
+    const r = await api('/api/jit-layout', { method: 'POST', body: JSON.stringify({ apply: false, opts: jitOpts() }) });
+    box.innerHTML = jitMetricRow(r.before, r.after);
+    const worseLate = r.after.lateUnits > r.before.lateUnits;
+    if (worseLate) box.innerHTML += `<div class="mini" style="color:var(--danger);margin-top:8px">⚠ Внимание: выросли опоздания — увеличь буфер/подушку или отключи «минимум цехов».</div>`;
+    if (applyBtn) applyBtn.disabled = false;
+  } catch (e) { box.innerHTML = `<span style="color:var(--danger)">Ошибка: ${e.message}</span>`; }
+}
+async function applyJit(close) {
+  try {
+    const r = await api('/api/jit-layout', { method: 'POST', body: JSON.stringify({ apply: true, opts: jitOpts() }) });
+    state = r.state; schedule = r.schedule;
+    if (close) close();
+    renderCurrent(); setStatus();
+    toast(`Экономная раскладка применена: заморозка ${r.before.freezeMlnUnitDays}→${r.after.freezeMlnUnitDays} млн шт·дн, цехов ${r.before.workshops}→${r.after.workshops}.`);
   } catch (e) { toast('Ошибка: ' + e.message, true); }
 }
 
@@ -6400,6 +6480,7 @@ async function init() {
   document.getElementById('settings-close')?.addEventListener('click', () => { document.getElementById('settings-modal').hidden = true; });
   document.getElementById('settings-modal')?.addEventListener('click', (e) => { if (e.target.id === 'settings-modal') e.target.hidden = true; });
   document.getElementById('zoom').addEventListener('input', (e) => { pxPerDay = +e.target.value; if (activeTab === 'gantt') renderCurrent(); });
+  document.getElementById('btn-jit')?.addEventListener('click', () => openJitDialog());
   document.getElementById('btn-compact')?.addEventListener('click', () => compactGantt());
   document.getElementById('btn-snapshot')?.addEventListener('click', () => exportLayoutSnapshotXlsx());
   document.getElementById('btn-clear-pins')?.addEventListener('click', () => clearAllPins());

@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { defaultState, normalizeState, PARTIA_ROLES } from './lib/model.js';
 import { buildSchedule } from './lib/scheduler.js';
+import { computeJitLayout } from './lib/jitLayout.js';
 import { findRescues } from './lib/rescue.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates, getSubjectPhrases, budgetStatus } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse, buildWbSupply, listVendorPrefixes } from './lib/wb/wbApi.js';
@@ -22,7 +23,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'jit-snapshot-2026-08-25';
+const BACKEND_BUILD = 'jit-engine-2026-08-25';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -394,6 +395,25 @@ app.post('/api/pin', requireEdit('gantt'), (req, res) => {
     res.json({ ok: true, schedule, state: norm });
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+// «Экономная раскладка (JIT)»: пересобрать даты старта пошива под оборачиваемость денег.
+//  - preview (apply≠true): вернуть метрики «до/после» и пины БЕЗ сохранения (для окна подтверждения);
+//  - apply=true: наложить пины (слить в state.batchPins), пересчитать, вернуть schedule+state.
+// opts: { deliveryBufferDays, nonSummerCushionDays, summerFinishMMDD, minimizeWorkshops, groupByArticle, summerIds }
+app.post('/api/jit-layout', requireEdit('gantt'), (req, res) => {
+  try {
+    const { apply, opts } = req.body || {};
+    const state = loadState();
+    const { pins, before, after } = computeJitLayout(state, opts || {});
+    if (!apply) { return res.json({ ok: true, preview: true, before, after, pinsCount: Object.keys(pins).length }); }
+    state.batchPins = state.batchPins || {};
+    for (const k in pins) state.batchPins[k] = { ...(state.batchPins[k] || {}), ws: pins[k].ws, cut: pins[k].cut };
+    const norm = saveState(state);
+    res.json({ ok: true, applied: true, before, after, schedule: buildSchedule(norm), state: norm });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e.stack || e.message || e) });
   }
 });
 
