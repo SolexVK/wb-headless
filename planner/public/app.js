@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'season-rank-zip-daily-2026-08-25';
+const APP_BUILD = 'partia-earliest-2026-08-25';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -1135,6 +1135,7 @@ function renderMatrix() {
           </select>
         </label>
         <label>Срок WB: <input type="date" id="mx-deadline" value="${p.deadline || ''}"></label>
+        <label title="Не начинать пошив этой партии раньше указанной даты. Действует вместе с «Пошив не раньше» артикула — берётся более поздняя дата. Пусто = без ограничения.">Пошив не раньше: <input type="date" id="mx-earliest" value="${p.earliestStart || ''}"></label>
         <button id="mx-save" class="btn btn-primary">Сохранить план</button>
         <button id="mx-del-partia" class="btn btn-danger">Удалить партию</button>
         <button id="mx-split-partia" class="btn btn-subtle" title="Разрезать эту партию надвое вручную (по правилам настила), без учёта мощностей">✂ разрезать вручную</button>
@@ -1206,6 +1207,7 @@ function renderMatrix() {
   document.getElementById('mx-add-partia').addEventListener('click', () => addPartia(a));
   document.getElementById('mx-ws').addEventListener('change', (e) => { p.workshopId = e.target.value; recomputePartiaNumbers(); dirty = true; renderMatrix(); });
   document.getElementById('mx-deadline').addEventListener('change', (e) => { p.deadline = e.target.value || ''; recomputePartiaNumbers(); dirty = true; renderMatrix(); });
+  document.getElementById('mx-earliest')?.addEventListener('change', (e) => { p.earliestStart = e.target.value || ''; dirty = true; renderMatrix(); });
   document.getElementById('mx-del-partia').addEventListener('click', () => {
     if (!confirm(`Удалить Партию ${p.no}?`)) return;
     state.partias = state.partias.filter((x) => x.id !== p.id);
