@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'jit-fewshops-2026-08-26';
+const APP_BUILD = 'jit-measure-2026-08-26';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2474,6 +2474,7 @@ function jitOpts() {
     deliveryBufferDays: +(g('jit-delivery')?.value) || JIT_DEFAULTS.deliveryBufferDays,
     nonSummerCushionDays: +(g('jit-cushion')?.value) || JIT_DEFAULTS.nonSummerCushionDays,
     maxExtraWorkshops: g('jit-maxws') ? Math.max(0, +g('jit-maxws').value || 0) : JIT_DEFAULTS.maxExtraWorkshops,
+    ignoreAllowedMatrix: g('jit-ignore-allow') ? g('jit-ignore-allow').checked : false,
     summerFinishMMDD: JIT_DEFAULTS.summerFinishMMDD,
   };
 }
@@ -2489,6 +2490,7 @@ async function openJitDialog() {
       <label title="Сколько ДОПОЛНИТЕЛЬНЫХ цехов (кроме своего) максимум задействовать. 2 = свой+2 (3 всего), 3 = свой+3 (4 всего).">Доп. цехов (кроме своего): <input type="number" id="jit-maxws" value="${JIT_DEFAULTS.maxExtraWorkshops}" min="0" max="6" style="width:56px"></label>
       <label title="Товар готов на нашем складе за столько дней до дедлайна ВБ (доставка + форс-мажор).">Буфер доставки, дн: <input type="number" id="jit-delivery" value="${JIT_DEFAULTS.deliveryBufferDays}" min="0" max="120" style="width:56px"></label>
       <label title="Не-летние финишируют минимум за столько дней до дедлайна (подушка на продажи/сбои).">Подушка не-летних, дн: <input type="number" id="jit-cushion" value="${JIT_DEFAULTS.nonSummerCushionDays}" min="0" max="240" style="width:56px"></label>
+      <label title="Сводить в минимум цехов ДАЖЕ вопреки матрице «кто шьёт». Включи, если цехов остаётся больше желаемого — модели переедут в целевые цеха, игнорируя ограничения матрицы."><input type="checkbox" id="jit-ignore-allow"> Ужать вопреки матрице «кто шьёт»</label>
     </div>
     <div id="jit-preview" style="margin:10px 0 16px">Считаю предпросмотр…</div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -2513,9 +2515,16 @@ function jitMetricRow(before, after) {
     return `<span style="color:${good ? 'var(--accent-2)' : 'var(--danger)'}">${arrow} ${fmt(Math.abs(d))}${unit}</span>`;
   };
   const row = (label, b, a, unit, goodDown) => `<tr><td style="padding:4px 10px">${label}</td><td class="num" style="padding:4px 10px">${fmt(b)}${unit}</td><td class="num" style="padding:4px 10px">${fmt(a)}${unit}</td><td class="num" style="padding:4px 10px">${delta(b, a, unit, goodDown)}</td></tr>`;
+  // «изделий» — контроль сохранности: равно = зелёное «= 0», любое отличие = красное (потеря/добавление!)
+  const eqRow = (label, b, a) => { const d = a - b; const col = d === 0 ? 'var(--accent-2)' : 'var(--danger)'; return `<tr><td style="padding:4px 10px">${label}</td><td class="num" style="padding:4px 10px">${fmt(b)}</td><td class="num" style="padding:4px 10px">${fmt(a)}</td><td class="num" style="padding:4px 10px;color:${col}">${d === 0 ? '= 0 ✅' : (d > 0 ? '▲ ' : '▼ ') + fmt(Math.abs(d))}</td></tr>`; };
+  // «дни производства» — информативно (меньше = быстрее шьётся в мощном цехе; изделия при этом те же)
+  const infoRow = (label, b, a) => { const d = a - b; return `<tr><td style="padding:4px 10px">${label}</td><td class="num" style="padding:4px 10px">${fmt(b)}</td><td class="num" style="padding:4px 10px">${fmt(a)}</td><td class="num" style="padding:4px 10px;color:var(--muted)">${d === 0 ? '=' : (d > 0 ? '▲ ' : '▼ ') + fmt(Math.abs(d))}</td></tr>`; };
   return `<table style="width:100%;border-collapse:collapse">
     <thead><tr style="border-bottom:1px solid var(--line)"><th style="text-align:left;padding:4px 10px">Показатель</th><th style="text-align:right;padding:4px 10px">Сейчас</th><th style="text-align:right;padding:4px 10px">После</th><th style="text-align:right;padding:4px 10px">Δ</th></tr></thead>
     <tbody>
+      ${eqRow('📦 ИЗДЕЛИЙ всего, шт (не меняется!)', before.totalUnits ?? 0, after.totalUnits ?? 0)}
+      ${infoRow('📅 Дней производства (Σ длин полос)', before.prodDays ?? 0, after.prodDays ?? 0)}
+      <tr><td colspan="4" style="border-top:1px solid var(--line);height:2px"></td></tr>
       ${row('💸 Заморозка НЕСЕЗОН (экономим), млн шт·дн', before.freezeNsMln ?? before.freezeMlnUnitDays, after.freezeNsMln ?? after.freezeMlnUnitDays, '', true)}
       ${row('🌞 Заморозка ЛЕТО (неизбежна, к 15.04)', before.freezeSuMln ?? 0, after.freezeSuMln ?? 0, '', true)}
       ${row('🏭 Задействовано цехов', before.workshops, after.workshops, '', true)}

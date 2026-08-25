@@ -30,7 +30,10 @@ export function layoutMetrics(schedule, summerSet = null) {
     }
   }
   let late = 0, lateUnits = 0, freezeUnitDays = 0, freezeNs = 0, freezeSu = 0;
+  let totalUnits = 0, prodDays = 0; // КОНТРОЛЬ: суммарные изделия (должны сохраняться) и дни производства (Σ длин полос)
   for (const c of cy) {
+    totalUnits += c.units;
+    prodDays += Math.max(0, diffDays(c.ops.cut.start, c.ops.otk.end)); // длина полосы (крой→готовность) в календ. днях
     const dl = c.logistics && c.logistics.deadline;
     if (dl && c.logistics.wbArrival) {
       const slack = diffDays(c.logistics.wbArrival, dl);
@@ -41,7 +44,7 @@ export function layoutMetrics(schedule, summerSet = null) {
   const ml = (x) => Math.round(x / 1e5) / 10;
   return {
     workshops: wsUsed.size, changeovers, overlaps, idleGaps, idleGapDays,
-    lateBatches: late, lateUnits,
+    lateBatches: late, lateUnits, totalUnits, prodDays, cycles: cy.length,
     freezeMlnUnitDays: ml(freezeUnitDays), freezeNsMln: ml(freezeNs), freezeSuMln: ml(freezeSu),
   };
 }
@@ -51,6 +54,7 @@ export function computeJitLayout(state, opts = {}) {
   const nonSummerCushionDays = num(opts.nonSummerCushionDays, 60);
   const summerMMDD = /^\d{2}-\d{2}$/.test(opts.summerFinishMMDD || '') ? opts.summerFinishMMDD : '04-15';
   const maxExtra = Math.max(0, Math.round(num(opts.maxExtraWorkshops, 3))); // свой + столько доп. цехов (деф. 3 → 4 всего)
+  const ignoreAllowedMatrix = !!opts.ignoreAllowedMatrix; // сводить в минимум цехов ДАЖЕ вопреки матрице «кто шьёт»
   const summerIds = new Set((opts.summerIds && opts.summerIds.length ? opts.summerIds : SUMMER_ARTICLE_IDS).map((x) => String(x).trim()));
 
   const cal = makeCalendar(state.settings.calendar);
@@ -78,9 +82,10 @@ export function computeJitLayout(state, opts = {}) {
   const artWs = {};
   const artsSorted = Object.keys(artVol).sort((a, b) => artVol[b] - artVol[a]);
   for (const art of artsSorted) {
-    // цеха-кандидаты: пересечение allowedWs и allowedWorkshops артикула; если пусто — allowedWs
+    // цеха-кандидаты: пересечение allowedWs и allowedWorkshops артикула; если пусто — allowedWs.
+    // При ignoreAllowedMatrix матрицу «кто шьёт» игнорируем и берём целевые цеха (для ужатия до N).
     let cand = allowedWs;
-    if (artAllow[art]) { const inter = allowedWs.filter((w) => artAllow[art].includes(w)); if (inter.length) cand = inter; else cand = artAllow[art].slice(0, 1); }
+    if (!ignoreAllowedMatrix && artAllow[art]) { const inter = allowedWs.filter((w) => artAllow[art].includes(w)); if (inter.length) cand = inter; else cand = artAllow[art].slice(0, 1); }
     const dest = cand.slice().sort((a, b) => (loadWd[a] || 0) - (loadWd[b] || 0))[0];
     artWs[art] = dest;
     loadWd[dest] = (loadWd[dest] || 0) + artVol[art] / (capById[dest] || 1);
