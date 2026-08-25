@@ -183,7 +183,8 @@ export function defaultState() {
     suppliers: seedSuppliers(),
     articles: seedArticles(),
     partias: [], // партии (план-заявки/производство) — источник истины по количествам
-    overrides: {}, // ручные правки Ганта: cycleId -> { cutStart?, workshopId? }
+    overrides: {}, // ручные правки Ганта (legacy): cycleId -> { cutStart?, workshopId? }
+    batchPins: {}, // пер-батчевые пины Ганта: `partiaId#batchIndex` -> { ws?, cut? }
     assignments: {}, // (устар.) фиксация цеха; теперь цех задаётся в партии
   };
   ensurePartias(state); // построить партии из сид-матриц
@@ -227,6 +228,18 @@ export function normalizeState(input) {
   s.partias = Array.isArray(input.partias) ? input.partias : [];
   s.overrides = input.overrides && typeof input.overrides === 'object' ? input.overrides : {};
   s.assignments = input.assignments && typeof input.assignments === 'object' ? input.assignments : {};
+  // batchPins: пер-батчевые пины Ганта (ключ `partiaId#batchIndex` -> { ws?, cut? }). Ручная раскладка
+  // блоков по цехам/датам + результат «Уплотнить». Чистим до валидных полей, чтобы мусор не тёк в план.
+  s.batchPins = {};
+  if (input.batchPins && typeof input.batchPins === 'object') {
+    for (const k of Object.keys(input.batchPins)) {
+      const v = input.batchPins[k]; if (!v || typeof v !== 'object') continue;
+      const pin = {};
+      if (v.ws && typeof v.ws === 'string') pin.ws = v.ws;
+      if (v.cut && /^\d{4}-\d{2}-\d{2}$/.test(String(v.cut).slice(0, 10))) pin.cut = String(v.cut).slice(0, 10);
+      if (pin.ws || pin.cut) s.batchPins[k] = pin;
+    }
+  }
   // сезоны: гарантировать id/имя и привязку каждого этапа к существующему сезону
   if (!Array.isArray(s.seasons) || !s.seasons.length) s.seasons = seedSeasons();
   for (const se of s.seasons) { se.id = se.id || genId('season'); se.name = se.name || 'Сезон'; }

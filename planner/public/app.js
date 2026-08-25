@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'partia-earliest-2026-08-25';
+const APP_BUILD = 'gantt-pins-compact-2026-08-25';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -185,7 +185,7 @@ function renderCurrent() {
   refreshSeasonFilter();
   if (activeTab === 'gantt') {
     const sch = { ...schedule, cycles: (schedule?.cycles || []).filter((c) => stageInSeason(c.stageId)) };
-    renderGantt(document.getElementById('gantt'), sch, state, { pxPerDay, onOverride, onProgress });
+    renderGantt(document.getElementById('gantt'), sch, state, { pxPerDay, onOverride, onProgress, onPin });
   }
   else if (activeTab === 'matrix') renderMatrix();
   else if (activeTab === 'salesplan') renderSalesPlan();
@@ -2336,6 +2336,73 @@ async function onOverride(cycleId, cutStart) {
     state = r.state; schedule = r.schedule;
     renderCurrent(); setStatus();
     toast(cutStart === null ? 'Ручной сдвиг сброшен' : 'Сдвиг сохранён, план пересчитан');
+  } catch (e) { toast('Ошибка: ' + e.message, true); }
+}
+
+// пер-батчевый пин с Ганта: перенос блока на др. цех и/или дату одним движением.
+async function onPin(batchKey, pin) {
+  try {
+    const r = await api('/api/pin', { method: 'POST', body: JSON.stringify({ batchKey, ws: pin.ws, cut: pin.cut }) });
+    state = r.state; schedule = r.schedule;
+    renderCurrent(); setStatus();
+    toast('Блок закреплён (цех/дата), план пересчитан');
+  } catch (e) { toast('Ошибка: ' + e.message, true); }
+}
+
+// «Уплотнить» — сохранить ручную раскладку (цех + порядок), но убрать лишние разрывы дней:
+// для каждого цеха берём его блоки в текущем порядке (по старту кроя) и ставим встык, начиная не
+// раньше сезонного окна/пауз. Пишем результат пер-батчевыми пинами (цех фиксируем текущий).
+async function compactGantt() {
+  const cycles = (schedule?.cycles || []).filter((c) => !c.historical && stageInSeason(c.stageId));
+  if (!cycles.length) { toast('Нет блоков для уплотнения'); return; }
+  // группируем по цеху, сортируем по текущему старту кроя (сохраняем раскладку пользователя)
+  const byWs = {};
+  for (const c of cycles) { (byWs[c.workshopId] = byWs[c.workshopId] || []).push(c); }
+  const pins = {};
+  const shiftWD = (iso, n) => { // +n рабочих дней (пн–пт)
+    const d = new Date(iso + 'T00:00:00Z'); let left = n;
+    while (left > 0) { d.setUTCDate(d.getUTCDate() + 1); const dow = d.getUTCDay(); if (dow !== 0 && dow !== 6) left--; }
+    while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1); // клампим к рабочему
+    return d.toISOString().slice(0, 10);
+  };
+  const wdBetween = (a, b) => { // рабочих дней от a (вкл.) до b (искл.) — длительность блока «крой→конец пошива»
+    let n = 0; const d = new Date(a + 'T00:00:00Z'); const e = new Date(b + 'T00:00:00Z');
+    while (d < e) { const dow = d.getUTCDay(); if (dow !== 0 && dow !== 6) n++; d.setUTCDate(d.getUTCDate() + 1); }
+    return n;
+  };
+  for (const wsId of Object.keys(byWs)) {
+    const items = byWs[wsId].sort((a, b) => (a.cutStart < b.cutStart ? -1 : a.cutStart > b.cutStart ? 1 : 0));
+    let cursor = null; // дата, с которой свободен цех (конец пошива предыдущего блока)
+    for (const c of items) {
+      // длительность занятости цеха этим блоком = крой.старт → пошив.конец (след. крой начинается после)
+      const busyWD = Math.max(1, wdBetween(c.ops.cut.start, c.ops.sew.end));
+      let start = c.cutStart;                       // по умолчанию — там же, где сейчас
+      if (cursor && cursor > start) start = cursor;  // но не раньше, чем освободится цех (убираем разрыв назад)
+      else if (cursor && cursor < start) start = cursor; // и не позже (убираем разрыв вперёд) → встык
+      // клампим старт к рабочему дню
+      const d0 = new Date(start + 'T00:00:00Z');
+      while (d0.getUTCDay() === 0 || d0.getUTCDay() === 6) d0.setUTCDate(d0.getUTCDate() + 1);
+      start = d0.toISOString().slice(0, 10);
+      pins[c.batchKey] = { ws: wsId, cut: start };
+      cursor = shiftWD(start, busyWD);              // следующий блок — сразу после конца пошива этого
+    }
+  }
+  try {
+    const r = await api('/api/pin', { method: 'POST', body: JSON.stringify({ pins }) });
+    state = r.state; schedule = r.schedule;
+    renderCurrent(); setStatus();
+    toast('Уплотнено: блоки поставлены встык без лишних разрывов');
+  } catch (e) { toast('Ошибка: ' + e.message, true); }
+}
+
+// снять все ручные пины Ганта (вернуть авто-раскладку)
+async function clearAllPins() {
+  if (!confirm('Снять все ручные закрепления блоков (цех/дата) и вернуться к авто-раскладке?')) return;
+  try {
+    const r = await api('/api/pin', { method: 'POST', body: JSON.stringify({ clearAll: true }) });
+    state = r.state; schedule = r.schedule;
+    renderCurrent(); setStatus();
+    toast('Ручные закрепления сняты');
   } catch (e) { toast('Ошибка: ' + e.message, true); }
 }
 
@@ -6262,6 +6329,8 @@ async function init() {
   document.getElementById('settings-close')?.addEventListener('click', () => { document.getElementById('settings-modal').hidden = true; });
   document.getElementById('settings-modal')?.addEventListener('click', (e) => { if (e.target.id === 'settings-modal') e.target.hidden = true; });
   document.getElementById('zoom').addEventListener('input', (e) => { pxPerDay = +e.target.value; if (activeTab === 'gantt') renderCurrent(); });
+  document.getElementById('btn-compact')?.addEventListener('click', () => compactGantt());
+  document.getElementById('btn-clear-pins')?.addEventListener('click', () => clearAllPins());
   // Старт производства (точка отсчёта расписания) — прямо на Ганте, применяется сразу.
   const prodStart = document.getElementById('prod-start');
   prodStart?.addEventListener('change', () => {

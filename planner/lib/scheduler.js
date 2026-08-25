@@ -168,6 +168,21 @@ export function buildSchedule(state) {
     return out;
   };
 
+  // Пер-батчевые «пины» с диаграммы Ганта (ручная перетасовка). Ключ — СТАБИЛЬНЫЙ `partiaId#batchIndex`
+  // (не зависит от цеха/порядка), значение { ws, cut }. Пин форсирует ЦЕХ батча (перекрывает
+  // пер-довозный workshopId — вертикальный drag) и/или ЯКОРИТ дату кроя `cut` (горизонтальный drag и
+  // кнопка «Уплотнить»). Аддитивно и неразрушающе: если число батчей довоза изменилось (сменился спрос),
+  // осиротевший пин просто игнорируется, батч планируется автоматически. Старые overrides (по cycleId)
+  // продолжают работать параллельно для совместимости.
+  const batchPins = (state && state.batchPins) || {};
+  const applyPin = (job) => {
+    const pin = batchPins[job.batchKey];
+    if (!pin) return job;
+    if (pin.ws && wsById[pin.ws]) job.lockedWs = pin.ws; // форс цеха (вертикальный drag)
+    if (pin.cut && /^\d{4}-\d{2}-\d{2}$/.test(String(pin.cut).slice(0, 10))) job.pinCut = String(pin.cut).slice(0, 10); // якорь даты
+    return job;
+  };
+
   // задания = партии (не прошлые, объём К ПРОИЗВОДСТВУ > 0 после неттинга)
   const jobs = [];
   for (const p of state.partias) {
@@ -189,13 +204,13 @@ export function buildSchedule(state) {
       done: false,
     };
     const nb = batchSize > 0 ? Math.max(1, Math.floor(units / batchSize)) : 1;
-    if (nb <= 1) { jobs.push({ ...base, units, prodMatrix, batchIndex: 0, batchCount: 1 }); continue; }
+    if (nb <= 1) { jobs.push(applyPin({ ...base, units, prodMatrix, batchIndex: 0, batchCount: 1, batchKey: `${p.id}#0` })); continue; }
     const batches = splitMatrixEven(prodMatrix, nb);
     let bi = 0;
     for (const bm of batches) {
       const bu = sumMatrixStage(bm);
       if (bu <= 0) continue;
-      jobs.push({ ...base, units: bu, prodMatrix: bm, batchIndex: bi, batchCount: nb });
+      jobs.push(applyPin({ ...base, units: bu, prodMatrix: bm, batchIndex: bi, batchCount: nb, batchKey: `${p.id}#${bi}` }));
       bi += 1;
     }
   }
@@ -213,7 +228,9 @@ export function buildSchedule(state) {
     // берём позднейшую из: пер-партийной earliestStart (ритм) и пер-артикульной sewNotBefore
     // (сезонное окно артикула). Обе клампим к рабочему дню и к старту сезона.
     let best = seasonStart;
-    for (const s of [j.partia && j.partia.earliestStart, j.article && j.article.sewNotBefore]) {
+    // пин-дата (ручная раскладка на Ганте) участвует в ранжировании наравне с окнами — чтобы
+    // закреплённые батчи вставали в цехе в порядке своих дат кроя.
+    for (const s of [j.partia && j.partia.earliestStart, j.article && j.article.sewNotBefore, j.pinCut]) {
       if (s && /^\d{4}-\d{2}-\d{2}$/.test(String(s).slice(0, 10))) {
         const d = cal.nextWorkingDay(String(s).slice(0, 10));
         const clamped = d > seasonStart ? d : seasonStart; // раньше старта сезона всё равно нельзя
@@ -268,7 +285,8 @@ export function buildSchedule(state) {
     const ovr = (state.overrides || {})[cid];
 
     let anchorFirstWork = bEff; // старт с учётом «не раньше» (паузы) — уже ≥ freeDate[w.id]
-    if (ovr && ovr.cutStart) anchorFirstWork = cal.nextWorkingDay(ovr.cutStart); // ручной сдвиг
+    if (ovr && ovr.cutStart) anchorFirstWork = cal.nextWorkingDay(ovr.cutStart); // ручной сдвиг (legacy, по cycleId)
+    if (job.pinCut) anchorFirstWork = cal.nextWorkingDay(job.pinCut); // пер-батчевый пин (Гант) — старший приоритет
 
     const wsOffsets = resolveFlowOffsets(w, flow);
     const f = computeFlowWD(job.units, w.capacities, wsOffsets, 0);
@@ -383,6 +401,8 @@ export function buildSchedule(state) {
       deliveryTag: job.partia.deliveryTag || '', // метка поставки (П1/П2/П3/подсорт) — если из прогноза
       batchIndex: job.batchIndex || 0,           // № партии в раздроблённом довозе (0-based)
       batchCount: job.batchCount || 1,           // сколько всего партий в довозе
+      batchKey: job.batchKey || `${job.partia.id}#${job.batchIndex || 0}`, // СТАБИЛЬНЫЙ ключ батча для пинов Ганта
+      pinned: !!batchPins[job.batchKey],         // закреплён ли батч вручную (цех/дата)
       batchMatrix: job.prodMatrix || {},         // матрица цвет×размер именно этой партии (для выгрузки/показа)
       articleId: job.article.id,
       articleName: job.article.name,
@@ -395,7 +415,7 @@ export function buildSchedule(state) {
       primary: true,
       split: false,
       overflow: false,
-      manual: !!(ovr && ovr.cutStart),
+      manual: !!(ovr && ovr.cutStart) || !!job.pinCut,
       locked: !!job.lockedWs,
       ops: dates,
       cutStart, sewStart, readyDate,

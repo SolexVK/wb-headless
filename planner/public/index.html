@@ -45,10 +45,12 @@
           <input type="date" id="prod-start" />
           <button id="prod-start-clear" class="btn btn-icon" title="Сбросить (авто)">✕</button>
         </label>
+        <button id="btn-compact" class="btn" title="Сохранить вашу раскладку (цех + порядок блоков), но убрать лишние разрывы в днях — блоки встают встык друг за другом.">🧲 Уплотнить</button>
+        <button id="btn-clear-pins" class="btn btn-subtle" title="Снять все ручные закрепления блоков (цех/дата) и вернуться к авто-раскладке планировщика.">↺ Сбросить раскладку</button>
         <span class="legend">
           <i class="mark deadline"></i>Дедлайн WB · блок = этап (крой→ОТК) · ⏱ отставание
         </span>
-        <span class="hint">Наведи — сводка. Двойной клик — детали этапа и ввод факта по операциям. Тяни блок — сдвиг старта кроя.</span>
+        <span class="hint">Наведи — сводка. Двойной клик — детали. Тяни блок: по горизонтали — дата, по вертикали — другой цех (одним движением).</span>
       </div>
       <div id="gantt" class="gantt-wrap"></div>
     </section>

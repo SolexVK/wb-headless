@@ -22,7 +22,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'partia-earliest-2026-08-25';
+const BACKEND_BUILD = 'gantt-pins-compact-2026-08-25';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -321,6 +321,41 @@ app.post('/api/override', requireEdit('gantt'), (req, res) => {
     state.overrides = state.overrides || {};
     if (clear) delete state.overrides[cycleId];
     else state.overrides[cycleId] = { ...(state.overrides[cycleId] || {}), cutStart };
+    const norm = saveState(state);
+    res.json({ ok: true, schedule: buildSchedule(norm), state: norm });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+// пер-батчевые пины Ганта (перенос блока на другой цех и/или дату; результат «Уплотнить»).
+// Ключ — стабильный `partiaId#batchIndex`, значение { ws?, cut? }.
+//  - одиночный:  { batchKey, ws?, cut? }         — установить/обновить пин батча
+//  - сбросить:   { batchKey, clear:true }        — снять пин батча
+//  - массово:    { pins:{k:{ws,cut},...} }        — слить набор пинов (для «Уплотнить»)
+//  - снять всё:  { clearAll:true }                — очистить все пины
+app.post('/api/pin', requireEdit('gantt'), (req, res) => {
+  try {
+    const { batchKey, ws, cut, clear, clearAll, pins } = req.body || {};
+    const state = loadState();
+    state.batchPins = state.batchPins || {};
+    if (clearAll) {
+      state.batchPins = {};
+    } else if (pins && typeof pins === 'object') {
+      for (const k of Object.keys(pins)) {
+        const v = pins[k] || {};
+        const cur = { ...(state.batchPins[k] || {}) };
+        if (v.ws) cur.ws = v.ws; if (v.cut) cur.cut = v.cut;
+        if (cur.ws || cur.cut) state.batchPins[k] = cur;
+      }
+    } else if (batchKey) {
+      if (clear) delete state.batchPins[batchKey];
+      else {
+        const cur = { ...(state.batchPins[batchKey] || {}) };
+        if (ws) cur.ws = ws; if (cut) cur.cut = cut;
+        state.batchPins[batchKey] = cur;
+      }
+    }
     const norm = saveState(state);
     res.json({ ok: true, schedule: buildSchedule(norm), state: norm });
   } catch (e) {

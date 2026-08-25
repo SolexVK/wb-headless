@@ -24,6 +24,7 @@ export function renderGantt(container, schedule, state, opts = {}) {
   const pxPerDay = opts.pxPerDay || 14;
   const onOverride = opts.onOverride || (() => {});
   const onProgress = opts.onProgress || (() => {});
+  const onPin = opts.onPin || (() => {}); // пер-батчевый пин: onPin(batchKey, { ws, cut })
   container.innerHTML = '';
 
   const cycles = schedule.cycles || [];
@@ -172,13 +173,19 @@ export function renderGantt(container, schedule, state, opts = {}) {
   // блоки-циклы
   for (const r of rows) {
     for (const c of r.items) {
-      drawCycle(svg, c, r, { xOf, pxPerDay, LANE_H, ROW_PAD, minD, tip, onOverride, onProgress });
+      drawCycle(svg, c, r, { xOf, pxPerDay, LANE_H, ROW_PAD, minD, tip, onOverride, onProgress, onPin, rows, svg });
     }
   }
 }
 
+// какой цех (строка) под точкой svgY; null — вне рядов
+function wsAtY(rows, svgY) {
+  for (const r of rows) { if (svgY >= r._y && svgY < r._y + r._h) return r.ws; }
+  return null;
+}
+
 function drawCycle(svg, c, row, ctx) {
-  const { xOf, pxPerDay, LANE_H, ROW_PAD, tip, onOverride, onProgress } = ctx;
+  const { xOf, pxPerDay, LANE_H, ROW_PAD, tip, onOverride, onProgress, onPin, rows } = ctx;
   const laneY = row._y + ROW_PAD + c._lane * LANE_H;
   const barH = LANE_H - 8;
   const isDone = c.status === 'done' || c.status === 'shipped';
@@ -225,33 +232,53 @@ function drawCycle(svg, c, row, ctx) {
     }, g);
     bt.textContent = `⏱+${c.delay.days}д`;
   }
-  g.style.cursor = 'pointer';
+  // маркер ручного закрепления (пин): цех/дата зафиксированы вручную или уплотнением
+  if (c.pinned) {
+    const pn = el('text', { x: x0 + 3, y: laneY + 11, 'font-size': 10 }, g);
+    pn.textContent = '📌';
+    el('title', {}, pn).textContent = 'Закреплено вручную (цех/дата). «Сбросить раскладку» — вернуть авто.';
+  }
+  g.style.cursor = 'grab';
 
   // тултип
   g.addEventListener('mousemove', (e) => showTip(tip, e, c));
   g.addEventListener('mouseleave', () => hideTip(tip));
 
-  // перетаскивание (сдвиг старта кроя)
+  // перетаскивание: по ГОРИЗОНТАЛИ — сдвиг даты кроя, по ВЕРТИКАЛИ — перенос батча в другой цех.
+  // Одним движением можно сменить и то, и другое. Пишем пер-батчевый пин onPin(batchKey,{ws,cut}).
+  // Кликом (без смещения) — ничего не меняем (двойной клик = детальное окно).
   let drag = null;
+  const svgPt = (clientX, clientY) => { // экранные координаты → пользовательские координаты SVG
+    const m = svg.getScreenCTM(); if (!m) return { x: clientX, y: clientY };
+    const p = svg.createSVGPoint(); p.x = clientX; p.y = clientY;
+    return p.matrixTransform(m.inverse());
+  };
   g.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     g.setPointerCapture(e.pointerId);
     g.classList.add('dragging');
-    drag = { startX: e.clientX, origCut: c.ops.cut.start, dx: 0 };
+    drag = { startX: e.clientX, origCut: c.ops.cut.start, dx: 0, dy: 0, clientY: e.clientY };
     hideTip(tip);
   });
   g.addEventListener('pointermove', (e) => {
     if (!drag) return;
     drag.dx = e.clientX - drag.startX;
-    g.setAttribute('transform', `translate(${drag.dx},0)`);
+    drag.dy = e.clientY - drag.clientY;
+    g.setAttribute('transform', `translate(${drag.dx},${drag.dy})`);
   });
-  const finish = () => {
+  const finish = (e) => {
     if (!drag) return;
     g.classList.remove('dragging');
     g.removeAttribute('transform');
-    const shiftDays = Math.round(drag.dx / pxPerDay);
     const d0 = drag; drag = null;
-    if (shiftDays !== 0) onOverride(c.id, shiftISO(d0.origCut, shiftDays));
+    const shiftDays = Math.round(d0.dx / pxPerDay);
+    // целевой цех — по вертикальной позиции курсора в момент отпускания
+    const loc = svgPt(d0.startX + d0.dx, (e && e.clientY) || d0.clientY + d0.dy);
+    const targetWs = wsAtY(rows, loc.y) || row.ws;
+    const newCut = shiftDays !== 0 ? shiftISO(d0.origCut, shiftDays) : d0.origCut;
+    const wsChanged = targetWs.id !== c.workshopId;
+    if (!wsChanged && shiftDays === 0) return; // ни цех, ни дата не изменились — это клик
+    onPin(c.batchKey, { ws: targetWs.id, cut: newCut });
   };
   g.addEventListener('pointerup', finish);
   g.addEventListener('pointercancel', finish);
