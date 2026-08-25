@@ -23,7 +23,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'jit-rework-wip-2026-08-25';
+const BACKEND_BUILD = 'jit-continuous-2026-08-26';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -350,6 +350,7 @@ app.post('/api/pin', requireEdit('gantt'), (req, res) => {
     }
     if (clearAll) {
       state.batchPins = {};
+      for (const p of state.partias || []) p.jitStart = ''; // «Сбросить раскладку» снимает и экономную раскладку (jitStart)
     } else if (pins && typeof pins === 'object') {
       for (const k of Object.keys(pins)) {
         const v = pins[k] || {};
@@ -404,12 +405,20 @@ app.post('/api/pin', requireEdit('gantt'), (req, res) => {
 // opts: { deliveryBufferDays, nonSummerCushionDays, summerFinishMMDD, minimizeWorkshops, groupByArticle, summerIds }
 app.post('/api/jit-layout', requireEdit('gantt'), (req, res) => {
   try {
-    const { apply, opts } = req.body || {};
+    const { apply, reset, opts } = req.body || {};
     const state = loadState();
-    const { pins, before, after } = computeJitLayout(state, opts || {});
-    if (!apply) { return res.json({ ok: true, preview: true, before, after, pinsCount: Object.keys(pins).length }); }
+    if (reset) { // снять экономную раскладку: очистить jitStart у всех партий + ws-пины
+      for (const p of state.partias || []) p.jitStart = '';
+      state.batchPins = {};
+      const norm = saveState(state);
+      return res.json({ ok: true, reset: true, schedule: buildSchedule(norm), state: norm });
+    }
+    const { jitStarts, wsPins, before, after } = computeJitLayout(state, opts || {});
+    if (!apply) { return res.json({ ok: true, preview: true, before, after }); }
+    // применяем: пол jitStart по партиям (аддитивно, ручной earliestStart не трогаем) + ws-пины (без дат)
+    for (const p of state.partias || []) p.jitStart = (jitStarts[p.id] !== undefined) ? jitStarts[p.id] : '';
     state.batchPins = state.batchPins || {};
-    for (const k in pins) state.batchPins[k] = { ...(state.batchPins[k] || {}), ws: pins[k].ws, cut: pins[k].cut };
+    for (const k in wsPins) state.batchPins[k] = { ...(state.batchPins[k] || {}), ws: wsPins[k].ws };
     const norm = saveState(state);
     res.json({ ok: true, applied: true, before, after, schedule: buildSchedule(norm), state: norm });
   } catch (e) {

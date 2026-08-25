@@ -230,7 +230,10 @@ export function buildSchedule(state) {
     let best = seasonStart;
     // пин-дата (ручная раскладка на Ганте) участвует в ранжировании наравне с окнами — чтобы
     // закреплённые батчи вставали в цехе в порядке своих дат кроя.
-    for (const s of [j.partia && j.partia.earliestStart, j.article && j.article.sewNotBefore, j.pinCut]) {
+    // jitStart — АДДИТИВНЫЙ пол «Экономной раскладки» (сезонные волны). Отдельное поле, НЕ трогает
+    // ручной earliestStart пользователя. Работает как ещё одно «не раньше»: цех сериализует поток сам
+    // (freeDate), поэтому непрерывность и «одна модель за раз» сохраняются, а волны стартуют вовремя.
+    for (const s of [j.partia && j.partia.earliestStart, j.partia && j.partia.jitStart, j.article && j.article.sewNotBefore, j.pinCut]) {
       if (s && /^\d{4}-\d{2}-\d{2}$/.test(String(s).slice(0, 10))) {
         const d = cal.nextWorkingDay(String(s).slice(0, 10));
         const clamped = d > seasonStart ? d : seasonStart; // раньше старта сезона всё равно нельзя

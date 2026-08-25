@@ -475,7 +475,8 @@ function ensurePartias(s) {
     p.historical = !!p.historical;
     p.progress = normalizeProgress(p.progress); // факт завершения операций (необязательный разбор)
     p.statusDates = normalizeStatusDates(p.statusDates); // авто-даты смены статуса (факт готовности)
-    p.earliestStart = /^\d{4}-\d{2}-\d{2}$/.test(String(p.earliestStart || '').slice(0, 10)) ? String(p.earliestStart).slice(0, 10) : ''; // «не начинать раньше» (ритм производства)
+    p.earliestStart = /^\d{4}-\d{2}-\d{2}$/.test(String(p.earliestStart || '').slice(0, 10)) ? String(p.earliestStart).slice(0, 10) : ''; // «не начинать раньше» (ритм производства, РУЧНОЙ)
+    p.jitStart = /^\d{4}-\d{2}-\d{2}$/.test(String(p.jitStart || '').slice(0, 10)) ? String(p.jitStart).slice(0, 10) : ''; // пол «Экономной раскладки» (сезонные волны, авто) — отдельно от ручного earliestStart
     p.expectedReady = /^\d{4}-\d{2}-\d{2}$/.test(p.expectedReady) ? p.expectedReady : ''; // ручная новая дата при задержке
     p.snoozeUntil = /^\d{4}-\d{2}-\d{2}$/.test(p.snoozeUntil) ? p.snoozeUntil : ''; // «идёт по плану» — не тревожить до этой даты
   }

@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'jit-rework-wip-2026-08-25';
+const APP_BUILD = 'jit-continuous-2026-08-26';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2467,15 +2467,15 @@ async function compactGantt() {
 }
 
 // «Экономная раскладка (JIT)» — окно предпросмотра «до/после», затем применение.
-const JIT_DEFAULTS = { deliveryBufferDays: 30, nonSummerCushionDays: 60, summerFinishMMDD: '04-15', minimizeWorkshops: true, groupByArticle: true };
+const JIT_DEFAULTS = { deliveryBufferDays: 30, nonSummerCushionDays: 60, summerFinishMMDD: '04-15', waveGapDays: 45, groupByArticle: true };
 function jitOpts() {
   const g = (id) => document.getElementById(id);
   return {
     deliveryBufferDays: +(g('jit-delivery')?.value) || JIT_DEFAULTS.deliveryBufferDays,
     nonSummerCushionDays: +(g('jit-cushion')?.value) || JIT_DEFAULTS.nonSummerCushionDays,
+    waveGapDays: +(g('jit-wave')?.value) || JIT_DEFAULTS.waveGapDays,
     summerFinishMMDD: JIT_DEFAULTS.summerFinishMMDD,
-    minimizeWorkshops: g('jit-minws') ? g('jit-minws').checked : true,
-    groupByArticle: JIT_DEFAULTS.groupByArticle,
+    groupByArticle: g('jit-group') ? g('jit-group').checked : true,
   };
 }
 async function openJitDialog() {
@@ -2484,17 +2484,18 @@ async function openJitDialog() {
   ov.className = 'g-modal-overlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.innerHTML = `<div style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;max-width:min(680px,96vw);width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:20px">
-    <h2 style="margin:0 0 6px">💰 Экономная раскладка (JIT)</h2>
-    <div class="mini" style="color:var(--muted);margin-bottom:14px">Пересобирает даты старта пошива так, чтобы товар был готов точно к сроку (дедлайн ВБ − буфер), а не лежал готовым месяцами. Сроки не срываются, летние — к 15.04. Раскладка пишется как ручные закрепления — обратимо кнопкой «Сбросить раскладку».</div>
+    <h2 style="margin:0 0 6px">💰 Экономная раскладка</h2>
+    <div class="mini" style="color:var(--muted);margin-bottom:14px">Непрерывные сезонные блоки: производство не встаёт (одна модель за раз, без параллели, сдвижки этапов соблюдены), но стартует позже — товар готов к сроку, а не лежит месяцами. Летние — к 15.04, «одна модель — один цех». Обратимо кнопкой «↺ Сбросить раскладку».</div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">
-      <label title="Товар должен быть готов на нашем складе за столько дней до дедлайна ВБ (доставка + форс-мажор).">Буфер доставки, дн: <input type="number" id="jit-delivery" value="${JIT_DEFAULTS.deliveryBufferDays}" min="0" max="120" style="width:64px"></label>
-      <label title="Не-летние финишируют минимум за столько дней до дедлайна (подушка на продажи/сбои).">Подушка не-летних, дн: <input type="number" id="jit-cushion" value="${JIT_DEFAULTS.nonSummerCushionDays}" min="0" max="240" style="width:64px"></label>
-      <label title="Свести к минимуму число задействованных цехов (кроме своего), не жертвуя сроками и заморозкой."><input type="checkbox" id="jit-minws" checked> Минимум цехов</label>
+      <label title="Товар готов на нашем складе за столько дней до дедлайна ВБ (доставка + форс-мажор).">Буфер доставки, дн: <input type="number" id="jit-delivery" value="${JIT_DEFAULTS.deliveryBufferDays}" min="0" max="120" style="width:60px"></label>
+      <label title="Не-летние финишируют минимум за столько дней до дедлайна (подушка на продажи/сбои).">Подушка не-летних, дн: <input type="number" id="jit-cushion" value="${JIT_DEFAULTS.nonSummerCushionDays}" min="0" max="240" style="width:60px"></label>
+      <label title="Порог паузы: зазор меньше этого — «склеиваем» в один непрерывный блок; больше — допускаем сезонную паузу. Больше значение = меньше пауз (но чуть больше заморозки).">Мин. пауза, дн: <input type="number" id="jit-wave" value="${JIT_DEFAULTS.waveGapDays}" min="0" max="365" style="width:60px"></label>
+      <label title="Собирать каждую модель в один цех (меньше перестроек, меньше задействованных цехов). Отключается только если модель не помещается в один цех к сроку."><input type="checkbox" id="jit-group" checked> Одна модель — один цех</label>
     </div>
     <div id="jit-preview" style="margin:10px 0 16px">Считаю предпросмотр…</div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button id="jit-cancel" class="btn btn-subtle">Отмена</button>
-      <button id="jit-recalc" class="btn">↻ Пересчитать предпросмотр</button>
+      <button id="jit-recalc" class="btn">↻ Пересчитать</button>
       <button id="jit-apply" class="btn btn-primary" disabled>Применить</button>
     </div>
   </div>`;
@@ -2520,7 +2521,8 @@ function jitMetricRow(before, after) {
       ${row('💸 Заморозка (млн шт·дней)', before.freezeMlnUnitDays, after.freezeMlnUnitDays, '', true)}
       ${row('🏭 Задействовано цехов', before.workshops, after.workshops, '', true)}
       ${row('🔧 Перестроек (смен модели)', before.changeovers, after.changeovers, '', true)}
-      ${row('⏰ Опоздания (партий)', before.lateBatches, after.lateBatches, '', true)}
+      ${row('⛔ Наложений (параллель)', before.overlaps, after.overlaps, '', true)}
+      ${row('⏸ Пауз между блоками', before.idleGaps, after.idleGaps, '', true)}
       ${row('⏰ Опоздания (шт)', before.lateUnits, after.lateUnits, '', true)}
     </tbody></table>`;
 }
