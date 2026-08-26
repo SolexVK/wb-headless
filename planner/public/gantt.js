@@ -7,6 +7,9 @@ const MS = 86400000;
 const OPS = ['cut', 'sew', 'iron', 'otk'];
 const OP_COLOR = { cut: 'var(--cut)', sew: 'var(--sew)', iron: 'var(--iron)', otk: 'var(--otk)' };
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+// Фиксированная СВЕТЛАЯ палитра для подсказки и модалки (одинаково в обеих темах):
+// светло-серый фон, чёрные буквы, артикул — оранжевый, опоздание — красный.
+const UI = { bg: '#e9edf2', panel2: '#ffffff', border: '#c3ccd6', text: '#141414', muted: '#4a4a4a', art: '#d97706', red: '#c0392b', green: '#1a7f3c', fabric: '#0d9488', grid: '#c3ccd6' };
 
 const parse = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d); };
 const iso = (t) => { const d = new Date(t); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`; };
@@ -370,7 +373,7 @@ function openCycleDetail(c, onOverride, onProgress = () => {}) {
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
 
   const modal = document.createElement('div');
-  modal.style.cssText = 'background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;max-width:min(900px,96vw);width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)';
+  modal.style.cssText = `background:${UI.bg};color:${UI.text};border:1px solid ${UI.border};border-radius:12px;max-width:min(900px,96vw);width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)`;
   overlay.appendChild(modal);
 
   const close = () => overlay.remove();
@@ -407,33 +410,33 @@ function openCycleDetail(c, onOverride, onProgress = () => {}) {
     const d = new Date(day);
     const x = PADL + t * ppd;
     if (d.getUTCDate() === 1 || t % step === 0) {
-      el('line', { x1: x, y1: AXIS_H - 6, x2: x, y2: svgH - 6, stroke: 'var(--g-grid)', 'stroke-width': d.getUTCDate() === 1 ? 1.3 : 1, opacity: d.getUTCDate() === 1 ? 0.9 : 0.5 }, svg);
-      const tx = el('text', { x: x + 2, y: 14, 'font-size': 9, fill: d.getUTCDay() === 0 ? 'var(--danger)' : 'var(--muted)' }, svg);
+      el('line', { x1: x, y1: AXIS_H - 6, x2: x, y2: svgH - 6, stroke: UI.grid, 'stroke-width': d.getUTCDate() === 1 ? 1.3 : 1, opacity: d.getUTCDate() === 1 ? 0.9 : 0.5 }, svg);
+      const tx = el('text', { x: x + 2, y: 14, 'font-size': 9, fill: d.getUTCDay() === 0 ? UI.red : UI.muted }, svg);
       tx.textContent = d.getUTCDate();
-      if (d.getUTCDate() === 1) { const mt = el('text', { x: x + 2, y: 26, 'font-size': 9, fill: 'var(--muted)', 'font-weight': 600 }, svg); mt.textContent = MONTHS[d.getUTCMonth()]; }
+      if (d.getUTCDate() === 1) { const mt = el('text', { x: x + 2, y: 26, 'font-size': 9, fill: UI.muted, 'font-weight': 600 }, svg); mt.textContent = MONTHS[d.getUTCMonth()]; }
     }
   }
 
   // дедлайн — вертикальная красная пунктирная
   if (c.logistics.deadline) {
     const dx = xOf(c.logistics.deadline);
-    el('line', { x1: dx, y1: AXIS_H - 6, x2: dx, y2: svgH - 6, stroke: 'var(--danger)', 'stroke-width': 1.3, 'stroke-dasharray': '5 4', opacity: 0.8 }, svg);
-    const dt = el('text', { x: dx + 3, y: svgH - 2, 'font-size': 9, fill: 'var(--danger)', 'font-weight': 600 }, svg);
+    el('line', { x1: dx, y1: AXIS_H - 6, x2: dx, y2: svgH - 6, stroke: UI.red, 'stroke-width': 1.3, 'stroke-dasharray': '5 4', opacity: 0.8 }, svg);
+    const dt = el('text', { x: dx + 3, y: svgH - 2, 'font-size': 9, fill: UI.red, 'font-weight': 600 }, svg);
     dt.textContent = 'дедлайн';
   }
 
   const rowLabel = (y, text, color) => {
-    const t2 = el('text', { x: 10, y: y + 15, 'font-size': 11, fill: color || 'var(--text)' }, svg);
+    const t2 = el('text', { x: 10, y: y + 15, 'font-size': 11, fill: color || UI.text }, svg);
     t2.textContent = text;
   };
 
   // ткань: пунктир заказ → склад цеха
   let yy = bodyY;
-  rowLabel(yy, 'Ткань', 'var(--fabric)');
+  rowLabel(yy, 'Ткань', UI.fabric);
   const foX = xOf(c.fabric.orderDate), faX = xOf(c.fabric.atWorkshop), fcy = yy + 15;
-  el('line', { x1: foX, y1: fcy, x2: faX, y2: fcy, stroke: 'var(--fabric)', 'stroke-width': 2, 'stroke-dasharray': '5 3' }, svg);
-  el('circle', { cx: foX, cy: fcy, r: 3.5, fill: 'var(--fabric)' }, svg);
-  el('path', { d: diamond(faX, fcy, 4), fill: 'var(--fabric)' }, svg);
+  el('line', { x1: foX, y1: fcy, x2: faX, y2: fcy, stroke: UI.fabric, 'stroke-width': 2, 'stroke-dasharray': '5 3' }, svg);
+  el('circle', { cx: foX, cy: fcy, r: 3.5, fill: UI.fabric }, svg);
+  el('path', { d: diamond(faX, fcy, 4), fill: UI.fabric }, svg);
   yy += FAB_H;
 
   // операции — отдельными полосами
@@ -445,63 +448,64 @@ function openCycleDetail(c, onOverride, onProgress = () => {}) {
   });
 
   // логистика: пунктир готовность → WB
-  rowLabel(yy, 'Отгрузка', 'var(--muted)');
+  rowLabel(yy, 'Отгрузка', UI.muted);
   const otkX = xOf(c.ops.otk.end), wbX = xOf(c.logistics.wbArrival), lcy = yy + 15;
-  el('line', { x1: otkX, y1: lcy, x2: wbX, y2: lcy, stroke: 'var(--muted)', 'stroke-width': 2, 'stroke-dasharray': '4 3' }, svg);
-  el('rect', { x: wbX - 4, y: lcy - 4, width: 8, height: 8, fill: c.logistics.lateDays > 0 ? 'var(--danger)' : 'var(--accent-2)' }, svg);
+  el('line', { x1: otkX, y1: lcy, x2: wbX, y2: lcy, stroke: UI.muted, 'stroke-width': 2, 'stroke-dasharray': '4 3' }, svg);
+  el('rect', { x: wbX - 4, y: lcy - 4, width: 8, height: 8, fill: c.logistics.lateDays > 0 ? UI.red : UI.green }, svg);
 
   // шапка + детали + кнопки
   const head = document.createElement('div');
   head.style.cssText = 'padding:14px 16px 4px';
-  const lateTxt = c.logistics.lateDays > 0 ? ` · <span style="color:var(--danger)">опоздание ${c.logistics.lateDays} дн</span>` : '';
-  head.innerHTML = `<div style="font-size:15px;font-weight:700"><span style="color:#d97706">Артикул ${c.articleId}</span> — ${c.articleName} · партия ${c.prodNo || c.partiaNo}</div>
-    <div style="color:var(--muted);font-size:12px;margin-top:2px">${c.deliveryTag ? c.deliveryTag + (c.batchCount > 1 ? ` · часть ${c.batchIndex + 1}/${c.batchCount}` : '') + ' · ' : ''}${c.stageName} · ${c.units} шт · цех ${c.workshopName}${c.own ? ' (свой)' : ''} · статус ${c.statusRu || '—'}${lateTxt}</div>`;
+  const lateTxt = c.logistics.lateDays > 0 ? ` · <span style="color:${UI.red}">опоздание ${c.logistics.lateDays} дн</span>` : '';
+  head.innerHTML = `<div style="font-size:15px;font-weight:700;color:${UI.text}"><span style="color:${UI.art}">Артикул ${c.articleId}</span> — ${c.articleName} · партия ${c.prodNo || c.partiaNo}</div>
+    <div style="color:${UI.muted};font-size:12px;margin-top:2px">${c.deliveryTag ? c.deliveryTag + (c.batchCount > 1 ? ` · часть ${c.batchIndex + 1}/${c.batchCount}` : '') + ' · ' : ''}${c.stageName} · ${c.units} шт · цех ${c.workshopName}${c.own ? ' (свой)' : ''} · статус ${c.statusRu || '—'}${lateTxt}</div>`;
   modal.appendChild(head);
   modal.appendChild(svg);
 
   const info = document.createElement('div');
-  info.style.cssText = 'padding:4px 16px 12px;color:var(--text);font-size:12.5px;line-height:1.7';
+  info.style.cssText = `padding:4px 16px 12px;color:${UI.text};font-size:12.5px;line-height:1.7`;
   info.innerHTML = `
     <div>Ткань: заказ <b>${fmt(c.fabric.orderDate)}</b> → на складе цеха <b>${fmt(c.fabric.atWorkshop)}</b> · ${c.fabric.meters.toLocaleString('ru')} м</div>
     <div>Крой ${fmt(c.ops.cut.start)} · Пошив ${fmt(c.ops.sew.start)} · Утюжка ${fmt(c.ops.iron.start)} · ОТК до <b>${fmt(c.ops.otk.end)}</b> (готовность)</div>
     <div>Отгрузка ${fmt(c.logistics.shipment)} → приход на WB <b>${fmt(c.logistics.wbArrival)}</b> · дедлайн ${fmt(c.logistics.deadline)}</div>
-    <div>На WB: <b>${(c.hasFact ? c.wbUnits : c.units).toLocaleString('ru')} шт</b> ${c.hasFact ? '(факт)' : '(план)'}${c.locked ? ' · <span style="color:var(--accent-2)">цех закреплён вручную</span>' : ''}${c.manual ? ' · сдвинут вручную' : ''}</div>`;
+    <div>На WB: <b>${(c.hasFact ? c.wbUnits : c.units).toLocaleString('ru')} шт</b> ${c.hasFact ? '(факт)' : '(план)'}${c.locked ? ` · <span style="color:${UI.muted}">цех закреплён вручную</span>` : ''}${c.manual ? ' · сдвинут вручную' : ''}</div>`;
   modal.appendChild(info);
 
   // Факт по операциям (ввод дат завершения) — считает отставание по каждому этапу
   const OP_LABELS = { cut: 'Крой', sew: 'Пошив', iron: 'Утюжка', otk: 'ОТК' };
   const prog = document.createElement('div');
-  prog.style.cssText = 'padding:6px 16px 12px;border-top:1px solid var(--line)';
+  prog.style.cssText = `padding:6px 16px 12px;border-top:1px solid ${UI.border}`;
   const grid = document.createElement('div');
   grid.style.cssText = 'display:grid;grid-template-columns:repeat(2,1fr);gap:8px';
   ['cut', 'sew', 'iron', 'otk'].forEach((op) => {
     const d = c.delay && c.delay.perOp ? c.delay.perOp[op] : null;
-    const dl = d == null ? '' : (d <= 0 ? ' · <span style="color:var(--accent-2)">в срок</span>' : ` · <span style="color:var(--danger)">+${d} дн</span>`);
+    const dl = d == null ? '' : (d <= 0 ? ` · <span style="color:${UI.green}">в срок</span>` : ` · <span style="color:${UI.red}">+${d} дн</span>`);
     const field = document.createElement('div');
     field.style.cssText = 'display:flex;flex-direction:column;gap:2px';
-    field.innerHTML = `<label style="font-size:11px;color:var(--muted)">${OP_LABELS[op]} · план ${fmt(c.ops[op].end)}${dl}</label>`;
+    field.innerHTML = `<label style="font-size:11px;color:${UI.muted}">${OP_LABELS[op]} · план ${fmt(c.ops[op].end)}${dl}</label>`;
     const inp = document.createElement('input');
     inp.type = 'date';
     inp.value = (c.progress && c.progress[op]) || '';
-    inp.style.cssText = 'padding:4px 6px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px';
+    inp.style.cssText = `padding:4px 6px;background:${UI.panel2};color:${UI.text};border:1px solid ${UI.border};border-radius:6px`;
     inp.addEventListener('change', () => { close(); onProgress(c.partiaId, op, inp.value || ''); });
     field.appendChild(inp);
     grid.appendChild(field);
   });
-  prog.innerHTML = '<div style="font-weight:600;margin-bottom:6px;font-size:13px">Факт завершения операций</div>';
+  prog.innerHTML = `<div style="font-weight:600;margin-bottom:6px;font-size:13px;color:${UI.text}">Факт завершения операций</div>`;
   prog.appendChild(grid);
   modal.appendChild(prog);
 
   const foot = document.createElement('div');
-  foot.style.cssText = 'padding:10px 16px 16px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--line)';
+  foot.style.cssText = `padding:10px 16px 16px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid ${UI.border}`;
+  const btnStyle = `background:${UI.panel2};color:${UI.text};border:1px solid ${UI.border};border-radius:8px;padding:6px 14px;cursor:pointer;font-size:13px`;
   if (c.manual) {
     const reset = document.createElement('button');
-    reset.className = 'btn'; reset.textContent = '↺ Сбросить ручной сдвиг';
+    reset.textContent = '↺ Сбросить ручной сдвиг'; reset.style.cssText = btnStyle;
     reset.addEventListener('click', () => { close(); onOverride(c.id, null); });
     foot.appendChild(reset);
   }
   const closeBtn = document.createElement('button');
-  closeBtn.className = 'btn'; closeBtn.textContent = 'Закрыть';
+  closeBtn.textContent = 'Закрыть'; closeBtn.style.cssText = btnStyle;
   closeBtn.addEventListener('click', close);
   foot.appendChild(closeBtn);
   modal.appendChild(foot);
@@ -521,15 +525,15 @@ function showTip(tip, e, c) {
   tip.style.display = 'block';
   tip.style.left = Math.min(e.clientX + 14, window.innerWidth - 340) + 'px';
   tip.style.top = (e.clientY + 14) + 'px';
-  const late = c.logistics.lateDays > 0 ? `<div class="row" style="color:var(--danger)">⚠ Опоздание на WB: ${c.logistics.lateDays} дн</div>` : '';
-  const tag = c.own ? ' · <span style="color:var(--accent-2)">свой</span>' : (c.locked ? ' · <span style="color:var(--accent-2)">закреплён</span>' : '');
+  const late = c.logistics.lateDays > 0 ? `<div class="row" style="color:${UI.red}">⚠ Опоздание на WB: ${c.logistics.lateDays} дн</div>` : '';
+  const tag = c.own ? ` · <span style="color:${UI.muted}">свой</span>` : (c.locked ? ` · <span style="color:${UI.muted}">закреплён</span>` : '');
   tip.innerHTML = `
-    <div><b style="color:#d97706">Артикул ${c.articleId}</b> ${c.articleName} · партия ${c.prodNo || c.partiaNo}</div>
+    <div><b style="color:${UI.art}">Артикул ${c.articleId}</b> ${c.articleName} · партия ${c.prodNo || c.partiaNo}</div>
     <div class="row">${c.deliveryTag ? c.deliveryTag + (c.batchCount > 1 ? ` · часть ${c.batchIndex + 1}/${c.batchCount}` : '') + ' · ' : ''}${c.stageName} · ${c.units.toLocaleString('ru')} шт · цех ${c.workshopName}${tag} · <b>${c.statusRu || '—'}</b></div>
     <div class="row">Производство: <b>${fmt(c.ops.cut.start)}</b> (крой) → <b>${fmt(c.readyDate)}</b> (готовность)</div>
     <div class="row">Приход на WB: <b>${fmt(c.logistics.wbArrival)}</b> · дедлайн ${fmt(c.logistics.deadline)}</div>
-    <div class="row">На WB: <b>${(c.hasFact ? c.wbUnits : c.units).toLocaleString('ru')} шт</b>${c.hasFact ? ` <span style="color:var(--accent-2)">(факт)</span>` : ' (план)'}</div>
+    <div class="row">На WB: <b>${(c.hasFact ? c.wbUnits : c.units).toLocaleString('ru')} шт</b>${c.hasFact ? ` <span style="color:${UI.muted}">(факт)</span>` : ' (план)'}</div>
     ${late}
-    <div class="row" style="color:var(--muted);margin-top:4px">Двойной клик — детали этапа (крой/пошив/утюжка/ОТК, ткань, отгрузка)</div>`;
+    <div class="row" style="color:${UI.muted};margin-top:4px">Двойной клик — детали этапа (крой/пошив/утюжка/ОТК, ткань, отгрузка)</div>`;
 }
 function hideTip(tip) { tip.style.display = 'none'; }

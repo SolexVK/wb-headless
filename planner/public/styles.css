@@ -131,12 +131,12 @@ input, select { font: inherit; }
 .g-manual rect.g-frame { stroke-dasharray: 4 3; stroke: var(--accent-2); stroke-width: 2; }
 .g-done { opacity: 0.9; }
 .g-tip {
-  position: fixed; z-index: 50; background: #0b1420; border: 1px solid var(--line);
+  position: fixed; z-index: 50; background: #e9edf2; border: 1px solid #c3ccd6;
   border-radius: 8px; padding: 8px 10px; font-size: 12px; pointer-events: none;
-  max-width: 320px; box-shadow: 0 8px 24px rgba(0,0,0,.4); display: none;
+  max-width: 320px; box-shadow: 0 8px 24px rgba(0,0,0,.25); display: none; color: #141414;
 }
-.g-tip b { color: var(--text); }
-.g-tip .row { color: var(--muted); }
+.g-tip b { color: #141414; }
+.g-tip .row { color: #141414; }
 
 /* dashboard */
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 18px; }
