@@ -29,6 +29,7 @@ export function renderGantt(container, schedule, state, opts = {}) {
   const onProgress = opts.onProgress || (() => {});
   const onPin = opts.onPin || (() => {}); // пер-батчевый пин: onPin(batchKey, { ws, cut })
   const onMerge = opts.onMerge || (() => {}); // склейка партий: onMerge(sourcePartiaId, targetPartiaId)
+  const onRemoveWs = opts.onRemoveWorkshop || (() => {}); // удалить пустой цех: onRemoveWorkshop(id)
   container.innerHTML = '';
 
   const cycles = schedule.cycles || [];
@@ -74,8 +75,9 @@ export function renderGantt(container, schedule, state, opts = {}) {
 
   const xOf = (d) => LABEL_W + days(minD, d) * pxPerDay;
 
-  // строки-цеха в порядке state.workshops; лейн-паковка внутри цеха
-  const wsList = state.workshops.filter((w) => cycles.some((c) => c.workshopId === w.id));
+  // строки-цеха в порядке state.workshops. Показываем ВСЕ цеха (в т.ч. пустые), чтобы в них можно было
+  // перетаскивать блоки — включая только что добавленный вручную цех.
+  const wsList = state.workshops.slice();
   const rows = [];
   for (const w of wsList) {
     const items = cycles.filter((c) => c.workshopId === w.id)
@@ -203,12 +205,24 @@ export function renderGantt(container, schedule, state, opts = {}) {
     t.textContent = r.ws.name;
     const role = el('tspan', { fill: 'var(--muted)', 'font-size': 10 }, t);
     role.textContent = '  ' + (r.ws.role === 'main' ? 'основной' : 'вспомог.');
+    // пустой НЕ-свой цех можно удалить крестиком (кнопка в правом верхнем углу его строки в столбце цехов)
+    if (!r.items.length && !r.ws.own) {
+      const rx = el('text', { x: LABEL_W - 16, y: r._y + 16, fill: 'var(--danger)', 'font-size': 14, 'font-weight': 700, style: 'cursor:pointer' }, labelG);
+      rx.textContent = '✕';
+      el('title', {}, rx).textContent = 'Удалить пустой цех';
+      rx.addEventListener('click', (e) => { e.stopPropagation(); onRemoveWs(r.ws.id); });
+    }
     // подпись артикула — НАПРОТИВ его горизонтальной полосы (по центру банда): номер крупно + объём
     for (const band of r.artBands) {
       const cy = r._y + HEAD_H_ROW + (band.base + band.count / 2) * LANE_H + 5;
       const line = el('text', { x: 12, y: cy }, labelG);
       const a = el('tspan', { fill: '#c99a00', 'font-weight': 700, 'font-size': 15 }, line); a.textContent = band.art;
       const v = el('tspan', { fill: 'var(--muted)', 'font-size': 11 }, line); v.textContent = `  ${fmtVol(band.vol)} шт`;
+    }
+    // подсказка для пустого цеха
+    if (!r.items.length) {
+      const hint = el('text', { x: 12, y: r._y + HEAD_H_ROW + LANE_H / 2 + 5, fill: 'var(--muted)', 'font-size': 11, 'font-style': 'italic' }, labelG);
+      hint.textContent = 'пусто — перетащите блок';
     }
   });
 

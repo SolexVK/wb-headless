@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'gantt-merge-2026-08-27';
+const APP_BUILD = 'gantt-addws-2026-08-27';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -185,7 +185,7 @@ function renderCurrent() {
   refreshSeasonFilter();
   if (activeTab === 'gantt') {
     const sch = { ...schedule, cycles: (schedule?.cycles || []).filter((c) => stageInSeason(c.stageId)) };
-    renderGantt(document.getElementById('gantt'), sch, state, { pxPerDay, onOverride, onProgress, onPin, onMerge });
+    renderGantt(document.getElementById('gantt'), sch, state, { pxPerDay, onOverride, onProgress, onPin, onMerge, onRemoveWorkshop });
   }
   else if (activeTab === 'matrix') renderMatrix();
   else if (activeTab === 'salesplan') renderSalesPlan();
@@ -2417,6 +2417,33 @@ async function onPin(batchKey, pin) {
     state = r.state; schedule = r.schedule;
     renderCurrent(); setStatus();
     toast('Блок закреплён (цех/дата), план пересчитан');
+  } catch (e) { toast('Ошибка: ' + e.message, true); }
+}
+
+// Добавить цех вручную с Ганта (не хватает мощностей). Спросим название и пошив/сутки; появится пустой цех.
+async function addWorkshop() {
+  try {
+    const name = prompt('Название нового цеха:', '');
+    if (name === null) return;
+    const sewStr = prompt('Мощность пошива, шт/сутки (крой/утюжка/ОТК посчитаются автоматически):', '150');
+    if (sewStr === null) return;
+    const r = await api('/api/workshop/add', { method: 'POST', body: JSON.stringify({ name: name.trim(), sew: +sewStr || 150 }) });
+    state = r.state; schedule = r.schedule;
+    renderCurrent(); setStatus();
+    toast('Цех добавлен — перетащите в него блоки');
+  } catch (e) { toast('Ошибка: ' + e.message, true); }
+}
+
+// Удалить пустой цех (крестик на его строке Ганта).
+async function onRemoveWorkshop(id) {
+  try {
+    const w = (state.workshops || []).find((x) => x.id === id);
+    if (!w) return;
+    if (!confirm(`Удалить цех «${w.name}»?`)) return;
+    const r = await api('/api/workshop/remove', { method: 'POST', body: JSON.stringify({ id }) });
+    state = r.state; schedule = r.schedule;
+    renderCurrent(); setStatus();
+    toast('Цех удалён');
   } catch (e) { toast('Ошибка: ' + e.message, true); }
 }
 
@@ -6519,6 +6546,7 @@ async function init() {
   document.getElementById('btn-compact')?.addEventListener('click', () => compactGantt());
   document.getElementById('btn-snapshot')?.addEventListener('click', () => exportLayoutSnapshotXlsx());
   document.getElementById('btn-clear-pins')?.addEventListener('click', () => clearAllPins());
+  document.getElementById('btn-add-ws')?.addEventListener('click', () => addWorkshop());
   // Старт производства (точка отсчёта расписания) — прямо на Ганте, применяется сразу.
   const prodStart = document.getElementById('prod-start');
   prodStart?.addEventListener('change', () => {

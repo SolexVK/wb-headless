@@ -23,7 +23,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'gantt-merge-2026-08-27';
+const BACKEND_BUILD = 'gantt-addws-2026-08-27';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -445,6 +445,53 @@ app.post('/api/merge-partias', requireEdit('gantt'), (req, res) => {
     const norm = saveState(state);
     const schedule = buildSchedule(norm);
     res.json({ ok: true, schedule, state: norm, mergedInto: targetId });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+// Добавить цех вручную с диаграммы Ганта (когда не хватает мощностей). Новый цех — вспомогательный (аутсорс),
+// с базовыми мощностями (можно задать пошив/сутки, остальное — по пропорциям). Появляется на Ганте пустой
+// строкой, в которую можно перетащить блоки.
+app.post('/api/workshop/add', requireEdit('gantt'), (req, res) => {
+  try {
+    const { name, sew } = req.body || {};
+    const state = loadState();
+    const nm = String(name || '').trim() || `Цех ${(state.workshops || []).length + 1}`;
+    const s = Math.max(1, Math.round(+sew || 150)); // пошив/сутки
+    let id, guard = 0;
+    do { id = 'w_' + crypto.randomBytes(4).toString('hex'); } while ((state.workshops || []).some((w) => w.id === id) && guard++ < 50);
+    const cap = { cut: s * 2, sew: s, iron: s * 2, otk: s * 4 }; // пропорции как у сид-цехов (крой×2, утюжка×2, ОТК×4)
+    state.workshops = state.workshops || [];
+    state.workshops.push({ id, name: nm, role: 'aux', own: false, capacities: cap });
+    const norm = saveState(state);
+    const schedule = buildSchedule(norm);
+    res.json({ ok: true, schedule, state: norm, workshopId: id });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+// Удалить цех с Ганта — ТОЛЬКО пустой (без блоков в расписании) и НЕ свой. Партии/пины, привязанные к нему,
+// не трогаем (их не должно быть, раз цех пустой); блокируем удаление, если что-то на нём есть.
+app.post('/api/workshop/remove', requireEdit('gantt'), (req, res) => {
+  try {
+    const { id } = req.body || {};
+    const state = loadState();
+    const w = (state.workshops || []).find((x) => x.id === id);
+    if (!w) return res.status(404).json({ ok: false, error: 'цех не найден' });
+    if (w.own) return res.status(400).json({ ok: false, error: 'нельзя удалить свой цех' });
+    const sch = buildSchedule(state);
+    const hasBlocks = (sch.cycles || []).some((c) => !c.historical && c.workshopId === id);
+    const referenced = (state.partias || []).some((p) => p.workshopId === id)
+      || Object.values(state.batchPins || {}).some((pin) => pin && pin.ws === id);
+    if (hasBlocks || referenced) return res.status(400).json({ ok: false, error: 'в цехе есть блоки/привязки — сначала перетащите их в другой цех' });
+    state.workshops = (state.workshops || []).filter((x) => x.id !== id);
+    // на всякий случай уберём цех из матрицы allowedWorkshops у артикулов
+    for (const a of state.articles || []) if (Array.isArray(a.allowedWorkshops)) a.allowedWorkshops = a.allowedWorkshops.filter((x) => x !== id);
+    const norm = saveState(state);
+    const schedule = buildSchedule(norm);
+    res.json({ ok: true, schedule, state: norm });
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.message || e) });
   }
