@@ -23,7 +23,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'jit-safe-2026-08-26';
+const BACKEND_BUILD = 'jit-balance-2026-08-27';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -413,14 +413,14 @@ app.post('/api/jit-layout', requireEdit('gantt'), (req, res) => {
       const norm = saveState(state);
       return res.json({ ok: true, reset: true, schedule: buildSchedule(norm), state: norm });
     }
-    const { jitStarts, wsPins, before, after } = computeJitLayout(state, opts || {});
-    if (!apply) { return res.json({ ok: true, preview: true, before, after }); }
+    const { jitStarts, wsPins, before, after, note } = computeJitLayout(state, opts || {});
+    if (!apply) { return res.json({ ok: true, preview: true, before, after, note }); }
     // применяем: пол jitStart по партиям (аддитивно, ручной earliestStart не трогаем) + ws-пины (без дат)
     for (const p of state.partias || []) p.jitStart = (jitStarts[p.id] !== undefined) ? jitStarts[p.id] : '';
     state.batchPins = state.batchPins || {};
     for (const k in wsPins) state.batchPins[k] = { ...(state.batchPins[k] || {}), ws: wsPins[k].ws };
     const norm = saveState(state);
-    res.json({ ok: true, applied: true, before, after, schedule: buildSchedule(norm), state: norm });
+    res.json({ ok: true, applied: true, before, after, note, schedule: buildSchedule(norm), state: norm });
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.stack || e.message || e) });
   }

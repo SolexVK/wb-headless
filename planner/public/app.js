@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'jit-safe-2026-08-26';
+const APP_BUILD = 'jit-balance-2026-08-27';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2467,7 +2467,7 @@ async function compactGantt() {
 }
 
 // «Экономная раскладка (JIT)» — окно предпросмотра «до/после», затем применение.
-const JIT_DEFAULTS = { deliveryBufferDays: 30, nonSummerCushionDays: 60, summerFinishMMDD: '04-15', maxExtraWorkshops: 3 };
+const JIT_DEFAULTS = { deliveryBufferDays: 30, nonSummerCushionDays: 60, summerFinishMMDD: '04-30', maxExtraWorkshops: 3 };
 function jitOpts() {
   const g = (id) => document.getElementById(id);
   return {
@@ -2475,6 +2475,7 @@ function jitOpts() {
     nonSummerCushionDays: +(g('jit-cushion')?.value) || JIT_DEFAULTS.nonSummerCushionDays,
     maxExtraWorkshops: g('jit-maxws') ? Math.max(0, +g('jit-maxws').value || 0) : JIT_DEFAULTS.maxExtraWorkshops,
     ignoreAllowedMatrix: g('jit-ignore-allow') ? g('jit-ignore-allow').checked : false,
+    balanceMinWorkshops: g('jit-balance') ? g('jit-balance').checked : false,
     summerFinishMMDD: JIT_DEFAULTS.summerFinishMMDD,
   };
 }
@@ -2485,14 +2486,14 @@ async function openJitDialog() {
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.innerHTML = `<div style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;max-width:min(680px,96vw);width:100%;max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:20px">
     <h2 style="margin:0 0 6px">💰 Экономная раскладка</h2>
-    <div class="mini" style="color:var(--muted);margin-bottom:14px"><b>По умолчанию</b> — безопасная экономия: цеха и порядок НЕ меняем (значит опозданий/перестроек/разрывов не добавится), но каждый блок цеха сдвигаем позже к своему дедлайну (заморозка падает). Летние — к 15.04. Производство непрерывно, изделия не меняются. <b>Чтобы СОКРАТИТЬ число цехов</b> — включи галочку ниже: модели съедутся в свой+N цехов (тогда возможны опоздания — увидишь их). Обратимо «↺ Сбросить раскладку».</div>
+    <div class="mini" style="color:var(--muted);margin-bottom:14px"><b>По умолчанию</b> — безопасная экономия: цеха и порядок НЕ меняем (опозданий/перестроек/разрывов не добавится), но каждый блок цеха сдвигаем позже к своему дедлайну (заморозка падает). Летние — к 30.04. Производство непрерывно, изделия не меняются. Обратимо «↺ Сбросить раскладку».</div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">
       <label title="Товар готов на нашем складе за столько дней до дедлайна ВБ (доставка + форс-мажор).">Буфер доставки, дн: <input type="number" id="jit-delivery" value="${JIT_DEFAULTS.deliveryBufferDays}" min="0" max="120" style="width:56px"></label>
       <label title="Не-летние финишируют минимум за столько дней до дедлайна (подушка на продажи/сбои).">Подушка не-летних, дн: <input type="number" id="jit-cushion" value="${JIT_DEFAULTS.nonSummerCushionDays}" min="0" max="240" style="width:56px"></label>
     </div>
-    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;padding:8px 10px;border:1px dashed var(--line);border-radius:8px">
-      <label title="ВКЛючи, чтобы реально сократить число цехов (иначе цеха не меняются). Модели съедутся в свой + N цехов, игнорируя матрицу «кто шьёт». Возможны опоздания — смотри метрику ниже."><input type="checkbox" id="jit-ignore-allow"> <b>Сократить число цехов</b> (съехать в свой + N)</label>
-      <label title="Сколько ДОПОЛНИТЕЛЬНЫХ цехов (кроме своего) оставить при сокращении. 2 = свой+2 (3 всего), 3 = свой+3 (4 всего).">N доп. цехов: <input type="number" id="jit-maxws" value="${JIT_DEFAULTS.maxExtraWorkshops}" min="0" max="6" style="width:52px"></label>
+    <div style="margin-bottom:14px;padding:8px 10px;border:1px dashed var(--line);border-radius:8px">
+      <label title="РЕКОМЕНДУЕТСЯ. Движок сам подбирает НАИМЕНЬШЕЕ число цехов (свой + сколько нужно), при котором НЕ появляется новых опозданий, и показывает его. Баланс: минимум цехов без срыва сроков." style="display:block;margin-bottom:6px"><input type="checkbox" id="jit-balance" checked> <b>⚖ Найти минимум цехов без опозданий</b> (рекомендуется)</label>
+      <label title="Жёстко ужать в свой + N цехов, даже если появятся опоздания (мощности под сроки не хватит). Игнорирует «Найти минимум» и матрицу «кто шьёт»."><input type="checkbox" id="jit-ignore-allow"> Или жёстко: свой + <input type="number" id="jit-maxws" value="${JIT_DEFAULTS.maxExtraWorkshops}" min="0" max="6" style="width:46px"> цехов (можно с опозданиями)</label>
     </div>
     <div id="jit-preview" style="margin:10px 0 16px">Считаю предпросмотр…</div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -2542,7 +2543,7 @@ async function runJitPreview() {
   box.innerHTML = 'Считаю предпросмотр…'; if (applyBtn) applyBtn.disabled = true;
   try {
     const r = await api('/api/jit-layout', { method: 'POST', body: JSON.stringify({ apply: false, opts: jitOpts() }) });
-    box.innerHTML = jitMetricRow(r.before, r.after);
+    box.innerHTML = (r.note ? `<div class="mini" style="margin-bottom:8px;color:var(--accent);font-weight:600">⚖ ${r.note}</div>` : '') + jitMetricRow(r.before, r.after);
     if (r.after.idleGaps > 0) box.innerHTML += `<div class="mini" style="color:var(--danger);margin-top:8px">⚠ Остались разрывы (${r.after.idleGaps}) — сообщи мне, докрутим.</div>`;
     if (r.after.lateUnits > r.before.lateUnits) box.innerHTML += `<div class="mini" style="color:var(--danger);margin-top:8px">⚠ Выросли опоздания (${(r.after.lateUnits - r.before.lateUnits).toLocaleString('ru')} шт): в столько цехов объём не помещается к срокам (особенно летние к 15.04). Добавь ещё цех («Доп. цехов») или ослабь буфер/подушку.</div>`;
     if (applyBtn) applyBtn.disabled = false;
