@@ -70,32 +70,39 @@ export function computeJitLayout(state, opts = {}) {
   const sewCap = (w) => (w.capacities && +w.capacities.sew) || 0;
   const ranked = wsAll.filter((w) => w.id !== ownId).sort((a, b) => sewCap(b) - sewCap(a));
   const capById = Object.fromEntries(wsAll.map((w) => [w.id, sewCap(w) || 1]));
-  const artVol = {};
+  const artVol = {}, artAllow = {};
   for (const c of base.cycles) { if (c.historical) continue; artVol[c.articleId] = (artVol[c.articleId] || 0) + c.units; }
+  for (const a of state.articles || []) artAllow[a.id] = (Array.isArray(a.allowedWorkshops) && a.allowedWorkshops.length) ? a.allowedWorkshops : null;
+  // СТРОГОЕ правило для СВОЕГО цеха: если артикул закреплён за нашим цехом (матрица «кто шьёт» разрешает own),
+  // он ОБЯЗАН шиться в своём цехе — при сокращении НЕ перебрасываем. Остальные — свободно между цехами.
+  const ownLocked = (art) => { const al = artAllow[art]; return !!(al && al.includes(ownId)); };
 
-  // назначение батчей по цехам: reduce ⇒ ужать в свой+N (жадная балансировка, вопреки матрице); иначе база
+  // ── СОКРАЩЕНИЕ ЦЕХОВ через ОГРАНИЧЕНИЕ набора цехов (не жёсткая привязка артикула в один цех!).
+  // Планировщик сам распределяет — в т.ч. ДРОБИТ крупный довоз параллельно по разрешённым цехам (так база
+  // укладывалась в сроки). Свой цех — СТРОГО по матрице (закреплённые за own артикулы только в own); прочие
+  // артикулы — свободно в набор {свой + N доп.}. На ВРЕМЕННОЙ копии state (матрицу «кто шьёт» не портим).
+  const targetSetFor = (maxE) => [ownId, ...ranked.slice(0, maxE).map((w) => w.id)].filter(Boolean);
+  const stateReduced = (maxE) => {
+    const target = targetSetFor(maxE);
+    const articles = (state.articles || []).map((a) => (ownLocked(a.id) ? { ...a, allowedWorkshops: [ownId] } : { ...a, allowedWorkshops: target.slice() }));
+    return { ...state, articles };
+  };
+  const scheduleReduced = (maxE) => buildSchedule(stateReduced(maxE));
+
+  // назначение батчей по цехам: reduce ⇒ распределение планировщика в ограниченном наборе; иначе — база.
   const assignWs = (maxE, reduce) => {
+    const sch = reduce ? scheduleReduced(maxE) : base;
     const map = {};
-    for (const c of base.cycles) { if (c.historical) continue; map[c.batchKey] = c.workshopId; }
-    if (!reduce) return { map, allowedN: new Set(base.cycles.filter((c) => !c.historical).map((c) => c.workshopId)).size };
-    const allowedWs = [ownId, ...ranked.slice(0, maxE).map((w) => w.id)].filter(Boolean);
-    const loadWd = Object.fromEntries(allowedWs.map((w) => [w, 0]));
-    const artWs = {};
-    for (const art of Object.keys(artVol).sort((a, b) => artVol[b] - artVol[a])) {
-      const dest = allowedWs.slice().sort((a, b) => (loadWd[a] || 0) - (loadWd[b] || 0))[0];
-      artWs[art] = dest; loadWd[dest] = (loadWd[dest] || 0) + artVol[art] / (capById[dest] || 1);
-    }
-    for (const c of base.cycles) if (!c.historical) map[c.batchKey] = artWs[c.articleId] || c.workshopId;
-    return { map, allowedN: allowedWs.length };
+    for (const c of sch.cycles) { if (c.historical) continue; map[c.batchKey] = c.workshopId; }
+    return { map, sch, allowedN: new Set(Object.values(map)).size };
   };
 
-  // ЛЁГКАЯ оценка опозданий при данном распределении (только непрерывная упаковка, без сдвига) — для свипа
-  const latenessOf = (maxE) => layoutMetrics(buildSchedule(withPins(state, assignWs(maxE, true).map, {})), summerIds).lateUnits;
+  // ЛЁГКАЯ оценка опозданий при данном наборе цехов (распределение планировщика, без сдвига) — для свипа
+  const latenessOf = (maxE) => layoutMetrics(scheduleReduced(maxE), summerIds).lateUnits;
 
   // ЯДРО: полная раскладка для (maxE, reduce) — распределение + непрерывная упаковка + сдвиг блоков + защита
   const runOnce = (maxE, reduce) => {
-    const { map: wsByBatch, allowedN } = assignWs(maxE, reduce);
-    const s1 = buildSchedule(withPins(state, wsByBatch, {}));
+    const { sch: s1, allowedN } = assignWs(maxE, reduce); // s1 = распределение в наборе (планировщик уже дробит параллельно)
     const wsFirstCut = {}, wsMinSlack = {};
     for (const c of s1.cycles) {
       if (c.historical) continue;
@@ -127,8 +134,11 @@ export function computeJitLayout(state, opts = {}) {
       for (const c of s1.cycles) if (!c.historical && bad.has(c.workshopId)) delete jitStarts[c.partiaId];
     }
     let after = layoutMetrics(afterSch, summerIds);
-    // страховка (не-reduce): не хуже базы по опозданиям/разрывам — иначе откат сдвига
-    if (!reduce && (after.lateUnits > before.lateUnits || after.idleGaps > before.idleGaps)) {
+    // УНИВЕРСАЛЬНАЯ страховка: СДВИГ блоков не должен добавлять опозданий/разрывов сверх того, что даёт
+    // это же распределение БЕЗ сдвига (s1). Если добавил — откатываем весь сдвиг (лучше без экономии).
+    const s1m = layoutMetrics(s1, summerIds);
+    const ref = reduce ? s1m : before; // reduce сравниваем с s1 (распределение user попросил), иначе — с базой
+    if (after.lateUnits > ref.lateUnits || after.idleGaps > ref.idleGaps) {
       for (const k of Object.keys(jitStarts)) delete jitStarts[k];
       afterSch = buildSchedule(withJit(state, jitStarts, items));
       after = layoutMetrics(afterSch, summerIds);
@@ -155,12 +165,6 @@ export function computeJitLayout(state, opts = {}) {
   return { jitStarts: r.jitStarts, wsPins: r.wsPins, before, after: r.after, allowedWorkshops: r.allowedWorkshops, reduceMode: ignoreAllowedMatrix || balance, balance, note };
 }
 
-function withPins(state, wsByBatch, jitStarts) {
-  const partias = (state.partias || []).map((p) => (jitStarts[p.id] ? { ...p, jitStart: jitStarts[p.id] } : { ...p, jitStart: '' }));
-  const bp = { ...(state.batchPins || {}) };
-  for (const k in wsByBatch) bp[k] = { ...(bp[k] || {}), ws: wsByBatch[k] };
-  return { ...state, partias, batchPins: bp };
-}
 function withJit(state, jitStarts, items) {
   const partias = (state.partias || []).map((p) => (jitStarts[p.id] ? { ...p, jitStart: jitStarts[p.id] } : { ...p, jitStart: '' }));
   const bp = { ...(state.batchPins || {}) };
