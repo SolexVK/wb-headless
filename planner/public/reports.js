@@ -77,8 +77,11 @@ export function buildReportsData(state, schedule, opts = {}) {
     return { ym: m, label: ymLabel(m), rows, total: rows.reduce((s, r) => s + r.meters, 0) };
   });
 
-  // ── Отчёт 2b: консолидация закупки ──
-  const skuKey = (d) => (d.plansheet || d.colorNo) ? `ps:${d.plansheet || '—'}|cn:${d.colorNo || '—'}` : `art:${d.articleId}|col:${d.color}`;
+  // ── Отчёт 2b: КОНСОЛИДАЦИЯ ЗАКУПКИ ──
+  // Ключ ткани = «планшет + № цвета» (одна и та же ткань в РАЗНЫХ артикулах складывается вместе).
+  // Если планшет/№ не заданы — консолидируем по НАЗВАНИЮ цвета (тоже через артикулы). Только для закупа;
+  // в детализации (2a) остаётся разбивка по артикулам.
+  const skuKey = (d) => (d.plansheet || d.colorNo) ? `ps:${d.plansheet || '—'}|cn:${d.colorNo || '—'}` : `col:${String(d.color || '').trim().toLowerCase()}`;
 
   // ДЕМИ: по периоду (месяц производства) — вся ткань периода закупается в САМУЮ РАННЮЮ дату периода
   const demiByMonth = {};
@@ -89,11 +92,11 @@ export function buildReportsData(state, schedule, opts = {}) {
     const bySku = {};
     for (const d of list) {
       const k = skuKey(d);
-      const it = (bySku[k] || (bySku[k] = { plansheet: d.plansheet, colorNo: d.colorNo, arts: new Set(), meters: 0 }));
+      const it = (bySku[k] || (bySku[k] = { plansheet: d.plansheet, colorNo: d.colorNo, color: d.color, arts: new Set(), meters: 0 }));
       it.meters += d.meters; it.arts.add(d.articleId);
     }
-    const items = Object.values(bySku).map((x) => ({ plansheet: x.plansheet, colorNo: x.colorNo, arts: [...x.arts].sort((a, b) => artNum(a) - artNum(b)), meters: Math.ceil(x.meters) }))
-      .sort((a, b) => String(a.plansheet).localeCompare(String(b.plansheet)) || String(a.colorNo).localeCompare(String(b.colorNo)));
+    const items = Object.values(bySku).map((x) => ({ plansheet: x.plansheet, colorNo: x.colorNo, color: x.color, arts: [...x.arts].sort((a, b) => artNum(a) - artNum(b)), meters: Math.ceil(x.meters) }))
+      .sort((a, b) => String(a.plansheet).localeCompare(String(b.plansheet)) || String(a.colorNo).localeCompare(String(b.colorNo)) || String(a.color).localeCompare(String(b.color)));
     return { ym: m, label: ymLabel(m), purchaseDate, items, totalMeters: items.reduce((s, i) => s + i.meters, 0) };
   });
 
@@ -101,12 +104,12 @@ export function buildReportsData(state, schedule, opts = {}) {
   const summerBy = {};
   for (const d of dem) if (d.isSummer) {
     const k = `${d.prodMonth}|${skuKey(d)}`;
-    const it = (summerBy[k] || (summerBy[k] = { ym: d.prodMonth, plansheet: d.plansheet, colorNo: d.colorNo, arts: new Set(), meters: 0, earliestCut: d.cutStart }));
+    const it = (summerBy[k] || (summerBy[k] = { ym: d.prodMonth, plansheet: d.plansheet, colorNo: d.colorNo, color: d.color, arts: new Set(), meters: 0, earliestCut: d.cutStart }));
     it.meters += d.meters; it.arts.add(d.articleId);
     if (d.cutStart < it.earliestCut) it.earliestCut = d.cutStart;
   }
   const summerP = Object.values(summerBy).map((x) => ({
-    ym: x.ym, monthLabel: ymLabel(x.ym), plansheet: x.plansheet, colorNo: x.colorNo,
+    ym: x.ym, monthLabel: ymLabel(x.ym), plansheet: x.plansheet, colorNo: x.colorNo, color: x.color,
     arts: [...x.arts].sort((a, b) => artNum(a) - artNum(b)), meters: Math.ceil(x.meters),
     productionStart: x.earliestCut, purchaseBy: addMonthsISO(x.earliestCut, -1),
   })).sort((a, b) => String(a.purchaseBy).localeCompare(String(b.purchaseBy)) || String(a.plansheet).localeCompare(String(b.plansheet)));
@@ -189,7 +192,7 @@ function report2aHtml(data) {
 
 function report2bHtml(data) {
   const P = data.fabricPurchase;
-  let h = `<div style="margin:0 0 10px;color:#556;font-size:13px">Демисезон: вся ткань периода закупается в <b>самую раннюю</b> дату этого периода. Лето: закупка <b>не позже, чем за месяц</b> до старта производства.</div>`;
+  let h = `<div style="margin:0 0 10px;color:#556;font-size:13px">Ткань одного <b>планшета и цвета</b> из разных артикулов сложена вместе. Демисезон: вся ткань периода закупается в <b>самую раннюю</b> дату этого периода. Лето: закупка <b>не позже, чем за месяц</b> до старта производства.</div>`;
   // ДЕМИ
   h += `<div style="font-weight:800;color:${C.head};font-size:15px;margin:14px 0 8px">🧵 Демисезон — консолидация по периодам</div>`;
   if (!P.demi.length) h += `<div style="color:#889;padding:6px 0">нет демисезонной ткани</div>`;
@@ -200,7 +203,8 @@ function report2bHtml(data) {
       <table style="width:100%;border-collapse:collapse;font-size:12.5px">
         <thead><tr style="background:${C.th}">
           <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:100px">Планшет</th>
-          <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:100px">№ цвета</th>
+          <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:90px">№ цвета</th>
+          <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:120px">Цвет</th>
           <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border}">Артикулы</th>
           <th style="text-align:right;padding:6px 10px;border:1px solid ${C.border};width:120px">Метраж, м</th>
         </tr></thead><tbody>`;
@@ -208,11 +212,12 @@ function report2bHtml(data) {
       h += `<tr style="background:${i % 2 ? C.zebra : '#fff'}">
         <td style="padding:5px 10px;border:1px solid ${C.border};font-weight:600">${esc(it.plansheet || '—')}</td>
         <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(it.colorNo || '—')}</td>
+        <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(it.color || '—')}</td>
         <td style="padding:5px 10px;border:1px solid ${C.border}">${it.arts.map(artChip).join(', ')}</td>
         <td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(it.meters)}</td>
       </tr>`;
     });
-    h += `<tr style="background:${C.total};font-weight:700"><td colspan="3" style="padding:5px 10px;border:1px solid ${C.border}">Итого закупка ${esc(m.label)} · заказать ${dmy(m.purchaseDate)}</td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(m.totalMeters)}</td></tr>`;
+    h += `<tr style="background:${C.total};font-weight:700"><td colspan="4" style="padding:5px 10px;border:1px solid ${C.border}">Итого закупка ${esc(m.label)} · заказать ${dmy(m.purchaseDate)}</td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(m.totalMeters)}</td></tr>`;
     h += `</tbody></table></div>`;
   }
   // ЛЕТО
@@ -222,11 +227,12 @@ function report2bHtml(data) {
     h += `<table style="width:100%;border-collapse:collapse;font-size:12.5px">
       <thead><tr style="background:${C.thSummer}">
         <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:110px">Заказать не позже</th>
-        <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:110px">Старт произв.</th>
-        <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:90px">Планшет</th>
-        <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:90px">№ цвета</th>
+        <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:100px">Старт произв.</th>
+        <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:80px">Планшет</th>
+        <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:80px">№ цвета</th>
+        <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:110px">Цвет</th>
         <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border}">Артикулы</th>
-        <th style="text-align:right;padding:6px 10px;border:1px solid ${C.border};width:110px">Метраж, м</th>
+        <th style="text-align:right;padding:6px 10px;border:1px solid ${C.border};width:100px">Метраж, м</th>
       </tr></thead><tbody>`;
     P.summer.forEach((it, i) => {
       h += `<tr style="background:${i % 2 ? C.totalSummer : '#fff'}">
@@ -234,12 +240,13 @@ function report2bHtml(data) {
         <td style="padding:5px 10px;border:1px solid ${C.border}">${dmy(it.productionStart)}</td>
         <td style="padding:5px 10px;border:1px solid ${C.border};font-weight:600">${esc(it.plansheet || '—')}</td>
         <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(it.colorNo || '—')}</td>
+        <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(it.color || '—')}</td>
         <td style="padding:5px 10px;border:1px solid ${C.border}">${it.arts.map(artChip).join(', ')}</td>
         <td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(it.meters)}</td>
       </tr>`;
     });
     const stot = P.summer.reduce((s, i) => s + i.meters, 0);
-    h += `<tr style="background:${C.totalSummer};font-weight:700"><td colspan="5" style="padding:5px 10px;border:1px solid ${C.border}">Итого летняя ткань</td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(stot)}</td></tr>`;
+    h += `<tr style="background:${C.totalSummer};font-weight:700"><td colspan="6" style="padding:5px 10px;border:1px solid ${C.border}">Итого летняя ткань</td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(stot)}</td></tr>`;
     h += `</tbody></table>`;
   }
   return h;
@@ -347,35 +354,35 @@ function report2Excel(data) {
     const aoa = [['ЗАКУПКА ТКАНИ — консолидация']];
     const sm = {}; let r = 1;
     sm.A1 = { font: { bold: true, sz: 13, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.head) } } };
-    aoa.push(['Демисезон — вся ткань периода закупается в самую раннюю дату периода']); r++;
-    aoa.push(['Период', 'Заказать', 'Планшет', '№ цвета', 'Артикулы', 'Метраж, м']);
-    for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r, c })] = TH; r++;
+    aoa.push(['Демисезон — вся ткань периода закупается в самую раннюю дату периода (цвета одного планшета консолидированы через артикулы)']); r++;
+    aoa.push(['Период', 'Заказать', 'Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м']);
+    for (let c = 0; c < 7; c++) sm[XLSX.utils.encode_cell({ r, c })] = TH; r++;
     for (const m of data.fabricPurchase.demi) {
       for (const it of m.items) {
-        aoa.push([m.label, dmy(m.purchaseDate), it.plansheet || '—', it.colorNo || '—', it.arts.join(', '), it.meters]);
-        for (const c of [0, 1, 2, 3, 4]) sm[XLSX.utils.encode_cell({ r, c })] = border();
-        sm[XLSX.utils.encode_cell({ r, c: 5 })] = { alignment: { horizontal: 'right' }, ...border() };
+        aoa.push([m.label, dmy(m.purchaseDate), it.plansheet || '—', it.colorNo || '—', it.color || '—', it.arts.join(', '), it.meters]);
+        for (const c of [0, 1, 2, 3, 4, 5]) sm[XLSX.utils.encode_cell({ r, c })] = border();
+        sm[XLSX.utils.encode_cell({ r, c: 6 })] = { alignment: { horizontal: 'right' }, ...border() };
         r++;
       }
-      aoa.push([`Итого ${m.label}`, dmy(m.purchaseDate), '', '', '', m.totalMeters]);
-      for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r, c })] = TOT; r++;
+      aoa.push([`Итого ${m.label}`, dmy(m.purchaseDate), '', '', '', '', m.totalMeters]);
+      for (let c = 0; c < 7; c++) sm[XLSX.utils.encode_cell({ r, c })] = TOT; r++;
     }
     aoa.push([]); r++;
     aoa.push(['Летние — закупка не позже чем за месяц до старта производства']);
     sm[XLSX.utils.encode_cell({ r, c: 0 })] = { font: { bold: true, color: { rgb: hx(C.summer) } } }; r++;
-    aoa.push(['Заказать не позже', 'Старт произв.', 'Планшет', '№ цвета', 'Артикулы', 'Метраж, м']);
+    aoa.push(['Заказать не позже', 'Старт произв.', 'Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м']);
     const THS = { ...TH, fill: { patternType: 'solid', fgColor: { rgb: hx(C.thSummer) } } };
-    for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r, c })] = THS; r++;
+    for (let c = 0; c < 7; c++) sm[XLSX.utils.encode_cell({ r, c })] = THS; r++;
     for (const it of data.fabricPurchase.summer) {
-      aoa.push([dmy(it.purchaseBy), dmy(it.productionStart), it.plansheet || '—', it.colorNo || '—', it.arts.join(', '), it.meters]);
+      aoa.push([dmy(it.purchaseBy), dmy(it.productionStart), it.plansheet || '—', it.colorNo || '—', it.color || '—', it.arts.join(', '), it.meters]);
       sm[XLSX.utils.encode_cell({ r, c: 0 })] = { font: { bold: true, color: { rgb: hx(C.summer) } }, ...border() };
-      for (const c of [1, 2, 3, 4]) sm[XLSX.utils.encode_cell({ r, c })] = border();
-      sm[XLSX.utils.encode_cell({ r, c: 5 })] = { alignment: { horizontal: 'right' }, ...border() };
+      for (const c of [1, 2, 3, 4, 5]) sm[XLSX.utils.encode_cell({ r, c })] = border();
+      sm[XLSX.utils.encode_cell({ r, c: 6 })] = { alignment: { horizontal: 'right' }, ...border() };
       r++;
     }
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
-    ws['!cols'] = [{ wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 12 }];
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
+    ws['!cols'] = [{ wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 20 }, { wch: 12 }];
     styleSheet(ws, sm); XLSX.utils.book_append_sheet(wb, ws, 'Закупка ткани');
   }
   XLSX.writeFile(wb, 'Отчёт_ткань_закупка.xlsx');
