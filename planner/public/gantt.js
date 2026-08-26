@@ -79,10 +79,12 @@ export function renderGantt(container, schedule, state, opts = {}) {
   for (const w of wsList) {
     const items = cycles.filter((c) => c.workshopId === w.id)
       .sort((a, b) => parse(a.ops.cut.start) - parse(b.ops.cut.start));
-    // артикулы этого цеха с суммарным объёмом (по убыванию) — что и сколько цех шьёт
+    // артикулы этого цеха с суммарным объёмом; ПОЛОСЫ сортируем по НОМЕРУ артикула по возрастанию
+    // (от меньшего к большему) — стабильный порядок, в т.ч. для только что перетащенного блока.
     const byArt = {};
     for (const c of items) byArt[c.articleId] = (byArt[c.articleId] || 0) + (c.units || 0);
-    const arts = Object.entries(byArt).sort((a, b) => b[1] - a[1]);
+    const artNum = (id) => { const n = parseInt(String(id).replace(/\D/g, ''), 10); return Number.isFinite(n) ? n : Infinity; };
+    const arts = Object.entries(byArt).sort((a, b) => artNum(a[0]) - artNum(b[0]) || String(a[0]).localeCompare(String(b[0])));
     // КАЖДЫЙ артикул — на СВОЕЙ горизонтальной полосе (банде). Внутри банда партии одного артикула
     // упаковываются встык; если довозы одного артикула пересекаются во времени — добавляем под-полосу.
     let laneBase = 0;
