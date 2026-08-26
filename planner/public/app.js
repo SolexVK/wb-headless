@@ -7,7 +7,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'reports-fabric-merge-2026-08-27';
+const APP_BUILD = 'fix-fabric-decimal-2026-08-27';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -6083,8 +6083,8 @@ function dataArticleCard(a, i) {
         </div>
         <div class="field"><label>Комментарий (кратко об особенностях)</label><input data-art="${i}" data-f="comment" value="${(a.comment || '').replace(/"/g, '&quot;')}" placeholder="напр.: твид, приталенная, отложной воротник"></div>
         <div class="row-flex">
-          <div class="field"><label>Расход ткани, м/шт</label><input data-art="${i}" data-f="fabricPerUnit" value="${a.fabricPerUnit}" style="width:90px"></div>
-          <div class="field"><label>Цена ткани, $/м</label><input data-art="${i}" data-f="fabricPricePerMeter" value="${a.fabricPricePerMeter || 0}" style="width:90px"></div>
+          <div class="field"><label>Расход ткани, м/шт</label><input data-art="${i}" data-f="fabricPerUnit" inputmode="decimal" value="${a.fabricPerUnit}" style="width:90px"></div>
+          <div class="field"><label>Цена ткани, $/м</label><input data-art="${i}" data-f="fabricPricePerMeter" inputmode="decimal" value="${a.fabricPricePerMeter || 0}" style="width:90px"></div>
           <div class="field"><label title="Доля заказов, которые выкупают. Для одежды ~30–60%. Заказы = выкупы / (%выкупа)">% выкупа</label><input data-art="${i}" data-f="buyoutPct" type="number" min="1" max="100" value="${a.buyoutPct ?? 40}" style="width:80px"></div>
         </div>
         <div class="field"><label>Поставщик ткани</label><select data-art="${i}" data-f="supplierId">
@@ -6268,6 +6268,15 @@ function bindColorDnD(root) {
   });
 }
 
+// разбор десятичного ввода с поддержкой ЗАПЯТОЙ (рус. раскладка): «1,6» → 1.6, «5 500» → 5500.
+// Возвращает число или null (пусто/невалидно) — вызывающий сам решает про дефолт.
+function parseDec(s) {
+  const t = String(s == null ? '' : s).trim().replace(/\s/g, '').replace(',', '.');
+  if (t === '') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
 function bindDataEvents() {
   const root = document.getElementById('data-forms');
   const mark = () => { dirty = true; setStatus(); };
@@ -6276,9 +6285,9 @@ function bindDataEvents() {
     const a = state.articles[+e.target.dataset.art]; const f = e.target.dataset.f;
     if (f === 'colors') { a.colors = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); pruneArticlePartias(a); mark(); renderData(); return; }
     else if (f === 'sizes') { a.sizes = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); pruneArticlePartias(a); mark(); renderData(); return; }
-    else if (f === 'fabricPerUnit') a.fabricPerUnit = +e.target.value || 1.6;
-    else if (f === 'fabricPricePerMeter') a.fabricPricePerMeter = Math.max(0, +e.target.value || 0);
-    else if (f === 'buyoutPct') a.buyoutPct = Math.max(1, Math.min(100, +e.target.value || 40));
+    else if (f === 'fabricPerUnit') { const v = parseDec(e.target.value); a.fabricPerUnit = (v != null && v > 0) ? v : 1.6; e.target.value = a.fabricPerUnit; }
+    else if (f === 'fabricPricePerMeter') { const v = parseDec(e.target.value); a.fabricPricePerMeter = (v != null && v >= 0) ? v : 0; e.target.value = a.fabricPricePerMeter; }
+    else if (f === 'buyoutPct') { const v = parseDec(e.target.value); a.buyoutPct = (v != null) ? Math.max(1, Math.min(100, v)) : 40; e.target.value = a.buyoutPct; }
     else if (f === 'id') { if (dataSelArticle === a.id) dataSelArticle = e.target.value; a.id = e.target.value; } // синхронизировать выбор при смене id
     else a[f] = e.target.value; mark();
   }));
