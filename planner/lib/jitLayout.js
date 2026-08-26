@@ -77,9 +77,11 @@ export function computeJitLayout(state, opts = {}) {
   const artVol = {}, artAllow = {};
   for (const c of base.cycles) { if (c.historical) continue; artVol[c.articleId] = (artVol[c.articleId] || 0) + c.units; }
   for (const a of state.articles || []) artAllow[a.id] = (Array.isArray(a.allowedWorkshops) && a.allowedWorkshops.length) ? a.allowedWorkshops : null;
-  // СТРОГОЕ правило для СВОЕГО цеха: если артикул закреплён за нашим цехом (матрица «кто шьёт» разрешает own),
-  // он ОБЯЗАН шиться в своём цехе — при сокращении НЕ перебрасываем. Остальные — свободно между цехами.
-  const ownLocked = (art) => { const al = artAllow[art]; return !!(al && al.includes(ownId)); };
+  // СТРОГИЕ ПРИВЯЗКИ из матрицы «кто шьёт» (страница «План по размерам»): если у артикула задан список
+  // разрешённых цехов — он ОБЯЗАН шиться ТОЛЬКО в них. Экономная раскладка НЕ перебрасывает такие артикулы
+  // за пределы их набора (ни при сокращении, ни при группировке). Свободно распределяются лишь артикулы БЕЗ
+  // привязки (в матрице «любой цех»). boundOf → массив разрешённых цехов или null (свободный).
+  const boundOf = (art) => artAllow[art];
 
   // ГЕНДЕРНОЕ (технологическое) ограничение: мужские модели требуют своего оборудования. Цех, который шьёт
   // мужские (по факту базы), «мужской-способный» — в нём можно и мужские, и женские. Цех, где шьют ТОЛЬКО
@@ -91,37 +93,39 @@ export function computeJitLayout(state, opts = {}) {
 
   // ── СОКРАЩЕНИЕ ЦЕХОВ через ОГРАНИЧЕНИЕ набора цехов (не жёсткая привязка артикула в один цех!).
   // Планировщик сам распределяет — в т.ч. ДРОБИТ крупный довоз параллельно по разрешённым цехам (так база
-  // укладывалась в сроки). Свой цех — СТРОГО по матрице; мужские — только мужские-способные; женские — любые.
-  // На ВРЕМЕННОЙ копии state (матрицу «кто шьёт» не портим).
+  // укладывалась в сроки). ПРИВЯЗАННЫЕ артикулы — СТРОГО по матрице (не выходим за их набор); мужские без
+  // привязки — только мужские-способные; свободные — любые из набора. На ВРЕМЕННОЙ копии state (матрицу не портим).
   const targetSetFor = (maxE) => [ownId, ...ranked.slice(0, maxE).map((w) => w.id)].filter(Boolean);
   const isSummer = (id) => summerIds.has(String(id).trim());
 
-  // ── ВАРИАНТ «РАСПЫЛЕНИЕ»: артикулу разрешён ВЕСЬ набор цехов (планировщик сам дробит параллельно).
+  // ── ВАРИАНТ «РАСПЫЛЕНИЕ»: свободному артикулу разрешён ВЕСЬ набор цехов (планировщик сам дробит параллельно),
+  // ПРИВЯЗАННЫЙ — оставляем строго его набор из матрицы.
   const stateReducedFull = (maxE) => {
     const target = targetSetFor(maxE);
     const articles = (state.articles || []).map((a) => {
-      if (ownLocked(a.id)) return { ...a, allowedWorkshops: [ownId] }; // строго свой
-      if (isMens(a.id)) { const cap = target.filter((w) => mensCapable.has(w)); return { ...a, allowedWorkshops: cap.length ? cap : [...mensCapable] }; } // мужские — только мужские-способные
-      return { ...a, allowedWorkshops: target.slice() }; // женские — любые из набора
+      if (boundOf(a.id)) return a; // строгая привязка из матрицы — НЕ трогаем (a.allowedWorkshops уже = разрешённые цеха)
+      if (isMens(a.id)) { const cap = target.filter((w) => mensCapable.has(w)); return { ...a, allowedWorkshops: cap.length ? cap : [...mensCapable] }; } // мужские без привязки — только мужские-способные
+      return { ...a, allowedWorkshops: target.slice() }; // свободные — любые из набора
     });
     return { ...state, articles };
   };
 
-  // ── ВАРИАНТ «ГРУППИРОВКА»: каждый артикул закрепляем за ОДНИМ цехом (минимум разных артикулов на цех ⇒
-  // меньше перестроек). Балансируем по мощности (load/cap). Летние отдаём в ДОП. цеха (2/3/4) как «начинку»
-  // с ноября (пол sewNotBefore ставит владелец) — свой цех оставляем на демисезоне. Мужские — только
-  // мужские-способные. Свой-закреплённые — строго свой.
+  // ── ВАРИАНТ «ГРУППИРОВКА»: СВОБОДНЫЙ артикул закрепляем за ОДНИМ цехом (минимум разных артикулов на цех ⇒
+  // меньше перестроек), балансируя по мощности (load/cap). ПРИВЯЗАННЫЕ артикулы оставляем строго по матрице
+  // (их набор разрешённых цехов не сужаем). Летние без привязки отдаём в ДОП. цеха (2/3/4) как «начинку» с
+  // ноября (пол sewNotBefore ставит владелец) — свой цех оставляем на демисезоне.
   const groupedAssign = (maxE) => {
     const target = targetSetFor(maxE);
     const load = {}; for (const w of target) load[w] = 0;
     const assign = {};
-    const nonLocked = [];
+    const free = [];
     for (const a of state.articles || []) {
-      if (ownLocked(a.id)) { assign[a.id] = [ownId]; load[ownId] = (load[ownId] || 0) + (artVol[a.id] || 0); }
-      else nonLocked.push(a);
+      const bound = boundOf(a.id);
+      if (bound) { assign[a.id] = bound.slice(); for (const w of bound) load[w] = (load[w] || 0) + (artVol[a.id] || 0) / bound.length; } // привязанный — весь его набор, объём делим по цехам
+      else free.push(a);
     }
-    nonLocked.sort((x, y) => (artVol[y.id] || 0) - (artVol[x.id] || 0)); // крупные — первыми (лучше балансируется)
-    for (const a of nonLocked) {
+    free.sort((x, y) => (artVol[y.id] || 0) - (artVol[x.id] || 0)); // крупные — первыми (лучше балансируется)
+    for (const a of free) {
       let elig = target.slice();
       if (isMens(a.id)) { const cap = elig.filter((w) => mensCapable.has(w)); elig = cap.length ? cap : [...mensCapable]; }
       if (isSummer(a.id)) { const noOwn = elig.filter((w) => w !== ownId); if (noOwn.length) elig = noOwn; } // летние — в доп. цеха
