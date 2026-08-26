@@ -176,10 +176,19 @@ export function buildSchedule(state) {
   // продолжают работать параллельно для совместимости.
   const batchPins = (state && state.batchPins) || {};
   const applyPin = (job) => {
+    // МАТРИЦА «кто шьёт» — ЖЁСТКОЕ ограничение: артикул с заданным списком разрешённых цехов шьётся ТОЛЬКО
+    // в них. Ни пер-довозный цех (partia.workshopId), ни пин с Ганта (устаревшая/конфликтующая раскладка)
+    // не могут вынести артикул за пределы разрешённого набора — матрица главнее. Цех вне набора игнорируем
+    // (артикул спланируется в разрешённом цехе), а не «прибиваем» его туда вопреки матрице.
+    const allow = job.article && job.article.allowedWorkshops;
+    const bound = Array.isArray(allow) && allow.length;
+    const okWs = (id) => !!(id && wsById[id] && (!bound || allow.includes(id)));
+    if (job.lockedWs && !okWs(job.lockedWs)) job.lockedWs = null; // снять пер-довозный цех вне матрицы
     const pin = batchPins[job.batchKey];
-    if (!pin) return job;
-    if (pin.ws && wsById[pin.ws]) { job.lockedWs = pin.ws; job.pinnedWs = true; } // форс цеха (вертикальный drag) — перекрывает даже allowedWorkshops (пользователь явно так перетащил)
-    if (pin.cut && /^\d{4}-\d{2}-\d{2}$/.test(String(pin.cut).slice(0, 10))) job.pinCut = String(pin.cut).slice(0, 10); // якорь даты
+    if (pin) {
+      if (pin.ws && okWs(pin.ws)) { job.lockedWs = pin.ws; job.pinnedWs = true; } // форс цеха — только В ПРЕДЕЛАХ матрицы
+      if (pin.cut && /^\d{4}-\d{2}-\d{2}$/.test(String(pin.cut).slice(0, 10))) job.pinCut = String(pin.cut).slice(0, 10); // якорь даты — всегда
+    }
     return job;
   };
 

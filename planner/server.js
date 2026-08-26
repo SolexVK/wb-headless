@@ -23,7 +23,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'jit-bindings-2026-08-27';
+const BACKEND_BUILD = 'matrix-hard-2026-08-27';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -364,6 +364,15 @@ app.post('/api/pin', requireEdit('gantt'), (req, res) => {
         const cur = { ...(state.batchPins[batchKey] || {}) };
         if (ws) cur.ws = ws; if (cut) cur.cut = cut;
         state.batchPins[batchKey] = cur;
+      }
+    }
+    // Перенос блока в ДРУГОЙ цех, а у артикула ЯВНЫЙ список «кто шьёт» без целевого цеха? Матрица теперь
+    // жёстче пина (планировщик игнорирует цех вне набора), поэтому СНАЧАЛА расширяем список на целевой цех
+    // (перенос = явное разрешение цеха), иначе блок вернулся бы обратно. Ниже точный набор зеркалится по факту.
+    if (singleWsMove && moveArticle && ws && ws !== sourceWs) {
+      const a0 = (state.articles || []).find((x) => x.id === moveArticle);
+      if (a0 && Array.isArray(a0.allowedWorkshops) && a0.allowedWorkshops.length && !a0.allowedWorkshops.includes(ws)) {
+        a0.allowedWorkshops = [...a0.allowedWorkshops, ws];
       }
     }
     let norm = saveState(state);
