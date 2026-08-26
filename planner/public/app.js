@@ -1,12 +1,13 @@
 // app.js — оболочка SPA: загрузка данных, вкладки, дашборд, формы, Гант.
 import { renderGantt } from './gantt.js';
+import { renderReportsPage } from './reports.js';
 import { unitParams, analyze } from './unitCalc.js';
 import { reconcilePlan, splitMatrixByShares } from './reconcile.js';
 import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'gantt-addws-2026-08-27';
+const APP_BUILD = 'reports-v1-2026-08-27';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -194,10 +195,17 @@ function renderCurrent() {
   else if (activeTab === 'fabric') renderFabricOrder();
   else if (activeTab === 'dashboard') renderDashboard();
   else if (activeTab === 'season') renderSeason();
+  else if (activeTab === 'reports') renderReports();
   else if (activeTab === 'supply') renderSupply();
   else if (activeTab === 'unit') renderUnit();
   else if (activeTab === 'data') renderData();
   applyCollapsibles();
+}
+
+// ---------- ОТЧЁТЫ ----------
+function renderReports() {
+  const sch = { ...schedule, cycles: (schedule?.cycles || []).filter((c) => stageInSeason(c.stageId)) };
+  renderReportsPage(document.getElementById('reports'), state, sch, { toast });
 }
 
 // ---------- ФАКТ (фактические количества по партиям) ----------
