@@ -94,7 +94,10 @@ export function computeJitLayout(state, opts = {}) {
   // укладывалась в сроки). Свой цех — СТРОГО по матрице; мужские — только мужские-способные; женские — любые.
   // На ВРЕМЕННОЙ копии state (матрицу «кто шьёт» не портим).
   const targetSetFor = (maxE) => [ownId, ...ranked.slice(0, maxE).map((w) => w.id)].filter(Boolean);
-  const stateReduced = (maxE) => {
+  const isSummer = (id) => summerIds.has(String(id).trim());
+
+  // ── ВАРИАНТ «РАСПЫЛЕНИЕ»: артикулу разрешён ВЕСЬ набор цехов (планировщик сам дробит параллельно).
+  const stateReducedFull = (maxE) => {
     const target = targetSetFor(maxE);
     const articles = (state.articles || []).map((a) => {
       if (ownLocked(a.id)) return { ...a, allowedWorkshops: [ownId] }; // строго свой
@@ -103,14 +106,59 @@ export function computeJitLayout(state, opts = {}) {
     });
     return { ...state, articles };
   };
-  const scheduleReduced = (maxE) => buildSchedule(stateReduced(maxE));
+
+  // ── ВАРИАНТ «ГРУППИРОВКА»: каждый артикул закрепляем за ОДНИМ цехом (минимум разных артикулов на цех ⇒
+  // меньше перестроек). Балансируем по мощности (load/cap). Летние отдаём в ДОП. цеха (2/3/4) как «начинку»
+  // с ноября (пол sewNotBefore ставит владелец) — свой цех оставляем на демисезоне. Мужские — только
+  // мужские-способные. Свой-закреплённые — строго свой.
+  const groupedAssign = (maxE) => {
+    const target = targetSetFor(maxE);
+    const load = {}; for (const w of target) load[w] = 0;
+    const assign = {};
+    const nonLocked = [];
+    for (const a of state.articles || []) {
+      if (ownLocked(a.id)) { assign[a.id] = [ownId]; load[ownId] = (load[ownId] || 0) + (artVol[a.id] || 0); }
+      else nonLocked.push(a);
+    }
+    nonLocked.sort((x, y) => (artVol[y.id] || 0) - (artVol[x.id] || 0)); // крупные — первыми (лучше балансируется)
+    for (const a of nonLocked) {
+      let elig = target.slice();
+      if (isMens(a.id)) { const cap = elig.filter((w) => mensCapable.has(w)); elig = cap.length ? cap : [...mensCapable]; }
+      if (isSummer(a.id)) { const noOwn = elig.filter((w) => w !== ownId); if (noOwn.length) elig = noOwn; } // летние — в доп. цеха
+      let best = null, bestScore = Infinity;
+      for (const w of elig) { const s = ((load[w] || 0) + (artVol[a.id] || 0)) / (capById[w] || 1); if (s < bestScore) { bestScore = s; best = w; } }
+      if (!best) best = elig[0] || ownId;
+      assign[a.id] = [best]; load[best] = (load[best] || 0) + (artVol[a.id] || 0);
+    }
+    return assign;
+  };
+  const stateReducedGrouped = (maxE) => {
+    const assign = groupedAssign(maxE);
+    const articles = (state.articles || []).map((a) => (assign[a.id] ? { ...a, allowedWorkshops: assign[a.id].slice() } : a));
+    return { ...state, articles };
+  };
+
+  // ВЫБОР между группировкой и распылением: группировка (меньше перестроек) — только если НЕ добавляет
+  // опозданий против распыления. Кэшируем расписание по maxE (свип вызывает многократно).
+  const _redCache = {};
+  const reducedFor = (maxE) => {
+    if (_redCache[maxE]) return _redCache[maxE];
+    const full = stateReducedFull(maxE), schFull = buildSchedule(full);
+    const grp = stateReducedGrouped(maxE), schGrp = buildSchedule(grp);
+    const lFull = layoutMetrics(schFull, summerIds).lateUnits;
+    const lGrp = layoutMetrics(schGrp, summerIds).lateUnits;
+    const useGrp = lGrp <= lFull; // группировка предпочтительна при равных/меньших опозданиях
+    return (_redCache[maxE] = { state: useGrp ? grp : full, sch: useGrp ? schGrp : schFull, grouped: useGrp });
+  };
+  const stateReduced = (maxE) => reducedFor(maxE).state;
+  const scheduleReduced = (maxE) => reducedFor(maxE).sch;
 
   // назначение батчей по цехам: reduce ⇒ распределение планировщика в ограниченном наборе; иначе — база.
   const assignWs = (maxE, reduce) => {
     const sch = reduce ? scheduleReduced(maxE) : base;
     const map = {};
     for (const c of sch.cycles) { if (c.historical) continue; map[c.batchKey] = c.workshopId; }
-    return { map, sch, allowedN: new Set(Object.values(map)).size };
+    return { map, sch, allowedN: new Set(Object.values(map)).size, grouped: reduce ? reducedFor(maxE).grouped : false };
   };
 
   // ЛЁГКАЯ оценка опозданий при данном наборе цехов (распределение планировщика, без сдвига) — для свипа
@@ -118,7 +166,7 @@ export function computeJitLayout(state, opts = {}) {
 
   // ЯДРО: полная раскладка для (maxE, reduce) — распределение + непрерывная упаковка + сдвиг блоков + защита
   const runOnce = (maxE, reduce) => {
-    const { sch: s1, allowedN } = assignWs(maxE, reduce); // s1 = распределение в наборе (планировщик уже дробит параллельно)
+    const { sch: s1, allowedN, grouped } = assignWs(maxE, reduce); // s1 = распределение в наборе (планировщик уже дробит параллельно)
     const items = s1.cycles.filter((c) => !c.historical).map((c) => ({ batchKey: c.batchKey, ws: c.workshopId, partiaId: c.partiaId }));
     const baseLate = new Set(s1.cycles.filter((c) => !c.historical && c.logistics.lateDays > 0).map((c) => c.partiaId));
     const jitStarts = {};
@@ -154,7 +202,7 @@ export function computeJitLayout(state, opts = {}) {
       if (after.lateUnits > ref.lateUnits) { for (const k of Object.keys(jitStarts)) delete jitStarts[k]; afterSch2 = buildSchedule(withJit(state, jitStarts, items)); after = layoutMetrics(afterSch2, summerIds); }
       const wsPins = {}; for (const it of items) wsPins[it.batchKey] = { ws: it.ws };
       for (const k of Object.keys(jitStarts)) if (!jitStarts[k]) delete jitStarts[k];
-      return { jitStarts, wsPins, after, allowedWorkshops: allowedN };
+      return { jitStarts, wsPins, after, allowedWorkshops: allowedN, grouped };
     }
 
     // ОБЫЧНЫЙ пер-цеховой сдвиг: весь блок цеха — на min запас (без разрывов).
@@ -195,7 +243,7 @@ export function computeJitLayout(state, opts = {}) {
     const wsPins = {};
     for (const it of items) wsPins[it.batchKey] = { ws: it.ws };
     for (const k of Object.keys(jitStarts)) if (!jitStarts[k]) delete jitStarts[k];
-    return { jitStarts, wsPins, after, allowedWorkshops: allowedN };
+    return { jitStarts, wsPins, after, allowedWorkshops: allowedN, grouped };
   };
 
   let r, chosenExtra = maxExtra, note = '';
@@ -207,11 +255,13 @@ export function computeJitLayout(state, opts = {}) {
     if (chosenExtra === null) { chosenExtra = wsAll.length - 1; note = 'даже всеми цехами опоздания не убрать (упор в сроки/мощность)'; }
     r = runOnce(chosenExtra, true);
     note = note || `минимум цехов без новых опозданий: ${r.allowedWorkshops}`;
+    if (r.grouped) note += '; артикулы сгруппированы по цехам (меньше перестроек)';
   } else {
     r = runOnce(maxExtra, ignoreAllowedMatrix);
+    if (r.grouped) note = 'артикулы сгруппированы по цехам (меньше перестроек)';
   }
 
-  return { jitStarts: r.jitStarts, wsPins: r.wsPins, before, after: r.after, allowedWorkshops: r.allowedWorkshops, reduceMode: ignoreAllowedMatrix || balance, balance, note };
+  return { jitStarts: r.jitStarts, wsPins: r.wsPins, before, after: r.after, allowedWorkshops: r.allowedWorkshops, reduceMode: ignoreAllowedMatrix || balance, balance, grouped: !!r.grouped, note };
 }
 
 function withJit(state, jitStarts, items) {
