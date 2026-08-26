@@ -13,6 +13,8 @@ import { buildSchedule } from './scheduler.js';
 import { makeCalendar, addDays, diffDays, toISO } from './calendar.js';
 
 export const SUMMER_ARTICLE_IDS = ['005', '006', '007', '014', '022', '032', '033', '034'];
+// мужские модели (требуют своего оборудования — только в мужских-способные цеха)
+export const MENS_ARTICLE_IDS = ['002', '003', '005', '006', '007'];
 
 export function layoutMetrics(schedule, summerSet = null) {
   const cy = (schedule.cycles || []).filter((c) => !c.historical);
@@ -56,10 +58,12 @@ export function computeJitLayout(state, opts = {}) {
   const maxExtra = Math.max(0, Math.round(num(opts.maxExtraWorkshops, 3)));
   const ignoreAllowedMatrix = !!opts.ignoreAllowedMatrix; // фикс. сокращение: свой + N цехов вопреки матрице
   const balance = !!opts.balanceMinWorkshops;             // авто-баланс: МИНИМУМ цехов БЕЗ новых опозданий
+  const deepShift = !!opts.deepShift;                     // глубокий пер-довозный сдвиг (больше экономии, возможны паузы)
   const summerIds = new Set((opts.summerIds && opts.summerIds.length ? opts.summerIds : SUMMER_ARTICLE_IDS).map((x) => String(x).trim()));
 
   const cal = makeCalendar(state.settings.calendar);
   const subWD = (iso, n) => { let cur = cal.nextWorkingDay(iso), left = Math.max(0, Math.ceil(n)), g = 0; while (left > 0 && g++ < 100000) { cur = addDays(cur, -1); while (!cal.isWorkingDay(cur)) cur = addDays(cur, -1); left--; } return cur; };
+  const wdBetween = (a, b) => { let n = 0, cur = a, g = 0; while (diffDays(cur, b) >= 0 && g++ < 100000) { if (cal.isWorkingDay(cur)) n++; cur = addDays(cur, 1); } return n; };
   const effDl = (dl, isSummer) => { if (!dl) return '2099-01-01'; if (!isSummer) return dl; const cap = `${dl.slice(0, 4)}-${summerMMDD}`; return diffDays(cap, dl) < 0 ? cap : dl; };
 
   const base = buildSchedule(state);
@@ -77,14 +81,26 @@ export function computeJitLayout(state, opts = {}) {
   // он ОБЯЗАН шиться в своём цехе — при сокращении НЕ перебрасываем. Остальные — свободно между цехами.
   const ownLocked = (art) => { const al = artAllow[art]; return !!(al && al.includes(ownId)); };
 
+  // ГЕНДЕРНОЕ (технологическое) ограничение: мужские модели требуют своего оборудования. Цех, который шьёт
+  // мужские (по факту базы), «мужской-способный» — в нём можно и мужские, и женские. Цех, где шьют ТОЛЬКО
+  // женские, мужские шить НЕ может. Значит: мужские артикулы — только в мужских-способные цеха; женские — в любые.
+  const MENS = new Set((opts.mensArticleIds && opts.mensArticleIds.length ? opts.mensArticleIds : MENS_ARTICLE_IDS).map((x) => String(x).trim()));
+  const isMens = (art) => MENS.has(String(art).trim());
+  const mensCapable = new Set();
+  for (const c of base.cycles) if (!c.historical && isMens(c.articleId)) mensCapable.add(c.workshopId);
+
   // ── СОКРАЩЕНИЕ ЦЕХОВ через ОГРАНИЧЕНИЕ набора цехов (не жёсткая привязка артикула в один цех!).
   // Планировщик сам распределяет — в т.ч. ДРОБИТ крупный довоз параллельно по разрешённым цехам (так база
-  // укладывалась в сроки). Свой цех — СТРОГО по матрице (закреплённые за own артикулы только в own); прочие
-  // артикулы — свободно в набор {свой + N доп.}. На ВРЕМЕННОЙ копии state (матрицу «кто шьёт» не портим).
+  // укладывалась в сроки). Свой цех — СТРОГО по матрице; мужские — только мужские-способные; женские — любые.
+  // На ВРЕМЕННОЙ копии state (матрицу «кто шьёт» не портим).
   const targetSetFor = (maxE) => [ownId, ...ranked.slice(0, maxE).map((w) => w.id)].filter(Boolean);
   const stateReduced = (maxE) => {
     const target = targetSetFor(maxE);
-    const articles = (state.articles || []).map((a) => (ownLocked(a.id) ? { ...a, allowedWorkshops: [ownId] } : { ...a, allowedWorkshops: target.slice() }));
+    const articles = (state.articles || []).map((a) => {
+      if (ownLocked(a.id)) return { ...a, allowedWorkshops: [ownId] }; // строго свой
+      if (isMens(a.id)) { const cap = target.filter((w) => mensCapable.has(w)); return { ...a, allowedWorkshops: cap.length ? cap : [...mensCapable] }; } // мужские — только мужские-способные
+      return { ...a, allowedWorkshops: target.slice() }; // женские — любые из набора
+    });
     return { ...state, articles };
   };
   const scheduleReduced = (maxE) => buildSchedule(stateReduced(maxE));
@@ -103,6 +119,45 @@ export function computeJitLayout(state, opts = {}) {
   // ЯДРО: полная раскладка для (maxE, reduce) — распределение + непрерывная упаковка + сдвиг блоков + защита
   const runOnce = (maxE, reduce) => {
     const { sch: s1, allowedN } = assignWs(maxE, reduce); // s1 = распределение в наборе (планировщик уже дробит параллельно)
+    const items = s1.cycles.filter((c) => !c.historical).map((c) => ({ batchKey: c.batchKey, ws: c.workshopId, partiaId: c.partiaId }));
+    const baseLate = new Set(s1.cycles.filter((c) => !c.historical && c.logistics.lateDays > 0).map((c) => c.partiaId));
+    const jitStarts = {};
+
+    if (deepShift) {
+      // ГЛУБОКИЙ ПЕР-ДОВОЗНЫЙ сдвиг: каждый довоз стартует как можно позже под СВОЙ дедлайн (а не по самому
+      // срочному в цехе). Даёт бОльшую экономию, но между довозами с разными сроками возможны ПАУЗЫ (это плата).
+      const byP = {};
+      for (const c of s1.cycles) {
+        if (c.historical) continue; const k = c.partiaId;
+        const it = byP[k] || (byP[k] = { cut: c.ops.cut.start, otk: c.ops.otk.end, art: c.articleId, dl: (c.logistics && c.logistics.deadline) || '' });
+        if (c.ops.cut.start < it.cut) it.cut = c.ops.cut.start; if (c.ops.otk.end > it.otk) it.otk = c.ops.otk.end;
+      }
+      for (const k of Object.keys(byP)) {
+        const it = byP[k]; if (!it.dl) continue;
+        const isS = summerIds.has(String(it.art).trim());
+        const buf = isS ? deliveryBufferDays : Math.max(deliveryBufferDays, nonSummerCushionDays);
+        const otkSpan = Math.max(1, wdBetween(it.cut, it.otk) - 1);
+        let cut = subWD(cal.nextWorkingDay(addDays(effDl(it.dl, isS), -buf)), otkSpan);
+        if (diffDays(cut, it.cut) > 0) cut = it.cut; // пол: не РАНЬШЕ базового кроя довоза (ALAP раньше базы ⇒ база)
+        jitStarts[k] = cut;
+      }
+      // защита: снимаем пол у ДОВОЗОВ, ставших опоздавшими (пер-довозно, паузы допускаем)
+      let afterSch2, g2 = 0;
+      while (g2++ < 25) {
+        afterSch2 = buildSchedule(withJit(state, jitStarts, items));
+        const late = [...new Set(afterSch2.cycles.filter((c) => !c.historical && c.logistics.lateDays > 0 && !baseLate.has(c.partiaId)).map((c) => c.partiaId))].filter((pid) => jitStarts[pid]);
+        if (!late.length) break;
+        for (const pid of late) delete jitStarts[pid];
+      }
+      let after = layoutMetrics(afterSch2, summerIds);
+      const ref = reduce ? layoutMetrics(s1, summerIds) : before;
+      if (after.lateUnits > ref.lateUnits) { for (const k of Object.keys(jitStarts)) delete jitStarts[k]; afterSch2 = buildSchedule(withJit(state, jitStarts, items)); after = layoutMetrics(afterSch2, summerIds); }
+      const wsPins = {}; for (const it of items) wsPins[it.batchKey] = { ws: it.ws };
+      for (const k of Object.keys(jitStarts)) if (!jitStarts[k]) delete jitStarts[k];
+      return { jitStarts, wsPins, after, allowedWorkshops: allowedN };
+    }
+
+    // ОБЫЧНЫЙ пер-цеховой сдвиг: весь блок цеха — на min запас (без разрывов).
     const wsFirstCut = {}, wsMinSlack = {};
     for (const c of s1.cycles) {
       if (c.historical) continue;
@@ -114,15 +169,12 @@ export function computeJitLayout(state, opts = {}) {
       const slack = diffDays(c.logistics.wbArrival, subWD(effDl(dl, isS), 0)) - buf;
       if (wsMinSlack[w] === undefined || slack < wsMinSlack[w]) wsMinSlack[w] = slack;
     }
-    const jitStarts = {};
     for (const w of Object.keys(wsFirstCut)) {
       const shift = Math.max(0, Math.floor(wsMinSlack[w] || 0));
       if (shift <= 0) continue;
       const start = cal.addWorkingDays(wsFirstCut[w], shift);
       for (const c of s1.cycles) if (!c.historical && c.workshopId === w) jitStarts[c.partiaId] = start;
     }
-    const items = s1.cycles.filter((c) => !c.historical).map((c) => ({ batchKey: c.batchKey, ws: c.workshopId, partiaId: c.partiaId }));
-    const baseLate = new Set(s1.cycles.filter((c) => !c.historical && c.logistics.lateDays > 0).map((c) => c.partiaId));
     let afterSch, guard = 0;
     while (guard++ < 20) {
       afterSch = buildSchedule(withJit(state, jitStarts, items));
@@ -134,10 +186,7 @@ export function computeJitLayout(state, opts = {}) {
       for (const c of s1.cycles) if (!c.historical && bad.has(c.workshopId)) delete jitStarts[c.partiaId];
     }
     let after = layoutMetrics(afterSch, summerIds);
-    // УНИВЕРСАЛЬНАЯ страховка: СДВИГ блоков не должен добавлять опозданий/разрывов сверх того, что даёт
-    // это же распределение БЕЗ сдвига (s1). Если добавил — откатываем весь сдвиг (лучше без экономии).
-    const s1m = layoutMetrics(s1, summerIds);
-    const ref = reduce ? s1m : before; // reduce сравниваем с s1 (распределение user попросил), иначе — с базой
+    const ref = reduce ? layoutMetrics(s1, summerIds) : before;
     if (after.lateUnits > ref.lateUnits || after.idleGaps > ref.idleGaps) {
       for (const k of Object.keys(jitStarts)) delete jitStarts[k];
       afterSch = buildSchedule(withJit(state, jitStarts, items));

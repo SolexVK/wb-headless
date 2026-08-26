@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'jit-ownlock-2026-08-27';
+const APP_BUILD = 'jit-gender-deep-2026-08-27';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -2476,6 +2476,7 @@ function jitOpts() {
     maxExtraWorkshops: g('jit-maxws') ? Math.max(0, +g('jit-maxws').value || 0) : JIT_DEFAULTS.maxExtraWorkshops,
     ignoreAllowedMatrix: g('jit-ignore-allow') ? g('jit-ignore-allow').checked : false,
     balanceMinWorkshops: g('jit-balance') ? g('jit-balance').checked : false,
+    deepShift: g('jit-deep') ? g('jit-deep').checked : false,
     summerFinishMMDD: JIT_DEFAULTS.summerFinishMMDD,
   };
 }
@@ -2491,9 +2492,13 @@ async function openJitDialog() {
       <label title="Товар готов на нашем складе за столько дней до дедлайна ВБ (доставка + форс-мажор).">Буфер доставки, дн: <input type="number" id="jit-delivery" value="${JIT_DEFAULTS.deliveryBufferDays}" min="0" max="120" style="width:56px"></label>
       <label title="Не-летние финишируют минимум за столько дней до дедлайна (подушка на продажи/сбои).">Подушка не-летних, дн: <input type="number" id="jit-cushion" value="${JIT_DEFAULTS.nonSummerCushionDays}" min="0" max="240" style="width:56px"></label>
     </div>
-    <div style="margin-bottom:14px;padding:8px 10px;border:1px dashed var(--line);border-radius:8px">
-      <label title="РЕКОМЕНДУЕТСЯ. Движок сам подбирает НАИМЕНЬШЕЕ число цехов (свой + сколько нужно), при котором НЕ появляется новых опозданий, и показывает его. Баланс: минимум цехов без срыва сроков." style="display:block;margin-bottom:6px"><input type="checkbox" id="jit-balance" checked> <b>⚖ Найти минимум цехов без опозданий</b> (рекомендуется)</label>
-      <label title="Жёстко ужать в свой + N цехов, даже если появятся опоздания (мощности под сроки не хватит). Игнорирует «Найти минимум» и матрицу «кто шьёт»."><input type="checkbox" id="jit-ignore-allow"> Или жёстко: свой + <input type="number" id="jit-maxws" value="${JIT_DEFAULTS.maxExtraWorkshops}" min="0" max="6" style="width:46px"> цехов (можно с опозданиями)</label>
+    <div style="margin-bottom:10px;padding:8px 10px;border:1px dashed var(--line);border-radius:8px">
+      <label title="РЕКОМЕНДУЕТСЯ. Движок сам подбирает НАИМЕНЬШЕЕ число цехов (свой + сколько нужно), при котором НЕ появляется новых опозданий. Свой цех — строго по матрице; мужские модели — только в цеха с оборудованием для мужских; женские — в любые." style="display:block;margin-bottom:6px"><input type="checkbox" id="jit-balance" checked> <b>⚖ Найти минимум цехов без опозданий</b> (рекомендуется)</label>
+      <label title="Жёстко ужать в свой + N цехов, даже если появятся опоздания (мощности под сроки не хватит). Свой цех и мужские/женские ограничения соблюдаются."><input type="checkbox" id="jit-ignore-allow"> Или жёстко: свой + <input type="number" id="jit-maxws" value="${JIT_DEFAULTS.maxExtraWorkshops}" min="0" max="6" style="width:46px"> цехов (можно с опозданиями)</label>
+      <div class="mini" style="color:var(--muted);margin-top:6px">Свой цех — строго по матрице «кто шьёт». Мужские модели — только в цеха с оборудованием для мужских; женские — в любые.</div>
+    </div>
+    <div style="margin-bottom:14px">
+      <label title="Каждый довоз стартует как можно позже под СВОЙ дедлайн (а не по самому срочному в цехе) — заморозка падает СИЛЬНЕЕ, но между довозами с разными сроками появятся ПАУЗЫ. Сроки при этом не срываются."><input type="checkbox" id="jit-deep"> 🔬 Глубже давить заморозку (пер-довоз — <b>больше экономии, но возможны паузы</b>)</label>
     </div>
     <div id="jit-preview" style="margin:10px 0 16px">Считаю предпросмотр…</div>
     <div style="display:flex;gap:8px;justify-content:flex-end">

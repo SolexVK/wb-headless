@@ -1,7 +1,7 @@
 # Handoff — planner / Этап 3+ (пины Ганта, авто-цеха, выгрузки, «Экономная раскладка»/JIT)
 
 Ветка: `claude/production-plan-twv8ki` · репо `solexvk/wb-headless` · приложение в `planner/`.
-Билд на конец сессии: **`jit-ownlock-2026-08-27`** (APP_BUILD в `public/app.js`, BACKEND_BUILD в `server.js` —
+Билд на конец сессии: **`jit-gender-deep-2026-08-27`** (APP_BUILD в `public/app.js`, BACKEND_BUILD в `server.js` —
 держим РАВНЫМИ; бампаем вместе с каждой правкой). Деплой у пользователя: Mac mini, порт 8477, supervisor.
 
 ## Цель
