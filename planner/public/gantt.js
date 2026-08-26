@@ -61,7 +61,7 @@ export function renderGantt(container, schedule, state, opts = {}) {
   maxD = iso(parse(maxD) + 3 * MS);
   const totalDays = days(minD, maxD) + 1;
 
-  const LABEL_W = 172; // шире — чтобы под цехом поместился список артикулов с объёмами
+  const LABEL_W = 200; // шире — чтобы под цехом поместился список артикулов с объёмами (номер крупно + объём)
   const HEADER_H = 46;
   const ROW_PAD = 6;
   const LANE_H = 40;
@@ -82,12 +82,23 @@ export function renderGantt(container, schedule, state, opts = {}) {
       lanes[lane] = end + 2 * MS;
       c._lane = lane;
     }
-    rows.push({ ws: w, items, laneCount: Math.max(1, lanes.length) });
+    // артикулы этого цеха с суммарным объёмом (по убыванию) — что и сколько цех шьёт
+    const byArt = {};
+    for (const c of items) byArt[c.articleId] = (byArt[c.articleId] || 0) + (c.units || 0);
+    const arts = Object.entries(byArt).sort((a, b) => b[1] - a[1]);
+    rows.push({ ws: w, items, laneCount: Math.max(1, lanes.length), arts });
   }
 
   const rowY = [];
   let y = HEADER_H;
-  for (const r of rows) { rowY.push(y); r._y = y; r._h = r.laneCount * LANE_H + ROW_PAD * 2; y += r._h; }
+  const ART_LINE = 15; // высота строки артикула в подписи
+  for (const r of rows) {
+    rowY.push(y); r._y = y;
+    const laneH = r.laneCount * LANE_H + ROW_PAD * 2;
+    const labelH = 44 + r.arts.length * ART_LINE + 6; // имя+роль + список артикулов — все должны помещаться
+    r._h = Math.max(laneH, labelH); // строка не ниже, чем нужно и полосам, и списку артикулов
+    y += r._h;
+  }
   const totalH = y + 10;
   const totalW = LABEL_W + totalDays * pxPerDay;
 
@@ -157,24 +168,19 @@ export function renderGantt(container, schedule, state, opts = {}) {
   // заголовки строк (цеха)
   el('rect', { x: 0, y: 0, width: LABEL_W, height: totalH, fill: 'var(--panel)' }, svg);
   el('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: totalH, stroke: 'var(--line)' }, svg);
-  const fmtVol = (v) => (v >= 1000 ? (Math.round(v / 100) / 10).toLocaleString('ru') + 'к' : String(v));
+  const fmtVol = (v) => String(Math.round(v || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); // «44 000» — пробел между тысячами
   rows.forEach((r) => {
     const t = el('text', { x: 10, y: r._y + 20, fill: 'var(--text)', 'font-size': 13, 'font-weight': 600 }, svg);
     t.textContent = r.ws.name;
-    const b = el('text', { x: 10, y: r._y + 36, fill: 'var(--muted)', 'font-size': 10 }, svg);
+    const b = el('text', { x: 10, y: r._y + 35, fill: 'var(--muted)', 'font-size': 10 }, svg);
     b.textContent = r.ws.role === 'main' ? 'основной' : 'вспомог.';
-    // список артикулов этого цеха с суммарным объёмом (по убыванию) — сколько чего цех шьёт
-    const byArt = {};
-    for (const c of r.items) byArt[c.articleId] = (byArt[c.articleId] || 0) + (c.units || 0);
-    const arts = Object.entries(byArt).sort((a, b2) => b2[1] - a[1]);
-    let yy = r._y + 50;
-    const yMax = r._y + r._h - 3;
-    for (let i = 0; i < arts.length; i++) {
-      if (yy > yMax) { const more = el('text', { x: 10, y: Math.min(yy, yMax), fill: 'var(--muted)', 'font-size': 9 }, svg); more.textContent = `+ ещё ${arts.length - i}`; break; }
-      const line = el('text', { x: 10, y: yy, 'font-size': 9.5 }, svg);
-      const a = el('tspan', { fill: '#c99a00', 'font-weight': 700 }, line); a.textContent = arts[i][0];
-      const v = el('tspan', { fill: 'var(--muted)' }, line); v.textContent = ` · ${fmtVol(arts[i][1])} шт`;
-      yy += 12;
+    // список артикулов цеха: НОМЕР крупно/жирно, рядом общий объём цифрами (пробел между тысячами)
+    let yy = r._y + 53;
+    for (const [art, vol] of r.arts) {
+      const line = el('text', { x: 10, y: yy }, svg);
+      const a = el('tspan', { fill: '#c99a00', 'font-weight': 700, 'font-size': 13 }, line); a.textContent = art;
+      const v = el('tspan', { fill: 'var(--muted)', 'font-size': 11 }, line); v.textContent = `  ${fmtVol(vol)} шт`;
+      yy += 15;
     }
   });
 
