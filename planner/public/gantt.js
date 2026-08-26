@@ -61,7 +61,7 @@ export function renderGantt(container, schedule, state, opts = {}) {
   maxD = iso(parse(maxD) + 3 * MS);
   const totalDays = days(minD, maxD) + 1;
 
-  const LABEL_W = 130;
+  const LABEL_W = 172; // шире — чтобы под цехом поместился список артикулов с объёмами
   const HEADER_H = 46;
   const ROW_PAD = 6;
   const LANE_H = 40;
@@ -157,11 +157,25 @@ export function renderGantt(container, schedule, state, opts = {}) {
   // заголовки строк (цеха)
   el('rect', { x: 0, y: 0, width: LABEL_W, height: totalH, fill: 'var(--panel)' }, svg);
   el('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: totalH, stroke: 'var(--line)' }, svg);
+  const fmtVol = (v) => (v >= 1000 ? (Math.round(v / 100) / 10).toLocaleString('ru') + 'к' : String(v));
   rows.forEach((r) => {
     const t = el('text', { x: 10, y: r._y + 20, fill: 'var(--text)', 'font-size': 13, 'font-weight': 600 }, svg);
     t.textContent = r.ws.name;
     const b = el('text', { x: 10, y: r._y + 36, fill: 'var(--muted)', 'font-size': 10 }, svg);
     b.textContent = r.ws.role === 'main' ? 'основной' : 'вспомог.';
+    // список артикулов этого цеха с суммарным объёмом (по убыванию) — сколько чего цех шьёт
+    const byArt = {};
+    for (const c of r.items) byArt[c.articleId] = (byArt[c.articleId] || 0) + (c.units || 0);
+    const arts = Object.entries(byArt).sort((a, b2) => b2[1] - a[1]);
+    let yy = r._y + 50;
+    const yMax = r._y + r._h - 3;
+    for (let i = 0; i < arts.length; i++) {
+      if (yy > yMax) { const more = el('text', { x: 10, y: Math.min(yy, yMax), fill: 'var(--muted)', 'font-size': 9 }, svg); more.textContent = `+ ещё ${arts.length - i}`; break; }
+      const line = el('text', { x: 10, y: yy, 'font-size': 9.5 }, svg);
+      const a = el('tspan', { fill: '#c99a00', 'font-weight': 700 }, line); a.textContent = arts[i][0];
+      const v = el('tspan', { fill: 'var(--muted)' }, line); v.textContent = ` · ${fmtVol(arts[i][1])} шт`;
+      yy += 12;
+    }
   });
 
   // горизонтальные разделители между цехами (на всю ширину, включая колонку названий) —
