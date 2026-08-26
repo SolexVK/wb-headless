@@ -65,6 +65,8 @@ export function renderGantt(container, schedule, state, opts = {}) {
   const HEADER_H = 46;
   const ROW_PAD = 6;
   const LANE_H = 40;
+  const HEAD_H_ROW = 24; // полоска сверху каждого ряда-цеха под название цеха
+  const ROW_PAD_B = 8;   // нижний отступ ряда
 
   const xOf = (d) => LABEL_W + days(minD, d) * pxPerDay;
 
@@ -74,29 +76,36 @@ export function renderGantt(container, schedule, state, opts = {}) {
   for (const w of wsList) {
     const items = cycles.filter((c) => c.workshopId === w.id)
       .sort((a, b) => parse(a.ops.cut.start) - parse(b.ops.cut.start));
-    const lanes = []; // конец занятости каждой полосы
-    for (const c of items) {
-      const start = parse(c.ops.cut.start), end = parse(c.ops.otk.end);
-      let lane = lanes.findIndex((e2) => e2 <= start);
-      if (lane === -1) { lane = lanes.length; lanes.push(0); }
-      lanes[lane] = end + 2 * MS;
-      c._lane = lane;
-    }
     // артикулы этого цеха с суммарным объёмом (по убыванию) — что и сколько цех шьёт
     const byArt = {};
     for (const c of items) byArt[c.articleId] = (byArt[c.articleId] || 0) + (c.units || 0);
     const arts = Object.entries(byArt).sort((a, b) => b[1] - a[1]);
-    rows.push({ ws: w, items, laneCount: Math.max(1, lanes.length), arts });
+    // КАЖДЫЙ артикул — на СВОЕЙ горизонтальной полосе (банде). Внутри банда партии одного артикула
+    // упаковываются встык; если довозы одного артикула пересекаются во времени — добавляем под-полосу.
+    let laneBase = 0;
+    const artBands = [];
+    for (const [art, vol] of arts) {
+      const artItems = items.filter((c) => c.articleId === art); // уже отсортированы по крою
+      const sub = []; // конец занятости под-полос этого артикула
+      for (const c of artItems) {
+        const start = parse(c.ops.cut.start), end = parse(c.ops.otk.end);
+        let ln = sub.findIndex((e2) => e2 <= start);
+        if (ln === -1) { ln = sub.length; sub.push(0); }
+        sub[ln] = end + 2 * MS;
+        c._lane = laneBase + ln;
+      }
+      const count = Math.max(1, sub.length);
+      artBands.push({ art, vol, base: laneBase, count });
+      laneBase += count;
+    }
+    rows.push({ ws: w, items, laneCount: Math.max(1, laneBase), arts, artBands });
   }
 
   const rowY = [];
   let y = HEADER_H;
-  const ART_LINE = 15; // высота строки артикула в подписи
   for (const r of rows) {
     rowY.push(y); r._y = y;
-    const laneH = r.laneCount * LANE_H + ROW_PAD * 2;
-    const labelH = 44 + r.arts.length * ART_LINE + 6; // имя+роль + список артикулов — все должны помещаться
-    r._h = Math.max(laneH, labelH); // строка не ниже, чем нужно и полосам, и списку артикулов
+    r._h = HEAD_H_ROW + r.laneCount * LANE_H + ROW_PAD_B; // шапка цеха + полосы-артикулы + низ
     y += r._h;
   }
   const totalH = y + 10;
@@ -170,30 +179,38 @@ export function renderGantt(container, schedule, state, opts = {}) {
   el('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: totalH, stroke: 'var(--line)' }, svg);
   const fmtVol = (v) => String(Math.round(v || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); // «44 000» — пробел между тысячами
   rows.forEach((r) => {
-    const t = el('text', { x: 10, y: r._y + 20, fill: 'var(--text)', 'font-size': 13, 'font-weight': 600 }, svg);
+    // название цеха + роль — в шапке ряда
+    const t = el('text', { x: 10, y: r._y + 16, fill: 'var(--text)', 'font-size': 13, 'font-weight': 600 }, svg);
     t.textContent = r.ws.name;
-    const b = el('text', { x: 10, y: r._y + 35, fill: 'var(--muted)', 'font-size': 10 }, svg);
-    b.textContent = r.ws.role === 'main' ? 'основной' : 'вспомог.';
-    // список артикулов цеха: НОМЕР крупно/жирно, рядом общий объём цифрами (пробел между тысячами)
-    let yy = r._y + 53;
-    for (const [art, vol] of r.arts) {
-      const line = el('text', { x: 10, y: yy }, svg);
-      const a = el('tspan', { fill: '#c99a00', 'font-weight': 700, 'font-size': 13 }, line); a.textContent = art;
-      const v = el('tspan', { fill: 'var(--muted)', 'font-size': 11 }, line); v.textContent = `  ${fmtVol(vol)} шт`;
-      yy += 15;
+    const role = el('tspan', { fill: 'var(--muted)', 'font-size': 10 }, t);
+    role.textContent = '  ' + (r.ws.role === 'main' ? 'основной' : 'вспомог.');
+    // подпись артикула — НАПРОТИВ его горизонтальной полосы (по центру банда): номер крупно + объём
+    for (const band of r.artBands) {
+      const cy = r._y + HEAD_H_ROW + (band.base + band.count / 2) * LANE_H + 5;
+      const line = el('text', { x: 12, y: cy }, svg);
+      const a = el('tspan', { fill: '#c99a00', 'font-weight': 700, 'font-size': 15 }, line); a.textContent = band.art;
+      const v = el('tspan', { fill: 'var(--muted)', 'font-size': 11 }, line); v.textContent = `  ${fmtVol(band.vol)} шт`;
     }
   });
 
   // горизонтальные разделители между цехами (на всю ширину, включая колонку названий) —
   // чтобы сразу видеть, какой ряд-артикул к какому цеху относится.
   const rowBottom = rows.length ? rows[rows.length - 1]._y + rows[rows.length - 1]._h : totalH;
-  rows.forEach((r) => { el('line', { x1: 0, y1: r._y, x2: totalW, y2: r._y, stroke: 'var(--line)', 'stroke-width': 1.2, class: 'g-ws-sep' }, svg); });
+  rows.forEach((r) => {
+    el('line', { x1: 0, y1: r._y, x2: totalW, y2: r._y, stroke: 'var(--line)', 'stroke-width': 1.2, class: 'g-ws-sep' }, svg);
+    // тонкие разделители между полосами-артикулами внутри цеха — видно, где кончается один артикул и начинается другой
+    for (const band of r.artBands) {
+      if (band.base === 0) continue;
+      const by = r._y + HEAD_H_ROW + band.base * LANE_H;
+      el('line', { x1: 0, y1: by, x2: totalW, y2: by, stroke: 'var(--g-grid)', 'stroke-width': 1, opacity: 0.55 }, svg);
+    }
+  });
   el('line', { x1: 0, y1: rowBottom, x2: totalW, y2: rowBottom, stroke: 'var(--line)', 'stroke-width': 1.2, class: 'g-ws-sep' }, svg);
 
   // блоки-циклы
   for (const r of rows) {
     for (const c of r.items) {
-      drawCycle(svg, c, r, { xOf, pxPerDay, LANE_H, ROW_PAD, minD, tip, onOverride, onProgress, onPin, rows, svg });
+      drawCycle(svg, c, r, { xOf, pxPerDay, LANE_H, HEAD_H_ROW, minD, tip, onOverride, onProgress, onPin, rows, svg });
     }
   }
 }
@@ -205,8 +222,8 @@ function wsAtY(rows, svgY) {
 }
 
 function drawCycle(svg, c, row, ctx) {
-  const { xOf, pxPerDay, LANE_H, ROW_PAD, tip, onOverride, onProgress, onPin, rows } = ctx;
-  const laneY = row._y + ROW_PAD + c._lane * LANE_H;
+  const { xOf, pxPerDay, LANE_H, HEAD_H_ROW, tip, onOverride, onProgress, onPin, rows } = ctx;
+  const laneY = row._y + HEAD_H_ROW + c._lane * LANE_H + 4;
   const barH = LANE_H - 8;
   const isDone = c.status === 'done' || c.status === 'shipped';
   const isLate = c.logistics.lateDays > 0;
