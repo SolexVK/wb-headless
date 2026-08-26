@@ -121,7 +121,7 @@ input, select { font: inherit; }
 .hint { font-size: 12px; color: var(--muted); }
 
 /* gantt */
-.gantt-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.gantt-wrap { overflow: auto; max-height: calc(100vh - 200px); border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .gantt-wrap svg { display: block; }
 .g-row-bg:nth-child(even) { fill: rgba(255,255,255,0.015); }
 .g-cycle { cursor: grab; }

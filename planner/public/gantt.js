@@ -113,9 +113,24 @@ export function renderGantt(container, schedule, state, opts = {}) {
 
   const svg = el('svg', { width: totalW, height: totalH, viewBox: `0 0 ${totalW} ${totalH}` }, container);
 
+  // ── СЛОИ для «замороженных» полос (frozen panes) ──
+  // bodyG   — прокручивается по обеим осям (фон, сетка, блоки).
+  // labelG  — левый столбец цехов: закреплён по X (едет только вертикально) — translate(scrollLeft,0).
+  // headerG — верхняя шкала дат: закреплена по Y (едет только горизонтально) — translate(0,scrollTop).
+  // cornerG — левый-верхний угол: закреплён по обеим осям — translate(scrollLeft,scrollTop).
+  const bodyG = el('g', { class: 'g-body' }, svg);
+  const labelG = el('g', { class: 'g-frozen-col' }, svg);
+  const headerG = el('g', { class: 'g-frozen-row' }, svg);
+  const cornerG = el('g', { class: 'g-frozen-corner' }, svg);
+  // непрозрачные подложки замороженных зон (скрывают уезжающий под них контент)
+  el('rect', { x: 0, y: 0, width: totalW, height: HEADER_H, fill: 'var(--panel)' }, headerG); // шапка дат
+  el('line', { x1: 0, y1: HEADER_H, x2: totalW, y2: HEADER_H, stroke: 'var(--line)' }, headerG);
+  el('rect', { x: 0, y: HEADER_H, width: LABEL_W, height: totalH - HEADER_H, fill: 'var(--panel)' }, labelG); // столбец цехов
+  el('line', { x1: LABEL_W, y1: HEADER_H, x2: LABEL_W, y2: totalH, stroke: 'var(--line)' }, labelG);
+
   // фон строк
   rows.forEach((r, i) => {
-    el('rect', { class: 'g-row-bg', x: 0, y: r._y, width: totalW, height: r._h, fill: i % 2 ? 'var(--g-row-alt)' : 'transparent' }, svg);
+    el('rect', { class: 'g-row-bg', x: 0, y: r._y, width: totalW, height: r._h, fill: i % 2 ? 'var(--g-row-alt)' : 'transparent' }, bodyG);
   });
 
   // сетка по месяцам + подписи дат (частота зависит от масштаба)
@@ -130,29 +145,29 @@ export function renderGantt(container, schedule, state, opts = {}) {
     const isMonthStart = d.getUTCDate() === 1;
     const isLabelDay = isMonthStart || (dayOffset % labelStep === 0);
     if (isMonthStart || isLabelDay) {
-      el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: isMonthStart ? 'var(--line)' : 'var(--g-grid)', 'stroke-width': isMonthStart ? 1.4 : 1 }, svg);
+      el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: isMonthStart ? 'var(--line)' : 'var(--g-grid)', 'stroke-width': isMonthStart ? 1.4 : 1 }, bodyG);
     }
     if (isMonthStart) {
-      el('rect', { x, y: 0, width: 1, height: HEADER_H, fill: 'var(--line)' }, svg);
-      const t = el('text', { x: x + 6, y: 16, fill: 'var(--text)', 'font-size': 12, 'font-weight': 600 }, svg);
+      el('rect', { x, y: 0, width: 1, height: HEADER_H, fill: 'var(--line)' }, headerG);
+      const t = el('text', { x: x + 6, y: 16, fill: 'var(--text)', 'font-size': 12, 'font-weight': 600 }, headerG);
       t.textContent = `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
     }
     if (isLabelDay) {
       // выходной (вс) — красноватый, чтобы легче ориентироваться
-      const t = el('text', { x: x + 2, y: 38, fill: d.getUTCDay() === 0 ? 'var(--danger)' : 'var(--muted)', 'font-size': 10 }, svg);
+      const t = el('text', { x: x + 2, y: 38, fill: d.getUTCDay() === 0 ? 'var(--danger)' : 'var(--muted)', 'font-size': 10 }, headerG);
       t.textContent = d.getUTCDate();
     }
     cur += MS; dayOffset++;
   }
 
-  // дедлайны этапов (вертикальные красные линии)
+  // дедлайны этапов (вертикальные красные линии + треугольник в шапке)
   const seenDeadline = new Set();
   for (const st of state.stages) {
     if (!st.deadline || seenDeadline.has(st.deadline)) continue;
     seenDeadline.add(st.deadline);
     const x = xOf(st.deadline);
-    el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: 'var(--danger)', 'stroke-width': 1.2, 'stroke-dasharray': '5 4', opacity: 0.7 }, svg);
-    el('path', { d: `M${x - 5} ${HEADER_H} L${x + 5} ${HEADER_H} L${x} ${HEADER_H + 9} Z`, fill: 'var(--danger)' }, svg);
+    el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: 'var(--danger)', 'stroke-width': 1.2, 'stroke-dasharray': '5 4', opacity: 0.7 }, bodyG);
+    el('path', { d: `M${x - 5} ${HEADER_H} L${x + 5} ${HEADER_H} L${x} ${HEADER_H + 9} Z`, fill: 'var(--danger)' }, headerG);
   }
 
   // приход товара ВНЕ плана (остатки на WB / в пути / готово / в производстве) — маркеры на шкале.
@@ -167,50 +182,69 @@ export function renderGantt(container, schedule, state, opts = {}) {
     const past = t < parse(minD);                        // уже на складе до начала горизонта → прижать к левому краю
     const x = past ? LABEL_W + 3 : xOf(a.availableOn);
     const col = SUP_COL[a.source] || 'var(--muted)';
-    el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: col, 'stroke-width': 1.2, 'stroke-dasharray': '2 5', opacity: 0.35 }, svg);
-    const tri = el('path', { d: `M${x - 6} ${HEADER_H - 2} L${x + 6} ${HEADER_H - 2} L${x} ${HEADER_H + 9} Z`, fill: col }, svg);
+    el('line', { x1: x, y1: HEADER_H, x2: x, y2: totalH, stroke: col, 'stroke-width': 1.2, 'stroke-dasharray': '2 5', opacity: 0.35 }, bodyG);
+    const tri = el('path', { d: `M${x - 6} ${HEADER_H - 2} L${x + 6} ${HEADER_H - 2} L${x} ${HEADER_H + 9} Z`, fill: col }, headerG);
     el('title', {}, tri).textContent = `${a.articleId}: ${a.units} шт — ${SUP_RU[a.source] || a.source}, на WB ${a.availableOn}${past ? ' (уже на складе)' : ''}`;
-    const lab = el('text', { x: x + (past ? 8 : 0), y: HEADER_H - 5, fill: col, 'font-size': 10, 'font-weight': 700, 'text-anchor': past ? 'start' : 'middle' }, svg);
+    const lab = el('text', { x: x + (past ? 8 : 0), y: HEADER_H - 5, fill: col, 'font-size': 10, 'font-weight': 700, 'text-anchor': past ? 'start' : 'middle' }, headerG);
     lab.textContent = '+' + a.units + (past ? ' ' + (SUP_RU[a.source] || '') : '');
   }
 
-  // заголовки строк (цеха)
-  el('rect', { x: 0, y: 0, width: LABEL_W, height: totalH, fill: 'var(--panel)' }, svg);
-  el('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: totalH, stroke: 'var(--line)' }, svg);
+  // заголовки строк (цеха) — в замороженный левый столбец
   const fmtVol = (v) => String(Math.round(v || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); // «44 000» — пробел между тысячами
   rows.forEach((r) => {
     // название цеха + роль — в шапке ряда
-    const t = el('text', { x: 10, y: r._y + 16, fill: 'var(--text)', 'font-size': 13, 'font-weight': 600 }, svg);
+    const t = el('text', { x: 10, y: r._y + 16, fill: 'var(--text)', 'font-size': 13, 'font-weight': 600 }, labelG);
     t.textContent = r.ws.name;
     const role = el('tspan', { fill: 'var(--muted)', 'font-size': 10 }, t);
     role.textContent = '  ' + (r.ws.role === 'main' ? 'основной' : 'вспомог.');
     // подпись артикула — НАПРОТИВ его горизонтальной полосы (по центру банда): номер крупно + объём
     for (const band of r.artBands) {
       const cy = r._y + HEAD_H_ROW + (band.base + band.count / 2) * LANE_H + 5;
-      const line = el('text', { x: 12, y: cy }, svg);
+      const line = el('text', { x: 12, y: cy }, labelG);
       const a = el('tspan', { fill: '#c99a00', 'font-weight': 700, 'font-size': 15 }, line); a.textContent = band.art;
       const v = el('tspan', { fill: 'var(--muted)', 'font-size': 11 }, line); v.textContent = `  ${fmtVol(band.vol)} шт`;
     }
   });
 
-  // горизонтальные разделители между цехами (на всю ширину, включая колонку названий) —
+  // горизонтальные разделители между цехами (на всю ширину; левую часть перекроет labelG-подложка) —
   // чтобы сразу видеть, какой ряд-артикул к какому цеху относится.
   const rowBottom = rows.length ? rows[rows.length - 1]._y + rows[rows.length - 1]._h : totalH;
   rows.forEach((r) => {
-    el('line', { x1: 0, y1: r._y, x2: totalW, y2: r._y, stroke: 'var(--line)', 'stroke-width': 1.2, class: 'g-ws-sep' }, svg);
+    el('line', { x1: 0, y1: r._y, x2: totalW, y2: r._y, stroke: 'var(--line)', 'stroke-width': 1.2, class: 'g-ws-sep' }, bodyG);
     // тонкие разделители между полосами-артикулами внутри цеха — видно, где кончается один артикул и начинается другой
     for (const band of r.artBands) {
       if (band.base === 0) continue;
       const by = r._y + HEAD_H_ROW + band.base * LANE_H;
-      el('line', { x1: 0, y1: by, x2: totalW, y2: by, stroke: 'var(--g-grid)', 'stroke-width': 1, opacity: 0.55 }, svg);
+      el('line', { x1: 0, y1: by, x2: totalW, y2: by, stroke: 'var(--g-grid)', 'stroke-width': 1, opacity: 0.55 }, bodyG);
     }
   });
-  el('line', { x1: 0, y1: rowBottom, x2: totalW, y2: rowBottom, stroke: 'var(--line)', 'stroke-width': 1.2, class: 'g-ws-sep' }, svg);
+  el('line', { x1: 0, y1: rowBottom, x2: totalW, y2: rowBottom, stroke: 'var(--line)', 'stroke-width': 1.2, class: 'g-ws-sep' }, bodyG);
+  // разделитель между цехами в замороженном левом столбце (дублируем поверх подложки)
+  rows.forEach((r) => { el('line', { x1: 0, y1: r._y, x2: LABEL_W, y2: r._y, stroke: 'var(--line)', 'stroke-width': 1.2 }, labelG); });
+
+  // левый-верхний угол (перекрёсток) — поверх всего
+  el('rect', { x: 0, y: 0, width: LABEL_W, height: HEADER_H, fill: 'var(--panel)' }, cornerG);
+  el('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: HEADER_H, stroke: 'var(--line)' }, cornerG);
+  el('line', { x1: 0, y1: HEADER_H, x2: LABEL_W, y2: HEADER_H, stroke: 'var(--line)' }, cornerG);
+  const ct = el('text', { x: 10, y: 28, fill: 'var(--muted)', 'font-size': 11, 'font-weight': 600 }, cornerG);
+  ct.textContent = 'Цех / артикул';
+
+  // ── прокрутка: держим замороженные слои на месте контр-сдвигом ──
+  if (container._ganttScroll) container.removeEventListener('scroll', container._ganttScroll);
+  const syncFrozen = () => {
+    const sx = container.scrollLeft, sy = container.scrollTop;
+    labelG.setAttribute('transform', `translate(${sx},0)`);
+    headerG.setAttribute('transform', `translate(0,${sy})`);
+    cornerG.setAttribute('transform', `translate(${sx},${sy})`);
+  };
+  container._ganttScroll = syncFrozen;
+  container.addEventListener('scroll', syncFrozen, { passive: true });
+  syncFrozen();
 
   // блоки-циклы
   for (const r of rows) {
     for (const c of r.items) {
-      drawCycle(svg, c, r, { xOf, pxPerDay, LANE_H, HEAD_H_ROW, minD, tip, onOverride, onProgress, onPin, rows, svg });
+      drawCycle(bodyG, c, r, { xOf, pxPerDay, LANE_H, HEAD_H_ROW, minD, tip, onOverride, onProgress, onPin, rows, rootSvg: svg });
     }
   }
 }
@@ -221,13 +255,13 @@ function wsAtY(rows, svgY) {
   return null;
 }
 
-function drawCycle(svg, c, row, ctx) {
-  const { xOf, pxPerDay, LANE_H, HEAD_H_ROW, tip, onOverride, onProgress, onPin, rows } = ctx;
+function drawCycle(parent, c, row, ctx) {
+  const { xOf, pxPerDay, LANE_H, HEAD_H_ROW, tip, onOverride, onProgress, onPin, rows, rootSvg } = ctx;
   const laneY = row._y + HEAD_H_ROW + c._lane * LANE_H + 4;
   const barH = LANE_H - 8;
   const isDone = c.status === 'done' || c.status === 'shipped';
   const isLate = c.logistics.lateDays > 0;
-  const g = el('g', { class: 'g-cycle' + (isLate ? ' g-late' : '') + (c.manual ? ' g-manual' : '') + (isDone ? ' g-done' : '') }, svg);
+  const g = el('g', { class: 'g-cycle' + (isLate ? ' g-late' : '') + (c.manual ? ' g-manual' : '') + (isDone ? ' g-done' : '') }, parent);
 
   const x0 = xOf(c.ops.cut.start);
   const x1 = xOf(c.ops.otk.end);
@@ -286,8 +320,8 @@ function drawCycle(svg, c, row, ctx) {
   // Кликом (без смещения) — ничего не меняем (двойной клик = детальное окно).
   let drag = null;
   const svgPt = (clientX, clientY) => { // экранные координаты → пользовательские координаты SVG
-    const m = svg.getScreenCTM(); if (!m) return { x: clientX, y: clientY };
-    const p = svg.createSVGPoint(); p.x = clientX; p.y = clientY;
+    const m = rootSvg.getScreenCTM(); if (!m) return { x: clientX, y: clientY };
+    const p = rootSvg.createSVGPoint(); p.x = clientX; p.y = clientY;
     return p.matrixTransform(m.inverse());
   };
   g.addEventListener('pointerdown', (e) => {
