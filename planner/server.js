@@ -23,7 +23,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'gantt-artsort-2026-08-27';
+const BACKEND_BUILD = 'gantt-merge-2026-08-27';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -403,6 +403,48 @@ app.post('/api/pin', requireEdit('gantt'), (req, res) => {
       }
     }
     res.json({ ok: true, schedule, state: norm });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+// Склейка партий одного артикула (drag&drop на Ганте: мелкую партию бросили в другую). Матрицы «цвет×размер»
+// суммируются в партию-ПРИЁМНИК (targetId), исходная (sourceId) удаляется. Сроки/этапы приёмника сохраняются,
+// объём растёт → планировщик сам пересчитывает длительность. Неразрушающе для других партий.
+app.post('/api/merge-partias', requireEdit('gantt'), (req, res) => {
+  try {
+    const { sourceId, targetId } = req.body || {};
+    if (!sourceId || !targetId || sourceId === targetId) return res.status(400).json({ ok: false, error: 'нужны разные sourceId и targetId' });
+    const state = loadState();
+    const src = (state.partias || []).find((p) => p.id === sourceId);
+    const tgt = (state.partias || []).find((p) => p.id === targetId);
+    if (!src || !tgt) return res.status(404).json({ ok: false, error: 'партия не найдена' });
+    if (src.articleId !== tgt.articleId) return res.status(400).json({ ok: false, error: 'склейка возможна только в пределах одного артикула' });
+    // суммируем матрицы (цвет × размер): приёмник += источник
+    const addMatrix = (dst, add) => {
+      dst = (dst && typeof dst === 'object') ? dst : {};
+      for (const color of Object.keys(add || {})) {
+        const row = add[color] || {}; dst[color] = dst[color] || {};
+        for (const sz of Object.keys(row)) dst[color][sz] = Math.max(0, Math.round((+dst[color][sz] || 0) + (+row[sz] || 0)));
+      }
+      return dst;
+    };
+    tgt.planMatrix = addMatrix(tgt.planMatrix, src.planMatrix);
+    tgt.factMatrix = addMatrix(tgt.factMatrix, src.factMatrix);
+    // объединить статусные даты (берём самые ранние по каждому статусу — консервативно)
+    if (src.statusDates && typeof src.statusDates === 'object') {
+      tgt.statusDates = tgt.statusDates || {};
+      for (const k of Object.keys(src.statusDates)) {
+        const a = tgt.statusDates[k], b = src.statusDates[k];
+        tgt.statusDates[k] = (a && b) ? (a < b ? a : b) : (a || b);
+      }
+    }
+    // удалить исходную партию и её пер-батчевые пины (partiaId#idx)
+    state.partias = (state.partias || []).filter((p) => p.id !== sourceId);
+    if (state.batchPins) for (const k of Object.keys(state.batchPins)) if (k.startsWith(sourceId + '#')) delete state.batchPins[k];
+    const norm = saveState(state);
+    const schedule = buildSchedule(norm);
+    res.json({ ok: true, schedule, state: norm, mergedInto: targetId });
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.message || e) });
   }

@@ -28,6 +28,7 @@ export function renderGantt(container, schedule, state, opts = {}) {
   const onOverride = opts.onOverride || (() => {});
   const onProgress = opts.onProgress || (() => {});
   const onPin = opts.onPin || (() => {}); // пер-батчевый пин: onPin(batchKey, { ws, cut })
+  const onMerge = opts.onMerge || (() => {}); // склейка партий: onMerge(sourcePartiaId, targetPartiaId)
   container.innerHTML = '';
 
   const cycles = schedule.cycles || [];
@@ -249,7 +250,7 @@ export function renderGantt(container, schedule, state, opts = {}) {
   // блоки-циклы
   for (const r of rows) {
     for (const c of r.items) {
-      drawCycle(bodyG, c, r, { xOf, pxPerDay, LANE_H, HEAD_H_ROW, minD, tip, onOverride, onProgress, onPin, rows, rootSvg: svg });
+      drawCycle(bodyG, c, r, { xOf, pxPerDay, LANE_H, HEAD_H_ROW, minD, tip, onOverride, onProgress, onPin, onMerge, rows, rootSvg: svg });
     }
   }
 }
@@ -261,12 +262,12 @@ function wsAtY(rows, svgY) {
 }
 
 function drawCycle(parent, c, row, ctx) {
-  const { xOf, pxPerDay, LANE_H, HEAD_H_ROW, tip, onOverride, onProgress, onPin, rows, rootSvg } = ctx;
+  const { xOf, pxPerDay, LANE_H, HEAD_H_ROW, tip, onOverride, onProgress, onPin, onMerge, rows, rootSvg } = ctx;
   const laneY = row._y + HEAD_H_ROW + c._lane * LANE_H + 4;
   const barH = LANE_H - 8;
   const isDone = c.status === 'done' || c.status === 'shipped';
   const isLate = c.logistics.lateDays > 0;
-  const g = el('g', { class: 'g-cycle' + (isLate ? ' g-late' : '') + (c.manual ? ' g-manual' : '') + (isDone ? ' g-done' : '') }, parent);
+  const g = el('g', { class: 'g-cycle' + (isLate ? ' g-late' : '') + (c.manual ? ' g-manual' : '') + (isDone ? ' g-done' : ''), 'data-partia': c.partiaId, 'data-article': c.articleId }, parent);
 
   const x0 = xOf(c.ops.cut.start);
   const x1 = xOf(c.ops.otk.end);
@@ -341,12 +342,32 @@ function drawCycle(parent, c, row, ctx) {
     drag.dx = e.clientX - drag.startX;
     drag.dy = e.clientY - drag.clientY;
     g.setAttribute('transform', `translate(${drag.dx},${drag.dy})`);
+    // подсветить блок-приёмник склейки (тот же артикул, другая партия) под курсором
+    const prevPE = g.style.pointerEvents; g.style.pointerEvents = 'none';
+    const under = document.elementFromPoint(e.clientX, e.clientY); g.style.pointerEvents = prevPE;
+    const tgt = (under && under.closest) ? under.closest('.g-cycle') : null;
+    document.querySelectorAll('.g-merge-target').forEach((n) => n.classList.remove('g-merge-target'));
+    if (tgt && tgt !== g && tgt.getAttribute('data-article') === c.articleId && tgt.getAttribute('data-partia') !== c.partiaId) tgt.classList.add('g-merge-target');
   });
   const finish = (e) => {
     if (!drag) return;
     g.classList.remove('dragging');
     g.removeAttribute('transform');
+    document.querySelectorAll('.g-merge-target').forEach((n) => n.classList.remove('g-merge-target'));
     const d0 = drag; drag = null;
+    // СКЛЕЙКА: если блок бросили НА другой блок ТОГО ЖЕ артикула (другая партия) — сливаем партии,
+    // а не двигаем. Определяем цель по элементу под курсором (свой блок временно «прозрачен» для клика).
+    if (e) {
+      const prevPE = g.style.pointerEvents;
+      g.style.pointerEvents = 'none';
+      const under = document.elementFromPoint(e.clientX, e.clientY);
+      g.style.pointerEvents = prevPE;
+      const tgt = (under && under.closest) ? under.closest('.g-cycle') : null;
+      if (tgt && tgt !== g) {
+        const tp = tgt.getAttribute('data-partia'), ta = tgt.getAttribute('data-article');
+        if (ta === c.articleId && tp && tp !== c.partiaId) { onMerge(c.partiaId, tp); return; }
+      }
+    }
     const shiftDays = Math.round(d0.dx / pxPerDay);
     // целевой цех — по вертикальной позиции курсора в момент отпускания
     const loc = svgPt(d0.startX + d0.dx, (e && e.clientY) || d0.clientY + d0.dy);

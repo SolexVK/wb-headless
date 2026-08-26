@@ -129,6 +129,7 @@ input, select { font: inherit; }
 .g-cycle text { pointer-events: none; }
 .g-late rect.g-frame { stroke: var(--danger); stroke-width: 2; }
 .g-manual rect.g-frame { stroke-dasharray: 4 3; stroke: var(--accent-2); stroke-width: 2; }
+.g-cycle.g-merge-target rect.g-frame { stroke: #16a34a; stroke-width: 3.5; }
 .g-done { opacity: 0.9; }
 .g-tip {
   position: fixed; z-index: 50; background: #e9edf2; border: 1px solid #c3ccd6;

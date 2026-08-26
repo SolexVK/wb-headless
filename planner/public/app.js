@@ -6,7 +6,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'gantt-artsort-2026-08-27';
+const APP_BUILD = 'gantt-merge-2026-08-27';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -185,7 +185,7 @@ function renderCurrent() {
   refreshSeasonFilter();
   if (activeTab === 'gantt') {
     const sch = { ...schedule, cycles: (schedule?.cycles || []).filter((c) => stageInSeason(c.stageId)) };
-    renderGantt(document.getElementById('gantt'), sch, state, { pxPerDay, onOverride, onProgress, onPin });
+    renderGantt(document.getElementById('gantt'), sch, state, { pxPerDay, onOverride, onProgress, onPin, onMerge });
   }
   else if (activeTab === 'matrix') renderMatrix();
   else if (activeTab === 'salesplan') renderSalesPlan();
@@ -2418,6 +2418,23 @@ async function onPin(batchKey, pin) {
     renderCurrent(); setStatus();
     toast('Блок закреплён (цех/дата), план пересчитан');
   } catch (e) { toast('Ошибка: ' + e.message, true); }
+}
+
+// Склейка партий: мелкую партию перетащили в другую того же артикула. Объёмы (цвет×размер) суммируются
+// в партию-приёмник, исходная удаляется, сроки пересчитываются. Подтверждаем — операция необратимая.
+async function onMerge(sourceId, targetId) {
+  try {
+    const src = (state.partias || []).find((p) => p.id === sourceId);
+    const tgt = (state.partias || []).find((p) => p.id === targetId);
+    if (!src || !tgt) return;
+    const u = (p) => { let s = 0; const M = p.planMatrix || {}; for (const c of Object.keys(M)) for (const z of Object.keys(M[c] || {})) s += +M[c][z] || 0; return Math.round(s); };
+    const ok = confirm(`Склеить партии артикула ${src.articleId}?\n\n• «${src.deliveryTag || 'партия'}» (${u(src).toLocaleString('ru')} шт) вольётся в «${tgt.deliveryTag || 'партию'}» (${u(tgt).toLocaleString('ru')} шт).\n• Объёмы суммируются по каждому цвету и размеру, исходная партия удаляется.\n• Сроки и объёмы пересчитаются автоматически (в т.ч. в «Плане по размерам»).`);
+    if (!ok) return;
+    const r = await api('/api/merge-partias', { method: 'POST', body: JSON.stringify({ sourceId, targetId }) });
+    state = r.state; schedule = r.schedule;
+    renderCurrent(); setStatus();
+    toast('Партии склеены, план пересчитан');
+  } catch (e) { toast('Ошибка склейки: ' + e.message, true); }
 }
 
 // «Уплотнить» — сохранить ручную раскладку (цех + порядок), но убрать лишние разрывы дней:
