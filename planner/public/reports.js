@@ -116,7 +116,10 @@ export function buildReportsData(state, schedule, opts = {}) {
   // заказываем ОДНОЙ партией в начале января (раньше и крупнее). cnyClamp сдвигает дату заказа в мёртвой
   // зоне на 5 января того же года.
   const cnyClamp = (iso) => { const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number); const dead = (m === 1 && d > 5) || m === 2 || (m === 3 && d <= 15); return dead ? `${y}-01-05` : String(iso).slice(0, 10); };
-  const firstOfMonth = (iso) => String(iso).slice(0, 7) + '-01';
+  const isCnyBlocked = (iso) => cnyClamp(iso) !== String(iso).slice(0, 10); // дата заказа упала в мёртвую зону (фев/CNY)
+  const subDaysISO = (iso, n) => { const d = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
+  const CHINA_LEAD_DAYS = 30; // Китай: полный месяц до старта пошива
+  const BISHKEK_LEAD_DAYS = 7; // Мадина (Бишкек): местный рынок — закупаем в течение недели
 
   // ПЕРИОД закупа: помесячно ('month') или раз в два месяца ('2month', календарные пары: янв–фев, мар–апр…)
   const periodMode = opts.periodMode === '2month' ? '2month' : 'month';
@@ -130,7 +133,7 @@ export function buildReportsData(state, schedule, opts = {}) {
   const rawDemi = Object.keys(demiByPeriod).sort().map((pk) => {
     const list = demiByPeriod[pk];
     const earliestCut = list.reduce((mn, d) => (d.cutStart < mn ? d.cutStart : mn), list[0].cutStart);
-    return { label: periodLabel(pk), purchaseDate: cnyClamp(addMonthsISO(earliestCut, -1)), list, earliestCut };
+    return { label: periodLabel(pk), purchaseDate: cnyClamp(subDaysISO(earliestCut, CHINA_LEAD_DAYS)), list, earliestCut }; // полный месяц до старта пошива
   });
   const demiByDate = {};
   for (const o of rawDemi) (demiByDate[o.purchaseDate] || (demiByDate[o.purchaseDate] = [])).push(o);
@@ -143,15 +146,16 @@ export function buildReportsData(state, schedule, opts = {}) {
     return { purchaseDate: date, arrival, label: labels.length > 1 ? `${labels[0]} … ${labels[labels.length - 1]}` : labels[0], coversPeriods: labels, cny, items, totalMeters: sumMeters(items), totalCost: sumCost(items) };
   });
 
-  // ЛЕТО: ВСЮ летнюю ткань — ОДНИМ заказом. Размещаем к первому месяцу пошива (самый ранний крой − месяц),
-  // но НЕ ПОЗЖЕ начала января (из-за CNY фабрики закрыты весь февраль). Авг/сен-лето уходит в блок Бишкека.
+  // ЛЕТО: в ДВА этапа. Этап 1 — ранний (по дате первого пошива, за месяц до него) — вся ткань, которую
+  // можно заказать в Китае ДО новогодней мёртвой зоны. Этап 2 — в начале января (5 янв), вся остальная
+  // летняя ткань (её заказ иначе упал бы на закрытый февраль). Авг/сен-лето уходит в блок Бишкека.
   const summerDem = dem.filter((d) => d.isSummer && d.source !== 'bishkek');
-  let summerOrders = [];
-  if (summerDem.length) {
-    const earliestCut = summerDem.reduce((mn, d) => (d.cutStart < mn ? d.cutStart : mn), summerDem[0].cutStart);
-    const items = mergeSku(summerDem);
-    summerOrders = [{ purchaseDate: cnyClamp(addMonthsISO(earliestCut, -1)), productionStart: earliestCut, arrival: earliestCut, label: 'Летний заказ — весь объём одним этапом', items, totalMeters: sumMeters(items), totalCost: sumCost(items) }];
-  }
+  const mkSummerOrder = (list, date, label) => { const ec = list.reduce((mn, d) => (d.cutStart < mn ? d.cutStart : mn), list[0].cutStart); const items = mergeSku(list); return { purchaseDate: date(ec), productionStart: ec, arrival: ec, label, items, totalMeters: sumMeters(items), totalCost: sumCost(items) }; };
+  const summerStage1 = summerDem.filter((d) => !isCnyBlocked(subDaysISO(d.cutStart, CHINA_LEAD_DAYS))); // заказ до CNY — ранний этап
+  const summerStage2 = summerDem.filter((d) => isCnyBlocked(subDaysISO(d.cutStart, CHINA_LEAD_DAYS)));  // заказ упёрся бы в февраль → начало января
+  const summerOrders = [];
+  if (summerStage1.length) summerOrders.push(mkSummerOrder(summerStage1, (ec) => subDaysISO(ec, CHINA_LEAD_DAYS), 'Летний заказ — этап 1 (ранний, по первому пошиву)'));
+  if (summerStage2.length) summerOrders.push(mkSummerOrder(summerStage2, (ec) => cnyClamp(subDaysISO(ec, CHINA_LEAD_DAYS)), 'Летний заказ — этап 2 (начало января, перед китайским НГ)'));
 
   // БИШКЕК (рынок Мадина): ткань для пошива в авг/сен — местная закупка (+$0.40/м). Заказ по месяцу
   // производства, покупаем к началу месяца пошива (местный рынок — довоз быстрый).
@@ -161,7 +165,7 @@ export function buildReportsData(state, schedule, opts = {}) {
     const list = bishkekByMonth[m];
     const earliestCut = list.reduce((mn, d) => (d.cutStart < mn ? d.cutStart : mn), list[0].cutStart);
     const items = mergeSku(list);
-    return { purchaseDate: firstOfMonth(earliestCut), arrival: earliestCut, label: `Пошив ${ymLabel(m)}`, items, totalMeters: sumMeters(items), totalCost: sumCost(items) };
+    return { purchaseDate: subDaysISO(earliestCut, BISHKEK_LEAD_DAYS), arrival: earliestCut, label: `Пошив ${ymLabel(m)}`, items, totalMeters: sumMeters(items), totalCost: sumCost(items) }; // за неделю до пошива
   });
 
   // ── цвет-оттенок для каждого цеха (стабильный, уникальный, гармонирует со схемой отчёта) ──
@@ -306,7 +310,7 @@ function orderCardHtml(order, R, kind) {
 function report2bHtml(data) {
   const P = data.fabricPurchase; const R = data.rates;
   const noRate = R ? '' : ` <span style="color:${C.summer}">(курс не загружен — суммы только в $)</span>`;
-  let h = `<div style="margin:0 0 10px;color:#556;font-size:13px">Ткань одного <b>планшета и цвета</b> из разных артикулов сложена вместе. Демисезон: закупка по <b>самому раннему артикулу периода — за месяц</b> до старта. Лето: <b>весь объём одним заказом</b>. Учтён <b>китайский Новый год</b> — в феврале фабрики закрыты, такие заказы перенесены на начало января. Стоимость ткани — из «Данных» ($/м).${noRate}</div>`;
+  let h = `<div style="margin:0 0 10px;color:#556;font-size:13px">Ткань одного <b>планшета и цвета</b> из разных артикулов сложена вместе. Сроки заказа: <b>Китай — за месяц</b> до старта пошива (по самому раннему артикулу периода), <b>Мадина (Бишкек) — за неделю</b>. Лето — в <b>два этапа</b> (ранний по первому пошиву + начало января). Учтён <b>китайский Новый год</b>: февраль закрыт, заказы перенесены на начало января и объединены. Стоимость ткани — из «Данных» ($/м).${noRate}</div>`;
   // БИШКЕК (рынок Мадина) — местная закупка под пошив авг/сен, выделена отдельным блоком
   if (P.bishkek && P.bishkek.length) {
     const bTot = P.bishkek.reduce((s, o) => s + o.totalCost, 0);
@@ -320,7 +324,7 @@ function report2bHtml(data) {
   if (!P.demi.length) h += `<div style="color:#889;padding:6px 0">нет демисезонной ткани</div>`;
   for (const m of P.demi) h += orderCardHtml(m, R, 'demi');
   // ЛЕТО
-  h += `<div style="font-weight:800;color:${C.summer};font-size:15px;margin:22px 0 8px">☀️ Летние (сезонные, Китай) — весь объём одним заказом (≤ начало января)</div>`;
+  h += `<div style="font-weight:800;color:${C.summer};font-size:15px;margin:22px 0 8px">☀️ Летние (сезонные, Китай) — в два этапа: ранний (по первому пошиву) + начало января</div>`;
   if (!P.summer.length) h += `<div style="color:#889;padding:6px 0">нет летней ткани</div>`;
   for (const o of P.summer) h += orderCardHtml(o, R, 'summer');
   // ОБЩИЙ ИТОГ по стоимости ткани
@@ -497,7 +501,7 @@ function report2bExcel(data, fname) {
     X.utils.book_append_sheet(wb, ordersSheet(data.fabricPurchase.bishkek, { title: `БИШКЕК · рынок Мадина — местная закупка (пошив авг/сен, +$${(data.bishkekMarkup || 0.4).toFixed(2)}/м)`, rates: data.rates, kind: 'bishkek' }), 'Бишкек (Мадина)');
   }
   X.utils.book_append_sheet(wb, ordersSheet(data.fabricPurchase.demi, { title: `ДЕМИСЕЗОН (Китай) — закупка ткани${data.periodMode === '2month' ? ' (раз в 2 месяца)' : ' (помесячно)'}`, rates: data.rates, kind: 'demi' }), 'Демисезон');
-  X.utils.book_append_sheet(wb, ordersSheet(data.fabricPurchase.summer, { title: 'ЛЕТО (Китай) — закупка ткани (весь объём одним заказом)', rates: data.rates, kind: 'summer' }), 'Лето');
+  X.utils.book_append_sheet(wb, ordersSheet(data.fabricPurchase.summer, { title: 'ЛЕТО (Китай) — закупка ткани в два этапа (ранний + начало января)', rates: data.rates, kind: 'summer' }), 'Лето');
   X.writeFile(wb, fname || 'Отчёт_закупка_ткани.xlsx');
 }
 
