@@ -87,13 +87,46 @@ export function buildReportsData(state, schedule, opts = {}) {
   const skuImageList = (k) => (skuImages[k] ? [...skuImages[k]] : []);
   const skuConflict = (k) => (skuImages[k] ? skuImages[k].size > 1 : false);
 
+  // ── ДАТЫ ЗАКУПА (нужны и для фильтра по месяцу закупа). Логика та же, что в отчёте закупки:
+  //   • демисезон (Китай): за месяц до самого раннего пошива периода, со сдвигом под кит. Новый год;
+  //   • лето (муслин/марлёвка): ДВА раза в год — ранний этап + начало января (перед CNY);
+  //   • Бишкек (Мадина): за неделю до пошива.
+  // Считаем на ПОЛНОМ наборе (до фильтрации) и вешаем d.purchaseDate/d.purchaseMonth на каждую позицию. ──
+  const cnyClamp = (iso) => { const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number); const dead = (m === 1 && d > 5) || m === 2 || (m === 3 && d <= 15); return dead ? `${y}-01-05` : String(iso).slice(0, 10); };
+  const isCnyBlocked = (iso) => cnyClamp(iso) !== String(iso).slice(0, 10); // дата заказа упала в мёртвую зону (фев/CNY)
+  const subDaysISO = (iso, n) => { const d = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
+  const CHINA_LEAD_DAYS = 30; // Китай: полный месяц до старта пошива
+  const BISHKEK_LEAD_DAYS = 7; // Мадина (Бишкек): местный рынок — закупаем в течение недели
+  const periodMode = opts.periodMode === '2month' ? '2month' : 'month';
+  const periodKey = (m) => { if (periodMode === 'month') return m; const [y, mo] = m.split('-').map(Number); return `${y}-P${Math.floor((mo - 1) / 2)}`; };
+  const periodLabel = (key) => { if (periodMode === 'month') return ymLabel(key); const [y, p] = key.split('-P'); const m0 = (+p) * 2 + 1; return `${MONTHS_RU[m0 - 1]}–${MONTHS_RU[m0]} ${y}`; };
+  const earliest = (list) => list.reduce((mn, d) => (d.cutStart < mn ? d.cutStart : mn), list[0].cutStart);
+  const assignPurchaseDates = (list) => {
+    const dg = {}; // демисезон по периодам
+    for (const d of list) if (!d.isSummer && d.source !== 'bishkek') (dg[periodKey(d.prodMonth)] || (dg[periodKey(d.prodMonth)] = [])).push(d);
+    for (const pk of Object.keys(dg)) { const pd = cnyClamp(subDaysISO(earliest(dg[pk]), CHINA_LEAD_DAYS)); for (const d of dg[pk]) d.purchaseDate = pd; }
+    const sd = list.filter((d) => d.isSummer && d.source !== 'bishkek'); // ЛЕТО — два этапа
+    const s1 = sd.filter((d) => !isCnyBlocked(subDaysISO(d.cutStart, CHINA_LEAD_DAYS)));
+    const s2 = sd.filter((d) => isCnyBlocked(subDaysISO(d.cutStart, CHINA_LEAD_DAYS)));
+    if (s1.length) { const pd = subDaysISO(earliest(s1), CHINA_LEAD_DAYS); for (const d of s1) d.purchaseDate = pd; }
+    if (s2.length) { const pd = cnyClamp(subDaysISO(earliest(s2), CHINA_LEAD_DAYS)); for (const d of s2) d.purchaseDate = pd; }
+    const bg = {}; // Бишкек по месяцам пошива
+    for (const d of list) if (d.source === 'bishkek') (bg[d.prodMonth] || (bg[d.prodMonth] = [])).push(d);
+    for (const m of Object.keys(bg)) { const pd = subDaysISO(earliest(bg[m]), BISHKEK_LEAD_DAYS); for (const d of bg[m]) d.purchaseDate = pd; }
+    for (const d of list) d.purchaseMonth = d.purchaseDate ? ym(d.purchaseDate) : '';
+  };
+  assignPurchaseDates(dem);
+
   // ── ФИЛЬТРЫ отчётов по ткани (планшет / артикул / месяц). Списки — из ПОЛНОГО набора (стабильны).
+  // Месяц: для «Ткань помесячно» — месяц ПРОИЗВОДСТВА; для «Закупка» — месяц ЗАКУПА (purchaseMonth).
   // При активном фильтре отчёты по ткани показывают КОНСОЛИДИРОВАННЫЙ вид. Конфликты образцов —
   // глобальные (skuImages выше построен до фильтрации), чтобы предупреждение не пропадало. ──
+  const monthField = opts.monthField === 'purchase' ? 'purchaseMonth' : 'prodMonth';
   const fabricFilters = {
     plansheets: [...new Set(dem.map((d) => d.plansheet).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru')),
     articles: [...new Map(dem.map((d) => [d.articleId, d.articleName])).entries()].map(([id, name]) => ({ id, name })).sort((a, b) => artNum(a.id) - artNum(b.id)),
-    months: [...new Set(dem.map((d) => d.prodMonth))].sort().map((m) => ({ ym: m, label: ymLabel(m) })),
+    months: [...new Set(dem.map((d) => d.prodMonth))].sort().map((m) => ({ ym: m, label: ymLabel(m) })),          // месяцы производства (для 2a)
+    purchaseMonths: [...new Set(dem.map((d) => d.purchaseMonth).filter(Boolean))].sort().map((m) => ({ ym: m, label: ymLabel(m) })), // месяцы закупа (для 2b)
   };
   // фильтры — МНОЖЕСТВЕННЫЙ выбор (массивы). Пустой набор = «все».
   const F = opts.filters || {};
@@ -102,7 +135,7 @@ export function buildReportsData(state, schedule, opts = {}) {
   const fArts = asArr(F.articleIds, F.articleId);
   const fMonths = asArr(F.months, F.month);
   const filtered = !!(fPlans.length || fArts.length || fMonths.length);
-  if (filtered) dem = dem.filter((d) => (!fPlans.length || fPlans.includes(d.plansheet)) && (!fArts.length || fArts.includes(d.articleId)) && (!fMonths.length || fMonths.includes(d.prodMonth)));
+  if (filtered) dem = dem.filter((d) => (!fPlans.length || fPlans.includes(d.plansheet)) && (!fArts.length || fArts.includes(d.articleId)) && (!fMonths.length || fMonths.includes(d[monthField])));
 
   // ── Отчёт 2a: помесячная детализация ткани (месяц × артикул × планшет × №цвета × метраж) ──
   const r2 = {};
@@ -136,21 +169,7 @@ export function buildReportsData(state, schedule, opts = {}) {
   };
   const sumMeters = (items) => items.reduce((s, i) => s + i.meters, 0);
   const sumCost = (items) => items.reduce((s, i) => s + i.cost, 0);
-
-  // КИТАЙСКИЙ НОВЫЙ ГОД: весь февраль фабрики закрыты — заказать/произвести нельзя. Крайний безопасный
-  // заказ перед CNY — начало января. Ткань, которую пришлось бы заказывать в январе–середине марта,
-  // заказываем ОДНОЙ партией в начале января (раньше и крупнее). cnyClamp сдвигает дату заказа в мёртвой
-  // зоне на 5 января того же года.
-  const cnyClamp = (iso) => { const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number); const dead = (m === 1 && d > 5) || m === 2 || (m === 3 && d <= 15); return dead ? `${y}-01-05` : String(iso).slice(0, 10); };
-  const isCnyBlocked = (iso) => cnyClamp(iso) !== String(iso).slice(0, 10); // дата заказа упала в мёртвую зону (фев/CNY)
-  const subDaysISO = (iso, n) => { const d = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
-  const CHINA_LEAD_DAYS = 30; // Китай: полный месяц до старта пошива
-  const BISHKEK_LEAD_DAYS = 7; // Мадина (Бишкек): местный рынок — закупаем в течение недели
-
-  // ПЕРИОД закупа: помесячно ('month') или раз в два месяца ('2month', календарные пары: янв–фев, мар–апр…)
-  const periodMode = opts.periodMode === '2month' ? '2month' : 'month';
-  const periodKey = (m) => { if (periodMode === 'month') return m; const [y, mo] = m.split('-').map(Number); return `${y}-P${Math.floor((mo - 1) / 2)}`; };
-  const periodLabel = (key) => { if (periodMode === 'month') return ymLabel(key); const [y, p] = key.split('-P'); const m0 = (+p) * 2 + 1; return `${MONTHS_RU[m0 - 1]}–${MONTHS_RU[m0]} ${y}`; };
+  // (даты закупа/CNY-хелперы и periodKey определены выше — до фильтрации)
 
   // ДЕМИ: заказ периода = по самому раннему артикулу периода, за МЕСЯЦ до старта; затем CNY-сдвиг.
   // Периоды, чья дата заказа из-за CNY совпала (сдвинулась к 5 января), СЛИВАЮТСЯ в один крупный заказ.
@@ -326,7 +345,7 @@ function activeFilterChips(data) {
   const f = data.filters || {}, ff = data.fabricFilters || {}; const parts = [];
   if (f.plansheets && f.plansheets.length) parts.push(`Планшет: <b>${f.plansheets.map(esc).join(', ')}</b>`);
   if (f.articleIds && f.articleIds.length) parts.push(`Артикул: <b>${f.articleIds.map((id) => { const a = (ff.articles || []).find((x) => x.id === id); return esc(id) + (a && a.name ? ' · ' + esc(a.name) : ''); }).join(', ')}</b>`);
-  if (f.months && f.months.length) parts.push(`Месяц: <b>${f.months.map((m) => { const mm = (ff.months || []).find((x) => x.ym === m); return esc(mm ? mm.label : m); }).join(', ')}</b>`);
+  if (f.months && f.months.length) { const allM = [...(ff.months || []), ...(ff.purchaseMonths || [])]; parts.push(`Месяц: <b>${f.months.map((m) => { const mm = allM.find((x) => x.ym === m); return esc(mm ? mm.label : m); }).join(', ')}</b>`); }
   return parts.join(' · ');
 }
 // КОНСОЛИДИРОВАННЫЙ вид отчёта по ткани (при активном фильтре): плоская сводка по фильтру.
@@ -1057,8 +1076,10 @@ function showReport(result, rep, data, genAtIso, ctx) {
   const toast = (ctx && ctx.toast) || (() => {});
   const api = ctx && ctx.api;
   const isFabric = rep.id === 'r2a' || rep.id === 'r2b'; // отчёты по ткани — с фильтрами
+  // «Закупка ткани» фильтруется по месяцу ЗАКУПА, «Ткань помесячно» — по месяцу ПРОИЗВОДСТВА
+  const monthMode = rep.id === 'r2b' ? 'purchase' : 'prod';
   // для отчётов по ткани пересобираем данные с текущими фильтрами (влияет только на этот отчёт)
-  const view = (isFabric && ctx && ctx.rebuild) ? ctx.rebuild({ filters: { ...reportFabricFilters } }) : data;
+  const view = (isFabric && ctx && ctx.rebuild) ? ctx.rebuild({ filters: { ...reportFabricFilters }, monthField: monthMode }) : data;
   const body = rep.html(view);
 
   // панель фильтров (планшет / артикул / месяц) — только для отчётов по ткани
@@ -1069,9 +1090,10 @@ function showReport(result, rep, data, genAtIso, ctx) {
     // множественный выбор: наборами (Ctrl/Cmd-клик), пустой набор = все
     const optM = (v, label, arr) => `<option value="${esc(v)}"${arr.includes(v) ? ' selected' : ''}>${esc(label)}</option>`;
     const selBox = (id, label, inner) => `<label style="display:flex;flex-direction:column;font-size:11px;color:#667;gap:3px">${label}<select id="${id}" multiple size="5" style="padding:4px 6px;border:1px solid ${C.border};border-radius:8px;font-size:12.5px;min-width:150px;max-width:220px">${inner}</select></label>`;
+    const monthOpts = (rep.id === 'r2b' ? ff.purchaseMonths : ff.months) || [];
     const plan = selBox('f-plan', 'Планшет', ff.plansheets.map((p) => optM(p, p, cur.plansheets)).join('') || '<option disabled>нет планшетов</option>');
     const art = selBox('f-art', 'Артикул', ff.articles.map((a) => optM(a.id, a.id + (a.name ? ' · ' + a.name : ''), cur.articleIds)).join('') || '<option disabled>нет артикулов</option>');
-    const mon = selBox('f-month', 'Месяц', ff.months.map((m) => optM(m.ym, m.label, cur.months)).join('') || '<option disabled>нет месяцев</option>');
+    const mon = selBox('f-month', rep.id === 'r2b' ? 'Месяц закупа' : 'Месяц', monthOpts.map((m) => optM(m.ym, m.label, cur.months)).join('') || '<option disabled>нет месяцев</option>');
     const reset = `<button class="btn btn-subtle" id="f-reset"${view.filtered ? '' : ' disabled'} style="align-self:flex-end">Сбросить</button>`;
     filterBar = `<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0 0 12px;padding:10px 12px;background:${C.zebra};border:1px solid ${C.border};border-radius:10px">
       <span style="font-weight:700;color:${C.head};font-size:13px;align-self:flex-end">🔎 Фильтр ткани:</span>${plan}${art}${mon}${reset}
