@@ -153,7 +153,8 @@ function report1Html(data) {
         <thead><tr style="background:${C.th}">
           <th style="text-align:left;padding:7px 12px;border:1px solid ${C.border};width:190px">Цех</th>
           <th style="text-align:left;padding:7px 12px;border:1px solid ${C.border}">Артикул</th>
-          <th style="text-align:right;padding:7px 12px;border:1px solid ${C.border};width:120px">Штук</th>
+          <th style="text-align:right;padding:7px 12px;border:1px solid ${C.border};width:110px">Штук</th>
+          <th style="text-align:right;padding:7px 12px;border:1px solid ${C.border};width:120px">Итого</th>
         </tr></thead><tbody>`;
     for (const w of m.workshops) {
       const bg = wc[w.workshopId] || '#fff';
@@ -164,10 +165,15 @@ function report1Html(data) {
           <td style="padding:6px 12px;border:1px solid ${C.border};${topBorder};font-weight:600">${esc(w.name)}${w.own ? ' <span style="font-size:11px;color:#7a8">свой</span>' : ''}</td>
           <td style="padding:6px 12px;border:1px solid ${C.border};${topBorder}">${artChip(a.art)}</td>
           <td style="padding:6px 12px;border:1px solid ${C.border};${topBorder};text-align:right;font-weight:600">${fmtNum(a.units)}</td>
+          <td style="padding:6px 12px;border:1px solid ${C.border};${topBorder}"></td>
         </tr>`;
       });
+      // помесячный подытог цеха — итог в столбце «Итого»
+      h += `<tr style="background:${bg};font-weight:700;border-bottom:2px solid ${C.chip}">
+        <td style="padding:6px 12px;border:1px solid ${C.border};text-align:right" colspan="3">Итого · ${esc(w.name)}</td>
+        <td style="padding:6px 12px;border:1px solid ${C.border};text-align:right;color:${C.head}">${fmtNum(w.total)}</td></tr>`;
     }
-    h += `<tr style="background:${C.total};font-weight:800"><td style="padding:6px 12px;border:1px solid ${C.border}" colspan="2">Итого за ${esc(m.label)}</td><td style="padding:6px 12px;border:1px solid ${C.border};text-align:right">${fmtNum(m.total)}</td></tr>`;
+    h += `<tr style="background:${C.total};font-weight:800"><td style="padding:6px 12px;border:1px solid ${C.border}" colspan="3">Итого за ${esc(m.label)}</td><td style="padding:6px 12px;border:1px solid ${C.border};text-align:right">${fmtNum(m.total)}</td></tr>`;
     h += `</tbody></table></div>`;
   }
   return h;
@@ -300,44 +306,53 @@ function styleSheet(ws, styles) { for (const [addr, s] of Object.entries(styles)
 function report1Excel(data, fname) {
   const XLSX = window.XLSX;
   const aoa = [['Отчёт — Производство помесячно: цеха × артикулы']];
-  aoa.push(['Месяц', 'Цех', 'Артикул', 'Штук']);
+  aoa.push(['Месяц', 'Цех', 'Артикул', 'Штук', 'Итого']); // все итоги — в столбце E
   const styleMap = {};
+  const cell = (rr, c) => XLSX.utils.encode_cell({ r: rr, c });
   const HEAD = { font: { bold: true, sz: 14, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.head) } }, alignment: { vertical: 'center' } };
   const TH = { font: { bold: true, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.th) } }, border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
   const MONTH = { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.month) } } };
-  const MONTHNUM = { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.month) } }, alignment: { horizontal: 'right' } };
+  const MONTHNUM = { ...MONTH, alignment: { horizontal: 'right' } };
   const GRAND = { font: { bold: true, sz: 13, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
   const GRANDNUM = { ...GRAND, alignment: { horizontal: 'right' } };
   const wc = data.workshopColors || {};
   let r = 2;
   for (const m of data.workshopMonthly) {
-    // строка месяца: название в A, ИТОГ МЕСЯЦА — в столбце D (без промежуточных подытогов)
-    aoa.push([m.label, '', '', m.total]);
-    for (let c = 0; c < 3; c++) styleMap[XLSX.utils.encode_cell({ r, c })] = MONTH;
-    styleMap[XLSX.utils.encode_cell({ r, c: 3 })] = MONTHNUM;
+    // строка месяца: название в A, ИТОГ МЕСЯЦА — в столбце E
+    aoa.push([m.label, '', '', '', m.total]);
+    for (let c = 0; c < 4; c++) styleMap[cell(r, c)] = MONTH;
+    styleMap[cell(r, 4)] = MONTHNUM;
     r++;
     for (const w of m.workshops) {
       const fill = { patternType: 'solid', fgColor: { rgb: hx(wc[w.workshopId] || '#FFFFFF') } }; // уникальный оттенок цеха
       w.arts.forEach((a, i) => {
-        aoa.push(['', w.name, a.art, a.units]); // название цеха — в КАЖДОЙ строке артикула
+        aoa.push(['', w.name, a.art, a.units, '']); // название цеха — в КАЖДОЙ строке артикула; штук в D, итог — в E
         const bd = XLSX_BORDER();
         if (i === 0) bd.top = { style: 'medium', color: { rgb: hx(C.chip) } }; // рамка сверху блока цеха
-        styleMap[XLSX.utils.encode_cell({ r, c: 0 })] = { fill, border: bd };
-        styleMap[XLSX.utils.encode_cell({ r, c: 1 })] = { font: { bold: true }, fill, border: bd };
-        styleMap[XLSX.utils.encode_cell({ r, c: 2 })] = { font: { bold: true, color: { rgb: hx(C.accent) } }, fill, border: bd };
-        styleMap[XLSX.utils.encode_cell({ r, c: 3 })] = { alignment: { horizontal: 'right' }, fill, border: bd };
+        styleMap[cell(r, 0)] = { fill, border: bd };
+        styleMap[cell(r, 1)] = { font: { bold: true }, fill, border: bd };
+        styleMap[cell(r, 2)] = { font: { bold: true, color: { rgb: hx(C.accent) } }, fill, border: bd };
+        styleMap[cell(r, 3)] = { alignment: { horizontal: 'right' }, fill, border: bd };
+        styleMap[cell(r, 4)] = { fill, border: bd };
         r++;
       });
+      // ПОМЕСЯЧНЫЙ ПОДЫТОГ ЦЕХА — в оттенке цеха, итог в столбце E, снизу рамка блока
+      aoa.push(['', `Итого · ${w.name}`, '', '', w.total]);
+      const sub = { font: { bold: true }, fill, border: { ...XLSX_BORDER(), bottom: { style: 'medium', color: { rgb: hx(C.chip) } } } };
+      for (let c = 0; c < 4; c++) styleMap[cell(r, c)] = sub;
+      styleMap[cell(r, 4)] = { ...sub, alignment: { horizontal: 'right' }, font: { bold: true, color: { rgb: hx(C.head) } } };
+      r++;
     }
   }
-  // ОБЩИЙ ИТОГ в самом конце (в столбце D)
-  aoa.push(['ИТОГО', '', '', data.grand.units]);
-  for (let c = 0; c < 3; c++) styleMap[XLSX.utils.encode_cell({ r, c })] = GRAND;
-  styleMap[XLSX.utils.encode_cell({ r, c: 3 })] = GRANDNUM;
+  // ОБЩИЙ ИТОГ в самом конце (в столбце E)
+  aoa.push(['ИТОГО', '', '', '', data.grand.units]);
+  for (let c = 0; c < 4; c++) styleMap[cell(r, c)] = GRAND;
+  styleMap[cell(r, 4)] = GRANDNUM;
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }];
-  ws['!cols'] = [{ wch: 20 }, { wch: 26 }, { wch: 12 }, { wch: 14 }];
-  styleMap['A1'] = HEAD; styleMap['A2'] = TH; styleMap['B2'] = TH; styleMap['C2'] = TH; styleMap['D2'] = TH;
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
+  ws['!cols'] = [{ wch: 20 }, { wch: 26 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+  for (let c = 0; c < 5; c++) styleMap[cell(1, c)] = TH;
+  styleMap['A1'] = HEAD;
   styleSheet(ws, styleMap);
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Цеха×Артикулы');
   XLSX.writeFile(wb, fname || 'Отчёт_производство_помесячно.xlsx');
