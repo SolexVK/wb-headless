@@ -583,38 +583,44 @@ function currencyBarHtml() {
     <button id="cur-refresh" class="btn btn-subtle" style="margin-left:auto">↻ Обновить курс</button></div>`;
 }
 
-// ── панель «проверка полноты»: какие артикулы не полностью вошли в отчёт ──
+// ── панель «проверка полноты» (свёрнута по умолчанию): что и почему не вошло в отчёт ──
 function coveragePanelHtml(data) {
   const cov = data.coverage || [];
   const issues = cov.filter((c) => c.status !== 'ok');
   const planU = (data.grand && data.grand.planUnits) || 0, prodU = (data.grand && data.grand.units) || 0;
-  if (!issues.length) {
-    return `<div style="margin:10px 0 0;padding:8px 12px;background:#e9f5ee;border:1px solid #b7dfc6;border-radius:10px;font-size:13px;color:#256b45">✓ Проверка полноты: все артикулы вошли в отчёт. План <b>${fmtNum(planU)}</b> шт = в производстве <b>${fmtNum(prodU)}</b> шт.</div>`;
-  }
+  const okAll = !issues.length;
   const nMissing = issues.filter((c) => c.status === 'missing' || c.status === 'partial').length;
   const nNoPlan = issues.filter((c) => c.status === 'noplan').length;
-  let h = `<div style="margin:10px 0 0;padding:10px 14px;background:#fdf3e6;border:2px solid ${C.summer};border-radius:10px">
-    <div style="font-weight:800;color:${C.summer};font-size:14px">⚠ Проверка полноты: ${nMissing ? `${nMissing} артикул(ов) вошли частично/не вошли` : 'все запланированные вошли'}${nNoPlan ? `, ${nNoPlan} — без плана` : ''}</div>
-    <div style="font-size:12px;color:#556;margin:2px 0 8px">План <b>${fmtNum(planU)}</b> шт → в производстве <b>${fmtNum(prodU)}</b> шт. Ниже — что и почему выпало:</div>
-    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
-      <thead><tr style="background:${C.thSummer}">
-        <th style="text-align:left;padding:5px 10px;border:1px solid ${C.border};width:80px">Артикул</th>
-        <th style="text-align:left;padding:5px 10px;border:1px solid ${C.border}">Название</th>
-        <th style="text-align:right;padding:5px 10px;border:1px solid ${C.border};width:90px">План, шт</th>
-        <th style="text-align:right;padding:5px 10px;border:1px solid ${C.border};width:100px">В произв., шт</th>
-        <th style="text-align:left;padding:5px 10px;border:1px solid ${C.border}">Причина</th>
-      </tr></thead><tbody>`;
-  for (const c of issues) {
-    const col = c.status === 'missing' ? C.summer : c.status === 'noplan' ? '#6b7280' : '#8a6d3b';
-    h += `<tr>
-      <td style="padding:4px 10px;border:1px solid ${C.border};font-weight:700;color:${col}">${esc(c.articleId)}</td>
+  const border = okAll ? '#b7dfc6' : C.summer;
+  const bg = okAll ? '#e9f5ee' : '#fdf3e6';
+  const col = okAll ? '#256b45' : C.summer;
+  const summary = okAll
+    ? `✓ Проверка полноты: все артикулы вошли (план ${fmtNum(planU)} = произв. ${fmtNum(prodU)} шт)`
+    : `⚠ Проверка полноты: ${nMissing ? `${nMissing} не/частично вошли` : 'все запланированные вошли'}${nNoPlan ? `, ${nNoPlan} без плана` : ''} · план ${fmtNum(planU)} → произв. ${fmtNum(prodU)} шт`;
+  const colOf = (s) => s === 'missing' ? C.summer : s === 'partial' ? '#8a6d3b' : s === 'noplan' ? '#6b7280' : '#256b45';
+  let rows = '';
+  for (const c of cov) {
+    const cc = colOf(c.status);
+    rows += `<tr style="background:${c.status === 'ok' ? '#fff' : bg}">
+      <td style="padding:4px 10px;border:1px solid ${C.border};font-weight:700;color:${cc}">${esc(c.articleId)}</td>
       <td style="padding:4px 10px;border:1px solid ${C.border}">${esc(c.name)}</td>
       <td style="padding:4px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(c.plan)}</td>
       <td style="padding:4px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(c.prod)}</td>
-      <td style="padding:4px 10px;border:1px solid ${C.border};color:${col}">${esc(c.note)}</td>
+      <td style="padding:4px 10px;border:1px solid ${C.border};color:${cc}">${c.status === 'ok' ? '<span style="color:#256b45">✓ вошёл</span>' : esc(c.note)}</td>
     </tr>`;
   }
-  return h + `</tbody></table></div>`;
+  return `<details style="margin:10px 0 0;border:1px solid ${border};border-radius:10px;background:${bg};overflow:hidden">
+    <summary style="cursor:pointer;padding:8px 12px;font-size:13px;font-weight:700;color:${col}">${summary} <span style="font-weight:500;color:#889;font-size:12px">— нажмите, чтобы раскрыть</span></summary>
+    <div style="padding:4px 12px 12px;background:#fff">
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+        <thead><tr style="background:${C.th}">
+          <th style="text-align:left;padding:5px 10px;border:1px solid ${C.border};width:80px">Артикул</th>
+          <th style="text-align:left;padding:5px 10px;border:1px solid ${C.border}">Название</th>
+          <th style="text-align:right;padding:5px 10px;border:1px solid ${C.border};width:90px">План, шт</th>
+          <th style="text-align:right;padding:5px 10px;border:1px solid ${C.border};width:100px">В произв., шт</th>
+          <th style="text-align:left;padding:5px 10px;border:1px solid ${C.border}">Статус / причина</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>
+  </details>`;
 }
 
 // ============================ СТРАНИЦА (2 под-вкладки: Отчёты / Архив) ============================
