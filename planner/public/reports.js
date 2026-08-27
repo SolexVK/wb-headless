@@ -540,9 +540,214 @@ function report2bExcel(data, fname) {
   X.writeFile(wb, fname || 'Отчёт_закупка_ткани.xlsx');
 }
 
+// ============================ ОТЧЁТ ДЛЯ СОБСТВЕННИКА (r3): СВОДКА + ГРАФИКИ ============================
+// Инлайн-SVG диаграммы (без внешних библиотек — работают на экране и в печати/PDF).
+const MON_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+const ymShort = (m) => { const [y, mo] = String(m).split('-'); return mo ? `${MON_SHORT[+mo - 1]} ${String(y).slice(2)}` : m; };
+const dmyShort = (iso) => { const s = String(iso || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s.slice(8, 10)}.${s.slice(5, 7)}` : '—'; };
+// «красивый» верх шкалы: округляем максимум вверх до 1/2/5×10ⁿ, чтобы сетка была ровной
+const niceMax = (v) => { if (!(v > 0)) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const f = v / p; const n = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10; return n * p; };
+
+// столбчатая диаграмма с накоплением сегментов (по цехам): months=[{label,total,segments:[{name,value,color}]}]
+function svgStacked(months, opts = {}) {
+  if (!months.length) return '';
+  const W = opts.width || Math.max(520, months.length * 76 + 70);
+  const H = opts.height || 300;
+  const padL = 48, padR = 14, padT = 18, padB = 46, plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxV = niceMax(Math.max(...months.map((m) => m.total), 1));
+  const gap = plotW / months.length, bw = Math.min(54, gap * 0.62);
+  const y = (v) => padT + plotH - (v / maxV) * plotH;
+  let g = '';
+  for (let i = 0; i <= 4; i++) { const v = maxV * i / 4, yy = y(v); g += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" stroke="#e3e9f2"/><text x="${padL - 6}" y="${(yy + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="#889">${fmtNum(v)}</text>`; }
+  months.forEach((m, i) => {
+    const x = padL + gap * i + (gap - bw) / 2; let acc = 0;
+    for (const s of m.segments) { if (!(s.value > 0)) continue; const yTop = y(acc + s.value), hh = (s.value / maxV) * plotH; g += `<rect x="${x.toFixed(1)}" y="${yTop.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, hh).toFixed(1)}" fill="${s.color}" stroke="#fff" stroke-width="0.6"><title>${esc(s.name)}: ${fmtNum(s.value)}</title></rect>`; acc += s.value; }
+    g += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y(m.total) - 5).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="700" fill="${C.head}">${fmtNum(m.total)}</text>`;
+    g += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - padB + 16}" text-anchor="middle" font-size="10.5" fill="#556">${esc(m.label)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto;font-family:inherit" preserveAspectRatio="xMinYMin meet">${g}</svg>`;
+}
+// простая столбчатая диаграмма: items=[{label,value,color?}]
+function svgBars(items, opts = {}) {
+  if (!items.length) return '';
+  const W = opts.width || Math.max(480, items.length * 68 + 70);
+  const H = opts.height || 260;
+  const padL = 52, padR = 14, padT = 18, padB = 46, plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxV = niceMax(Math.max(...items.map((it) => it.value), 1));
+  const gap = plotW / items.length, bw = Math.min(50, gap * 0.6);
+  const y = (v) => padT + plotH - (v / maxV) * plotH;
+  const color = opts.color || C.accent, fmt = opts.fmt || fmtNum;
+  let g = '';
+  for (let i = 0; i <= 4; i++) { const v = maxV * i / 4, yy = y(v); g += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" stroke="#e3e9f2"/><text x="${padL - 6}" y="${(yy + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="#889">${fmtNum(v)}</text>`; }
+  items.forEach((it, i) => {
+    const x = padL + gap * i + (gap - bw) / 2, yy = y(it.value), hh = padT + plotH - yy;
+    g += `<rect x="${x.toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, hh).toFixed(1)}" rx="3" fill="${it.color || color}"><title>${esc(it.label)}: ${fmt(it.value)}</title></rect>`;
+    g += `<text x="${(x + bw / 2).toFixed(1)}" y="${(yy - 5).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="700" fill="${C.head}">${fmt(it.value)}</text>`;
+    g += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - padB + 16}" text-anchor="middle" font-size="10" fill="#556">${esc(it.label)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto;font-family:inherit" preserveAspectRatio="xMinYMin meet">${g}</svg>`;
+}
+function legendHtml(entries) {
+  return `<div style="display:flex;flex-wrap:wrap;gap:8px 16px;margin:10px 0 0">` +
+    entries.map((e) => `<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#445"><span style="width:12px;height:12px;border-radius:3px;background:${e.color};display:inline-block;border:1px solid #0001"></span>${esc(e.name)}</span>`).join('') + `</div>`;
+}
+function kpiCard(label, value, sub, accent) {
+  return `<div style="flex:1 1 180px;min-width:168px;background:linear-gradient(135deg,${accent}12,${accent}22);border:1px solid ${accent}55;border-left:4px solid ${accent};border-radius:12px;padding:14px 16px">
+    <div style="font-size:11.5px;color:#667;font-weight:700;text-transform:uppercase;letter-spacing:.4px">${esc(label)}</div>
+    <div style="font-size:23px;font-weight:800;color:${C.head};margin:4px 0 0;line-height:1.1">${value}</div>
+    ${sub ? `<div style="font-size:12px;color:#778;margin-top:3px">${esc(sub)}</div>` : ''}</div>`;
+}
+function sectionTitle(title, sub) {
+  return `<div style="margin:24px 0 10px"><div style="font-size:16px;font-weight:800;color:${C.head}">${title}</div>${sub ? `<div style="font-size:12px;color:#778;margin-top:1px">${esc(sub)}</div>` : ''}</div>`;
+}
+const cardWrap = (inner) => `<div style="border:1px solid ${C.border};border-radius:12px;padding:14px 16px;background:#fff">${inner}</div>`;
+
+function report3Html(data) {
+  const R = data.rates, wc = data.workshopColors || {};
+  const wm = data.workshopMonthly || [], fm = data.fabricMonthly || [];
+  const P = data.fabricPurchase || {}; const bK = P.bishkek || [], dK = P.demi || [], sK = P.summer || [];
+  const orders = [...bK.map((o) => ({ ...o, kind: 'bishkek' })), ...dK.map((o) => ({ ...o, kind: 'demi' })), ...sK.map((o) => ({ ...o, kind: 'summer' }))]
+    .sort((a, b) => String(a.purchaseDate).localeCompare(String(b.purchaseDate)));
+  if (!wm.length && !fm.length && !orders.length) return `<div style="padding:20px;color:#667">Нет данных для сводки. Заполните план и раскладку.</div>`;
+  const somRub = (usd) => R ? `${fmtNum(Math.round(usd * R.usdKgs))} сом · ${fmtNum(Math.round(usd * R.usdRub))} ₽` : '';
+  const kindColor = (k) => k === 'summer' ? C.summer : k === 'bishkek' ? C.bishkek : C.month;
+  const kindName = (k) => k === 'summer' ? 'Лето' : k === 'bishkek' ? 'Бишкек' : 'Демисезон';
+
+  // === KPI ===
+  const ordSub = `${bK.length ? bK.length + ' Бишкек · ' : ''}${dK.length} деми · ${sK.length} лето`;
+  let h = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:0 0 6px">
+    ${kpiCard('Изделий всего', fmtNum(data.grand.units) + ' шт', `${wm.length} мес · план ${fmtNum(data.grand.planUnits)} шт`, C.accent)}
+    ${kpiCard('Ткань к расходу', fmtNum(data.grand.fabricMeters) + ' м', `${fm.length} мес производства`, '#2f855a')}
+    ${kpiCard('Стоимость ткани', usdSum(data.grand.fabricCost), somRub(data.grand.fabricCost), C.summer)}
+    ${kpiCard('Заказов на ткань', String(orders.length), ordSub, C.chip)}
+  </div>`;
+
+  // === БЛОК A: пошив помесячно, с разбивкой по цехам ===
+  const wsNames = {}; for (const m of wm) for (const w of m.workshops) wsNames[w.workshopId] = w.name;
+  const wsOrder = Object.keys(wc).filter((id) => wsNames[id]); for (const id of Object.keys(wsNames)) if (!wsOrder.includes(id)) wsOrder.push(id);
+  const months = wm.map((m) => ({ label: ymShort(m.ym), total: m.total, segments: wsOrder.map((id) => ({ name: wsNames[id], color: wc[id] || C.accent, value: (m.workshops.find((w) => w.workshopId === id) || {}).total || 0 })) }));
+  h += sectionTitle('🧵 Пошив изделий помесячно', 'штук в производство, с разбивкой по цехам');
+  h += cardWrap(svgStacked(months) + legendHtml(wsOrder.map((id) => ({ name: wsNames[id], color: wc[id] || C.accent }))));
+  // матрица месяц × цех
+  const thc = `text-align:right;padding:6px 10px;border:1px solid ${C.border}`;
+  const wsTotals = {};
+  let mtx = `<div style="overflow-x:auto;margin:10px 0 0"><table style="border-collapse:collapse;font-size:12.5px;min-width:100%">
+    <thead><tr style="background:${C.th}"><th style="text-align:left;padding:6px 10px;border:1px solid ${C.border}">Месяц</th>${wsOrder.map((id) => `<th style="${thc}">${esc(wsNames[id])}</th>`).join('')}<th style="${thc};background:${C.total}">Итого</th></tr></thead><tbody>`;
+  wm.forEach((m, i) => {
+    mtx += `<tr style="background:${i % 2 ? C.zebra : '#fff'}"><td style="padding:5px 10px;border:1px solid ${C.border};font-weight:600">${esc(m.label)}</td>`;
+    for (const id of wsOrder) { const v = (m.workshops.find((w) => w.workshopId === id) || {}).total || 0; wsTotals[id] = (wsTotals[id] || 0) + v; mtx += `<td style="${thc}">${v ? fmtNum(v) : '·'}</td>`; }
+    mtx += `<td style="${thc};background:${C.total};font-weight:800;color:${C.head}">${fmtNum(m.total)}</td></tr>`;
+  });
+  mtx += `<tr style="background:${C.total};font-weight:800;color:${C.head}"><td style="padding:6px 10px;border:1px solid ${C.border}">Итого</td>${wsOrder.map((id) => `<td style="${thc}">${fmtNum(wsTotals[id] || 0)}</td>`).join('')}<td style="${thc}">${fmtNum(data.grand.units)}</td></tr>`;
+  h += mtx + `</tbody></table></div>`;
+
+  // === БЛОК B: расход ткани помесячно ===
+  h += sectionTitle('🧶 Расход ткани помесячно', 'метров ткани по месяцам производства');
+  h += cardWrap(svgBars(fm.map((m) => ({ label: ymShort(m.ym), value: m.total })), { color: '#2f855a' }));
+  let ft = `<div style="overflow-x:auto;margin:10px 0 0"><table style="border-collapse:collapse;font-size:12.5px;min-width:100%">
+    <thead><tr style="background:${C.th}"><th style="text-align:left;padding:6px 10px;border:1px solid ${C.border}">Месяц</th><th style="${thc}">Метраж, м</th></tr></thead><tbody>`;
+  fm.forEach((m, i) => { ft += `<tr style="background:${i % 2 ? C.zebra : '#fff'}"><td style="padding:5px 10px;border:1px solid ${C.border};font-weight:600">${esc(m.label)}</td><td style="${thc}">${fmtNum(m.total)}</td></tr>`; });
+  ft += `<tr style="background:${C.total};font-weight:800;color:${C.head}"><td style="padding:6px 10px;border:1px solid ${C.border}">Итого</td><td style="${thc}">${fmtNum(data.grand.fabricMeters)}</td></tr>`;
+  h += ft + `</tbody></table></div>`;
+
+  // === БЛОК C: закупка ткани по периодам (объёмы + суммы) ===
+  h += sectionTitle('💰 Закупка ткани по периодам', 'стоимость и объём заказов ткани по датам заказа');
+  if (!orders.length) h += cardWrap(`<div style="color:#889">Нет заказов на ткань.</div>`);
+  else {
+    h += cardWrap(svgBars(orders.map((o) => ({ label: dmyShort(o.purchaseDate), value: o.totalCost, color: kindColor(o.kind) })), { fmt: usdSum, height: 270 })
+      + legendHtml([{ name: 'Демисезон (Китай)', color: C.month }, { name: 'Лето (Китай)', color: C.summer }, { name: 'Бишкек (Мадина)', color: C.bishkek }]));
+    const totM = orders.reduce((s, o) => s + o.totalMeters, 0), totC = orders.reduce((s, o) => s + o.totalCost, 0);
+    let ot = `<div style="overflow-x:auto;margin:10px 0 0"><table style="border-collapse:collapse;font-size:12.5px;min-width:100%">
+      <thead><tr style="background:${C.th}">
+        <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border}">Тип</th>
+        <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border}">Заказ</th>
+        <th style="${thc}">Заказать</th><th style="${thc}">Приход</th>
+        <th style="${thc}">Метраж, м</th><th style="${thc}">Сумма, $</th>${R ? `<th style="${thc}">Сумма, сом</th>` : ''}
+      </tr></thead><tbody>`;
+    orders.forEach((o, i) => {
+      ot += `<tr style="background:${i % 2 ? C.zebra : '#fff'}">
+        <td style="padding:5px 10px;border:1px solid ${C.border}"><span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;background:${kindColor(o.kind)}">${kindName(o.kind)}</span></td>
+        <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(o.label)}${o.cny ? ' <span style="font-size:10.5px;color:' + C.summer + '">↤ кит. НГ</span>' : ''}</td>
+        <td style="${thc}">${dmy(o.purchaseDate)}</td>
+        <td style="${thc}">${o.arrival ? esc(ymShort(String(o.arrival).slice(0, 7))) : '—'}</td>
+        <td style="${thc}">${fmtNum(o.totalMeters)}</td>
+        <td style="${thc};font-weight:600">${usdSum(o.totalCost)}</td>${R ? `<td style="${thc}">${fmtNum(Math.round(o.totalCost * R.usdKgs))}</td>` : ''}</tr>`;
+    });
+    ot += `<tr style="background:${C.total};font-weight:800;color:${C.head}"><td style="padding:6px 10px;border:1px solid ${C.border}" colspan="4">Итого закупка</td><td style="${thc}">${fmtNum(totM)}</td><td style="${thc}">${usdSum(totC)}</td>${R ? `<td style="${thc}">${fmtNum(Math.round(totC * R.usdKgs))}</td>` : ''}</tr>`;
+    h += ot + `</tbody></table></div>`;
+    if (R) h += `<div style="margin:8px 2px 0;font-size:12px;color:#778">Пересчёт по курсу НБ КР: $1 = ${cur2(R.usdKgs)} сом · $1 = ${cur2(R.usdRub)} ₽${R.rateDate ? ' (на ' + dmy(R.rateDate) + ')' : ''}.</div>`;
+  }
+  return h;
+}
+
+// Excel «Сводка для собственника»: числовые таблицы на 3 листах (пошив / ткань / закупка)
+function report3Excel(data, fname) {
+  const X = window.XLSX, wb = X.utils.book_new();
+  const cc = (r, c) => X.utils.encode_cell({ r, c });
+  const HEAD = { font: { bold: true, sz: 13, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.head) } } };
+  const TH = { font: { bold: true, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.th) } }, border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
+  const TOT = { font: { bold: true, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
+  const RIGHT = () => ({ alignment: { horizontal: 'right' }, border: XLSX_BORDER() });
+  const bd = () => ({ border: XLSX_BORDER() });
+  const R = data.rates;
+
+  // Лист 1 — Пошив по цехам (матрица месяц × цех)
+  const wm = data.workshopMonthly || [], wc = data.workshopColors || {};
+  const wsNames = {}; for (const m of wm) for (const w of m.workshops) wsNames[w.workshopId] = w.name;
+  const wsOrder = Object.keys(wc).filter((id) => wsNames[id]); for (const id of Object.keys(wsNames)) if (!wsOrder.includes(id)) wsOrder.push(id);
+  {
+    const ncol = wsOrder.length + 2;
+    const aoa = [['Сводка для собственника — пошив изделий помесячно']]; const sm = {}; const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: Math.max(1, ncol - 1) } }];
+    sm.A1 = HEAD;
+    aoa.push(['Месяц', ...wsOrder.map((id) => wsNames[id]), 'Итого']); let r = 1;
+    for (let c = 0; c < ncol; c++) sm[cc(r, c)] = TH; r++;
+    const wsTot = {};
+    for (const m of wm) {
+      const row = [m.label]; for (const id of wsOrder) { const v = (m.workshops.find((w) => w.workshopId === id) || {}).total || 0; wsTot[id] = (wsTot[id] || 0) + v; row.push(v || ''); } row.push(m.total);
+      aoa.push(row); sm[cc(r, 0)] = { font: { bold: true }, ...bd() }; for (let c = 1; c < ncol; c++) sm[cc(r, c)] = RIGHT(); sm[cc(r, ncol - 1)] = { ...RIGHT(), font: { bold: true } }; r++;
+    }
+    const totRow = ['Итого', ...wsOrder.map((id) => wsTot[id] || 0), data.grand.units]; aoa.push(totRow);
+    for (let c = 0; c < ncol; c++) sm[cc(r, c)] = c === 0 ? TOT : { ...TOT, alignment: { horizontal: 'right' } };
+    const ws = X.utils.aoa_to_sheet(aoa); ws['!merges'] = merges; ws['!cols'] = [{ wch: 16 }, ...wsOrder.map(() => ({ wch: 14 })), { wch: 12 }];
+    styleSheet(ws, sm); X.utils.book_append_sheet(wb, ws, 'Пошив по цехам');
+  }
+  // Лист 2 — Расход ткани помесячно
+  {
+    const fm = data.fabricMonthly || [];
+    const aoa = [['Расход ткани помесячно, м']]; const sm = { A1: HEAD }; const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
+    aoa.push(['Месяц', 'Метраж, м']); let r = 1; for (let c = 0; c < 2; c++) sm[cc(r, c)] = TH; r++;
+    for (const m of fm) { aoa.push([m.label, m.total]); sm[cc(r, 0)] = { font: { bold: true }, ...bd() }; sm[cc(r, 1)] = RIGHT(); r++; }
+    aoa.push(['Итого', data.grand.fabricMeters]); sm[cc(r, 0)] = TOT; sm[cc(r, 1)] = { ...TOT, alignment: { horizontal: 'right' } };
+    const ws = X.utils.aoa_to_sheet(aoa); ws['!merges'] = merges; ws['!cols'] = [{ wch: 18 }, { wch: 14 }];
+    styleSheet(ws, sm); X.utils.book_append_sheet(wb, ws, 'Расход ткани');
+  }
+  // Лист 3 — Закупка ткани по периодам
+  {
+    const P = data.fabricPurchase || {};
+    const orders = [...(P.bishkek || []).map((o) => ({ ...o, kind: 'Бишкек' })), ...(P.demi || []).map((o) => ({ ...o, kind: 'Демисезон' })), ...(P.summer || []).map((o) => ({ ...o, kind: 'Лето' }))]
+      .sort((a, b) => String(a.purchaseDate).localeCompare(String(b.purchaseDate)));
+    const som = (usd) => R ? Math.round(usd * R.usdKgs) : '';
+    const cols = ['Тип', 'Заказ', 'Заказать', 'Приход ткани', 'Метраж, м', 'Сумма, $', 'Сумма, сом'];
+    const ncol = cols.length;
+    const aoa = [['Закупка ткани по периодам — объёмы и суммы']]; const sm = { A1: HEAD }; const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: ncol - 1 } }];
+    aoa.push(cols); let r = 1; for (let c = 0; c < ncol; c++) sm[cc(r, c)] = TH; r++;
+    let tm = 0, tc = 0;
+    for (const o of orders) {
+      aoa.push([o.kind, o.label + (o.cny ? ' (перенос под кит. НГ)' : ''), dmy(o.purchaseDate), o.arrival ? ymLabel(String(o.arrival).slice(0, 7)) : '—', o.totalMeters, o.totalCost, som(o.totalCost)]);
+      for (const c of [0, 1, 2, 3]) sm[cc(r, c)] = bd(); for (const c of [4, 5, 6]) sm[cc(r, c)] = RIGHT(); r++; tm += o.totalMeters; tc += o.totalCost;
+    }
+    aoa.push(['Итого', '', '', '', tm, tc, som(tc)]); for (let c = 0; c < ncol; c++) sm[cc(r, c)] = c >= 4 ? { ...TOT, alignment: { horizontal: 'right' } } : TOT;
+    merges.push({ s: { r, c: 0 }, e: { r, c: 3 } });
+    const ws = X.utils.aoa_to_sheet(aoa); ws['!merges'] = merges; ws['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+    styleSheet(ws, sm); X.utils.book_append_sheet(wb, ws, 'Закупка по периодам');
+  }
+  X.writeFile(wb, fname || 'Отчёт_сводка_собственника.xlsx');
+}
+
 // ============================ РЕЕСТР ОТЧЁТОВ ============================
 // Каждый отчёт: id, имя (для списка/архива), html(data), excel(data,fname), pdfTitle, имя файла.
 const REPORTS = [
+  { id: 'r3', name: 'Сводка для собственника (объёмы · периоды · суммы)', html: report3Html, excel: report3Excel, pdfTitle: 'Сводка для собственника', file: 'Отчёт_сводка.xlsx' },
   { id: 'r1', name: 'Производство помесячно (цеха × артикулы)', html: report1Html, excel: report1Excel, pdfTitle: 'Производство помесячно: цеха × артикулы', file: 'Отчёт_производство.xlsx' },
   { id: 'r2a', name: 'Ткань помесячно (планшет / цвет / метраж)', html: report2aHtml, excel: report2aExcel, pdfTitle: 'Ткань помесячно', file: 'Отчёт_ткань_помесячно.xlsx' },
   { id: 'r2b', name: 'Закупка ткани (консолидация цветов)', html: report2bHtml, excel: report2bExcel, pdfTitle: 'Закупка ткани — консолидация', file: 'Отчёт_закупка_ткани.xlsx' },
