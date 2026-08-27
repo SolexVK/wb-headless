@@ -55,6 +55,12 @@ export function buildReportsData(state, schedule, opts = {}) {
   const BISHKEK_MONTHS = new Set((opts.bishkekMonths && opts.bishkekMonths.length) ? opts.bishkekMonths.map(String) : ['08', '09']);
   const BISHKEK_MARKUP = (opts.bishkekMarkup != null && isFinite(+opts.bishkekMarkup)) ? +opts.bishkekMarkup : 0.40;
 
+  // ПЕРЕОПРЕДЕЛЕНИЕ ИСТОЧНИКА/ЦЕНЫ ткани (настраивается на странице «Отчёты»):
+  //   базово по планшету + точечно по (планшет|месяц). Пусто = авто (месяц/цена из «Данных»).
+  const sourcing = (state.settings && state.settings.fabricSourcing) || {};
+  const srcByPlan = sourcing.plansheet || {};
+  const srcByMonth = sourcing.month || {};
+
   // ── потребности в ткани из циклов (по цвету), с планшет/№цвета и датами ──
   let dem = [];
   for (const c of cycles) {
@@ -64,14 +70,23 @@ export function buildReportsData(state, schedule, opts = {}) {
       const units = sumRow(M[color]); if (units <= 0) continue;
       const fi = (a.fabricInfo && a.fabricInfo[color]) || {};
       const prodMonth = prodMonthOf(c);
-      const isBishkek = BISHKEK_MONTHS.has(prodMonth.slice(5, 7)); // пошив в авг/сен → локальная закупка
+      const ps = (fi.plansheet || '').trim();
+      // источник: авто по месяцу (авг/сен → Мадина), затем переопределение по планшету/месяцу
+      let source = BISHKEK_MONTHS.has(prodMonth.slice(5, 7)) ? 'bishkek' : 'china';
+      const ov = (ps && srcByMonth[`${ps}|${prodMonth}`]) || (ps && srcByPlan[ps]) || null;
+      let priceOverride = null;
+      if (ov) {
+        if (ov.source === 'china' || ov.source === 'bishkek') source = ov.source;
+        if (ov.price != null && isFinite(+ov.price) && +ov.price > 0) priceOverride = +ov.price;
+      }
+      const markup = source === 'bishkek' ? BISHKEK_MARKUP : 0; // локальная (Мадина) дороже на markup
+      const price = priceOverride != null ? priceOverride : (+a.fabricPricePerMeter || 0) + markup;
       dem.push({
         articleId: c.articleId, articleName: a.name || '', color,
-        plansheet: (fi.plansheet || '').trim(), colorNo: (fi.colorNo || '').trim(),
+        plansheet: ps, colorNo: (fi.colorNo || '').trim(),
         image: (fi.image || ''), // образец ткани (изображение) из карточки артикула
         meters: units * (+a.fabricPerUnit || 0) * wastageMul, units,
-        price: (+a.fabricPricePerMeter || 0) + (isBishkek ? BISHKEK_MARKUP : 0), // Бишкек: +$0.40/м
-        source: isBishkek ? 'bishkek' : 'china',
+        price, source, priceOverridden: priceOverride != null, sourceOverridden: !!(ov && (ov.source === 'china' || ov.source === 'bishkek')),
         prodMonth, cutStart: c.cutStart || (c.ops && c.ops.cut && c.ops.cut.start),
         orderBy: (c.fabric && c.fabric.orderDate) || c.cutStart,
         isSummer: summer.has(String(c.articleId).trim()),
@@ -116,6 +131,19 @@ export function buildReportsData(state, schedule, opts = {}) {
     for (const d of list) d.purchaseMonth = d.purchaseDate ? ym(d.purchaseDate) : '';
   };
   assignPurchaseDates(dem);
+
+  // ── СВОДКА ПО ПЛАНШЕТАМ (для панели «Источник и цена ткани»): артикулы, цвета, месяцы, метраж ──
+  const psAgg = {};
+  for (const d of dem) {
+    const ps = d.plansheet; if (!ps) continue;
+    const it = (psAgg[ps] || (psAgg[ps] = { plansheet: ps, arts: new Set(), colors: new Set(), months: {}, meters: 0, sources: new Set() }));
+    it.arts.add(d.articleId); it.colors.add(d.color); it.meters += d.meters; it.sources.add(d.source);
+    if (!it.months[d.prodMonth]) it.months[d.prodMonth] = { ym: d.prodMonth, label: ymLabel(d.prodMonth), purchaseDate: d.purchaseDate || '', purchaseMonth: d.purchaseMonth || '', source: d.source };
+  }
+  const plansheetInfo = Object.values(psAgg).map((x) => ({
+    plansheet: x.plansheet, arts: [...x.arts].sort((a, b) => artNum(a) - artNum(b)), colors: [...x.colors],
+    months: Object.values(x.months).sort((a, b) => a.ym.localeCompare(b.ym)), meters: Math.ceil(x.meters), sources: [...x.sources],
+  })).sort((a, b) => a.plansheet.localeCompare(b.plansheet, 'ru'));
 
   // ── ФИЛЬТРЫ отчётов по ткани (планшет / артикул / месяц). Списки — из ПОЛНОГО набора (стабильны).
   // Месяц: для «Ткань помесячно» — месяц ПРОИЗВОДСТВА; для «Закупка» — месяц ЗАКУПА (purchaseMonth).
@@ -277,6 +305,7 @@ export function buildReportsData(state, schedule, opts = {}) {
     rates: (opts.rates && typeof opts.rates === 'object') ? opts.rates : null, // курсы валют на момент отчёта
     periodMode,
     fabricFilters, filters: { plansheets: fPlans, articleIds: fArts, months: fMonths }, filtered, // фильтры отчётов по ткани (множественные)
+    plansheetInfo, // сводка по планшетам для панели «Источник и цена ткани»
     fabricConsolidated, consTotals, // консолидированный вид при активном фильтре
     grand: {
       units: workshopMonthly.reduce((s, m) => s + m.total, 0),
@@ -472,8 +501,8 @@ function report2bHtml(data) {
   if (P.bishkek && P.bishkek.length) {
     const bTot = P.bishkek.reduce((s, o) => s + o.totalCost, 0);
     h += `<div style="margin:14px 0 8px;padding:10px 14px;border:2px solid ${C.bishkek};border-radius:10px;background:${C.totalBishkek}">
-      <div style="font-weight:800;color:${C.bishkek};font-size:15px">🏪 Бишкек · рынок Мадина — местная закупка (пошив авг/сен)</div>
-      <div style="font-size:12px;color:#556;margin-top:2px">Ткань для августа/сентября заказываем локально (в Китае не успеваем). Цена <b>+$${(data.bishkekMarkup || 0.4).toFixed(2)}/м</b> к китайской. Итого местной ткани: <b>${usdSum(bTot)}</b>${convStr(bTot, R)}</div></div>`;
+      <div style="font-weight:800;color:${C.bishkek};font-size:15px">🏪 Бишкек · рынок Мадина — местная закупка</div>
+      <div style="font-size:12px;color:#556;margin-top:2px">По умолчанию — ткань для авг/сен (в Китае не успеваем); плюс планшеты, вручную переведённые на Мадину в панели «Источник и цена ткани». Цена <b>+$${(data.bishkekMarkup || 0.4).toFixed(2)}/м</b> к китайской (или заданная вручную). Итого местной ткани: <b>${usdSum(bTot)}</b>${convStr(bTot, R)}</div></div>`;
     for (const o of P.bishkek) h += orderCardHtml(o, R, 'bishkek');
   }
   // ДЕМИ
@@ -1004,10 +1033,71 @@ function coveragePanelHtml(data) {
   </details>`;
 }
 
+// ── ПАНЕЛЬ «Источник и цена ткани»: переопределение Китай/Мадина и цены по планшетам (+ точечно по месяцам) ──
+let sourcingPanelOpen = false;          // раскрыта ли панель
+const sourcingExpanded = new Set();     // планшеты с раскрытыми под-строками по месяцам
+const parseDecR = (s) => { const t = String(s == null ? '' : s).replace(/\s/g, '').replace(',', '.'); if (t === '') return null; const n = parseFloat(t); return isFinite(n) ? n : null; };
+
+function applySourcingEdit(state, kind, key, field, value) {
+  state.settings = state.settings || {};
+  const fs = (state.settings.fabricSourcing = state.settings.fabricSourcing || { plansheet: {}, month: {} });
+  fs.plansheet = fs.plansheet || {}; fs.month = fs.month || {};
+  const map = kind === 'plan' ? fs.plansheet : fs.month;
+  const cur = map[key] || { source: '', price: null };
+  if (field === 'source') cur.source = (value === 'china' || value === 'bishkek') ? value : '';
+  if (field === 'price') { const n = parseDecR(value); cur.price = (n != null && n >= 0) ? n : null; }
+  if (!cur.source && cur.price == null) delete map[key]; else map[key] = cur;
+}
+
+function sourcingPanelHtml(data, cfg) {
+  const info = data.plansheetInfo || [];
+  const plan = (cfg && cfg.plansheet) || {}, month = (cfg && cfg.month) || {};
+  const srcSel = (id, cur, withAuto) => `<select data-src="${esc(id)}" style="padding:4px 6px;border:1px solid ${C.border};border-radius:6px;font-size:12px">
+      <option value=""${!cur ? ' selected' : ''}>${withAuto ? 'Авто (по месяцу)' : 'как планшет'}</option>
+      <option value="china"${cur === 'china' ? ' selected' : ''}>Китай</option>
+      <option value="bishkek"${cur === 'bishkek' ? ' selected' : ''}>Мадина (Бишкек)</option></select>`;
+  const priceInp = (id, cur, ph) => `<input data-price="${esc(id)}" type="text" inputmode="decimal" value="${cur != null ? esc(String(cur)) : ''}" placeholder="${ph}" style="width:78px;padding:4px 6px;border:1px solid ${C.border};border-radius:6px;font-size:12px;text-align:right">`;
+  let rows = '';
+  for (const p of info) {
+    const ps = p.plansheet, base = plan[ps] || {}, expanded = sourcingExpanded.has(ps);
+    const ovd = base.source || base.price != null;
+    rows += `<tr style="background:${ovd ? '#eef6ff' : '#fff'}">
+      <td style="padding:6px 10px;border:1px solid ${C.border};font-weight:700">${esc(ps)}</td>
+      <td style="padding:6px 10px;border:1px solid ${C.border};font-size:11.5px;color:#667">${p.arts.map(esc).join(', ')} · ${p.colors.length} цв · ${fmtNum(p.meters)} м</td>
+      <td style="padding:6px 10px;border:1px solid ${C.border}">${srcSel('plan|' + ps, base.source || '', true)}</td>
+      <td style="padding:6px 10px;border:1px solid ${C.border};text-align:right">${priceInp('plan|' + ps, base.price, 'авто')}</td>
+      <td style="padding:6px 10px;border:1px solid ${C.border};text-align:center"><button class="btn btn-subtle" data-ps-toggle="${esc(ps)}" style="font-size:11px;padding:2px 8px">${expanded ? '▾ месяцы' : '▸ по месяцам'}</button></td></tr>`;
+    if (expanded) for (const m of p.months) {
+      const mk = `${ps}|${m.ym}`, mo = month[mk] || {}, ovm = mo.source || mo.price != null;
+      rows += `<tr style="background:${ovm ? '#eaf3ff' : '#fafcff'}">
+        <td style="padding:4px 10px 4px 24px;border:1px solid ${C.border};font-size:12px;color:#556">↳ пошив ${esc(m.label)}</td>
+        <td style="padding:4px 10px;border:1px solid ${C.border};font-size:11.5px;color:#889">закуп: ${m.purchaseDate ? dmy(m.purchaseDate) : '—'}${m.purchaseMonth ? ' · ' + esc(ymLabel(m.purchaseMonth)) : ''}</td>
+        <td style="padding:4px 10px;border:1px solid ${C.border}">${srcSel('month|' + mk, mo.source || '', false)}</td>
+        <td style="padding:4px 10px;border:1px solid ${C.border};text-align:right">${priceInp('month|' + mk, mo.price, 'как планшет')}</td>
+        <td style="padding:4px 10px;border:1px solid ${C.border}"></td></tr>`;
+    }
+  }
+  if (!info.length) rows = `<tr><td colspan="5" style="padding:10px;color:#889">Нет тканей с заданным планшетом.</td></tr>`;
+  return `<details ${sourcingPanelOpen ? 'open' : ''} id="src-panel" style="margin:10px 0 0;border:1px solid ${C.border};border-radius:10px;overflow:hidden">
+    <summary style="cursor:pointer;padding:8px 12px;font-size:13px;font-weight:700;color:${C.head};background:${C.zebra}">⚙ Источник и цена ткани — переопределить Китай / Мадину и цену по планшетам</summary>
+    <div style="padding:10px 12px;background:#fff">
+      <div style="font-size:12px;color:#667;margin:0 0 8px">По умолчанию: авг/сен → <b>Мадина (Бишкек, +$${(data.bishkekMarkup || 0.4).toFixed(2)}/м)</b>, остальное — <b>Китай</b>; цена — из «Данных». Здесь задаётся источник и цена <b>по планшету</b>, а через «по месяцам» — точечно для конкретного закупа. Пусто = авто. Меняется сразу и сохраняется.</div>
+      <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12.5px;min-width:100%">
+        <thead><tr style="background:${C.th}">
+          <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border}">Планшет</th>
+          <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border}">Артикулы · цвета · метраж</th>
+          <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:170px">Источник</th>
+          <th style="text-align:right;padding:6px 10px;border:1px solid ${C.border};width:100px">Цена, $/м</th>
+          <th style="text-align:center;padding:6px 10px;border:1px solid ${C.border};width:120px">Точечно</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>
+    </div></details>`;
+}
+
 // ============================ СТРАНИЦА (2 под-вкладки: Отчёты / Архив) ============================
 let reportsSubTab = 'build';       // 'build' | 'archive' — сохраняется между перерисовками
 let reportPeriodMode = 'month';    // 'month' | '2month' — период закупа ткани
 let reportFabricFilters = { plansheets: [], articleIds: [], months: [] }; // фильтры отчётов по ткани (множественные)
+let openReportId = null, openReportGenAt = null; // какой отчёт открыт (чтобы переоткрыть после перерисовки)
 
 export function renderReportsPage(container, state, schedule, ctx = {}) {
   const toast = ctx.toast || (() => {});
@@ -1026,10 +1116,28 @@ export function renderReportsPage(container, state, schedule, ctx = {}) {
       <div style="color:#667;font-size:13px">Текущие данные: ${fmtNum(data.grand.units)} шт производства · ${fmtNum(data.grand.fabricMeters)} м ткани.</div></div>
     ${currencyBarHtml()}
     ${coveragePanelHtml(data)}
+    ${sourcingPanelHtml(data, (state.settings && state.settings.fabricSourcing) || {})}
     <div style="display:flex;gap:4px;margin:14px 0 0">${tabBtn('build', '📄 Получить отчёт')}${tabBtn('archive', '🗄 Архив')}</div>
     <div id="rep-panel" style="border:1px solid ${C.border};border-radius:0 12px 12px 12px;background:#fff;padding:18px;min-height:200px"></div>`;
 
   container.querySelectorAll('[data-subtab]').forEach((b) => b.addEventListener('click', () => { reportsSubTab = b.dataset.subtab; rerender(); }));
+
+  // ── панель «Источник и цена ткани»: раскрытие, редактирование, сохранение ──
+  const srcPanel = container.querySelector('#src-panel');
+  srcPanel?.addEventListener('toggle', () => { sourcingPanelOpen = srcPanel.open; });
+  container.querySelectorAll('[data-ps-toggle]').forEach((b) => b.addEventListener('click', () => {
+    const ps = b.dataset.psToggle; if (sourcingExpanded.has(ps)) sourcingExpanded.delete(ps); else sourcingExpanded.add(ps);
+    sourcingPanelOpen = true; rerender();
+  }));
+  const onSrcEdit = (el, field) => {
+    const raw = el.dataset.src || el.dataset.price; const i = raw.indexOf('|');
+    applySourcingEdit(state, raw.slice(0, i), raw.slice(i + 1), field, el.value);
+    sourcingPanelOpen = true;
+    if (ctx.saveState) ctx.saveState().catch(() => toast('Не удалось сохранить настройку', true));
+    rerender();
+  };
+  container.querySelectorAll('[data-src]').forEach((el) => el.addEventListener('change', () => onSrcEdit(el, 'source')));
+  container.querySelectorAll('[data-price]').forEach((el) => el.addEventListener('change', () => onSrcEdit(el, 'price')));
   container.querySelector('#cur-refresh')?.addEventListener('click', async () => {
     if (!api) return;
     try { const r = await api('/api/currency/refresh', { method: 'POST' }); currencyRates = (r && r.rates) || false; toast('Курс обновлён'); }
@@ -1065,16 +1173,21 @@ function renderBuild(panel, data, ctx) {
     <div id="rep-result"></div>`;
 
   const result = panel.querySelector('#rep-result');
+  const sel = panel.querySelector('#rep-sel');
+  if (openReportId) sel.value = openReportId; // сохранить выбор между перерисовками
   panel.querySelector('#rep-get').addEventListener('click', () => {
-    const rep = reportById(panel.querySelector('#rep-sel').value);
-    showReport(result, rep, ctx.rebuild ? ctx.rebuild() : data, new Date().toISOString(), ctx); // текущие данные, БЕЗ авто-сохранения
+    openReportId = sel.value; openReportGenAt = new Date().toISOString();
+    showReport(result, reportById(openReportId), ctx.rebuild ? ctx.rebuild() : data, openReportGenAt, ctx); // текущие данные, БЕЗ авто-сохранения
   });
+  // переоткрыть ранее открытый отчёт (после правок источника/цены, курса и т.п.)
+  if (openReportId) showReport(result, reportById(openReportId), ctx.rebuild ? ctx.rebuild() : data, openReportGenAt || new Date().toISOString(), ctx);
 }
 
 // показать отчёт (шапка с датой + тело) + кнопки Сохранить/Excel/PDF
 function showReport(result, rep, data, genAtIso, ctx) {
   const toast = (ctx && ctx.toast) || (() => {});
   const api = ctx && ctx.api;
+  openReportId = rep.id; openReportGenAt = genAtIso; // запомнить открытый отчёт для переоткрытия
   const isFabric = rep.id === 'r2a' || rep.id === 'r2b'; // отчёты по ткани — с фильтрами
   // «Закупка ткани» фильтруется по месяцу ЗАКУПА, «Ткань помесячно» — по месяцу ПРОИЗВОДСТВА
   const monthMode = rep.id === 'r2b' ? 'purchase' : 'prod';

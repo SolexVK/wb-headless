@@ -7,7 +7,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'reports-purchase-month-2026-08-27';
+const APP_BUILD = 'reports-fabric-sourcing-2026-08-27';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -205,7 +205,11 @@ function renderCurrent() {
 // ---------- ОТЧЁТЫ ----------
 function renderReports() {
   const sch = { ...schedule, cycles: (schedule?.cycles || []).filter((c) => stageInSeason(c.stageId)) };
-  renderReportsPage(document.getElementById('reports'), state, sch, { toast, api });
+  renderReportsPage(document.getElementById('reports'), state, sch, {
+    toast, api,
+    // сохранить state (напр. настройки источника/цены ткани из панели отчётов)
+    saveState: async () => { const r = await api('/api/state', { method: 'PUT', body: JSON.stringify(state) }); if (r && r.state) state = r.state; dirty = false; setStatus(); return state; },
+  });
 }
 
 // ---------- ФАКТ (фактические количества по партиям) ----------

@@ -68,6 +68,11 @@ export function defaultSettings() {
     // { aliasKey(строка цвета) → канон-цвет }. Глобальный словарь, копится по мере
     // подтверждений пользователя. Расширяет COLOR_GROUPS частными случаями («небо»→голубой).
     colorAliases: {},
+    // Источник и цена ткани (переопределение авто-логики закупа) — для отчётов.
+    //   plansheet: { [планшет]: { source:'china'|'bishkek'|'', price:number|null } } — базово по планшету
+    //   month:     { [`${планшет}|${YYYY-MM}`]: { source, price } } — точечно по месяцу пошива (закупу)
+    // Пустой source '' = «авто» (по месяцу: авг/сен → Мадина, иначе Китай). price null = авто (из «Данных»).
+    fabricSourcing: { plansheet: {}, month: {} },
   };
 }
 
@@ -218,6 +223,15 @@ export function normalizeState(input) {
   { const ca = s.settings.colorAliases && typeof s.settings.colorAliases === 'object' ? s.settings.colorAliases : {};
     const clean = {}; for (const [k, v] of Object.entries(ca)) if (k && typeof v === 'string' && v.trim()) clean[String(k)] = v.trim();
     s.settings.colorAliases = clean; }
+  // источник/цена ткани: только валидные записи {source∈china|bishkek, price≥0}
+  { const fs = s.settings.fabricSourcing && typeof s.settings.fabricSourcing === 'object' ? s.settings.fabricSourcing : {};
+    const cleanMap = (obj) => { const o = {}; for (const [k, v] of Object.entries(obj && typeof obj === 'object' ? obj : {})) {
+        if (!v || typeof v !== 'object') continue;
+        const src = (v.source === 'china' || v.source === 'bishkek') ? v.source : '';
+        const price = (v.price != null && isFinite(+v.price) && +v.price >= 0) ? +v.price : null;
+        if (src || price != null) o[String(k)] = { source: src, price };
+      } return o; };
+    s.settings.fabricSourcing = { plansheet: cleanMap(fs.plansheet), month: cleanMap(fs.month) }; }
   s.unit = normalizeUnitGlobal(input.unit); // глобальные параметры ВБ/налогов (юнит-экономика)
   s.seasons = Array.isArray(input.seasons) && input.seasons.length ? input.seasons : base.seasons;
   s.stages = Array.isArray(input.stages) ? input.stages : base.stages;
