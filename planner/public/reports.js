@@ -128,7 +128,8 @@ export function buildReportsData(state, schedule, opts = {}) {
     const items = mergeSku(grp.flatMap((o) => o.list));
     const labels = grp.map((o) => o.label);
     const cny = grp.length > 1; // несколько периодов слиты из-за китайского НГ
-    return { purchaseDate: date, label: labels.length > 1 ? `${labels[0]} … ${labels[labels.length - 1]}` : labels[0], coversPeriods: labels, cny, items, totalMeters: sumMeters(items), totalCost: sumCost(items) };
+    const arrival = grp.reduce((mn, o) => (o.earliestCut < mn ? o.earliestCut : mn), grp[0].earliestCut); // когда ткань нужна на производстве
+    return { purchaseDate: date, arrival, label: labels.length > 1 ? `${labels[0]} … ${labels[labels.length - 1]}` : labels[0], coversPeriods: labels, cny, items, totalMeters: sumMeters(items), totalCost: sumCost(items) };
   });
 
   // ЛЕТО: ВСЮ летнюю ткань — ОДНИМ заказом. Размещаем к первому месяцу пошива (самый ранний крой − месяц),
@@ -138,7 +139,7 @@ export function buildReportsData(state, schedule, opts = {}) {
   if (summerDem.length) {
     const earliestCut = summerDem.reduce((mn, d) => (d.cutStart < mn ? d.cutStart : mn), summerDem[0].cutStart);
     const items = mergeSku(summerDem);
-    summerOrders = [{ purchaseDate: cnyClamp(addMonthsISO(earliestCut, -1)), productionStart: earliestCut, label: 'Летний заказ — весь объём одним этапом', items, totalMeters: sumMeters(items), totalCost: sumCost(items) }];
+    summerOrders = [{ purchaseDate: cnyClamp(addMonthsISO(earliestCut, -1)), productionStart: earliestCut, arrival: earliestCut, label: 'Летний заказ — весь объём одним этапом', items, totalMeters: sumMeters(items), totalCost: sumCost(items) }];
   }
 
   // ── цвет-оттенок для каждого цеха (стабильный, уникальный, гармонирует со схемой отчёта) ──
@@ -248,11 +249,11 @@ function orderCardHtml(order, R, summer) {
   const head = summer ? C.summer : C.month;
   const th = summer ? C.thSummer : C.th;
   const zebra = summer ? C.totalSummer : C.zebra;
-  const extra = summer && order.productionStart ? ` · старт пошива ${dmy(order.productionStart)}` : '';
+  const arrival = order.arrival ? ` · приход ткани: <b>${esc(ymLabel(String(order.arrival).slice(0, 7)))}</b>` : '';
   const cnyNote = order.cny ? ` <span style="background:#fff3;padding:1px 6px;border-radius:10px;font-size:11px">↤ перенесено под кит. Новый год</span>` : '';
   let h = `<div style="margin:0 0 18px">
     <div style="background:${head};color:#fff;font-weight:700;padding:7px 14px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
-      <span>${esc(order.label)}${cnyNote}</span><span>заказать: <b>${dmy(order.purchaseDate)}</b>${extra} · ${fmtNum(order.totalMeters)} м · <b>${usdSum(order.totalCost)}</b>${convStr(order.totalCost, R)}</span></div>
+      <span>${esc(order.label)}${cnyNote}</span><span>заказать: <b>${dmy(order.purchaseDate)}</b>${arrival} · ${fmtNum(order.totalMeters)} м · <b>${usdSum(order.totalCost)}</b>${convStr(order.totalCost, R)}</span></div>
     <table style="width:100%;border-collapse:collapse;font-size:12.5px">
       <thead><tr style="background:${th}">
         <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:90px">Планшет</th>
@@ -424,8 +425,8 @@ function ordersSheet(orders, opts) {
   let r = 1;
   let allCost = 0, allMeters = 0;
   for (const o of orders) {
-    const extra = isSummer && o.productionStart ? ` · старт пошива ${dmy(o.productionStart)}` : '';
-    aoa.push([`${o.label} · заказать ${dmy(o.purchaseDate)}${extra} · ${o.totalMeters} м · $${o.totalCost}${o.cny ? ' · перенесено под кит. Новый год' : ''}`]);
+    const arrival = o.arrival ? ` · приход ткани ${ymLabel(String(o.arrival).slice(0, 7))}` : '';
+    aoa.push([`${o.label} · заказать ${dmy(o.purchaseDate)}${arrival} · ${o.totalMeters} м · $${o.totalCost}${o.cny ? ' · перенесено под кит. Новый год' : ''}`]);
     for (let c = 0; c < NCOL; c++) sm[cc(r, c)] = BANNER; merges.push({ s: { r, c: 0 }, e: { r, c: NCOL - 1 } }); r++;
     aoa.push(['Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $']);
     for (let c = 0; c < NCOL; c++) sm[cc(r, c)] = TH; r++;
