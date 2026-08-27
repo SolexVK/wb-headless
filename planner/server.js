@@ -13,7 +13,7 @@ import { findRescues } from './lib/rescue.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates, getSubjectPhrases, budgetStatus } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse, buildWbSupply, listVendorPrefixes } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
-import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList, metaGet, metaSet, snapshotSave, snapshotList, snapshotGet, snapshotDelete, snapshotPrune } from './lib/db.js';
+import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList, metaGet, metaSet, snapshotSave, snapshotList, snapshotGet, snapshotDelete, snapshotPrune, reportArchiveSave, reportArchiveList, reportArchiveGet, reportArchiveDelete } from './lib/db.js';
 import { installAuth, requireView, requireEdit } from './lib/authMiddleware.js';
 import { applyWritePolicy, filterStateForRead, canEditAnything } from './lib/permissions.js';
 
@@ -23,7 +23,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'fix-fabric-decimal-2026-08-27';
+const BACKEND_BUILD = 'reports-archive-2026-08-27';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -495,6 +495,33 @@ app.post('/api/workshop/remove', requireEdit('gantt'), (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.message || e) });
   }
+});
+
+// ── Архив отчётов ──
+// Клиент считает отчёт (public/reports.js) и присылает его данные; сервер сохраняет снимок с датой/временем.
+app.post('/api/reports/archive', requireView('data'), (req, res) => {
+  try {
+    const { reportKind, label, data } = req.body || {};
+    if (!reportKind || data == null) return res.status(400).json({ ok: false, error: 'нужны reportKind и data' });
+    const r = reportArchiveSave(reportKind, label, JSON.stringify(data));
+    if (!r) return res.status(503).json({ ok: false, error: 'архив недоступен (нет БД)' });
+    res.json({ ok: true, id: r.id, savedAt: r.savedAt });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+app.get('/api/reports/archive', requireView('data'), (req, res) => {
+  try { res.json({ ok: true, items: reportArchiveList() }); }
+  catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+app.get('/api/reports/archive/:id', requireView('data'), (req, res) => {
+  try {
+    const row = reportArchiveGet(+req.params.id);
+    if (!row) return res.status(404).json({ ok: false, error: 'отчёт не найден' });
+    res.json({ ok: true, id: row.id, reportKind: row.reportKind, label: row.label, savedAt: row.savedAt, data: JSON.parse(row.json) });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+app.delete('/api/reports/archive/:id', requireEdit('data'), (req, res) => {
+  try { reportArchiveDelete(+req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 
 // «Экономная раскладка (JIT)»: пересобрать даты старта пошива под оборачиваемость денег.

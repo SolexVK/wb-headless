@@ -58,6 +58,16 @@ function migrate(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       label TEXT, kind TEXT, json TEXT NOT NULL, createdAt TEXT NOT NULL
     );
+    -- Архив отчётов: снимок посчитанного отчёта (JSON) на момент сохранения.
+    -- reportKind — какой отчёт (r1|r2a|r2b); json — данные отчёта (buildReportsData) целиком.
+    CREATE TABLE IF NOT EXISTS report_archive (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reportKind TEXT NOT NULL,
+      label TEXT,
+      json TEXT NOT NULL,
+      savedAt TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_report_archive_saved ON report_archive(savedAt);
     CREATE TABLE IF NOT EXISTS feature_dict (
       path TEXT PRIMARY KEY, json TEXT, fetchedAt TEXT
     );
@@ -555,6 +565,30 @@ export function snapshotDelete(id) {
 export function snapshotPrune(keepN = 20) {
   const db = getDb(); if (!db) return;
   db.prepare("DELETE FROM state_snapshots WHERE kind='auto' AND id NOT IN (SELECT id FROM state_snapshots WHERE kind='auto' ORDER BY id DESC LIMIT ?)").run(Math.max(1, keepN));
+}
+
+// ── Архив отчётов ──
+export function reportArchiveSave(reportKind, label, json) {
+  const db = getDb(); if (!db) return null;
+  if (!json || String(json).length < 2) return null;
+  const savedAt = new Date().toISOString();
+  const info = db.prepare('INSERT INTO report_archive(reportKind,label,json,savedAt) VALUES(?,?,?,?)')
+    .run(String(reportKind || '').slice(0, 40), label ? String(label).slice(0, 200) : null, String(json), savedAt);
+  return { id: info.lastInsertRowid, savedAt };
+}
+// список без тела: id, reportKind, label, savedAt, размер
+export function reportArchiveList() {
+  const db = getDb(); if (!db) return [];
+  return db.prepare('SELECT id,reportKind,label,savedAt,length(json) AS size FROM report_archive ORDER BY id DESC').all();
+}
+export function reportArchiveGet(id) {
+  const db = getDb(); if (!db) return null;
+  return db.prepare('SELECT id,reportKind,label,savedAt,json FROM report_archive WHERE id=?').get(id) || null;
+}
+export function reportArchiveDelete(id) {
+  const db = getDb(); if (!db) return false;
+  db.prepare('DELETE FROM report_archive WHERE id=?').run(id);
+  return true;
 }
 
 // ── Журнал производственных событий (append-only) ──

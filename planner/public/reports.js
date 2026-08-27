@@ -12,6 +12,8 @@ const fmtNum = (n) => String(Math.round(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g
 const artNum = (id) => { const n = parseInt(String(id).replace(/\D/g, ''), 10); return Number.isFinite(n) ? n : Infinity; };
 const addMonthsISO = (iso, k) => { const d = new Date(String(iso).slice(0, 10) + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + k); return d.toISOString().slice(0, 10); };
 const dmy = (iso) => { const s = String(iso || '').slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '—'; const [y, m, d] = s.split('-'); return `${d}.${m}.${y}`; };
+// дата+время сохранения (для имени/шапки архивного отчёта). ISO → «ДД.ММ.ГГГГ ЧЧ:ММ» в локальном времени.
+const dmyhm = (iso) => { const dt = new Date(iso); if (isNaN(dt)) return '—'; const p = (n) => String(n).padStart(2, '0'); return `${p(dt.getDate())}.${p(dt.getMonth() + 1)}.${dt.getFullYear()} ${p(dt.getHours())}:${p(dt.getMinutes())}`; };
 
 // ── ПАЛИТРА отчётов (единая для экрана, PDF, Excel) ──
 const C = {
@@ -279,156 +281,268 @@ const XLSX_BORDER = () => ({ top: { style: 'thin', color: { rgb: 'C9D4E2' } }, b
 const hx = (c) => String(c).replace('#', '').toUpperCase();
 function styleSheet(ws, styles) { for (const [addr, s] of Object.entries(styles)) { if (ws[addr]) ws[addr].s = s; } }
 
-function report1Excel(data) {
+function report1Excel(data, fname) {
   const XLSX = window.XLSX;
-  const aoa = [['Отчёт 1 — Производство помесячно: цеха × артикулы']];
+  const aoa = [['Отчёт — Производство помесячно: цеха × артикулы']];
   aoa.push(['Месяц', 'Цех', 'Артикул', 'Штук']);
-  const styleMap = {}; const merges = [];
+  const styleMap = {};
   const HEAD = { font: { bold: true, sz: 14, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.head) } }, alignment: { vertical: 'center' } };
   const TH = { font: { bold: true, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.th) } }, border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
   const MONTH = { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.month) } } };
-  const TOT = { font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
+  const MONTHNUM = { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.month) } }, alignment: { horizontal: 'right' } };
+  const GRAND = { font: { bold: true, sz: 13, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
+  const GRANDNUM = { ...GRAND, alignment: { horizontal: 'right' } };
   let r = 2;
   for (const m of data.workshopMonthly) {
-    const mr = r;
-    aoa.push([`${m.label}  ·  ${m.total} шт`, '', '', '']);
-    merges.push({ s: { r: mr, c: 0 }, e: { r: mr, c: 3 } });
-    for (let c = 0; c < 4; c++) styleMap[XLSX.utils.encode_cell({ r: mr, c })] = MONTH;
+    // строка месяца: название в A, ИТОГ МЕСЯЦА — в столбце D (без промежуточных подытогов)
+    aoa.push([m.label, '', '', m.total]);
+    for (let c = 0; c < 3; c++) styleMap[XLSX.utils.encode_cell({ r, c })] = MONTH;
+    styleMap[XLSX.utils.encode_cell({ r, c: 3 })] = MONTHNUM;
     r++;
     for (const w of m.workshops) {
       w.arts.forEach((a, i) => {
-        aoa.push([i === 0 ? '' : '', i === 0 ? w.name : '', a.art, a.units]);
-        const rr = r;
-        styleMap[XLSX.utils.encode_cell({ r: rr, c: 1 })] = { font: { bold: i === 0 }, border: XLSX_BORDER() };
-        styleMap[XLSX.utils.encode_cell({ r: rr, c: 2 })] = { font: { bold: true, color: { rgb: hx(C.accent) } }, border: XLSX_BORDER() };
-        styleMap[XLSX.utils.encode_cell({ r: rr, c: 3 })] = { alignment: { horizontal: 'right' }, border: XLSX_BORDER() };
+        aoa.push(['', i === 0 ? w.name : '', a.art, a.units]);
+        styleMap[XLSX.utils.encode_cell({ r, c: 1 })] = { font: { bold: i === 0 }, border: XLSX_BORDER() };
+        styleMap[XLSX.utils.encode_cell({ r, c: 2 })] = { font: { bold: true, color: { rgb: hx(C.accent) } }, border: XLSX_BORDER() };
+        styleMap[XLSX.utils.encode_cell({ r, c: 3 })] = { alignment: { horizontal: 'right' }, border: XLSX_BORDER() };
         r++;
       });
-      // подытог цеха
-      aoa.push(['', `Итого ${w.name}`, '', w.total]);
-      for (let c = 0; c < 4; c++) styleMap[XLSX.utils.encode_cell({ r, c })] = TOT;
-      r++;
     }
   }
+  // ОБЩИЙ ИТОГ в самом конце (в столбце D)
+  aoa.push(['ИТОГО', '', '', data.grand.units]);
+  for (let c = 0; c < 3; c++) styleMap[XLSX.utils.encode_cell({ r, c })] = GRAND;
+  styleMap[XLSX.utils.encode_cell({ r, c: 3 })] = GRANDNUM;
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }, ...merges];
-  ws['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 12 }, { wch: 12 }];
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }];
+  ws['!cols'] = [{ wch: 20 }, { wch: 26 }, { wch: 12 }, { wch: 14 }];
   styleMap['A1'] = HEAD; styleMap['A2'] = TH; styleMap['B2'] = TH; styleMap['C2'] = TH; styleMap['D2'] = TH;
   styleSheet(ws, styleMap);
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Цеха×Артикулы');
-  XLSX.writeFile(wb, 'Отчёт_производство_помесячно.xlsx');
+  XLSX.writeFile(wb, fname || 'Отчёт_производство_помесячно.xlsx');
 }
 
-function report2Excel(data) {
+// лист «Ткань помесячно» (детализация) → worksheet
+function fabricMonthlySheet(data) {
   const XLSX = window.XLSX;
-  const wb = XLSX.utils.book_new();
   const TH = { font: { bold: true, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.th) } }, border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
   const MONTH = { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.month) } } };
   const TOT = { font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
   const border = () => ({ border: XLSX_BORDER() });
-
-  // Лист 1: детализация по месяцам
-  {
-    const aoa = [['Месяц', 'Артикул', 'Планшет', '№ цвета', 'Цвет', 'Метраж, м']];
-    const sm = {}; let r = 1;
-    for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r: 0, c })] = TH;
-    for (const m of data.fabricMonthly) {
-      aoa.push([`${m.label}  ·  ${m.total} м`, '', '', '', '', '']);
-      for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r, c })] = MONTH; r++;
-      for (const row of m.rows) {
-        aoa.push(['', row.articleId, row.plansheet || '—', row.colorNo || '—', row.color, row.meters]);
-        sm[XLSX.utils.encode_cell({ r, c: 1 })] = { font: { bold: true, color: { rgb: hx(row.isSummer ? C.summer : C.accent) } }, ...border() };
-        for (const c of [2, 3, 4]) sm[XLSX.utils.encode_cell({ r, c })] = border();
-        sm[XLSX.utils.encode_cell({ r, c: 5 })] = { alignment: { horizontal: 'right' }, ...border() };
-        r++;
-      }
-      aoa.push(['', '', '', '', `Итого ${m.label}`, m.total]);
-      for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r, c })] = TOT; r++;
+  const aoa = [['Месяц', 'Артикул', 'Планшет', '№ цвета', 'Цвет', 'Метраж, м']];
+  const sm = {}; let r = 1;
+  for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r: 0, c })] = TH;
+  for (const m of data.fabricMonthly) {
+    aoa.push([`${m.label}  ·  ${m.total} м`, '', '', '', '', '']);
+    for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r, c })] = MONTH; r++;
+    for (const row of m.rows) {
+      aoa.push(['', row.articleId, row.plansheet || '—', row.colorNo || '—', row.color, row.meters]);
+      sm[XLSX.utils.encode_cell({ r, c: 1 })] = { font: { bold: true, color: { rgb: hx(row.isSummer ? C.summer : C.accent) } }, ...border() };
+      for (const c of [2, 3, 4]) sm[XLSX.utils.encode_cell({ r, c })] = border();
+      sm[XLSX.utils.encode_cell({ r, c: 5 })] = { alignment: { horizontal: 'right' }, ...border() };
+      r++;
     }
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }];
-    styleSheet(ws, sm); XLSX.utils.book_append_sheet(wb, ws, 'Ткань помесячно');
+    aoa.push(['', '', '', '', `Итого ${m.label}`, m.total]);
+    for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r, c })] = TOT; r++;
   }
-  // Лист 2: закупка (деми + лето)
-  {
-    const aoa = [['ЗАКУПКА ТКАНИ — консолидация']];
-    const sm = {}; let r = 1;
-    sm.A1 = { font: { bold: true, sz: 13, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.head) } } };
-    aoa.push(['Демисезон — вся ткань периода закупается в самую раннюю дату периода (цвета одного планшета консолидированы через артикулы)']); r++;
-    aoa.push(['Период', 'Заказать', 'Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м']);
-    for (let c = 0; c < 7; c++) sm[XLSX.utils.encode_cell({ r, c })] = TH; r++;
-    for (const m of data.fabricPurchase.demi) {
-      for (const it of m.items) {
-        aoa.push([m.label, dmy(m.purchaseDate), it.plansheet || '—', it.colorNo || '—', it.color || '—', it.arts.join(', '), it.meters]);
-        for (const c of [0, 1, 2, 3, 4, 5]) sm[XLSX.utils.encode_cell({ r, c })] = border();
-        sm[XLSX.utils.encode_cell({ r, c: 6 })] = { alignment: { horizontal: 'right' }, ...border() };
-        r++;
-      }
-      aoa.push([`Итого ${m.label}`, dmy(m.purchaseDate), '', '', '', '', m.totalMeters]);
-      for (let c = 0; c < 7; c++) sm[XLSX.utils.encode_cell({ r, c })] = TOT; r++;
-    }
-    aoa.push([]); r++;
-    aoa.push(['Летние — закупка не позже чем за месяц до старта производства']);
-    sm[XLSX.utils.encode_cell({ r, c: 0 })] = { font: { bold: true, color: { rgb: hx(C.summer) } } }; r++;
-    aoa.push(['Заказать не позже', 'Старт произв.', 'Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м']);
-    const THS = { ...TH, fill: { patternType: 'solid', fgColor: { rgb: hx(C.thSummer) } } };
-    for (let c = 0; c < 7; c++) sm[XLSX.utils.encode_cell({ r, c })] = THS; r++;
-    for (const it of data.fabricPurchase.summer) {
-      aoa.push([dmy(it.purchaseBy), dmy(it.productionStart), it.plansheet || '—', it.colorNo || '—', it.color || '—', it.arts.join(', '), it.meters]);
-      sm[XLSX.utils.encode_cell({ r, c: 0 })] = { font: { bold: true, color: { rgb: hx(C.summer) } }, ...border() };
-      for (const c of [1, 2, 3, 4, 5]) sm[XLSX.utils.encode_cell({ r, c })] = border();
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }];
+  styleSheet(ws, sm); return ws;
+}
+// лист «Закупка ткани» (деми + лето) → worksheet
+function fabricPurchaseSheet(data) {
+  const XLSX = window.XLSX;
+  const TH = { font: { bold: true, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.th) } }, border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
+  const TOT = { font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
+  const border = () => ({ border: XLSX_BORDER() });
+  const aoa = [['ЗАКУПКА ТКАНИ — консолидация']];
+  const sm = {}; let r = 1;
+  sm.A1 = { font: { bold: true, sz: 13, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.head) } } };
+  aoa.push(['Демисезон — вся ткань периода закупается в самую раннюю дату периода (цвета одного планшета консолидированы через артикулы)']); r++;
+  aoa.push(['Период', 'Заказать', 'Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м']);
+  for (let c = 0; c < 7; c++) sm[XLSX.utils.encode_cell({ r, c })] = TH; r++;
+  for (const m of data.fabricPurchase.demi) {
+    for (const it of m.items) {
+      aoa.push([m.label, dmy(m.purchaseDate), it.plansheet || '—', it.colorNo || '—', it.color || '—', it.arts.join(', '), it.meters]);
+      for (const c of [0, 1, 2, 3, 4, 5]) sm[XLSX.utils.encode_cell({ r, c })] = border();
       sm[XLSX.utils.encode_cell({ r, c: 6 })] = { alignment: { horizontal: 'right' }, ...border() };
       r++;
     }
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
-    ws['!cols'] = [{ wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 20 }, { wch: 12 }];
-    styleSheet(ws, sm); XLSX.utils.book_append_sheet(wb, ws, 'Закупка ткани');
+    aoa.push([`Итого ${m.label}`, dmy(m.purchaseDate), '', '', '', '', m.totalMeters]);
+    for (let c = 0; c < 7; c++) sm[XLSX.utils.encode_cell({ r, c })] = TOT; r++;
   }
-  XLSX.writeFile(wb, 'Отчёт_ткань_закупка.xlsx');
+  aoa.push([]); r++;
+  aoa.push(['Летние — закупка не позже чем за месяц до старта производства']);
+  sm[XLSX.utils.encode_cell({ r, c: 0 })] = { font: { bold: true, color: { rgb: hx(C.summer) } } }; r++;
+  aoa.push(['Заказать не позже', 'Старт произв.', 'Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м']);
+  const THS = { ...TH, fill: { patternType: 'solid', fgColor: { rgb: hx(C.thSummer) } } };
+  for (let c = 0; c < 7; c++) sm[XLSX.utils.encode_cell({ r, c })] = THS; r++;
+  for (const it of data.fabricPurchase.summer) {
+    aoa.push([dmy(it.purchaseBy), dmy(it.productionStart), it.plansheet || '—', it.colorNo || '—', it.color || '—', it.arts.join(', '), it.meters]);
+    sm[XLSX.utils.encode_cell({ r, c: 0 })] = { font: { bold: true, color: { rgb: hx(C.summer) } }, ...border() };
+    for (const c of [1, 2, 3, 4, 5]) sm[XLSX.utils.encode_cell({ r, c })] = border();
+    sm[XLSX.utils.encode_cell({ r, c: 6 })] = { alignment: { horizontal: 'right' }, ...border() };
+    r++;
+  }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
+  ws['!cols'] = [{ wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 20 }, { wch: 12 }];
+  styleSheet(ws, sm); return ws;
+}
+function report2aExcel(data, fname) { const X = window.XLSX; const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, fabricMonthlySheet(data), 'Ткань помесячно'); X.writeFile(wb, fname || 'Отчёт_ткань_помесячно.xlsx'); }
+function report2bExcel(data, fname) { const X = window.XLSX; const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, fabricPurchaseSheet(data), 'Закупка ткани'); X.writeFile(wb, fname || 'Отчёт_закупка_ткани.xlsx'); }
+
+// ============================ РЕЕСТР ОТЧЁТОВ ============================
+// Каждый отчёт: id, имя (для списка/архива), html(data), excel(data,fname), pdfTitle, имя файла.
+const REPORTS = [
+  { id: 'r1', name: 'Производство помесячно (цеха × артикулы)', html: report1Html, excel: report1Excel, pdfTitle: 'Производство помесячно: цеха × артикулы', file: 'Отчёт_производство.xlsx' },
+  { id: 'r2a', name: 'Ткань помесячно (планшет / цвет / метраж)', html: report2aHtml, excel: report2aExcel, pdfTitle: 'Ткань помесячно', file: 'Отчёт_ткань_помесячно.xlsx' },
+  { id: 'r2b', name: 'Закупка ткани (консолидация цветов)', html: report2bHtml, excel: report2bExcel, pdfTitle: 'Закупка ткани — консолидация', file: 'Отчёт_закупка_ткани.xlsx' },
+];
+const reportById = (id) => REPORTS.find((r) => r.id === id) || REPORTS[0];
+
+// заголовок отчёта с датой/временем сохранения (для экрана и печати)
+function reportHeaderHtml(rep, savedAtIso) {
+  return `<div style="margin:0 0 14px;padding:10px 14px;border-left:4px solid ${C.accent};background:${C.zebra};border-radius:0 8px 8px 0">
+    <div style="font-size:17px;font-weight:800;color:${C.head}">${esc(rep.name)}</div>
+    <div style="font-size:12px;color:#556">Сформировано на данных системы · <b>${esc(dmyhm(savedAtIso))}</b></div></div>`;
+}
+function reportExcel(rep, data, savedAtIso) {
+  const stamp = dmyhm(savedAtIso).replace(/[.: ]/g, '-');
+  const base = rep.file.replace(/\.xlsx$/, '');
+  rep.excel(data, `${base}_${stamp}.xlsx`);
 }
 
-// ============================ СТРАНИЦА ============================
+// ============================ СТРАНИЦА (2 под-вкладки: Отчёты / Архив) ============================
+let reportsSubTab = 'build'; // 'build' | 'archive' — сохраняется между перерисовками
+
 export function renderReportsPage(container, state, schedule, ctx = {}) {
   const toast = ctx.toast || (() => {});
+  const api = ctx.api;
   let data;
   try { data = buildReportsData(state, schedule); }
   catch (e) { container.innerHTML = `<div style="padding:20px;color:#c0392b">Ошибка сбора отчёта: ${esc(e.message)}</div>`; return; }
 
-  const card = (title, subtitle, id, bodyHtml) => `
-    <section style="background:#fff;border:1px solid ${C.border};border-radius:12px;margin:0 0 20px;overflow:hidden">
-      <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid ${C.border};background:linear-gradient(90deg,${C.head},${C.month})">
-        <div style="flex:1"><div style="font-size:16px;font-weight:800;color:#fff">${esc(title)}</div><div style="font-size:12px;color:#dbe6f5">${esc(subtitle)}</div></div>
-        <button class="btn" data-xlsx="${id}" style="background:#fff">⤓ Excel</button>
-        <button class="btn" data-pdf="${id}" style="background:#fff">⤓ PDF</button>
-      </div>
-      <div style="padding:16px">${bodyHtml}</div>
-    </section>`;
-
-  const h1 = report1Html(data);
-  const h2a = report2aHtml(data);
-  const h2b = report2bHtml(data);
+  const tabBtn = (id, label) => `<button data-subtab="${id}" style="padding:8px 16px;border:1px solid ${C.border};border-bottom:none;border-radius:8px 8px 0 0;cursor:pointer;font-weight:700;font-size:13px;background:${reportsSubTab === id ? '#fff' : C.zebra};color:${reportsSubTab === id ? C.head : '#667'}">${label}</button>`;
 
   container.innerHTML = `
-    <div style="margin:0 0 16px">
-      <div style="font-size:20px;font-weight:800;color:${C.head}">Отчёты</div>
-      <div style="color:#667;font-size:13px">Снимок настроенной системы: ${fmtNum(data.grand.units)} шт производства · ${fmtNum(data.grand.fabricMeters)} м ткани. Экспорт в Excel и PDF.</div>
-    </div>
-    ${card('1 · Производство помесячно', 'Какие цеха какие артикулы отшивают и сколько (по месяцу старта производства)', 'r1', h1)}
-    ${card('2 · Ткань помесячно', 'Метраж по артикулам, планшетам и номерам цвета (по месяцу производства)', 'r2a', h2a)}
-    ${card('2 · Закупка ткани (консолидация)', 'Демисезон — по самой ранней дате периода; лето — ≤ 1 мес до производства', 'r2b', h2b)}
-  `;
+    <div style="margin:0 0 4px"><div style="font-size:20px;font-weight:800;color:${C.head}">Отчёты</div>
+      <div style="color:#667;font-size:13px">Текущие данные: ${fmtNum(data.grand.units)} шт производства · ${fmtNum(data.grand.fabricMeters)} м ткани.</div></div>
+    <div style="display:flex;gap:4px;margin:14px 0 0">${tabBtn('build', '📄 Получить отчёт')}${tabBtn('archive', '🗄 Архив')}</div>
+    <div id="rep-panel" style="border:1px solid ${C.border};border-radius:0 12px 12px 12px;background:#fff;padding:18px;min-height:200px"></div>`;
 
-  container.querySelectorAll('[data-xlsx]').forEach((b) => b.addEventListener('click', () => {
+  container.querySelectorAll('[data-subtab]').forEach((b) => b.addEventListener('click', () => { reportsSubTab = b.dataset.subtab; renderReportsPage(container, state, schedule, ctx); }));
+
+  const panel = container.querySelector('#rep-panel');
+  if (reportsSubTab === 'archive') renderArchive(panel, ctx);
+  else renderBuild(panel, data, ctx);
+}
+
+// ── под-вкладка «Получить отчёт»: выпадающий список + кнопка ──
+function renderBuild(panel, data, ctx) {
+  const toast = ctx.toast || (() => {});
+  const api = ctx.api;
+  panel.innerHTML = `
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0 0 6px">
+      <div><label style="display:block;font-size:12px;color:#667;margin-bottom:4px">Отчёт</label>
+        <select id="rep-sel" style="min-width:340px;padding:7px 10px;border:1px solid ${C.border};border-radius:8px;font-size:13px">
+          ${REPORTS.map((r) => `<option value="${r.id}">${esc(r.name)}</option>`).join('')}
+        </select></div>
+      <button id="rep-get" class="btn btn-accent">Получить отчёт</button>
+    </div>
+    <div style="color:#889;font-size:12px;margin:0 0 14px">Отчёт строится на текущих данных и автоматически сохраняется в архив с датой и временем.</div>
+    <div id="rep-result"></div>`;
+
+  const result = panel.querySelector('#rep-result');
+  panel.querySelector('#rep-get').addEventListener('click', async () => {
+    const rep = reportById(panel.querySelector('#rep-sel').value);
+    let savedAt = new Date().toISOString();
+    // авто-сохранение в архив (не блокирует показ, если БД недоступна)
+    if (api) {
+      try {
+        const r = await api('/api/reports/archive', { method: 'POST', body: JSON.stringify({ reportKind: rep.id, label: rep.name, data }) });
+        if (r && r.savedAt) savedAt = r.savedAt;
+        toast('Отчёт сформирован и сохранён в архив');
+      } catch (e) { toast('Отчёт сформирован (в архив не сохранён: ' + e.message + ')', true); }
+    }
+    showReport(result, rep, data, savedAt, ctx);
+  });
+}
+
+// показать отчёт (шапка с датой + тело) + кнопки Excel/PDF
+function showReport(result, rep, data, savedAtIso, ctx) {
+  const toast = (ctx && ctx.toast) || (() => {});
+  const body = rep.html(data);
+  result.innerHTML = `
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin:0 0 10px">
+      <button class="btn" id="rep-xlsx">⤓ Excel</button>
+      <button class="btn" id="rep-pdf">⤓ PDF</button>
+    </div>
+    ${reportHeaderHtml(rep, savedAtIso)}
+    ${body}`;
+  result.querySelector('#rep-xlsx').addEventListener('click', () => {
     if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу', true); return; }
-    try {
-      if (b.dataset.xlsx === 'r1') report1Excel(data); else report2Excel(data);
-      toast('Excel сформирован');
-    } catch (e) { toast('Ошибка Excel: ' + e.message, true); }
+    try { reportExcel(rep, data, savedAtIso); toast('Excel сформирован'); } catch (e) { toast('Ошибка Excel: ' + e.message, true); }
+  });
+  result.querySelector('#rep-pdf').addEventListener('click', () => printReport(`${rep.pdfTitle} — ${dmyhm(savedAtIso)}`, reportHeaderHtml(rep, savedAtIso) + body));
+}
+
+// ── под-вкладка «Архив» ──
+async function renderArchive(panel, ctx) {
+  const toast = ctx.toast || (() => {});
+  const api = ctx.api;
+  panel.innerHTML = `<div style="color:#667">Загрузка архива…</div>`;
+  if (!api) { panel.innerHTML = `<div style="color:#c0392b">Архив недоступен.</div>`; return; }
+  let items = [];
+  try { const r = await api('/api/reports/archive'); items = (r && r.items) || []; }
+  catch (e) { panel.innerHTML = `<div style="color:#c0392b">Ошибка загрузки архива: ${esc(e.message)}</div>`; return; }
+
+  if (!items.length) { panel.innerHTML = `<div style="color:#889;padding:8px 0">Архив пуст. Сформируйте отчёт во вкладке «Получить отчёт» — он сохранится сюда с датой и временем.</div>`; return; }
+
+  panel.innerHTML = `
+    <div style="font-size:13px;color:#667;margin:0 0 12px">Сохранённые отчёты (${items.length}). Данные системы могли меняться — здесь снимок на момент сохранения.</div>
+    <div id="arch-view"></div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:${C.th}">
+        <th style="text-align:left;padding:8px 12px;border:1px solid ${C.border}">Отчёт</th>
+        <th style="text-align:left;padding:8px 12px;border:1px solid ${C.border};width:180px">Дата и время</th>
+        <th style="text-align:right;padding:8px 12px;border:1px solid ${C.border};width:280px">Действия</th>
+      </tr></thead><tbody>
+      ${items.map((it, i) => `<tr style="background:${i % 2 ? C.zebra : '#fff'}">
+        <td style="padding:7px 12px;border:1px solid ${C.border};font-weight:600">${esc(reportById(it.reportKind).name)}</td>
+        <td style="padding:7px 12px;border:1px solid ${C.border}">${esc(dmyhm(it.savedAt))}</td>
+        <td style="padding:7px 12px;border:1px solid ${C.border};text-align:right;white-space:nowrap">
+          <button class="btn" data-view="${it.id}">Просмотр</button>
+          <button class="btn" data-xlsx="${it.id}">Excel</button>
+          <button class="btn" data-pdf="${it.id}">PDF</button>
+          <button class="btn btn-subtle" data-del="${it.id}" title="Удалить из архива">✕</button>
+        </td></tr>`).join('')}
+    </tbody></table>`;
+
+  const viewBox = panel.querySelector('#arch-view');
+  const fetchEntry = async (id) => { const r = await api('/api/reports/archive/' + id); return r; };
+
+  panel.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', async () => {
+    try { const e = await fetchEntry(b.dataset.view); const rep = reportById(e.reportKind);
+      viewBox.innerHTML = `<div style="border:1px solid ${C.border};border-radius:10px;padding:16px;margin:0 0 16px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 8px"><div style="font-weight:800;color:${C.head}">Просмотр из архива</div><button class="btn btn-subtle" id="arch-close">Закрыть</button></div>
+        ${reportHeaderHtml(rep, e.savedAt)}${rep.html(e.data)}</div>`;
+      viewBox.querySelector('#arch-close').addEventListener('click', () => { viewBox.innerHTML = ''; });
+      viewBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) { toast('Ошибка: ' + err.message, true); }
   }));
-  container.querySelectorAll('[data-pdf]').forEach((b) => b.addEventListener('click', () => {
-    if (b.dataset.pdf === 'r1') printReport('Производство помесячно: цеха × артикулы', h1);
-    else if (b.dataset.pdf === 'r2a') printReport('Ткань помесячно', h2a);
-    else printReport('Закупка ткани — консолидация', h2b);
+  panel.querySelectorAll('[data-xlsx]').forEach((b) => b.addEventListener('click', async () => {
+    if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу', true); return; }
+    try { const e = await fetchEntry(b.dataset.xlsx); reportExcel(reportById(e.reportKind), e.data, e.savedAt); toast('Excel сформирован'); }
+    catch (err) { toast('Ошибка: ' + err.message, true); }
+  }));
+  panel.querySelectorAll('[data-pdf]').forEach((b) => b.addEventListener('click', async () => {
+    try { const e = await fetchEntry(b.dataset.pdf); const rep = reportById(e.reportKind); printReport(`${rep.pdfTitle} — ${dmyhm(e.savedAt)}`, reportHeaderHtml(rep, e.savedAt) + rep.html(e.data)); }
+    catch (err) { toast('Ошибка: ' + err.message, true); }
+  }));
+  panel.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Удалить этот отчёт из архива?')) return;
+    try { await api('/api/reports/archive/' + b.dataset.del, { method: 'DELETE' }); toast('Удалено'); renderArchive(panel, ctx); }
+    catch (err) { toast('Ошибка: ' + err.message, true); }
   }));
 }
