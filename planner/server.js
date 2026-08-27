@@ -13,6 +13,7 @@ import { findRescues } from './lib/rescue.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates, getSubjectPhrases, budgetStatus } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse, buildWbSupply, listVendorPrefixes } from './lib/wb/wbApi.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
+import { fetchRates } from './lib/currency.js';
 import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList, metaGet, metaSet, snapshotSave, snapshotList, snapshotGet, snapshotDelete, snapshotPrune, reportArchiveSave, reportArchiveList, reportArchiveGet, reportArchiveDelete } from './lib/db.js';
 import { installAuth, requireView, requireEdit } from './lib/authMiddleware.js';
 import { applyWritePolicy, filterStateForRead, canEditAnything } from './lib/permissions.js';
@@ -23,7 +24,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'reports-ws-merge-2026-08-27';
+const BACKEND_BUILD = 'reports-currency-2026-08-27';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -495,6 +496,26 @@ app.post('/api/workshop/remove', requireEdit('gantt'), (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.message || e) });
   }
+});
+
+// ── Курсы валют (НБ КР): сом↔$, ₽↔сом, ₽↔$ ──
+// GET — вернуть закэшированные (или подтянуть, если кэша нет). POST /refresh — обновить из интернета.
+app.get('/api/currency', requireView('data'), async (req, res) => {
+  try {
+    let cached = null;
+    try { const m = metaGet('currency_rates'); if (m && m.value) cached = JSON.parse(m.value); } catch { /* нет БД/кэша */ }
+    if (cached) return res.json({ ok: true, rates: cached, cached: true });
+    const rates = await fetchRates();
+    try { metaSet('currency_rates', JSON.stringify(rates)); } catch { /* нет БД — не критично */ }
+    res.json({ ok: true, rates, cached: false });
+  } catch (e) { res.status(502).json({ ok: false, error: String(e.message || e) }); }
+});
+app.post('/api/currency/refresh', requireView('data'), async (req, res) => {
+  try {
+    const rates = await fetchRates();
+    try { metaSet('currency_rates', JSON.stringify(rates)); } catch { /* нет БД */ }
+    res.json({ ok: true, rates });
+  } catch (e) { res.status(502).json({ ok: false, error: String(e.message || e) }); }
 });
 
 // ── Архив отчётов ──

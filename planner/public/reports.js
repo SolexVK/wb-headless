@@ -449,14 +449,37 @@ function reportExcel(rep, data, savedAtIso) {
   rep.excel(data, `${base}_${stamp}.xlsx`);
 }
 
+// ============================ КУРСЫ ВАЛЮТ ============================
+let currencyRates = null; // null — не загружено; объект — курсы; false — ошибка загрузки
+const cur2 = (n) => (Math.round((+n || 0) * 100) / 100).toLocaleString('ru', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const cur4 = (n) => (Math.round((+n || 0) * 10000) / 10000).toLocaleString('ru', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+function currencyBarHtml() {
+  const r = currencyRates;
+  const chip = (txt) => `<span style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid ${C.border};border-radius:20px;padding:5px 12px;font-size:13px;font-weight:600;color:${C.head}">${txt}</span>`;
+  let body;
+  if (r && typeof r === 'object') {
+    body = `${chip(`$1 = <b>${cur2(r.usdKgs)}</b> сом`)}${chip(`₽1 = <b>${cur4(r.rubKgs)}</b> сом`)}${chip(`$1 = <b>${cur2(r.usdRub)}</b> ₽`)}
+      <span style="font-size:11px;color:#889">${esc(r.source || '')}${r.rateDate ? ' · курс на ' + dmy(r.rateDate) : ''}</span>`;
+  } else if (r === false) {
+    body = `<span style="color:${C.summer};font-size:13px">Курс не загружен — нажмите «Обновить курс»</span>`;
+  } else {
+    body = `<span style="color:#889;font-size:13px">Загрузка курса…</span>`;
+  }
+  return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 0;padding:10px 12px;background:${C.zebra};border:1px solid ${C.border};border-radius:10px">
+    <span style="font-weight:700;color:${C.head};font-size:13px">💱 Курсы валют:</span>${body}
+    <button id="cur-refresh" class="btn btn-subtle" style="margin-left:auto">↻ Обновить курс</button></div>`;
+}
+
 // ============================ СТРАНИЦА (2 под-вкладки: Отчёты / Архив) ============================
 let reportsSubTab = 'build'; // 'build' | 'archive' — сохраняется между перерисовками
 
 export function renderReportsPage(container, state, schedule, ctx = {}) {
   const toast = ctx.toast || (() => {});
   const api = ctx.api;
+  const rerender = () => renderReportsPage(container, state, schedule, ctx);
   let data;
-  try { data = buildReportsData(state, schedule); }
+  try { data = buildReportsData(state, schedule, { rates: (currencyRates && typeof currencyRates === 'object') ? currencyRates : null }); }
   catch (e) { container.innerHTML = `<div style="padding:20px;color:#c0392b">Ошибка сбора отчёта: ${esc(e.message)}</div>`; return; }
 
   const tabBtn = (id, label) => `<button data-subtab="${id}" style="padding:8px 16px;border:1px solid ${C.border};border-bottom:none;border-radius:8px 8px 0 0;cursor:pointer;font-weight:700;font-size:13px;background:${reportsSubTab === id ? '#fff' : C.zebra};color:${reportsSubTab === id ? C.head : '#667'}">${label}</button>`;
@@ -464,10 +487,24 @@ export function renderReportsPage(container, state, schedule, ctx = {}) {
   container.innerHTML = `
     <div style="margin:0 0 4px"><div style="font-size:20px;font-weight:800;color:${C.head}">Отчёты</div>
       <div style="color:#667;font-size:13px">Текущие данные: ${fmtNum(data.grand.units)} шт производства · ${fmtNum(data.grand.fabricMeters)} м ткани.</div></div>
+    ${currencyBarHtml()}
     <div style="display:flex;gap:4px;margin:14px 0 0">${tabBtn('build', '📄 Получить отчёт')}${tabBtn('archive', '🗄 Архив')}</div>
     <div id="rep-panel" style="border:1px solid ${C.border};border-radius:0 12px 12px 12px;background:#fff;padding:18px;min-height:200px"></div>`;
 
-  container.querySelectorAll('[data-subtab]').forEach((b) => b.addEventListener('click', () => { reportsSubTab = b.dataset.subtab; renderReportsPage(container, state, schedule, ctx); }));
+  container.querySelectorAll('[data-subtab]').forEach((b) => b.addEventListener('click', () => { reportsSubTab = b.dataset.subtab; rerender(); }));
+  container.querySelector('#cur-refresh')?.addEventListener('click', async () => {
+    if (!api) return;
+    try { const r = await api('/api/currency/refresh', { method: 'POST' }); currencyRates = (r && r.rates) || false; toast('Курс обновлён'); }
+    catch (e) { currencyRates = currencyRates || false; toast('Не удалось обновить курс: ' + e.message, true); }
+    rerender();
+  });
+
+  // первичная загрузка курса (один раз): подтягиваем закэшированный, затем перерисовываем
+  if (currencyRates === null && api) {
+    currencyRates = undefined; // помечаем «загрузка идёт», чтобы не дёргать повторно
+    api('/api/currency').then((r) => { currencyRates = (r && r.rates) || false; rerender(); })
+      .catch(() => { currencyRates = false; rerender(); });
+  }
 
   const panel = container.querySelector('#rep-panel');
   if (reportsSubTab === 'archive') renderArchive(panel, ctx);
@@ -486,41 +523,45 @@ function renderBuild(panel, data, ctx) {
         </select></div>
       <button id="rep-get" class="btn btn-accent">Получить отчёт</button>
     </div>
-    <div style="color:#889;font-size:12px;margin:0 0 14px">Отчёт строится на текущих данных и автоматически сохраняется в архив с датой и временем.</div>
+    <div style="color:#889;font-size:12px;margin:0 0 14px">Отчёт строится на текущих данных. В архив он попадёт только после нажатия «Сохранить отчёт».</div>
     <div id="rep-result"></div>`;
 
   const result = panel.querySelector('#rep-result');
-  panel.querySelector('#rep-get').addEventListener('click', async () => {
+  panel.querySelector('#rep-get').addEventListener('click', () => {
     const rep = reportById(panel.querySelector('#rep-sel').value);
-    let savedAt = new Date().toISOString();
-    // авто-сохранение в архив (не блокирует показ, если БД недоступна)
-    if (api) {
-      try {
-        const r = await api('/api/reports/archive', { method: 'POST', body: JSON.stringify({ reportKind: rep.id, label: rep.name, data }) });
-        if (r && r.savedAt) savedAt = r.savedAt;
-        toast('Отчёт сформирован и сохранён в архив');
-      } catch (e) { toast('Отчёт сформирован (в архив не сохранён: ' + e.message + ')', true); }
-    }
-    showReport(result, rep, data, savedAt, ctx);
+    showReport(result, rep, data, new Date().toISOString(), ctx); // строим на текущих данных, БЕЗ авто-сохранения
   });
 }
 
-// показать отчёт (шапка с датой + тело) + кнопки Excel/PDF
-function showReport(result, rep, data, savedAtIso, ctx) {
+// показать отчёт (шапка с датой + тело) + кнопки Сохранить/Excel/PDF
+function showReport(result, rep, data, genAtIso, ctx) {
   const toast = (ctx && ctx.toast) || (() => {});
+  const api = ctx && ctx.api;
   const body = rep.html(data);
   result.innerHTML = `
     <div style="display:flex;gap:8px;justify-content:flex-end;margin:0 0 10px">
+      <button class="btn btn-accent" id="rep-save">💾 Сохранить отчёт</button>
       <button class="btn" id="rep-xlsx">⤓ Excel</button>
       <button class="btn" id="rep-pdf">⤓ PDF</button>
     </div>
-    ${reportHeaderHtml(rep, savedAtIso)}
+    ${reportHeaderHtml(rep, genAtIso)}
     ${body}`;
+  const saveBtn = result.querySelector('#rep-save');
+  saveBtn.addEventListener('click', async () => {
+    if (!api) { toast('Сохранение недоступно', true); return; }
+    saveBtn.disabled = true;
+    try {
+      const r = await api('/api/reports/archive', { method: 'POST', body: JSON.stringify({ reportKind: rep.id, label: rep.name, data }) });
+      saveBtn.textContent = `✓ Сохранено ${dmyhm((r && r.savedAt) || genAtIso)}`;
+      saveBtn.classList.remove('btn-accent');
+      toast('Отчёт сохранён в архив');
+    } catch (e) { saveBtn.disabled = false; toast('Не удалось сохранить: ' + e.message, true); }
+  });
   result.querySelector('#rep-xlsx').addEventListener('click', () => {
     if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу', true); return; }
-    try { reportExcel(rep, data, savedAtIso); toast('Excel сформирован'); } catch (e) { toast('Ошибка Excel: ' + e.message, true); }
+    try { reportExcel(rep, data, genAtIso); toast('Excel сформирован'); } catch (e) { toast('Ошибка Excel: ' + e.message, true); }
   });
-  result.querySelector('#rep-pdf').addEventListener('click', () => printReport(`${rep.pdfTitle} — ${dmyhm(savedAtIso)}`, reportHeaderHtml(rep, savedAtIso) + body));
+  result.querySelector('#rep-pdf').addEventListener('click', () => printReport(`${rep.pdfTitle} — ${dmyhm(genAtIso)}`, reportHeaderHtml(rep, genAtIso) + body));
 }
 
 // ── под-вкладка «Архив» ──
