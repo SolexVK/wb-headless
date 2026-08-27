@@ -20,6 +20,8 @@ const C = {
   ink: '#1a2434', head: '#1f3a5f', month: '#2b6cb0', monthSummer: '#c05621',
   th: '#e7edf5', thSummer: '#fbe8d8', zebra: '#f6f9fc', border: '#c9d4e2',
   total: '#eaf1fb', totalSummer: '#fdeede', chip: '#334e68', accent: '#2b6cb0', summer: '#c05621',
+  // локальная закупка (рынок Мадина, Бишкек) — зелёный акцент
+  bishkek: '#2f855a', thBishkek: '#e2f3ea', totalBishkek: '#eaf7ef',
 };
 // Пастельные оттенки для блоков цехов (уникальный на цех, мягкие, в тон синей схемы отчёта).
 const WS_TINTS = ['#EAF1FB', '#E7F5EC', '#FCF0E2', '#F1ECFA', '#FCE9E9', '#E6F5F7', '#F5F3E6', '#ECEFF4', '#FBEDF4', '#E9F9F0', '#F0F4FB', '#F7EEE6'];
@@ -48,6 +50,11 @@ export function buildReportsData(state, schedule, opts = {}) {
     return { ym: m, label: ymLabel(m), workshops, total: workshops.reduce((s, w) => s + w.total, 0) };
   });
 
+  // ЛОКАЛЬНАЯ ЗАКУПКА: ткань для пошива в АВГУСТЕ и СЕНТЯБРЕ покупаем не в Китае, а на рынке Мадина
+  // (Бишкек) — не успеваем заказать в Китае. Цена в Бишкеке ВЫШЕ на $0.40/м.
+  const BISHKEK_MONTHS = new Set((opts.bishkekMonths && opts.bishkekMonths.length) ? opts.bishkekMonths.map(String) : ['08', '09']);
+  const BISHKEK_MARKUP = (opts.bishkekMarkup != null && isFinite(+opts.bishkekMarkup)) ? +opts.bishkekMarkup : 0.40;
+
   // ── потребности в ткани из циклов (по цвету), с планшет/№цвета и датами ──
   const dem = [];
   for (const c of cycles) {
@@ -56,12 +63,15 @@ export function buildReportsData(state, schedule, opts = {}) {
     for (const color of Object.keys(M)) {
       const units = sumRow(M[color]); if (units <= 0) continue;
       const fi = (a.fabricInfo && a.fabricInfo[color]) || {};
+      const prodMonth = prodMonthOf(c);
+      const isBishkek = BISHKEK_MONTHS.has(prodMonth.slice(5, 7)); // пошив в авг/сен → локальная закупка
       dem.push({
         articleId: c.articleId, articleName: a.name || '', color,
         plansheet: (fi.plansheet || '').trim(), colorNo: (fi.colorNo || '').trim(),
         meters: units * (+a.fabricPerUnit || 0) * wastageMul, units,
-        price: +a.fabricPricePerMeter || 0, // цена ткани, $/м (задаётся на листе «Данные»)
-        prodMonth: prodMonthOf(c), cutStart: c.cutStart || (c.ops && c.ops.cut && c.ops.cut.start),
+        price: (+a.fabricPricePerMeter || 0) + (isBishkek ? BISHKEK_MARKUP : 0), // Бишкек: +$0.40/м
+        source: isBishkek ? 'bishkek' : 'china',
+        prodMonth, cutStart: c.cutStart || (c.ops && c.ops.cut && c.ops.cut.start),
         orderBy: (c.fabric && c.fabric.orderDate) || c.cutStart,
         isSummer: summer.has(String(c.articleId).trim()),
       });
@@ -106,6 +116,7 @@ export function buildReportsData(state, schedule, opts = {}) {
   // заказываем ОДНОЙ партией в начале января (раньше и крупнее). cnyClamp сдвигает дату заказа в мёртвой
   // зоне на 5 января того же года.
   const cnyClamp = (iso) => { const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number); const dead = (m === 1 && d > 5) || m === 2 || (m === 3 && d <= 15); return dead ? `${y}-01-05` : String(iso).slice(0, 10); };
+  const firstOfMonth = (iso) => String(iso).slice(0, 7) + '-01';
 
   // ПЕРИОД закупа: помесячно ('month') или раз в два месяца ('2month', календарные пары: янв–фев, мар–апр…)
   const periodMode = opts.periodMode === '2month' ? '2month' : 'month';
@@ -115,7 +126,7 @@ export function buildReportsData(state, schedule, opts = {}) {
   // ДЕМИ: заказ периода = по самому раннему артикулу периода, за МЕСЯЦ до старта; затем CNY-сдвиг.
   // Периоды, чья дата заказа из-за CNY совпала (сдвинулась к 5 января), СЛИВАЮТСЯ в один крупный заказ.
   const demiByPeriod = {};
-  for (const d of dem) if (!d.isSummer) (demiByPeriod[periodKey(d.prodMonth)] || (demiByPeriod[periodKey(d.prodMonth)] = [])).push(d);
+  for (const d of dem) if (!d.isSummer && d.source !== 'bishkek') (demiByPeriod[periodKey(d.prodMonth)] || (demiByPeriod[periodKey(d.prodMonth)] = [])).push(d);
   const rawDemi = Object.keys(demiByPeriod).sort().map((pk) => {
     const list = demiByPeriod[pk];
     const earliestCut = list.reduce((mn, d) => (d.cutStart < mn ? d.cutStart : mn), list[0].cutStart);
@@ -133,14 +144,25 @@ export function buildReportsData(state, schedule, opts = {}) {
   });
 
   // ЛЕТО: ВСЮ летнюю ткань — ОДНИМ заказом. Размещаем к первому месяцу пошива (самый ранний крой − месяц),
-  // но НЕ ПОЗЖЕ начала января (из-за CNY фабрики закрыты весь февраль).
-  const summerDem = dem.filter((d) => d.isSummer);
+  // но НЕ ПОЗЖЕ начала января (из-за CNY фабрики закрыты весь февраль). Авг/сен-лето уходит в блок Бишкека.
+  const summerDem = dem.filter((d) => d.isSummer && d.source !== 'bishkek');
   let summerOrders = [];
   if (summerDem.length) {
     const earliestCut = summerDem.reduce((mn, d) => (d.cutStart < mn ? d.cutStart : mn), summerDem[0].cutStart);
     const items = mergeSku(summerDem);
     summerOrders = [{ purchaseDate: cnyClamp(addMonthsISO(earliestCut, -1)), productionStart: earliestCut, arrival: earliestCut, label: 'Летний заказ — весь объём одним этапом', items, totalMeters: sumMeters(items), totalCost: sumCost(items) }];
   }
+
+  // БИШКЕК (рынок Мадина): ткань для пошива в авг/сен — местная закупка (+$0.40/м). Заказ по месяцу
+  // производства, покупаем к началу месяца пошива (местный рынок — довоз быстрый).
+  const bishkekByMonth = {};
+  for (const d of dem) if (d.source === 'bishkek') (bishkekByMonth[d.prodMonth] || (bishkekByMonth[d.prodMonth] = [])).push(d);
+  const bishkek = Object.keys(bishkekByMonth).sort().map((m) => {
+    const list = bishkekByMonth[m];
+    const earliestCut = list.reduce((mn, d) => (d.cutStart < mn ? d.cutStart : mn), list[0].cutStart);
+    const items = mergeSku(list);
+    return { purchaseDate: firstOfMonth(earliestCut), arrival: earliestCut, label: `Пошив ${ymLabel(m)}`, items, totalMeters: sumMeters(items), totalCost: sumCost(items) };
+  });
 
   // ── цвет-оттенок для каждого цеха (стабильный, уникальный, гармонирует со схемой отчёта) ──
   // Порядок цехов — как в state.workshops, затем прочие. Каждый цех получает свой пастельный оттенок.
@@ -151,10 +173,11 @@ export function buildReportsData(state, schedule, opts = {}) {
   const workshopColors = {};
   orderedWs.forEach((id, i) => { workshopColors[id] = WS_TINTS[i % WS_TINTS.length]; });
 
-  const fabricCost = demi.reduce((s, m) => s + m.totalCost, 0) + summerOrders.reduce((s, o) => s + o.totalCost, 0);
+  const fabricCost = demi.reduce((s, m) => s + m.totalCost, 0) + summerOrders.reduce((s, o) => s + o.totalCost, 0) + bishkek.reduce((s, o) => s + o.totalCost, 0);
   return {
     workshopMonthly, fabricMonthly, workshopColors,
-    fabricPurchase: { demi, summer: summerOrders },
+    fabricPurchase: { bishkek, demi, summer: summerOrders },
+    bishkekMarkup: BISHKEK_MARKUP,
     summerIds: [...summer],
     rates: (opts.rates && typeof opts.rates === 'object') ? opts.rates : null, // курсы валют на момент отчёта
     periodMode,
@@ -244,11 +267,12 @@ const usdSum = (n) => '$' + fmtNum(Math.round(n || 0));
 const price2 = (n) => (Math.round((n || 0) * 100) / 100).toLocaleString('ru', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const convStr = (costUsd, rates) => rates ? `<span style="color:#667;font-weight:500"> · ${fmtNum(Math.round(costUsd * rates.usdKgs))} сом · ${fmtNum(Math.round(costUsd * rates.usdRub))} ₽</span>` : '';
 
-// одна карточка-заказ (шапка «когда/сколько» + таблица позиций по ткани) — общая для деми и лета
-function orderCardHtml(order, R, summer) {
-  const head = summer ? C.summer : C.month;
-  const th = summer ? C.thSummer : C.th;
-  const zebra = summer ? C.totalSummer : C.zebra;
+// одна карточка-заказ (шапка «когда/сколько» + таблица позиций по ткани) — общая для деми/лета/Бишкека
+function orderCardHtml(order, R, kind) {
+  const head = kind === 'summer' ? C.summer : kind === 'bishkek' ? C.bishkek : C.month;
+  const th = kind === 'summer' ? C.thSummer : kind === 'bishkek' ? C.thBishkek : C.th;
+  const zebra = kind === 'summer' ? C.totalSummer : kind === 'bishkek' ? C.totalBishkek : C.zebra;
+  const totalBg = kind === 'summer' ? C.totalSummer : kind === 'bishkek' ? C.totalBishkek : C.total;
   const arrival = order.arrival ? ` · приход ткани: <b>${esc(ymLabel(String(order.arrival).slice(0, 7)))}</b>` : '';
   const cnyNote = order.cny ? ` <span style="background:#fff3;padding:1px 6px;border-radius:10px;font-size:11px">↤ перенесено под кит. Новый год</span>` : '';
   let h = `<div style="margin:0 0 18px">
@@ -275,7 +299,7 @@ function orderCardHtml(order, R, summer) {
       <td style="padding:5px 10px;border:1px solid ${C.border};text-align:right;font-weight:600">${usdSum(it.cost)}</td>
     </tr>`;
   });
-  h += `<tr style="background:${summer ? C.totalSummer : C.total};font-weight:700"><td colspan="4" style="padding:5px 10px;border:1px solid ${C.border}">Итого заказ · ${dmy(order.purchaseDate)}</td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(order.totalMeters)}</td><td style="padding:5px 10px;border:1px solid ${C.border}"></td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${usdSum(order.totalCost)}${convStr(order.totalCost, R)}</td></tr>`;
+  h += `<tr style="background:${totalBg};font-weight:700"><td colspan="4" style="padding:5px 10px;border:1px solid ${C.border}">Итого заказ · ${dmy(order.purchaseDate)}</td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(order.totalMeters)}</td><td style="padding:5px 10px;border:1px solid ${C.border}"></td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${usdSum(order.totalCost)}${convStr(order.totalCost, R)}</td></tr>`;
   return h + `</tbody></table></div>`;
 }
 
@@ -283,14 +307,22 @@ function report2bHtml(data) {
   const P = data.fabricPurchase; const R = data.rates;
   const noRate = R ? '' : ` <span style="color:${C.summer}">(курс не загружен — суммы только в $)</span>`;
   let h = `<div style="margin:0 0 10px;color:#556;font-size:13px">Ткань одного <b>планшета и цвета</b> из разных артикулов сложена вместе. Демисезон: закупка по <b>самому раннему артикулу периода — за месяц</b> до старта. Лето: <b>весь объём одним заказом</b>. Учтён <b>китайский Новый год</b> — в феврале фабрики закрыты, такие заказы перенесены на начало января. Стоимость ткани — из «Данных» ($/м).${noRate}</div>`;
+  // БИШКЕК (рынок Мадина) — местная закупка под пошив авг/сен, выделена отдельным блоком
+  if (P.bishkek && P.bishkek.length) {
+    const bTot = P.bishkek.reduce((s, o) => s + o.totalCost, 0);
+    h += `<div style="margin:14px 0 8px;padding:10px 14px;border:2px solid ${C.bishkek};border-radius:10px;background:${C.totalBishkek}">
+      <div style="font-weight:800;color:${C.bishkek};font-size:15px">🏪 Бишкек · рынок Мадина — местная закупка (пошив авг/сен)</div>
+      <div style="font-size:12px;color:#556;margin-top:2px">Ткань для августа/сентября заказываем локально (в Китае не успеваем). Цена <b>+$${(data.bishkekMarkup || 0.4).toFixed(2)}/м</b> к китайской. Итого местной ткани: <b>${usdSum(bTot)}</b>${convStr(bTot, R)}</div></div>`;
+    for (const o of P.bishkek) h += orderCardHtml(o, R, 'bishkek');
+  }
   // ДЕМИ
-  h += `<div style="font-weight:800;color:${C.head};font-size:15px;margin:14px 0 8px">🧵 Демисезон — консолидация по периодам${data.periodMode === '2month' ? ' (раз в 2 месяца)' : ' (помесячно)'}</div>`;
+  h += `<div style="font-weight:800;color:${C.head};font-size:15px;margin:20px 0 8px">🧵 Демисезон (Китай) — консолидация по периодам${data.periodMode === '2month' ? ' (раз в 2 месяца)' : ' (помесячно)'}</div>`;
   if (!P.demi.length) h += `<div style="color:#889;padding:6px 0">нет демисезонной ткани</div>`;
-  for (const m of P.demi) h += orderCardHtml(m, R, false);
+  for (const m of P.demi) h += orderCardHtml(m, R, 'demi');
   // ЛЕТО
-  h += `<div style="font-weight:800;color:${C.summer};font-size:15px;margin:22px 0 8px">☀️ Летние (сезонные) — весь объём одним заказом (≤ начало января)</div>`;
+  h += `<div style="font-weight:800;color:${C.summer};font-size:15px;margin:22px 0 8px">☀️ Летние (сезонные, Китай) — весь объём одним заказом (≤ начало января)</div>`;
   if (!P.summer.length) h += `<div style="color:#889;padding:6px 0">нет летней ткани</div>`;
-  for (const o of P.summer) h += orderCardHtml(o, R, true);
+  for (const o of P.summer) h += orderCardHtml(o, R, 'summer');
   // ОБЩИЙ ИТОГ по стоимости ткани
   h += `<div style="margin:18px 0 0;padding:12px 16px;background:${C.total};border:1px solid ${C.border};border-radius:10px;font-size:15px;font-weight:800;color:${C.head}">
     Итого стоимость ткани к закупке: ${usdSum(data.grand.fabricCost)}${R ? ` <span style="font-weight:600;color:#556">≈ ${fmtNum(Math.round(data.grand.fabricCost * R.usdKgs))} сом · ${fmtNum(Math.round(data.grand.fabricCost * R.usdRub))} ₽</span>` : ''}</div>`;
@@ -411,13 +443,16 @@ function fabricMonthlySheet(data) {
 // лист закупки для набора заказов (демисезон ИЛИ лето) → worksheet. 7 колонок.
 function ordersSheet(orders, opts) {
   const XLSX = window.XLSX;
-  const R = opts.rates; const isSummer = !!opts.summer;
+  const R = opts.rates; const kind = opts.kind || 'demi';
   const cc = (rr, c) => XLSX.utils.encode_cell({ r: rr, c });
   const NCOL = 7; // Планшет, №цвета, Цвет, Артикулы, Метраж, Цена $/м, Сумма $
-  const bannerBg = isSummer ? hx(C.summer) : hx(C.month);
-  const TH = { font: { bold: true, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(isSummer ? C.thSummer : C.th) } }, border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
+  const bannerBg = kind === 'summer' ? hx(C.summer) : kind === 'bishkek' ? hx(C.bishkek) : hx(C.month);
+  const thBg = kind === 'summer' ? C.thSummer : kind === 'bishkek' ? C.thBishkek : C.th;
+  const totBg = kind === 'summer' ? C.totalSummer : kind === 'bishkek' ? C.totalBishkek : C.total;
+  const kindLabel = kind === 'summer' ? 'лето' : kind === 'bishkek' ? 'Бишкек (Мадина)' : 'демисезон';
+  const TH = { font: { bold: true, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(thBg) } }, border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
   const BANNER = { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: bannerBg } } };
-  const TOT = { font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: hx(isSummer ? C.totalSummer : C.total) } }, border: XLSX_BORDER() };
+  const TOT = { font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: hx(totBg) } }, border: XLSX_BORDER() };
   const RIGHT = () => ({ alignment: { horizontal: 'right' }, border: XLSX_BORDER() });
   const border = () => ({ border: XLSX_BORDER() });
   const aoa = [[opts.title]]; const sm = {}; const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOL - 1 } }];
@@ -444,7 +479,7 @@ function ordersSheet(orders, opts) {
   }
   // итог листа + пересчёт по курсу
   const conv = R ? `  ≈ ${Math.round(allCost * R.usdKgs)} сом · ${Math.round(allCost * R.usdRub)} ₽` : '';
-  aoa.push([`ИТОГО ${isSummer ? 'лето' : 'демисезон'}:${conv}`, '', '', '', allMeters, '', allCost]);
+  aoa.push([`ИТОГО ${kindLabel}:${conv}`, '', '', '', allMeters, '', allCost]);
   const GT = { font: { bold: true, sz: 12, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
   for (let c = 0; c < NCOL; c++) sm[cc(r, c)] = GT;
   sm[cc(r, 4)] = { ...GT, alignment: { horizontal: 'right' } }; sm[cc(r, 6)] = { ...GT, alignment: { horizontal: 'right' } };
@@ -457,9 +492,12 @@ function ordersSheet(orders, opts) {
 function report2aExcel(data, fname) { const X = window.XLSX; const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, fabricMonthlySheet(data), 'Ткань помесячно'); X.writeFile(wb, fname || 'Отчёт_ткань_помесячно.xlsx'); }
 function report2bExcel(data, fname) {
   const X = window.XLSX; const wb = X.utils.book_new();
-  // сезон (демисезон) и лето — на РАЗНЫХ листах
-  X.utils.book_append_sheet(wb, ordersSheet(data.fabricPurchase.demi, { title: `ДЕМИСЕЗОН — закупка ткани${data.periodMode === '2month' ? ' (раз в 2 месяца)' : ' (помесячно)'}`, rates: data.rates, summer: false }), 'Демисезон');
-  X.utils.book_append_sheet(wb, ordersSheet(data.fabricPurchase.summer, { title: 'ЛЕТО — закупка ткани (весь объём одним заказом)', rates: data.rates, summer: true }), 'Лето');
+  // Бишкек (местная закупка), демисезон и лето — на РАЗНЫХ листах
+  if (data.fabricPurchase.bishkek && data.fabricPurchase.bishkek.length) {
+    X.utils.book_append_sheet(wb, ordersSheet(data.fabricPurchase.bishkek, { title: `БИШКЕК · рынок Мадина — местная закупка (пошив авг/сен, +$${(data.bishkekMarkup || 0.4).toFixed(2)}/м)`, rates: data.rates, kind: 'bishkek' }), 'Бишкек (Мадина)');
+  }
+  X.utils.book_append_sheet(wb, ordersSheet(data.fabricPurchase.demi, { title: `ДЕМИСЕЗОН (Китай) — закупка ткани${data.periodMode === '2month' ? ' (раз в 2 месяца)' : ' (помесячно)'}`, rates: data.rates, kind: 'demi' }), 'Демисезон');
+  X.utils.book_append_sheet(wb, ordersSheet(data.fabricPurchase.summer, { title: 'ЛЕТО (Китай) — закупка ткани (весь объём одним заказом)', rates: data.rates, kind: 'summer' }), 'Лето');
   X.writeFile(wb, fname || 'Отчёт_закупка_ткани.xlsx');
 }
 
