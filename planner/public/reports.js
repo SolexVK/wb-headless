@@ -178,8 +178,41 @@ export function buildReportsData(state, schedule, opts = {}) {
   orderedWs.forEach((id, i) => { workshopColors[id] = WS_TINTS[i % WS_TINTS.length]; });
 
   const fabricCost = demi.reduce((s, m) => s + m.totalCost, 0) + summerOrders.reduce((s, o) => s + o.totalCost, 0) + bishkek.reduce((s, o) => s + o.totalCost, 0);
+
+  // ── ПРОВЕРКА ПОЛНОТЫ: сверяем план (по партиям) с тем, что реально вошло в производство (циклы) ──
+  // Показывает артикулы, которые НЕ попали в отчёт (не размещены планировщиком / в архиве / покрыты
+  // остатками / нет партий) и где нетто заметно меньше плана.
+  const sumMat = (M) => { let s = 0; for (const c of Object.keys(M || {})) s += sumRow(M[c]); return s; };
+  const plannedByArt = {};
+  for (const p of state.partias || []) { if (p.historical) continue; const u = sumMat(p.planMatrix); if (u > 0) plannedByArt[p.articleId] = (plannedByArt[p.articleId] || 0) + u; }
+  const producedByArt = {};
+  for (const c of cycles) producedByArt[c.articleId] = (producedByArt[c.articleId] || 0) + c.units;
+  const unschedArts = new Set(((schedule && schedule.warnings) || []).filter((w) => w.kind === 'unscheduled').map((w) => w.article));
+  const coverage = [];
+  for (const id of new Set([...Object.keys(plannedByArt), ...Object.keys(producedByArt)])) {
+    const plan = plannedByArt[id] || 0, prod = producedByArt[id] || 0;
+    if (plan === 0 && prod === 0) continue;
+    const a = artById[id];
+    let status = 'ok', note = '';
+    if (prod === 0 && plan > 0) {
+      status = 'missing';
+      note = unschedArts.has(id) ? 'НЕ размещён планировщиком (закреплён за цехом, который его не шьёт — проверь «кто шьёт»)'
+        : (a && a.archived) ? 'артикул в архиве' : 'нет партий с планом или всё покрыто остатками/поставками';
+    } else if (plan > 0 && prod < plan - Math.max(2, plan * 0.02)) {
+      status = 'partial'; note = `в производство вошло ${fmtNum(prod)} из ${fmtNum(plan)} шт (остальное покрыто остатками/поставками)`;
+    }
+    coverage.push({ articleId: id, name: (a && a.name) || '', plan, prod, status, note });
+  }
+  // артикулы БЕЗ плана вообще (не архивные) — их нет ни в пошиве, ни в закупке; чаще всего это и есть «пропажа»
+  for (const a of state.articles || []) {
+    if (a.archived) continue;
+    if ((plannedByArt[a.id] || 0) > 0 || (producedByArt[a.id] || 0) > 0) continue;
+    coverage.push({ articleId: a.id, name: a.name || '', plan: 0, prod: 0, status: 'noplan', note: 'нет партий/плана — задайте план на листе «План по размерам»' });
+  }
+  coverage.sort((x, y) => artNum(x.articleId) - artNum(y.articleId));
+
   return {
-    workshopMonthly, fabricMonthly, workshopColors,
+    workshopMonthly, fabricMonthly, workshopColors, coverage,
     fabricPurchase: { bishkek, demi, summer: summerOrders },
     bishkekMarkup: BISHKEK_MARKUP,
     summerIds: [...summer],
@@ -189,6 +222,7 @@ export function buildReportsData(state, schedule, opts = {}) {
       units: workshopMonthly.reduce((s, m) => s + m.total, 0),
       fabricMeters: fabricMonthly.reduce((s, m) => s + m.total, 0),
       fabricCost, // $ — суммарная стоимость ткани к закупке
+      planUnits: Object.values(plannedByArt).reduce((s, u) => s + u, 0),
     },
   };
 }
@@ -549,6 +583,40 @@ function currencyBarHtml() {
     <button id="cur-refresh" class="btn btn-subtle" style="margin-left:auto">↻ Обновить курс</button></div>`;
 }
 
+// ── панель «проверка полноты»: какие артикулы не полностью вошли в отчёт ──
+function coveragePanelHtml(data) {
+  const cov = data.coverage || [];
+  const issues = cov.filter((c) => c.status !== 'ok');
+  const planU = (data.grand && data.grand.planUnits) || 0, prodU = (data.grand && data.grand.units) || 0;
+  if (!issues.length) {
+    return `<div style="margin:10px 0 0;padding:8px 12px;background:#e9f5ee;border:1px solid #b7dfc6;border-radius:10px;font-size:13px;color:#256b45">✓ Проверка полноты: все артикулы вошли в отчёт. План <b>${fmtNum(planU)}</b> шт = в производстве <b>${fmtNum(prodU)}</b> шт.</div>`;
+  }
+  const nMissing = issues.filter((c) => c.status === 'missing' || c.status === 'partial').length;
+  const nNoPlan = issues.filter((c) => c.status === 'noplan').length;
+  let h = `<div style="margin:10px 0 0;padding:10px 14px;background:#fdf3e6;border:2px solid ${C.summer};border-radius:10px">
+    <div style="font-weight:800;color:${C.summer};font-size:14px">⚠ Проверка полноты: ${nMissing ? `${nMissing} артикул(ов) вошли частично/не вошли` : 'все запланированные вошли'}${nNoPlan ? `, ${nNoPlan} — без плана` : ''}</div>
+    <div style="font-size:12px;color:#556;margin:2px 0 8px">План <b>${fmtNum(planU)}</b> шт → в производстве <b>${fmtNum(prodU)}</b> шт. Ниже — что и почему выпало:</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <thead><tr style="background:${C.thSummer}">
+        <th style="text-align:left;padding:5px 10px;border:1px solid ${C.border};width:80px">Артикул</th>
+        <th style="text-align:left;padding:5px 10px;border:1px solid ${C.border}">Название</th>
+        <th style="text-align:right;padding:5px 10px;border:1px solid ${C.border};width:90px">План, шт</th>
+        <th style="text-align:right;padding:5px 10px;border:1px solid ${C.border};width:100px">В произв., шт</th>
+        <th style="text-align:left;padding:5px 10px;border:1px solid ${C.border}">Причина</th>
+      </tr></thead><tbody>`;
+  for (const c of issues) {
+    const col = c.status === 'missing' ? C.summer : c.status === 'noplan' ? '#6b7280' : '#8a6d3b';
+    h += `<tr>
+      <td style="padding:4px 10px;border:1px solid ${C.border};font-weight:700;color:${col}">${esc(c.articleId)}</td>
+      <td style="padding:4px 10px;border:1px solid ${C.border}">${esc(c.name)}</td>
+      <td style="padding:4px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(c.plan)}</td>
+      <td style="padding:4px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(c.prod)}</td>
+      <td style="padding:4px 10px;border:1px solid ${C.border};color:${col}">${esc(c.note)}</td>
+    </tr>`;
+  }
+  return h + `</tbody></table></div>`;
+}
+
 // ============================ СТРАНИЦА (2 под-вкладки: Отчёты / Архив) ============================
 let reportsSubTab = 'build';       // 'build' | 'archive' — сохраняется между перерисовками
 let reportPeriodMode = 'month';    // 'month' | '2month' — период закупа ткани
@@ -569,6 +637,7 @@ export function renderReportsPage(container, state, schedule, ctx = {}) {
     <div style="margin:0 0 4px"><div style="font-size:20px;font-weight:800;color:${C.head}">Отчёты</div>
       <div style="color:#667;font-size:13px">Текущие данные: ${fmtNum(data.grand.units)} шт производства · ${fmtNum(data.grand.fabricMeters)} м ткани.</div></div>
     ${currencyBarHtml()}
+    ${coveragePanelHtml(data)}
     <div style="display:flex;gap:4px;margin:14px 0 0">${tabBtn('build', '📄 Получить отчёт')}${tabBtn('archive', '🗄 Архив')}</div>
     <div id="rep-panel" style="border:1px solid ${C.border};border-radius:0 12px 12px 12px;background:#fff;padding:18px;min-height:200px"></div>`;
 
