@@ -158,20 +158,18 @@ function report1Html(data) {
         </tr></thead><tbody>`;
     for (const w of m.workshops) {
       const bg = wc[w.workshopId] || '#fff';
+      const n = w.arts.length;
       w.arts.forEach((a, idx) => {
-        // каждая строка блока — оттенком цеха; у первой строки блока — усиленная верхняя граница (рамка блока)
-        const topBorder = idx === 0 ? `border-top:2px solid ${C.chip}` : '';
+        // рамка блока цеха: сверху у первой строки, снизу у последней
+        const tb = idx === 0 ? `border-top:2px solid ${C.chip};` : '';
+        const bb = idx === n - 1 ? `border-bottom:2px solid ${C.chip};` : '';
         h += `<tr style="background:${bg}">
-          <td style="padding:6px 12px;border:1px solid ${C.border};${topBorder};font-weight:600">${esc(w.name)}${w.own ? ' <span style="font-size:11px;color:#7a8">свой</span>' : ''}</td>
-          <td style="padding:6px 12px;border:1px solid ${C.border};${topBorder}">${artChip(a.art)}</td>
-          <td style="padding:6px 12px;border:1px solid ${C.border};${topBorder};text-align:right;font-weight:600">${fmtNum(a.units)}</td>
-          <td style="padding:6px 12px;border:1px solid ${C.border};${topBorder}"></td>
+          <td style="padding:6px 12px;border:1px solid ${C.border};${tb}${bb}font-weight:600">${esc(w.name)}${w.own ? ' <span style="font-size:11px;color:#7a8">свой</span>' : ''}</td>
+          <td style="padding:6px 12px;border:1px solid ${C.border};${tb}${bb}">${artChip(a.art)}</td>
+          <td style="padding:6px 12px;border:1px solid ${C.border};${tb}${bb}text-align:right;font-weight:600">${fmtNum(a.units)}</td>
+          ${idx === 0 ? `<td rowspan="${n}" style="padding:6px 12px;border:1px solid ${C.border};border-top:2px solid ${C.chip};border-bottom:2px solid ${C.chip};text-align:right;vertical-align:middle;font-weight:800;font-size:14px;color:${C.head}">${fmtNum(w.total)}</td>` : ''}
         </tr>`;
       });
-      // помесячный подытог цеха — итог в столбце «Итого»
-      h += `<tr style="background:${bg};font-weight:700;border-bottom:2px solid ${C.chip}">
-        <td style="padding:6px 12px;border:1px solid ${C.border};text-align:right" colspan="3">Итого · ${esc(w.name)}</td>
-        <td style="padding:6px 12px;border:1px solid ${C.border};text-align:right;color:${C.head}">${fmtNum(w.total)}</td></tr>`;
     }
     h += `<tr style="background:${C.total};font-weight:800"><td style="padding:6px 12px;border:1px solid ${C.border}" colspan="3">Итого за ${esc(m.label)}</td><td style="padding:6px 12px;border:1px solid ${C.border};text-align:right">${fmtNum(m.total)}</td></tr>`;
     h += `</tbody></table></div>`;
@@ -316,6 +314,7 @@ function report1Excel(data, fname) {
   const GRAND = { font: { bold: true, sz: 13, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
   const GRANDNUM = { ...GRAND, alignment: { horizontal: 'right' } };
   const wc = data.workshopColors || {};
+  const merges = []; // объединения ячеек столбца E (итог цеха) по блокам
   let r = 2;
   for (const m of data.workshopMonthly) {
     // строка месяца: название в A, ИТОГ МЕСЯЦА — в столбце E
@@ -325,23 +324,24 @@ function report1Excel(data, fname) {
     r++;
     for (const w of m.workshops) {
       const fill = { patternType: 'solid', fgColor: { rgb: hx(wc[w.workshopId] || '#FFFFFF') } }; // уникальный оттенок цеха
+      const startR = r;
+      const n = w.arts.length;
       w.arts.forEach((a, i) => {
-        aoa.push(['', w.name, a.art, a.units, '']); // название цеха — в КАЖДОЙ строке артикула; штук в D, итог — в E
+        // итог цеха — ОДНОЙ цифрой в столбце E, объединённой на все строки артикулов цеха (без строки «Итого»)
+        aoa.push(['', w.name, a.art, a.units, i === 0 ? w.total : '']);
         const bd = XLSX_BORDER();
-        if (i === 0) bd.top = { style: 'medium', color: { rgb: hx(C.chip) } }; // рамка сверху блока цеха
+        if (i === 0) bd.top = { style: 'medium', color: { rgb: hx(C.chip) } };      // рамка сверху блока цеха
+        if (i === n - 1) bd.bottom = { style: 'medium', color: { rgb: hx(C.chip) } }; // и снизу — закрыть блок
         styleMap[cell(r, 0)] = { fill, border: bd };
         styleMap[cell(r, 1)] = { font: { bold: true }, fill, border: bd };
         styleMap[cell(r, 2)] = { font: { bold: true, color: { rgb: hx(C.accent) } }, fill, border: bd };
         styleMap[cell(r, 3)] = { alignment: { horizontal: 'right' }, fill, border: bd };
-        styleMap[cell(r, 4)] = { fill, border: bd };
+        // объединённая E: рамка блока по всей высоте (сверху/снизу — medium), цифра итога по центру
+        const ebd = { ...XLSX_BORDER(), top: { style: 'medium', color: { rgb: hx(C.chip) } }, bottom: { style: 'medium', color: { rgb: hx(C.chip) } } };
+        styleMap[cell(r, 4)] = { fill, border: ebd, font: { bold: true, sz: 12, color: { rgb: hx(C.head) } }, alignment: { horizontal: 'right', vertical: 'center' } };
         r++;
       });
-      // ПОМЕСЯЧНЫЙ ПОДЫТОГ ЦЕХА — в оттенке цеха, итог в столбце E, снизу рамка блока
-      aoa.push(['', `Итого · ${w.name}`, '', '', w.total]);
-      const sub = { font: { bold: true }, fill, border: { ...XLSX_BORDER(), bottom: { style: 'medium', color: { rgb: hx(C.chip) } } } };
-      for (let c = 0; c < 4; c++) styleMap[cell(r, c)] = sub;
-      styleMap[cell(r, 4)] = { ...sub, alignment: { horizontal: 'right' }, font: { bold: true, color: { rgb: hx(C.head) } } };
-      r++;
+      if (n > 1) merges.push({ s: { r: startR, c: 4 }, e: { r: startR + n - 1, c: 4 } }); // объединяем E на весь блок цеха
     }
   }
   // ОБЩИЙ ИТОГ в самом конце (в столбце E)
@@ -349,7 +349,7 @@ function report1Excel(data, fname) {
   for (let c = 0; c < 4; c++) styleMap[cell(r, c)] = GRAND;
   styleMap[cell(r, 4)] = GRANDNUM;
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }, ...merges];
   ws['!cols'] = [{ wch: 20 }, { wch: 26 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
   for (let c = 0; c < 5; c++) styleMap[cell(1, c)] = TH;
   styleMap['A1'] = HEAD;
