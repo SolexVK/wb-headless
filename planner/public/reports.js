@@ -95,10 +95,14 @@ export function buildReportsData(state, schedule, opts = {}) {
     articles: [...new Map(dem.map((d) => [d.articleId, d.articleName])).entries()].map(([id, name]) => ({ id, name })).sort((a, b) => artNum(a.id) - artNum(b.id)),
     months: [...new Set(dem.map((d) => d.prodMonth))].sort().map((m) => ({ ym: m, label: ymLabel(m) })),
   };
+  // фильтры — МНОЖЕСТВЕННЫЙ выбор (массивы). Пустой набор = «все».
   const F = opts.filters || {};
-  const fPlan = F.plansheet || '', fArt = F.articleId || '', fMonth = F.month || '';
-  const filtered = !!(fPlan || fArt || fMonth);
-  if (filtered) dem = dem.filter((d) => (!fPlan || d.plansheet === fPlan) && (!fArt || d.articleId === fArt) && (!fMonth || d.prodMonth === fMonth));
+  const asArr = (a, single) => Array.isArray(a) ? a.filter(Boolean) : (single ? [single] : []);
+  const fPlans = asArr(F.plansheets, F.plansheet);
+  const fArts = asArr(F.articleIds, F.articleId);
+  const fMonths = asArr(F.months, F.month);
+  const filtered = !!(fPlans.length || fArts.length || fMonths.length);
+  if (filtered) dem = dem.filter((d) => (!fPlans.length || fPlans.includes(d.plansheet)) && (!fArts.length || fArts.includes(d.articleId)) && (!fMonths.length || fMonths.includes(d.prodMonth)));
 
   // ── Отчёт 2a: помесячная детализация ткани (месяц × артикул × планшет × №цвета × метраж) ──
   const r2 = {};
@@ -233,15 +237,17 @@ export function buildReportsData(state, schedule, opts = {}) {
   }
   coverage.sort((x, y) => artNum(x.articleId) - artNum(y.articleId));
 
-  // ── КОНСОЛИДАЦИЯ по фильтрам: плоская сводка отфильтрованной ткани (артикул × планшет × №цвета × цвет) ──
+  // ── КОНСОЛИДАЦИЯ: ткань ОДНОГО планшета + № цвета + цвета из РАЗНЫХ артикулов складывается вместе
+  // (суммируем метраж, стоимость, количество; перечисляем артикулы). Красным — если образцы разные. ──
+  const consKey = (d) => `${(d.plansheet || '').trim().toLowerCase()}|${(d.colorNo || '').trim().toLowerCase()}|${String(d.color || '').trim().toLowerCase()}`;
   const consBy = {};
   for (const d of dem) {
-    const k = `${d.articleId}|${d.plansheet}|${d.colorNo}|${d.color}`;
-    const it = (consBy[k] || (consBy[k] = { articleId: d.articleId, articleName: d.articleName, plansheet: d.plansheet, colorNo: d.colorNo, color: d.color, image: d.image, meters: 0, cost: 0, units: 0, months: new Set() }));
-    it.meters += d.meters; it.cost += d.meters * d.price; it.units += d.units; it.months.add(d.prodMonth);
+    const k = consKey(d);
+    const it = (consBy[k] || (consBy[k] = { plansheet: d.plansheet, colorNo: d.colorNo, color: d.color, arts: new Set(), images: new Set(), meters: 0, cost: 0, units: 0, months: new Set() }));
+    it.meters += d.meters; it.cost += d.meters * d.price; it.units += d.units; it.arts.add(d.articleId); if (d.image) it.images.add(d.image); it.months.add(d.prodMonth);
   }
-  const fabricConsolidated = Object.values(consBy).map((x) => ({ articleId: x.articleId, articleName: x.articleName, plansheet: x.plansheet, colorNo: x.colorNo, color: x.color, image: x.image, imageConflict: skuConflict(skuKey(x)), meters: Math.ceil(x.meters), cost: Math.round(x.cost), price: x.meters ? x.cost / x.meters : 0, units: x.units, months: [...x.months].sort() }))
-    .sort((a, b) => artNum(a.articleId) - artNum(b.articleId) || String(a.plansheet).localeCompare(String(b.plansheet)) || String(a.colorNo).localeCompare(String(b.colorNo)) || String(a.color).localeCompare(String(b.color)));
+  const fabricConsolidated = Object.values(consBy).map((x) => ({ plansheet: x.plansheet, colorNo: x.colorNo, color: x.color, arts: [...x.arts].sort((a, b) => artNum(a) - artNum(b)), images: [...x.images], imageConflict: x.images.size > 1, meters: Math.ceil(x.meters), cost: Math.round(x.cost), price: x.meters ? x.cost / x.meters : 0, units: x.units, months: [...x.months].sort() }))
+    .sort((a, b) => String(a.plansheet).localeCompare(String(b.plansheet)) || String(a.colorNo).localeCompare(String(b.colorNo)) || String(a.color).localeCompare(String(b.color)));
   const consTotals = { meters: fabricConsolidated.reduce((s, x) => s + x.meters, 0), cost: fabricConsolidated.reduce((s, x) => s + x.cost, 0), units: fabricConsolidated.reduce((s, x) => s + x.units, 0) };
 
   return {
@@ -251,7 +257,7 @@ export function buildReportsData(state, schedule, opts = {}) {
     summerIds: [...summer],
     rates: (opts.rates && typeof opts.rates === 'object') ? opts.rates : null, // курсы валют на момент отчёта
     periodMode,
-    fabricFilters, filters: { plansheet: fPlan, articleId: fArt, month: fMonth }, filtered, // фильтры отчётов по ткани
+    fabricFilters, filters: { plansheets: fPlans, articleIds: fArts, months: fMonths }, filtered, // фильтры отчётов по ткани (множественные)
     fabricConsolidated, consTotals, // консолидированный вид при активном фильтре
     grand: {
       units: workshopMonthly.reduce((s, m) => s + m.total, 0),
@@ -315,12 +321,12 @@ function report1Html(data) {
   return h;
 }
 
-// подпись активных фильтров (для шапки консолидированного вида)
+// подпись активных фильтров (для шапки консолидированного вида) — множественный выбор
 function activeFilterChips(data) {
   const f = data.filters || {}, ff = data.fabricFilters || {}; const parts = [];
-  if (f.plansheet) parts.push(`Планшет: <b>${esc(f.plansheet)}</b>`);
-  if (f.articleId) { const a = (ff.articles || []).find((x) => x.id === f.articleId); parts.push(`Артикул: <b>${esc(f.articleId)}${a && a.name ? ' · ' + esc(a.name) : ''}</b>`); }
-  if (f.month) { const m = (ff.months || []).find((x) => x.ym === f.month); parts.push(`Месяц: <b>${esc(m ? m.label : f.month)}</b>`); }
+  if (f.plansheets && f.plansheets.length) parts.push(`Планшет: <b>${f.plansheets.map(esc).join(', ')}</b>`);
+  if (f.articleIds && f.articleIds.length) parts.push(`Артикул: <b>${f.articleIds.map((id) => { const a = (ff.articles || []).find((x) => x.id === id); return esc(id) + (a && a.name ? ' · ' + esc(a.name) : ''); }).join(', ')}</b>`);
+  if (f.months && f.months.length) parts.push(`Месяц: <b>${f.months.map((m) => { const mm = (ff.months || []).find((x) => x.ym === m); return esc(mm ? mm.label : m); }).join(', ')}</b>`);
   return parts.join(' · ');
 }
 // КОНСОЛИДИРОВАННЫЙ вид отчёта по ткани (при активном фильтре): плоская сводка по фильтру.
@@ -333,22 +339,22 @@ function fabricConsolidatedHtml(data) {
   if (!rows.length) return h + `<div style="padding:16px;color:#889">Нет данных под выбранные фильтры.</div>`;
   h += `<table style="width:100%;border-collapse:collapse;font-size:12.5px">
     <thead><tr style="background:${C.th}">
-      <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:70px">Артикул</th>
       <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:90px">Планшет</th>
       <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:80px">№ цвета</th>
       <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border}">Цвет</th>
       <th style="text-align:center;padding:6px 10px;border:1px solid ${C.border};width:120px">Образец</th>
+      <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:150px">Артикулы</th>
       <th style="text-align:right;padding:6px 10px;border:1px solid ${C.border};width:100px">Метраж, м</th>
       <th style="text-align:right;padding:6px 10px;border:1px solid ${C.border};width:80px">Цена, $/м</th>
       <th style="text-align:right;padding:6px 10px;border:1px solid ${C.border};width:110px">Сумма, $</th>
     </tr></thead><tbody>`;
   rows.forEach((r, i) => {
     h += `<tr style="background:${i % 2 ? C.zebra : '#fff'}">
-      <td style="padding:5px 10px;border:1px solid ${C.border};font-weight:700;color:${C.accent}">${esc(r.articleId)}</td>
-      <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(r.plansheet || '—')}</td>
+      <td style="padding:5px 10px;border:1px solid ${C.border};font-weight:600">${esc(r.plansheet || '—')}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(r.colorNo || '—')}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(r.color)}</td>
-      ${fabricSwatchCell(C.border, r.image, r.imageConflict)}
+      ${fabricSwatchCell(C.border, r.images, r.imageConflict)}
+      <td style="padding:5px 10px;border:1px solid ${C.border}">${r.arts.map(artChip).join(', ')}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(r.meters)}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${price2(r.price)}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border};text-align:right;font-weight:600">${usdSum(r.cost)}</td>
@@ -640,7 +646,7 @@ function ordersSheet(orders, opts) {
 function fabricConsolidatedSheet(data) {
   const XLSX = window.XLSX, R = data.rates;
   const cc = (rr, c) => XLSX.utils.encode_cell({ r: rr, c });
-  const NC = 8; // Артикул, Планшет, №цвета, Цвет, Образец, Метраж, Цена $/м, Сумма $
+  const NC = 8; // Планшет, №цвета, Цвет, Образец, Артикулы, Метраж, Цена $/м, Сумма $
   const TH = { font: { bold: true, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.th) } }, border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
   const TOT = { font: { bold: true, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
   const CONFXL = { font: { bold: true, color: { rgb: 'E02424' } }, fill: { patternType: 'solid', fgColor: { rgb: 'FDECEA' } }, border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
@@ -650,14 +656,14 @@ function fabricConsolidatedSheet(data) {
   const chips = (activeFilterChips(data) || '—').replace(/<[^>]+>/g, ''); // без html-тегов
   const aoa = [[`Консолидация по ткани · фильтр: ${chips}`]]; const sm = { A1: { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.head) } } } };
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NC - 1 } }];
-  aoa.push(['Артикул', 'Планшет', '№ цвета', 'Цвет', 'Образец', 'Метраж, м', 'Цена, $/м', 'Сумма, $']);
+  aoa.push(['Планшет', '№ цвета', 'Цвет', 'Образец', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $']);
   let r = 1; for (let c = 0; c < NC; c++) sm[cc(r, c)] = TH; r++;
   for (const x of (data.fabricConsolidated || [])) {
-    const samp = x.imageConflict ? '⚠ разные' : (x.image ? '✓ есть' : '—');
-    aoa.push([x.articleId, x.plansheet || '—', x.colorNo || '—', x.color, samp, x.meters, Math.round(x.price * 100) / 100, x.cost]);
-    sm[cc(r, 0)] = { font: { bold: true, color: { rgb: hx(C.accent) } }, ...border() };
-    for (const c of [1, 2, 3]) sm[cc(r, c)] = border();
-    sm[cc(r, 4)] = x.imageConflict ? CONFXL : SAMPXL;
+    const samp = x.imageConflict ? '⚠ разные' : ((x.images && x.images.length) ? '✓ есть' : '—');
+    aoa.push([x.plansheet || '—', x.colorNo || '—', x.color, samp, x.arts.join(', '), x.meters, Math.round(x.price * 100) / 100, x.cost]);
+    sm[cc(r, 0)] = { font: { bold: true }, ...border() };
+    for (const c of [1, 2, 4]) sm[cc(r, c)] = border();
+    sm[cc(r, 3)] = x.imageConflict ? CONFXL : SAMPXL;
     for (const c of [5, 6, 7]) sm[cc(r, c)] = RIGHT();
     r++;
   }
@@ -666,7 +672,7 @@ function fabricConsolidatedSheet(data) {
   for (let c = 0; c < NC; c++) sm[cc(r, c)] = c >= 5 ? { ...TOT, alignment: { horizontal: 'right' } } : TOT;
   merges.push({ s: { r, c: 0 }, e: { r, c: 4 } });
   const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!merges'] = merges;
-  ws['!cols'] = [{ wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 13 }];
+  ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 18 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 11 }, { wch: 13 }];
   styleSheet(ws, sm); return ws;
 }
 function report2aExcel(data, fname) {
@@ -982,7 +988,7 @@ function coveragePanelHtml(data) {
 // ============================ СТРАНИЦА (2 под-вкладки: Отчёты / Архив) ============================
 let reportsSubTab = 'build';       // 'build' | 'archive' — сохраняется между перерисовками
 let reportPeriodMode = 'month';    // 'month' | '2month' — период закупа ткани
-let reportFabricFilters = { plansheet: '', articleId: '', month: '' }; // фильтры отчётов по ткани
+let reportFabricFilters = { plansheets: [], articleIds: [], months: [] }; // фильтры отчётов по ткани (множественные)
 
 export function renderReportsPage(container, state, schedule, ctx = {}) {
   const toast = ctx.toast || (() => {});
@@ -1060,14 +1066,16 @@ function showReport(result, rep, data, genAtIso, ctx) {
   if (isFabric) {
     const ff = view.fabricFilters || { plansheets: [], articles: [], months: [] };
     const cur = reportFabricFilters;
-    const opt = (v, label, selected) => `<option value="${esc(v)}"${selected ? ' selected' : ''}>${esc(label)}</option>`;
-    const selBox = (id, label, inner) => `<label style="display:flex;flex-direction:column;font-size:11px;color:#667;gap:3px">${label}<select id="${id}" style="padding:6px 8px;border:1px solid ${C.border};border-radius:8px;font-size:12.5px;min-width:130px">${inner}</select></label>`;
-    const plan = selBox('f-plan', 'Планшет', opt('', 'Все планшеты', !cur.plansheet) + ff.plansheets.map((p) => opt(p, p, cur.plansheet === p)).join(''));
-    const art = selBox('f-art', 'Артикул', opt('', 'Все артикулы', !cur.articleId) + ff.articles.map((a) => opt(a.id, a.id + (a.name ? ' · ' + a.name : ''), cur.articleId === a.id)).join(''));
-    const mon = selBox('f-month', 'Месяц', opt('', 'Все месяцы', !cur.month) + ff.months.map((m) => opt(m.ym, m.label, cur.month === m.ym)).join(''));
+    // множественный выбор: наборами (Ctrl/Cmd-клик), пустой набор = все
+    const optM = (v, label, arr) => `<option value="${esc(v)}"${arr.includes(v) ? ' selected' : ''}>${esc(label)}</option>`;
+    const selBox = (id, label, inner) => `<label style="display:flex;flex-direction:column;font-size:11px;color:#667;gap:3px">${label}<select id="${id}" multiple size="5" style="padding:4px 6px;border:1px solid ${C.border};border-radius:8px;font-size:12.5px;min-width:150px;max-width:220px">${inner}</select></label>`;
+    const plan = selBox('f-plan', 'Планшет', ff.plansheets.map((p) => optM(p, p, cur.plansheets)).join('') || '<option disabled>нет планшетов</option>');
+    const art = selBox('f-art', 'Артикул', ff.articles.map((a) => optM(a.id, a.id + (a.name ? ' · ' + a.name : ''), cur.articleIds)).join('') || '<option disabled>нет артикулов</option>');
+    const mon = selBox('f-month', 'Месяц', ff.months.map((m) => optM(m.ym, m.label, cur.months)).join('') || '<option disabled>нет месяцев</option>');
     const reset = `<button class="btn btn-subtle" id="f-reset"${view.filtered ? '' : ' disabled'} style="align-self:flex-end">Сбросить</button>`;
     filterBar = `<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0 0 12px;padding:10px 12px;background:${C.zebra};border:1px solid ${C.border};border-radius:10px">
       <span style="font-weight:700;color:${C.head};font-size:13px;align-self:flex-end">🔎 Фильтр ткани:</span>${plan}${art}${mon}${reset}
+      <span style="align-self:flex-end;font-size:11px;color:#889">выбор наборами: Ctrl/Cmd-клик · пусто = все</span>
       ${view.filtered ? `<span style="align-self:flex-end;font-size:12px;color:${C.accent};font-weight:700">консолидированный вид</span>` : ''}</div>`;
   }
 
@@ -1091,10 +1099,11 @@ function showReport(result, rep, data, genAtIso, ctx) {
 
   const rerender = () => showReport(result, rep, data, genAtIso, ctx); // пересобирает view с текущими фильтрами/периодом
   result.querySelector('#rep-period')?.addEventListener('change', (e) => { reportPeriodMode = e.target.value === '2month' ? '2month' : 'month'; rerender(); });
-  result.querySelector('#f-plan')?.addEventListener('change', (e) => { reportFabricFilters.plansheet = e.target.value; rerender(); });
-  result.querySelector('#f-art')?.addEventListener('change', (e) => { reportFabricFilters.articleId = e.target.value; rerender(); });
-  result.querySelector('#f-month')?.addEventListener('change', (e) => { reportFabricFilters.month = e.target.value; rerender(); });
-  result.querySelector('#f-reset')?.addEventListener('click', () => { reportFabricFilters = { plansheet: '', articleId: '', month: '' }; rerender(); });
+  const readSel = (id) => [...(result.querySelector('#' + id)?.selectedOptions || [])].map((o) => o.value).filter(Boolean);
+  result.querySelector('#f-plan')?.addEventListener('change', () => { reportFabricFilters.plansheets = readSel('f-plan'); rerender(); });
+  result.querySelector('#f-art')?.addEventListener('change', () => { reportFabricFilters.articleIds = readSel('f-art'); rerender(); });
+  result.querySelector('#f-month')?.addEventListener('change', () => { reportFabricFilters.months = readSel('f-month'); rerender(); });
+  result.querySelector('#f-reset')?.addEventListener('click', () => { reportFabricFilters = { plansheets: [], articleIds: [], months: [] }; rerender(); });
 
   const saveBtn = result.querySelector('#rep-save');
   saveBtn.addEventListener('click', async () => {
