@@ -572,18 +572,22 @@ function svgBars(items, opts = {}) {
   if (!items.length) return '';
   const W = opts.width || Math.max(480, items.length * 68 + 70);
   const H = opts.height || 260;
-  const padL = 52, padR = 14, padT = 18, padB = 46, plotW = W - padL - padR, plotH = H - padT - padB;
+  const padL = 52, padR = 14, padT = opts.padT || 18, padB = 46, plotW = W - padL - padR, plotH = H - padT - padB;
   const maxV = niceMax(Math.max(...items.map((it) => it.value), 1));
   const gap = plotW / items.length, bw = Math.min(50, gap * 0.6);
   const y = (v) => padT + plotH - (v / maxV) * plotH;
   const color = opts.color || C.accent, fmt = opts.fmt || fmtNum;
   let g = '';
   for (let i = 0; i <= 4; i++) { const v = maxV * i / 4, yy = y(v); g += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" stroke="#e3e9f2"/><text x="${padL - 6}" y="${(yy + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="#889">${fmtNum(v)}</text>`; }
+  const fmt2 = opts.fmt2; // необязательная вторая строка подписи (напр. сумма в сомах)
   items.forEach((it, i) => {
     const x = padL + gap * i + (gap - bw) / 2, yy = y(it.value), hh = padT + plotH - yy;
-    g += `<rect x="${x.toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, hh).toFixed(1)}" rx="3" fill="${it.color || color}"><title>${esc(it.label)}: ${fmt(it.value)}</title></rect>`;
-    g += `<text x="${(x + bw / 2).toFixed(1)}" y="${(yy - 5).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="700" fill="${C.head}">${fmt(it.value)}</text>`;
-    g += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - padB + 16}" text-anchor="middle" font-size="10" fill="#556">${esc(it.label)}</text>`;
+    const cx = (x + bw / 2).toFixed(1);
+    g += `<rect x="${x.toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, hh).toFixed(1)}" rx="3" fill="${it.color || color}"><title>${esc(it.label)}: ${fmt(it.value)}${fmt2 ? ' (' + fmt2(it.value) + ')' : ''}</title></rect>`;
+    const s2 = fmt2 ? fmt2(it.value) : '';
+    g += `<text x="${cx}" y="${(yy - (s2 ? 16 : 5)).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="700" fill="${C.head}">${fmt(it.value)}</text>`;
+    if (s2) g += `<text x="${cx}" y="${(yy - 5).toFixed(1)}" text-anchor="middle" font-size="9" fill="#667">${s2}</text>`;
+    g += `<text x="${cx}" y="${H - padB + 16}" text-anchor="middle" font-size="10" fill="#556">${esc(it.label)}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;height:auto;font-family:inherit" preserveAspectRatio="xMinYMin meet">${g}</svg>`;
 }
@@ -654,7 +658,8 @@ function report3Html(data) {
   h += sectionTitle('💰 Закупка ткани по периодам', 'стоимость и объём заказов ткани по датам заказа');
   if (!orders.length) h += cardWrap(`<div style="color:#889">Нет заказов на ткань.</div>`);
   else {
-    h += cardWrap(svgBars(orders.map((o) => ({ label: dmyShort(o.purchaseDate), value: o.totalCost, color: kindColor(o.kind) })), { fmt: usdSum, height: 270 })
+    const somFmt = R ? (usd) => fmtNum(Math.round(usd * R.usdKgs)) + ' сом' : null;
+    h += cardWrap(svgBars(orders.map((o) => ({ label: dmyShort(o.purchaseDate), value: o.totalCost, color: kindColor(o.kind) })), { fmt: usdSum, fmt2: somFmt, padT: 32, height: 280 })
       + legendHtml([{ name: 'Демисезон (Китай)', color: C.month }, { name: 'Лето (Китай)', color: C.summer }, { name: 'Бишкек (Мадина)', color: C.bishkek }]));
     const totM = orders.reduce((s, o) => s + o.totalMeters, 0), totC = orders.reduce((s, o) => s + o.totalCost, 0);
     let ot = `<div style="overflow-x:auto;margin:10px 0 0"><table style="border-collapse:collapse;font-size:12.5px;min-width:100%">
