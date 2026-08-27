@@ -1098,6 +1098,8 @@ let reportsSubTab = 'build';       // 'build' | 'archive' — сохраняет
 let reportPeriodMode = 'month';    // 'month' | '2month' — период закупа ткани
 let reportFabricFilters = { plansheets: [], articleIds: [], months: [] }; // фильтры отчётов по ткани (множественные)
 let openReportId = null, openReportGenAt = null; // какой отчёт открыт (чтобы переоткрыть после перерисовки)
+let currentReportRefresh = null;   // перерисовать ТОЛЬКО тело открытого отчёта (не трогая панель настроек)
+let sourcingSaveTimer = null;      // дебаунс сохранения настроек источника/цены
 
 export function renderReportsPage(container, state, schedule, ctx = {}) {
   const toast = ctx.toast || (() => {});
@@ -1129,12 +1131,19 @@ export function renderReportsPage(container, state, schedule, ctx = {}) {
     const ps = b.dataset.psToggle; if (sourcingExpanded.has(ps)) sourcingExpanded.delete(ps); else sourcingExpanded.add(ps);
     sourcingPanelOpen = true; rerender();
   }));
+  // Правка НЕ перестраивает панель (иначе теряется/сбрасывается ввод) — только мутируем state,
+  // подсвечиваем строку, дебаунс-сохраняем и обновляем ТОЛЬКО тело открытого отчёта.
   const onSrcEdit = (el, field) => {
     const raw = el.dataset.src || el.dataset.price; const i = raw.indexOf('|');
-    applySourcingEdit(state, raw.slice(0, i), raw.slice(i + 1), field, el.value);
+    const kind = raw.slice(0, i), key = raw.slice(i + 1);
+    applySourcingEdit(state, kind, key, field, el.value);
     sourcingPanelOpen = true;
-    if (ctx.saveState) ctx.saveState().catch(() => toast('Не удалось сохранить настройку', true));
-    rerender();
+    const fs = state.settings.fabricSourcing || { plansheet: {}, month: {} };
+    const on = !!((kind === 'plan' ? fs.plansheet : fs.month) || {})[key];
+    const tr = el.closest('tr'); if (tr) tr.style.background = on ? (kind === 'plan' ? '#eef6ff' : '#eaf3ff') : (kind === 'plan' ? '#fff' : '#fafcff');
+    clearTimeout(sourcingSaveTimer);
+    sourcingSaveTimer = setTimeout(() => { if (ctx.saveState) ctx.saveState().catch(() => toast('Не удалось сохранить настройку', true)); }, 500);
+    if (currentReportRefresh) currentReportRefresh(); // пересчитать открытый отчёт под новую настройку
   };
   container.querySelectorAll('[data-src]').forEach((el) => el.addEventListener('change', () => onSrcEdit(el, 'source')));
   container.querySelectorAll('[data-price]').forEach((el) => el.addEventListener('change', () => onSrcEdit(el, 'price')));
@@ -1175,12 +1184,14 @@ function renderBuild(panel, data, ctx) {
   const result = panel.querySelector('#rep-result');
   const sel = panel.querySelector('#rep-sel');
   if (openReportId) sel.value = openReportId; // сохранить выбор между перерисовками
+  // обновить ТОЛЬКО тело открытого отчёта под текущий state (используется при правках источника/цены)
+  currentReportRefresh = () => { if (openReportId) showReport(result, reportById(openReportId), ctx.rebuild ? ctx.rebuild() : data, openReportGenAt || new Date().toISOString(), ctx); };
   panel.querySelector('#rep-get').addEventListener('click', () => {
     openReportId = sel.value; openReportGenAt = new Date().toISOString();
-    showReport(result, reportById(openReportId), ctx.rebuild ? ctx.rebuild() : data, openReportGenAt, ctx); // текущие данные, БЕЗ авто-сохранения
+    currentReportRefresh();
   });
-  // переоткрыть ранее открытый отчёт (после правок источника/цены, курса и т.п.)
-  if (openReportId) showReport(result, reportById(openReportId), ctx.rebuild ? ctx.rebuild() : data, openReportGenAt || new Date().toISOString(), ctx);
+  // переоткрыть ранее открытый отчёт (после перерисовки страницы)
+  if (openReportId) currentReportRefresh();
 }
 
 // показать отчёт (шапка с датой + тело) + кнопки Сохранить/Excel/PDF
@@ -1262,6 +1273,7 @@ function showReport(result, rep, data, genAtIso, ctx) {
 async function renderArchive(panel, ctx) {
   const toast = ctx.toast || (() => {});
   const api = ctx.api;
+  currentReportRefresh = null; // на вкладке архива открытого отчёта нет
   panel.innerHTML = `<div style="color:#667">Загрузка архива…</div>`;
   if (!api) { panel.innerHTML = `<div style="color:#c0392b">Архив недоступен.</div>`; return; }
   let items = [];
