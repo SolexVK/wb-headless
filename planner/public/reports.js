@@ -21,6 +21,8 @@ const C = {
   th: '#e7edf5', thSummer: '#fbe8d8', zebra: '#f6f9fc', border: '#c9d4e2',
   total: '#eaf1fb', totalSummer: '#fdeede', chip: '#334e68', accent: '#2b6cb0', summer: '#c05621',
 };
+// Пастельные оттенки для блоков цехов (уникальный на цех, мягкие, в тон синей схемы отчёта).
+const WS_TINTS = ['#EAF1FB', '#E7F5EC', '#FCF0E2', '#F1ECFA', '#FCE9E9', '#E6F5F7', '#F5F3E6', '#ECEFF4', '#FBEDF4', '#E9F9F0', '#F0F4FB', '#F7EEE6'];
 
 // ============================ СБОР ДАННЫХ ============================
 export function buildReportsData(state, schedule, opts = {}) {
@@ -116,8 +118,17 @@ export function buildReportsData(state, schedule, opts = {}) {
     productionStart: x.earliestCut, purchaseBy: addMonthsISO(x.earliestCut, -1),
   })).sort((a, b) => String(a.purchaseBy).localeCompare(String(b.purchaseBy)) || String(a.plansheet).localeCompare(String(b.plansheet)));
 
+  // ── цвет-оттенок для каждого цеха (стабильный, уникальный, гармонирует со схемой отчёта) ──
+  // Порядок цехов — как в state.workshops, затем прочие. Каждый цех получает свой пастельный оттенок.
+  const seenWs = [];
+  for (const m of workshopMonthly) for (const w of m.workshops) if (!seenWs.includes(w.workshopId)) seenWs.push(w.workshopId);
+  const wsOrder = (state.workshops || []).map((w) => w.id);
+  const orderedWs = [...wsOrder.filter((id) => seenWs.includes(id)), ...seenWs.filter((id) => !wsOrder.includes(id))];
+  const workshopColors = {};
+  orderedWs.forEach((id, i) => { workshopColors[id] = WS_TINTS[i % WS_TINTS.length]; });
+
   return {
-    workshopMonthly, fabricMonthly,
+    workshopMonthly, fabricMonthly, workshopColors,
     fabricPurchase: { demi, summer: summerP },
     summerIds: [...summer],
     grand: {
@@ -133,25 +144,30 @@ const artChip = (id) => `<span style="display:inline-block;font-weight:700;color
 
 function report1Html(data) {
   if (!data.workshopMonthly.length) return `<div style="padding:20px;color:#667">Нет данных для отчёта. Заполните план и раскладку на Ганте.</div>`;
+  const wc = data.workshopColors || {};
   let h = '';
   for (const m of data.workshopMonthly) {
     h += `<div style="margin:0 0 22px">
       <div style="background:${C.month};color:#fff;font-weight:700;font-size:15px;padding:8px 14px;border-radius:8px 8px 0 0">${esc(m.label)} <span style="opacity:.85;font-weight:600">· ${fmtNum(m.total)} шт</span></div>
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:${C.th}">
-          <th style="text-align:left;padding:7px 12px;border:1px solid ${C.border};width:170px">Цех</th>
-          <th style="text-align:left;padding:7px 12px;border:1px solid ${C.border}">Артикулы (штук)</th>
-          <th style="text-align:right;padding:7px 12px;border:1px solid ${C.border};width:110px">Итого цех</th>
+          <th style="text-align:left;padding:7px 12px;border:1px solid ${C.border};width:190px">Цех</th>
+          <th style="text-align:left;padding:7px 12px;border:1px solid ${C.border}">Артикул</th>
+          <th style="text-align:right;padding:7px 12px;border:1px solid ${C.border};width:120px">Штук</th>
         </tr></thead><tbody>`;
-    m.workshops.forEach((w, i) => {
-      const arts = w.arts.map((a) => `${artChip(a.art)}&nbsp;<span style="color:#556">${fmtNum(a.units)}</span>`).join('&nbsp;&nbsp;·&nbsp;&nbsp;');
-      h += `<tr style="background:${i % 2 ? C.zebra : '#fff'}">
-        <td style="padding:6px 12px;border:1px solid ${C.border};font-weight:600">${esc(w.name)}${w.own ? ' <span style="font-size:11px;color:#7a8">свой</span>' : ''}</td>
-        <td style="padding:6px 12px;border:1px solid ${C.border}">${arts}</td>
-        <td style="padding:6px 12px;border:1px solid ${C.border};text-align:right;font-weight:700">${fmtNum(w.total)}</td>
-      </tr>`;
-    });
-    h += `<tr style="background:${C.total};font-weight:700"><td style="padding:6px 12px;border:1px solid ${C.border}" colspan="2">Итого за ${esc(m.label)}</td><td style="padding:6px 12px;border:1px solid ${C.border};text-align:right">${fmtNum(m.total)}</td></tr>`;
+    for (const w of m.workshops) {
+      const bg = wc[w.workshopId] || '#fff';
+      w.arts.forEach((a, idx) => {
+        // каждая строка блока — оттенком цеха; у первой строки блока — усиленная верхняя граница (рамка блока)
+        const topBorder = idx === 0 ? `border-top:2px solid ${C.chip}` : '';
+        h += `<tr style="background:${bg}">
+          <td style="padding:6px 12px;border:1px solid ${C.border};${topBorder};font-weight:600">${esc(w.name)}${w.own ? ' <span style="font-size:11px;color:#7a8">свой</span>' : ''}</td>
+          <td style="padding:6px 12px;border:1px solid ${C.border};${topBorder}">${artChip(a.art)}</td>
+          <td style="padding:6px 12px;border:1px solid ${C.border};${topBorder};text-align:right;font-weight:600">${fmtNum(a.units)}</td>
+        </tr>`;
+      });
+    }
+    h += `<tr style="background:${C.total};font-weight:800"><td style="padding:6px 12px;border:1px solid ${C.border}" colspan="2">Итого за ${esc(m.label)}</td><td style="padding:6px 12px;border:1px solid ${C.border};text-align:right">${fmtNum(m.total)}</td></tr>`;
     h += `</tbody></table></div>`;
   }
   return h;
@@ -292,6 +308,7 @@ function report1Excel(data, fname) {
   const MONTHNUM = { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.month) } }, alignment: { horizontal: 'right' } };
   const GRAND = { font: { bold: true, sz: 13, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
   const GRANDNUM = { ...GRAND, alignment: { horizontal: 'right' } };
+  const wc = data.workshopColors || {};
   let r = 2;
   for (const m of data.workshopMonthly) {
     // строка месяца: название в A, ИТОГ МЕСЯЦА — в столбце D (без промежуточных подытогов)
@@ -300,11 +317,15 @@ function report1Excel(data, fname) {
     styleMap[XLSX.utils.encode_cell({ r, c: 3 })] = MONTHNUM;
     r++;
     for (const w of m.workshops) {
+      const fill = { patternType: 'solid', fgColor: { rgb: hx(wc[w.workshopId] || '#FFFFFF') } }; // уникальный оттенок цеха
       w.arts.forEach((a, i) => {
-        aoa.push(['', i === 0 ? w.name : '', a.art, a.units]);
-        styleMap[XLSX.utils.encode_cell({ r, c: 1 })] = { font: { bold: i === 0 }, border: XLSX_BORDER() };
-        styleMap[XLSX.utils.encode_cell({ r, c: 2 })] = { font: { bold: true, color: { rgb: hx(C.accent) } }, border: XLSX_BORDER() };
-        styleMap[XLSX.utils.encode_cell({ r, c: 3 })] = { alignment: { horizontal: 'right' }, border: XLSX_BORDER() };
+        aoa.push(['', w.name, a.art, a.units]); // название цеха — в КАЖДОЙ строке артикула
+        const bd = XLSX_BORDER();
+        if (i === 0) bd.top = { style: 'medium', color: { rgb: hx(C.chip) } }; // рамка сверху блока цеха
+        styleMap[XLSX.utils.encode_cell({ r, c: 0 })] = { fill, border: bd };
+        styleMap[XLSX.utils.encode_cell({ r, c: 1 })] = { font: { bold: true }, fill, border: bd };
+        styleMap[XLSX.utils.encode_cell({ r, c: 2 })] = { font: { bold: true, color: { rgb: hx(C.accent) } }, fill, border: bd };
+        styleMap[XLSX.utils.encode_cell({ r, c: 3 })] = { alignment: { horizontal: 'right' }, fill, border: bd };
         r++;
       });
     }
