@@ -68,6 +68,7 @@ export function buildReportsData(state, schedule, opts = {}) {
       dem.push({
         articleId: c.articleId, articleName: a.name || '', color,
         plansheet: (fi.plansheet || '').trim(), colorNo: (fi.colorNo || '').trim(),
+        image: (fi.image || ''), // образец ткани (изображение) из карточки артикула
         meters: units * (+a.fabricPerUnit || 0) * wastageMul, units,
         price: (+a.fabricPricePerMeter || 0) + (isBishkek ? BISHKEK_MARKUP : 0), // Бишкек: +$0.40/м
         source: isBishkek ? 'bishkek' : 'china',
@@ -78,16 +79,24 @@ export function buildReportsData(state, schedule, opts = {}) {
     }
   }
 
+  // ── ОБРАЗЦЫ ТКАНИ и КОНФЛИКТЫ: ключ ткани = «планшет + № цвета» (иначе — по названию цвета).
+  // Если для одного и того же ключа заведены РАЗНЫЕ изображения — это конфликт (подсветим красным). ──
+  const skuKey = (d) => (d.plansheet || d.colorNo) ? `ps:${d.plansheet || '—'}|cn:${d.colorNo || '—'}` : `col:${String(d.color || '').trim().toLowerCase()}`;
+  const skuImages = {};
+  for (const d of dem) { const k = skuKey(d); (skuImages[k] || (skuImages[k] = new Set())); if (d.image) skuImages[k].add(d.image); }
+  const skuImageList = (k) => (skuImages[k] ? [...skuImages[k]] : []);
+  const skuConflict = (k) => (skuImages[k] ? skuImages[k].size > 1 : false);
+
   // ── Отчёт 2a: помесячная детализация ткани (месяц × артикул × планшет × №цвета × метраж) ──
   const r2 = {};
   for (const d of dem) {
     const mm = (r2[d.prodMonth] || (r2[d.prodMonth] = {}));
     const k = `${d.articleId}|${d.plansheet}|${d.colorNo}|${d.color}`;
-    const row = (mm[k] || (mm[k] = { articleId: d.articleId, articleName: d.articleName, color: d.color, plansheet: d.plansheet, colorNo: d.colorNo, meters: 0, units: 0, isSummer: d.isSummer }));
+    const row = (mm[k] || (mm[k] = { articleId: d.articleId, articleName: d.articleName, color: d.color, plansheet: d.plansheet, colorNo: d.colorNo, image: d.image, meters: 0, units: 0, isSummer: d.isSummer }));
     row.meters += d.meters; row.units += d.units;
   }
   const fabricMonthly = Object.keys(r2).sort().map((m) => {
-    const rows = Object.values(r2[m]).map((x) => ({ ...x, meters: Math.ceil(x.meters) }))
+    const rows = Object.values(r2[m]).map((x) => ({ ...x, meters: Math.ceil(x.meters), imageConflict: skuConflict(skuKey(x)) }))
       .sort((a, b) => artNum(a.articleId) - artNum(b.articleId) || String(a.plansheet).localeCompare(String(b.plansheet)) || String(a.colorNo).localeCompare(String(b.colorNo)));
     return { ym: m, label: ymLabel(m), rows, total: rows.reduce((s, r) => s + r.meters, 0) };
   });
@@ -96,8 +105,8 @@ export function buildReportsData(state, schedule, opts = {}) {
   // Ключ ткани = «планшет + № цвета» (одна и та же ткань в РАЗНЫХ артикулах складывается вместе).
   // Если планшет/№ не заданы — консолидируем по НАЗВАНИЮ цвета. Только для закупа; в детализации (2a)
   // остаётся разбивка по артикулам.
-  const skuKey = (d) => (d.plansheet || d.colorNo) ? `ps:${d.plansheet || '—'}|cn:${d.colorNo || '—'}` : `col:${String(d.color || '').trim().toLowerCase()}`;
   // Свернуть список потребностей в позиции по ткани (планшет+цвет), суммируя метраж и стоимость.
+  // К каждой позиции прикладываем образцы ткани (все уникальные) и флаг конфликта (разные образцы).
   const mergeSku = (list) => {
     const by = {};
     for (const d of list) {
@@ -105,7 +114,7 @@ export function buildReportsData(state, schedule, opts = {}) {
       const it = (by[k] || (by[k] = { plansheet: d.plansheet, colorNo: d.colorNo, color: d.color, arts: new Set(), meters: 0, cost: 0 }));
       it.meters += d.meters; it.cost += d.meters * d.price; it.arts.add(d.articleId);
     }
-    return Object.values(by).map((x) => ({ plansheet: x.plansheet, colorNo: x.colorNo, color: x.color, arts: [...x.arts].sort((a, b) => artNum(a) - artNum(b)), meters: Math.ceil(x.meters), cost: Math.round(x.cost), price: x.meters ? x.cost / x.meters : 0 }))
+    return Object.values(by).map((x) => { const k = skuKey(x); return { plansheet: x.plansheet, colorNo: x.colorNo, color: x.color, arts: [...x.arts].sort((a, b) => artNum(a) - artNum(b)), meters: Math.ceil(x.meters), cost: Math.round(x.cost), price: x.meters ? x.cost / x.meters : 0, images: skuImageList(k), imageConflict: skuConflict(k) }; })
       .sort((a, b) => String(a.plansheet).localeCompare(String(b.plansheet)) || String(a.colorNo).localeCompare(String(b.colorNo)) || String(a.color).localeCompare(String(b.color)));
   };
   const sumMeters = (items) => items.reduce((s, i) => s + i.meters, 0);
@@ -231,6 +240,20 @@ export function buildReportsData(state, schedule, opts = {}) {
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 const artChip = (id) => `<span style="display:inline-block;font-weight:700;color:${C.accent}">${esc(id)}</span>`;
 
+// ── ячейка с образцом(-ами) ткани. images — строка URL или массив URL. При конфликте (разные образцы
+// для одного планшета+цвета) — красная рамка/фон + пометка. Показываем все уникальные образцы. ──
+const CONF = { bg: '#fdecea', line: '#e02424' };
+function fabricSwatchCell(border, images, conflict) {
+  const list = (Array.isArray(images) ? images : [images]).filter(Boolean);
+  const w = conflict ? 46 : 54, hh = conflict ? 24 : 28;
+  const body = list.length
+    ? list.map((s) => `<img src="${esc(s)}" alt="" style="width:${w}px;height:${hh}px;object-fit:cover;border-radius:4px;border:1px solid ${conflict ? CONF.line : '#0002'};vertical-align:middle">`).join('<span style="display:inline-block;width:4px"></span>')
+    : '<span style="color:#c0c6cf">—</span>';
+  const warn = conflict ? `<div style="font-size:10px;line-height:1.1;color:${CONF.line};font-weight:700;margin-top:2px">⚠ разные образцы</div>` : '';
+  const cs = conflict ? `background:${CONF.bg};box-shadow:inset 0 0 0 2px ${CONF.line}` : '';
+  return `<td style="padding:4px 8px;border:1px solid ${border};text-align:center;white-space:nowrap;${cs}">${body}${warn}</td>`;
+}
+
 function report1Html(data) {
   if (!data.workshopMonthly.length) return `<div style="padding:20px;color:#667">Нет данных для отчёта. Заполните план и раскладку на Ганте.</div>`;
   const wc = data.workshopColors || {};
@@ -274,6 +297,7 @@ function fabricTableHtml(rows, summerFlag) {
       <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:90px">Планшет</th>
       <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:90px">№ цвета</th>
       <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border}">Цвет</th>
+      <th style="text-align:center;padding:6px 10px;border:1px solid ${C.border};width:120px">Образец</th>
       <th style="text-align:right;padding:6px 10px;border:1px solid ${C.border};width:120px">Метраж, м</th>
     </tr></thead><tbody>`;
   rows.forEach((r, i) => {
@@ -282,6 +306,7 @@ function fabricTableHtml(rows, summerFlag) {
       <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(r.plansheet || '—')}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(r.colorNo || '—')}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(r.color)}</td>
+      ${fabricSwatchCell(C.border, r.image, r.imageConflict)}
       <td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(r.meters)}</td>
     </tr>`;
   });
@@ -321,6 +346,7 @@ function orderCardHtml(order, R, kind) {
         <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:90px">Планшет</th>
         <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:80px">№ цвета</th>
         <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border};width:110px">Цвет</th>
+        <th style="text-align:center;padding:6px 10px;border:1px solid ${C.border};width:120px">Образец</th>
         <th style="text-align:left;padding:6px 10px;border:1px solid ${C.border}">Артикулы</th>
         <th style="text-align:right;padding:6px 10px;border:1px solid ${C.border};width:100px">Метраж, м</th>
         <th style="text-align:right;padding:6px 10px;border:1px solid ${C.border};width:90px">Цена, $/м</th>
@@ -331,20 +357,21 @@ function orderCardHtml(order, R, kind) {
       <td style="padding:5px 10px;border:1px solid ${C.border};font-weight:600">${esc(it.plansheet || '—')}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(it.colorNo || '—')}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border}">${esc(it.color || '—')}</td>
+      ${fabricSwatchCell(C.border, it.images, it.imageConflict)}
       <td style="padding:5px 10px;border:1px solid ${C.border}">${it.arts.map(artChip).join(', ')}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(it.meters)}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${price2(it.price)}</td>
       <td style="padding:5px 10px;border:1px solid ${C.border};text-align:right;font-weight:600">${usdSum(it.cost)}</td>
     </tr>`;
   });
-  h += `<tr style="background:${totalBg};font-weight:700"><td colspan="4" style="padding:5px 10px;border:1px solid ${C.border}">Итого заказ · ${dmy(order.purchaseDate)}</td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(order.totalMeters)}</td><td style="padding:5px 10px;border:1px solid ${C.border}"></td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${usdSum(order.totalCost)}${convStr(order.totalCost, R)}</td></tr>`;
+  h += `<tr style="background:${totalBg};font-weight:700"><td colspan="5" style="padding:5px 10px;border:1px solid ${C.border}">Итого заказ · ${dmy(order.purchaseDate)}</td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${fmtNum(order.totalMeters)}</td><td style="padding:5px 10px;border:1px solid ${C.border}"></td><td style="padding:5px 10px;border:1px solid ${C.border};text-align:right">${usdSum(order.totalCost)}${convStr(order.totalCost, R)}</td></tr>`;
   return h + `</tbody></table></div>`;
 }
 
 function report2bHtml(data) {
   const P = data.fabricPurchase; const R = data.rates;
   const noRate = R ? '' : ` <span style="color:${C.summer}">(курс не загружен — суммы только в $)</span>`;
-  let h = `<div style="margin:0 0 10px;color:#556;font-size:13px">Ткань одного <b>планшета и цвета</b> из разных артикулов сложена вместе. Сроки заказа: <b>Китай — за месяц</b> до старта пошива (по самому раннему артикулу периода), <b>Мадина (Бишкек) — за неделю</b>. Лето — в <b>два этапа</b> (ранний по первому пошиву + начало января). Учтён <b>китайский Новый год</b>: февраль закрыт, заказы перенесены на начало января и объединены. Стоимость ткани — из «Данных» ($/м).${noRate}</div>`;
+  let h = `<div style="margin:0 0 10px;color:#556;font-size:13px">Ткань одного <b>планшета и цвета</b> из разных артикулов сложена вместе. Сроки заказа: <b>Китай — за месяц</b> до старта пошива (по самому раннему артикулу периода), <b>Мадина (Бишкек) — за неделю</b>. Лето — в <b>два этапа</b> (ранний по первому пошиву + начало января). Учтён <b>китайский Новый год</b>: февраль закрыт, заказы перенесены на начало января и объединены. Стоимость ткани — из «Данных» ($/м). Столбец <b>«Образец»</b> — картинки ткани из карточек; <span style="color:${CONF.line};font-weight:700">красным</span> выделены цвета, где на один планшет+№ заведены <b>разные образцы</b>.${noRate}</div>`;
   // БИШКЕК (рынок Мадина) — местная закупка под пошив авг/сен, выделена отдельным блоком
   if (P.bishkek && P.bishkek.length) {
     const bTot = P.bishkek.reduce((s, o) => s + o.totalCost, 0);
@@ -458,32 +485,38 @@ function fabricMonthlySheet(data) {
   const MONTH = { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.month) } } };
   const TOT = { font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
   const border = () => ({ border: XLSX_BORDER() });
-  const aoa = [['Месяц', 'Артикул', 'Планшет', '№ цвета', 'Цвет', 'Метраж, м']];
+  // «Образец» — Excel не умеет вставлять картинки этой библиотекой, поэтому отмечаем наличие/конфликт
+  const CONFXL = { font: { bold: true, color: { rgb: 'E02424' } }, fill: { patternType: 'solid', fgColor: { rgb: 'FDECEA' } }, border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
+  const SAMPXL = { border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
+  const NC = 7;
+  const aoa = [['Месяц', 'Артикул', 'Планшет', '№ цвета', 'Цвет', 'Образец', 'Метраж, м']];
   const sm = {}; let r = 1;
-  for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r: 0, c })] = TH;
+  for (let c = 0; c < NC; c++) sm[XLSX.utils.encode_cell({ r: 0, c })] = TH;
   for (const m of data.fabricMonthly) {
-    aoa.push([`${m.label}  ·  ${m.total} м`, '', '', '', '', '']);
-    for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r, c })] = MONTH; r++;
+    aoa.push([`${m.label}  ·  ${m.total} м`, '', '', '', '', '', '']);
+    for (let c = 0; c < NC; c++) sm[XLSX.utils.encode_cell({ r, c })] = MONTH; r++;
     for (const row of m.rows) {
-      aoa.push(['', row.articleId, row.plansheet || '—', row.colorNo || '—', row.color, row.meters]);
+      const samp = row.imageConflict ? '⚠ разные' : (row.image ? '✓ есть' : '—');
+      aoa.push(['', row.articleId, row.plansheet || '—', row.colorNo || '—', row.color, samp, row.meters]);
       sm[XLSX.utils.encode_cell({ r, c: 1 })] = { font: { bold: true, color: { rgb: hx(row.isSummer ? C.summer : C.accent) } }, ...border() };
       for (const c of [2, 3, 4]) sm[XLSX.utils.encode_cell({ r, c })] = border();
-      sm[XLSX.utils.encode_cell({ r, c: 5 })] = { alignment: { horizontal: 'right' }, ...border() };
+      sm[XLSX.utils.encode_cell({ r, c: 5 })] = row.imageConflict ? CONFXL : SAMPXL;
+      sm[XLSX.utils.encode_cell({ r, c: 6 })] = { alignment: { horizontal: 'right' }, ...border() };
       r++;
     }
-    aoa.push(['', '', '', '', `Итого ${m.label}`, m.total]);
-    for (let c = 0; c < 6; c++) sm[XLSX.utils.encode_cell({ r, c })] = TOT; r++;
+    aoa.push(['', '', '', '', `Итого ${m.label}`, '', m.total]);
+    for (let c = 0; c < NC; c++) sm[XLSX.utils.encode_cell({ r, c })] = TOT; r++;
   }
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }];
+  ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 12 }];
   styleSheet(ws, sm); return ws;
 }
-// лист закупки для набора заказов (демисезон ИЛИ лето) → worksheet. 7 колонок.
+// лист закупки для набора заказов (демисезон ИЛИ лето) → worksheet. 9 колонок (+ Образец).
 function ordersSheet(orders, opts) {
   const XLSX = window.XLSX;
   const R = opts.rates; const kind = opts.kind || 'demi';
   const cc = (rr, c) => XLSX.utils.encode_cell({ r: rr, c });
-  const NCOL = 8; // Планшет, №цвета, Цвет, Артикулы, Метраж, Цена $/м, Сумма $, Сумма сом
+  const NCOL = 9; // Планшет, №цвета, Цвет, Образец, Артикулы, Метраж, Цена $/м, Сумма $, Сумма сом
   const som = (usd) => R ? Math.round(usd * R.usdKgs) : ''; // пересчёт в сомы по курсу
   const bannerBg = kind === 'summer' ? hx(C.summer) : kind === 'bishkek' ? hx(C.bishkek) : hx(C.month);
   const thBg = kind === 'summer' ? C.thSummer : kind === 'bishkek' ? C.thBishkek : C.th;
@@ -494,6 +527,8 @@ function ordersSheet(orders, opts) {
   const TOT = { font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: hx(totBg) } }, border: XLSX_BORDER() };
   const RIGHT = () => ({ alignment: { horizontal: 'right' }, border: XLSX_BORDER() });
   const border = () => ({ border: XLSX_BORDER() });
+  const CONFXL = { font: { bold: true, color: { rgb: 'E02424' } }, fill: { patternType: 'solid', fgColor: { rgb: 'FDECEA' } }, border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
+  const SAMPXL = { border: XLSX_BORDER(), alignment: { horizontal: 'center' } };
   const aoa = [[opts.title]]; const sm = {}; const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NCOL - 1 } }];
   sm.A1 = { font: { bold: true, sz: 13, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.head) } } };
   let r = 1;
@@ -502,30 +537,32 @@ function ordersSheet(orders, opts) {
     const arrival = o.arrival ? ` · приход ткани ${ymLabel(String(o.arrival).slice(0, 7))}` : '';
     aoa.push([`${o.label} · заказать ${dmy(o.purchaseDate)}${arrival} · ${o.totalMeters} м · $${o.totalCost}${o.cny ? ' · перенесено под кит. Новый год' : ''}`]);
     for (let c = 0; c < NCOL; c++) sm[cc(r, c)] = BANNER; merges.push({ s: { r, c: 0 }, e: { r, c: NCOL - 1 } }); r++;
-    aoa.push(['Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $', 'Сумма, сом']);
+    aoa.push(['Планшет', '№ цвета', 'Цвет', 'Образец', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $', 'Сумма, сом']);
     for (let c = 0; c < NCOL; c++) sm[cc(r, c)] = TH; r++;
     for (const it of o.items) {
-      aoa.push([it.plansheet || '—', it.colorNo || '—', it.color || '—', it.arts.join(', '), it.meters, Math.round(it.price * 100) / 100, it.cost, som(it.cost)]);
-      for (const c of [0, 1, 2, 3]) sm[cc(r, c)] = border();
-      for (const c of [4, 5, 6, 7]) sm[cc(r, c)] = RIGHT();
+      const samp = it.imageConflict ? '⚠ разные' : ((it.images && it.images.length) ? '✓ есть' : '—');
+      aoa.push([it.plansheet || '—', it.colorNo || '—', it.color || '—', samp, it.arts.join(', '), it.meters, Math.round(it.price * 100) / 100, it.cost, som(it.cost)]);
+      for (const c of [0, 1, 2, 4]) sm[cc(r, c)] = border();
+      sm[cc(r, 3)] = it.imageConflict ? CONFXL : SAMPXL;
+      for (const c of [5, 6, 7, 8]) sm[cc(r, c)] = RIGHT();
       r++;
     }
-    aoa.push(['Итого заказ', '', '', '', o.totalMeters, '', o.totalCost, som(o.totalCost)]);
+    aoa.push(['Итого заказ', '', '', '', '', o.totalMeters, '', o.totalCost, som(o.totalCost)]);
     for (let c = 0; c < NCOL; c++) sm[cc(r, c)] = TOT;
-    for (const c of [4, 6, 7]) sm[cc(r, c)] = { ...TOT, alignment: { horizontal: 'right' } };
+    for (const c of [5, 7, 8]) sm[cc(r, c)] = { ...TOT, alignment: { horizontal: 'right' } };
     r++; aoa.push([]); r++;
     allCost += o.totalCost; allMeters += o.totalMeters;
   }
   // итог листа + пересчёт по курсу
   const conv = R ? `  ≈ ${Math.round(allCost * R.usdRub)} ₽` : '';
-  aoa.push([`ИТОГО ${kindLabel}:${conv}`, '', '', '', allMeters, '', allCost, som(allCost)]);
+  aoa.push([`ИТОГО ${kindLabel}:${conv}`, '', '', '', '', allMeters, '', allCost, som(allCost)]);
   const GT = { font: { bold: true, sz: 12, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
   for (let c = 0; c < NCOL; c++) sm[cc(r, c)] = GT;
-  for (const c of [4, 6, 7]) sm[cc(r, c)] = { ...GT, alignment: { horizontal: 'right' } };
-  merges.push({ s: { r, c: 0 }, e: { r, c: 3 } });
+  for (const c of [5, 7, 8]) sm[cc(r, c)] = { ...GT, alignment: { horizontal: 'right' } };
+  merges.push({ s: { r, c: 0 }, e: { r, c: 4 } });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!merges'] = merges;
-  ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 22 }, { wch: 12 }, { wch: 11 }, { wch: 13 }, { wch: 15 }];
+  ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 12 }, { wch: 22 }, { wch: 12 }, { wch: 11 }, { wch: 13 }, { wch: 15 }];
   styleSheet(ws, sm); return ws;
 }
 function report2aExcel(data, fname) { const X = window.XLSX; const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, fabricMonthlySheet(data), 'Ткань помесячно'); X.writeFile(wb, fname || 'Отчёт_ткань_помесячно.xlsx'); }
