@@ -449,7 +449,8 @@ function ordersSheet(orders, opts) {
   const XLSX = window.XLSX;
   const R = opts.rates; const kind = opts.kind || 'demi';
   const cc = (rr, c) => XLSX.utils.encode_cell({ r: rr, c });
-  const NCOL = 7; // Планшет, №цвета, Цвет, Артикулы, Метраж, Цена $/м, Сумма $
+  const NCOL = 8; // Планшет, №цвета, Цвет, Артикулы, Метраж, Цена $/м, Сумма $, Сумма сом
+  const som = (usd) => R ? Math.round(usd * R.usdKgs) : ''; // пересчёт в сомы по курсу
   const bannerBg = kind === 'summer' ? hx(C.summer) : kind === 'bishkek' ? hx(C.bishkek) : hx(C.month);
   const thBg = kind === 'summer' ? C.thSummer : kind === 'bishkek' ? C.thBishkek : C.th;
   const totBg = kind === 'summer' ? C.totalSummer : kind === 'bishkek' ? C.totalBishkek : C.total;
@@ -467,30 +468,30 @@ function ordersSheet(orders, opts) {
     const arrival = o.arrival ? ` · приход ткани ${ymLabel(String(o.arrival).slice(0, 7))}` : '';
     aoa.push([`${o.label} · заказать ${dmy(o.purchaseDate)}${arrival} · ${o.totalMeters} м · $${o.totalCost}${o.cny ? ' · перенесено под кит. Новый год' : ''}`]);
     for (let c = 0; c < NCOL; c++) sm[cc(r, c)] = BANNER; merges.push({ s: { r, c: 0 }, e: { r, c: NCOL - 1 } }); r++;
-    aoa.push(['Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $']);
+    aoa.push(['Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $', 'Сумма, сом']);
     for (let c = 0; c < NCOL; c++) sm[cc(r, c)] = TH; r++;
     for (const it of o.items) {
-      aoa.push([it.plansheet || '—', it.colorNo || '—', it.color || '—', it.arts.join(', '), it.meters, Math.round(it.price * 100) / 100, it.cost]);
+      aoa.push([it.plansheet || '—', it.colorNo || '—', it.color || '—', it.arts.join(', '), it.meters, Math.round(it.price * 100) / 100, it.cost, som(it.cost)]);
       for (const c of [0, 1, 2, 3]) sm[cc(r, c)] = border();
-      for (const c of [4, 5, 6]) sm[cc(r, c)] = RIGHT();
+      for (const c of [4, 5, 6, 7]) sm[cc(r, c)] = RIGHT();
       r++;
     }
-    aoa.push(['Итого заказ', '', '', '', o.totalMeters, '', o.totalCost]);
+    aoa.push(['Итого заказ', '', '', '', o.totalMeters, '', o.totalCost, som(o.totalCost)]);
     for (let c = 0; c < NCOL; c++) sm[cc(r, c)] = TOT;
-    sm[cc(r, 4)] = { ...TOT, alignment: { horizontal: 'right' } }; sm[cc(r, 6)] = { ...TOT, alignment: { horizontal: 'right' } };
+    for (const c of [4, 6, 7]) sm[cc(r, c)] = { ...TOT, alignment: { horizontal: 'right' } };
     r++; aoa.push([]); r++;
     allCost += o.totalCost; allMeters += o.totalMeters;
   }
   // итог листа + пересчёт по курсу
-  const conv = R ? `  ≈ ${Math.round(allCost * R.usdKgs)} сом · ${Math.round(allCost * R.usdRub)} ₽` : '';
-  aoa.push([`ИТОГО ${kindLabel}:${conv}`, '', '', '', allMeters, '', allCost]);
+  const conv = R ? `  ≈ ${Math.round(allCost * R.usdRub)} ₽` : '';
+  aoa.push([`ИТОГО ${kindLabel}:${conv}`, '', '', '', allMeters, '', allCost, som(allCost)]);
   const GT = { font: { bold: true, sz: 12, color: { rgb: hx(C.head) } }, fill: { patternType: 'solid', fgColor: { rgb: hx(C.total) } }, border: XLSX_BORDER() };
   for (let c = 0; c < NCOL; c++) sm[cc(r, c)] = GT;
-  sm[cc(r, 4)] = { ...GT, alignment: { horizontal: 'right' } }; sm[cc(r, 6)] = { ...GT, alignment: { horizontal: 'right' } };
+  for (const c of [4, 6, 7]) sm[cc(r, c)] = { ...GT, alignment: { horizontal: 'right' } };
   merges.push({ s: { r, c: 0 }, e: { r, c: 3 } });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!merges'] = merges;
-  ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 22 }, { wch: 12 }, { wch: 11 }, { wch: 13 }];
+  ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 16 }, { wch: 22 }, { wch: 12 }, { wch: 11 }, { wch: 13 }, { wch: 15 }];
   styleSheet(ws, sm); return ws;
 }
 function report2aExcel(data, fname) { const X = window.XLSX; const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, fabricMonthlySheet(data), 'Ткань помесячно'); X.writeFile(wb, fname || 'Отчёт_ткань_помесячно.xlsx'); }
