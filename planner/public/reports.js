@@ -1375,10 +1375,11 @@ function showReport(result, rep, data, genAtIso, ctx) {
     if (!googleStatus.connected) { toast('Сначала подключите Google в шапке отчётов', true); return; }
     if (!rep.sheets) { toast('Этот отчёт нельзя выгрузить в Google', true); return; }
     const old = gBtn.textContent; gBtn.disabled = true; gBtn.textContent = '📗 …';
+    toast('Выгружаю в Google (первый раз с образцами — чуть дольше)…');
     try {
       const sheets = rep.sheets(view);
-      const r = await api('/api/google/export', { method: 'POST', body: JSON.stringify({ title: `${rep.pdfTitle} — ${dmyhm(genAtIso)}`, sheets }) });
-      if (r && r.url) { window.open(r.url, '_blank'); toast('Таблица создана в Google'); }
+      const r = await api('/api/google/export', { method: 'POST', body: JSON.stringify({ title: `${rep.pdfTitle} — ${dmyhm(genAtIso)}`, sheets, reportKind: rep.id }) });
+      if (r && r.url) { window.open(r.url, '_blank'); toast(r.updated ? 'Google-таблица обновлена' : 'Google-таблица создана'); }
       else toast('Не удалось создать таблицу', true);
     } catch (e) { toast('Google: ' + e.message, true); }
     finally { gBtn.disabled = false; gBtn.textContent = old; }

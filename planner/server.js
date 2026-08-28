@@ -25,7 +25,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'reports-gsheets-images-2026-08-28';
+const BACKEND_BUILD = 'reports-gsheets-update-2026-08-28';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -574,39 +574,54 @@ function readSampleBuffer(p) {
 // кэш «путь образца → Drive fileId», чтобы не заливать одну и ту же картинку повторно
 function googleImgCacheLoad() { try { const m = metaGet('google_img_cache'); return m && m.value ? JSON.parse(m.value) : {}; } catch { return {}; } }
 function googleImgCacheSave(c) { try { metaSet('google_img_cache', JSON.stringify(c)); } catch { /* нет БД */ } }
-// заменить ячейки-маркеры «@IMG:<путь>» на формулы =IMAGE(...), заливая образцы в Google Drive
+// привязка «вид отчёта → id таблицы» (чтобы обновлять одну и ту же таблицу, а не плодить новые)
+function googleReportSheetsLoad() { try { const m = metaGet('google_report_sheets'); return m && m.value ? JSON.parse(m.value) : {}; } catch { return {}; } }
+function googleReportSheetsSave(m) { try { metaSet('google_report_sheets', JSON.stringify(m)); } catch { /* нет БД */ } }
+// заменить ячейки-маркеры «@IMG:<путь>» на формулы =IMAGE(...), заливая образцы в Google Drive.
+// Уникальные образцы заливаем ПАРАЛЛЕЛЬНО (с ограничением), с тайм-аутами — чтобы не подвешивать выгрузку.
 async function googleResolveImageCells(accessToken, sheets) {
   const cache = googleImgCacheLoad(); let touched = false;
-  const idFor = async (p) => {
-    if (cache[p]) return cache[p];
-    const s = readSampleBuffer(p); if (!s) return '';
-    const id = await google.uploadImageToDrive(accessToken, s.buf, s.mime, 'ткань ' + p.split('/').pop());
-    await google.makeFilePublic(accessToken, id);
-    cache[p] = id; touched = true; return id;
-  };
-  for (const sh of sheets) {
-    if (!Array.isArray(sh.rows)) continue;
-    for (const row of sh.rows) {
-      for (let c = 0; c < row.length; c++) {
-        const v = row[c];
-        if (typeof v === 'string' && v.startsWith('@IMG:')) {
-          try { const id = await idFor(v.slice(5)); row[c] = id ? google.imageFormula(id) : ''; }
-          catch { row[c] = ''; } // образец не залился — оставим пусто, отчёт всё равно выгрузим
-        }
-      }
-    }
+  const paths = new Set();
+  for (const sh of sheets) for (const row of (sh.rows || [])) for (const v of row) if (typeof v === 'string' && v.startsWith('@IMG:')) paths.add(v.slice(5));
+  const need = [...paths].filter((p) => p && !cache[p]);
+  const CONC = 6;
+  for (let i = 0; i < need.length; i += CONC) {
+    await Promise.all(need.slice(i, i + CONC).map(async (p) => {
+      try {
+        const s = readSampleBuffer(p); if (!s) return;
+        const id = await google.uploadImageToDrive(accessToken, s.buf, s.mime, 'ткань ' + p.split('/').pop());
+        await google.makeFilePublic(accessToken, id);
+        cache[p] = id; touched = true;
+      } catch { /* образец не залился — пропустим, отчёт всё равно выгрузим */ }
+    }));
   }
   if (touched) googleImgCacheSave(cache);
+  for (const sh of sheets) for (const row of (sh.rows || [])) for (let c = 0; c < row.length; c++) {
+    const v = row[c];
+    if (typeof v === 'string' && v.startsWith('@IMG:')) { const id = cache[v.slice(5)]; row[c] = id ? google.imageFormula(id) : ''; }
+  }
 }
 app.post('/api/google/export', requireView('data'), async (req, res) => {
   try {
     if (!google.isEnabled()) return res.status(400).json({ ok: false, error: 'Google OAuth не настроен на сервере' });
-    const { title, sheets } = req.body || {};
+    const { title, sheets, reportKind } = req.body || {};
     if (!Array.isArray(sheets) || !sheets.length) return res.status(400).json({ ok: false, error: 'нет данных для выгрузки' });
     const at = await googleAccessToken();
     await googleResolveImageCells(at, sheets); // образцы ткани → картинки в ячейках (через Drive)
-    const out = await google.createReport(at, title, sheets);
-    res.json({ ok: true, url: out.url });
+    const map = googleReportSheetsLoad();
+    const boundId = reportKind ? map[reportKind] : '';
+    let out, updated = false;
+    if (boundId) {
+      try { out = await google.updateReport(at, boundId, title, sheets); updated = true; } // обновляем существующую таблицу
+      catch (e) {
+        if (String(e.message || e).includes('NOT_FOUND')) { out = await google.createReport(at, title, sheets); } // таблицу удалили — создаём новую
+        else throw e;
+      }
+    } else {
+      out = await google.createReport(at, title, sheets);
+    }
+    if (reportKind && out && out.id && map[reportKind] !== out.id) { map[reportKind] = out.id; googleReportSheetsSave(map); }
+    res.json({ ok: true, url: out.url, updated });
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 
