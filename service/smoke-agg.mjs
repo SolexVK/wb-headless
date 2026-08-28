@@ -7,7 +7,7 @@ import { avg, median, pct, r2, mskDate } from '../scripts/lib/agg/stats.mjs';
 import { buildAssembly, buildDelivery, buildReturnPath } from '../scripts/lib/agg/logistics.mjs';
 import { aggregateRegions, aggregateFbs } from '../scripts/lib/agg/geo.mjs';
 import { stockMetrics, oosLabel } from '../scripts/lib/agg/stock.mjs';
-import { buildCancels, classify } from '../scripts/lib/agg/cancels.mjs';
+import { buildCancels, classify, buildMoney, buildScorecard } from '../scripts/lib/agg/cancels.mjs';
 
 let failed = 0;
 const ok = (cond, msg) => { console.log(`${cond ? '✓' : '✗'}  ${msg}`); if (!cond) failed++; };
@@ -213,6 +213,30 @@ eq(cx.reasons.map((r) => [r.key, r.rub]), [['cancelSeller', 3000], ['defect', 10
 // «Без статуса» уменьшает decided и не входит в % отказов.
 const cU = buildCancels([{ id: 1, ff: 'A', priceRub: 0 }, { id: 2, ff: 'A', priceRub: 0 }], (o) => (o.id === 1 ? { supplierStatus: 'cancel', wbStatus: 'canceled' } : null));
 eq([cU.totals.made, cU.totals.withStatus, cU.totals.decided, cU.totals.sellerCancelPct], [2, 1, 1, 100], 'отказы: unknown вне decided/% (1 из 2 без статуса)');
+
+// ── ДЕНЬГИ ИЗ РЕАЛИЗАЦИИ: привязка штрафов/удержаний/логистики к ФФ по srid ──────
+// A: r1 обр.логистика 80 (возврат), r2 штраф 100; B: r3 удержание 150; zzz — не наш ФФ.
+const ridToFF = new Map([['r1', { ff: 'A', warehouseId: 1 }], ['r2', { ff: 'A', warehouseId: 1 }], ['r3', { ff: 'B', warehouseId: 2 }]]);
+const money = buildMoney([
+  { srid: 'r1', docTypeName: 'Возврат', penalty: '0', deduction: '0', deliveryAmount: '80', rebillLogisticCost: '0', bonusTypeName: 'Логистика возврата' },
+  { srid: 'r2', docTypeName: 'Продажа', penalty: '100', deduction: '0', deliveryAmount: '0', bonusTypeName: 'Штраф МП. Невыполненный заказ (отмена продавцом)' },
+  { srid: 'r3', docTypeName: 'Продажа', penalty: '0', deduction: '150', deliveryAmount: '0', bonusTypeName: 'Хранение' },
+  { srid: 'zzz', docTypeName: 'Продажа', penalty: '999', deduction: '0', deliveryAmount: '0', bonusTypeName: 'FBW' },
+], ridToFF);
+eq([money.matched, money.unmatched], [3, 1], 'деньги: привязано 3, не наши 1');
+eq(money.totals, { penalty: 100, deduction: 150, returnLogistics: 80, ffLossRub: 180, rows: 3 }, 'деньги: итоги (штраф+обр.логистика=180, удержание отдельно)');
+eq(money.byFF[0], { ff: 'A', warehouseId: 1, penalty: 100, deduction: 0, returnLogistics: 80, ffLossRub: 180, rows: 2 }, 'деньги: строка ФФ «A» точная');
+eq(money.byFF.map((r) => [r.ff, r.ffLossRub]), [['A', 180], ['B', 0]], 'деньги: по ФФ сортировка по потерям');
+eq(money.reasons.map((r) => [r.reason, r.rub]), [['Хранение', 150], ['Штраф МП. Невыполненный заказ (отмена продавцом)', 100]], 'деньги: причины по сумме');
+
+// ── СВОДКА ФФ: сшивка скорость сборки ↔ отказы ↔ деньги ─────────────────────────
+const sc = buildScorecard(
+  [{ ff: 'A', made: 10, sellerCancel: 2, sellerCancelPct: 20, lostRub: 2000 }, { ff: 'B', made: 5, sellerCancel: 1, sellerCancelPct: 10, lostRub: 1000 }],
+  [{ ff: 'A', medianHours: 30 }, { ff: 'B', medianHours: 12 }],
+  [{ ff: 'A', penalty: 100, returnLogistics: 80, deduction: 0, ffLossRub: 180 }, { ff: 'B', penalty: 0, returnLogistics: 0, deduction: 150, ffLossRub: 0 }],
+);
+eq(sc.map((r) => [r.ff, r.totalLossRub]), [['A', 2180], ['B', 1000]], 'сводка: ИТОГО потерь (упущено + деньги), сортировка');
+eq(sc[0], { ff: 'A', asmMedianHours: 30, made: 10, sellerCancel: 2, sellerCancelPct: 20, cancelLostRub: 2000, penaltyRub: 100, returnLogRub: 80, deductionRub: 0, totalLossRub: 2180 }, 'сводка: строка ФФ «A» точная');
 
 console.log(`\nАгрегаторы (agg): ${failed ? failed + ' ПРОВАЛ(ов)' : 'все проверки зелёные'}`);
 process.exit(failed ? 1 : 0);

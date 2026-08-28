@@ -16,6 +16,10 @@
     {
       "url": "https://dev.wildberries.ru/docs/openapi/orders-fbs",
       "out": "docs/wb-api/orders-fbs.md"
+    },
+    {
+      "url": "https://dev.wildberries.ru/docs/openapi/financial-reports-and-accounting",
+      "out": "docs/wb-api/finance-reports.md"
     }
   ]
 }

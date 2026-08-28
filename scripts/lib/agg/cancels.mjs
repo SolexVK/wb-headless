@@ -98,3 +98,71 @@ export function buildCancels(orders, statusOf) {
       : null,
   };
 }
+
+// ДЕНЬГИ ИЗ РЕАЛИЗАЦИИ: штрафы, удержания и обратная логистика по ФФ.
+//   details  — «сырые» строки finance-детализации (fetchFinanceDetail)
+//   ridToFF  — Map(srid → { ff, warehouseId }); только НАШИ FBS-заказы (srid = rid)
+// «Потери по вине ФФ (деньги)» = штраф + обратная логистика возвратов. `deduction`
+// шумный (подписки WB/Джем/Продвижение/хранение) → показываем ОТДЕЛЬНО, с разбивкой
+// по причине (bonusTypeName), НЕ вмешивая в потери ФФ.
+export function buildMoney(details, ridToFF) {
+  const num = (v) => Number(v) || 0;
+  const rnd = (x) => Math.round(x);
+  const byFF = new Map(); const byReason = new Map();
+  let matched = 0, unmatched = 0;
+  const tot = { penalty: 0, deduction: 0, returnLogistics: 0, rows: 0 };
+  for (const d of details || []) {
+    const ff = ridToFF.get(String(d.srid));
+    if (!ff) { unmatched++; continue; }               // не наш FBS-заказ (FBW/вне окна)
+    matched++;
+    const penalty = num(d.penalty);
+    const deduction = num(d.deduction);
+    const isReturn = String(d.docTypeName || '') === 'Возврат';
+    const retLog = (isReturn ? num(d.deliveryAmount) : 0) + num(d.rebillLogisticCost);
+    if (!byFF.has(ff.ff)) byFF.set(ff.ff, { ff: ff.ff, warehouseId: ff.warehouseId, penalty: 0, deduction: 0, returnLogistics: 0, rows: 0 });
+    const g = byFF.get(ff.ff);
+    g.penalty += penalty; g.deduction += deduction; g.returnLogistics += retLog; g.rows++;
+    tot.penalty += penalty; tot.deduction += deduction; tot.returnLogistics += retLog; tot.rows++;
+    if (penalty || deduction) {
+      const reason = d.bonusTypeName || d.sellerOperName || '—';
+      if (!byReason.has(reason)) byReason.set(reason, { reason, penalty: 0, deduction: 0, count: 0 });
+      const r = byReason.get(reason); r.penalty += penalty; r.deduction += deduction; r.count++;
+    }
+  }
+  const rows = [...byFF.values()].map((g) => ({
+    ff: g.ff, warehouseId: g.warehouseId,
+    penalty: rnd(g.penalty), deduction: rnd(g.deduction), returnLogistics: rnd(g.returnLogistics),
+    ffLossRub: rnd(g.penalty + g.returnLogistics), rows: g.rows,
+  })).sort((a, b) => b.ffLossRub - a.ffLossRub || b.penalty - a.penalty);
+  const reasons = [...byReason.values()]
+    .map((r) => ({ reason: r.reason, penalty: rnd(r.penalty), deduction: rnd(r.deduction), rub: rnd(r.penalty + r.deduction), count: r.count }))
+    .sort((a, b) => b.rub - a.rub).slice(0, 30);
+  return {
+    available: true, matched, unmatched,
+    totals: { penalty: rnd(tot.penalty), deduction: rnd(tot.deduction), returnLogistics: rnd(tot.returnLogistics), ffLossRub: rnd(tot.penalty + tot.returnLogistics), rows: tot.rows },
+    byFF: rows, reasons,
+  };
+}
+
+// СВОДКА ПО ФФ: сшивка «скорость сборки ↔ отказы ↔ деньги» в одну строку на ФФ.
+//   cancelsRows   — buildCancels(...).byFF (sellerCancel, sellerCancelPct, lostRub)
+//   assemblyByFF  — buildAssembly(...).byFF (medianHours, made, processed) | []
+//   moneyRows     — buildMoney(...).byFF (penalty, returnLogistics, deduction, ffLossRub) | []
+// totalLossRub = упущенная выручка от отказов ФФ + денежные потери (штраф+обр.логистика).
+export function buildScorecard(cancelsRows, assemblyByFF, moneyRows) {
+  const c = new Map((cancelsRows || []).map((r) => [r.ff, r]));
+  const a = new Map((assemblyByFF || []).map((r) => [r.ff, r]));
+  const m = new Map((moneyRows || []).map((r) => [r.ff, r]));
+  const names = new Set([...c.keys(), ...a.keys(), ...m.keys()]);
+  return [...names].map((ff) => {
+    const cc = c.get(ff) || {}; const aa = a.get(ff) || {}; const mm = m.get(ff) || {};
+    const cancelLost = cc.lostRub || 0;
+    const moneyLoss = mm.ffLossRub || 0;
+    return {
+      ff, asmMedianHours: aa.medianHours ?? null, made: cc.made ?? (aa.made ?? 0),
+      sellerCancel: cc.sellerCancel || 0, sellerCancelPct: cc.sellerCancelPct || 0,
+      cancelLostRub: cancelLost, penaltyRub: mm.penalty || 0, returnLogRub: mm.returnLogistics || 0, deductionRub: mm.deduction || 0,
+      totalLossRub: cancelLost + moneyLoss,
+    };
+  }).sort((x, y) => y.totalLossRub - x.totalLossRub || y.sellerCancel - x.sellerCancel);
+}

@@ -43,12 +43,35 @@ sheet(ws,
                  r.get('defect', 0), r.get('clientRefusal', 0), r.get('clientDecline', 0), r.get('inWork', 0), round(r.get('lostRub', 0))],
       rub_cols=(10,), pct_cols=(5,))
 
-sheet(wb.create_sheet('Причины потерь'),
-      ['Причина', 'Зона', 'Количество', 'Сумма, ₽'],
+sheet(wb.create_sheet('Причины отказов'),
+      ['Причина', 'Зона', 'Количество', 'Упущено, ₽'],
       s.get('reasons', []),
       lambda r: [r.get('ru', ''), {'ff': 'фулфилмент', 'client': 'клиент', 'other': 'прочее'}.get(r.get('blame'), r.get('blame', '')),
                  r.get('count', 0), round(r.get('rub', 0))],
       rub_cols=(4,))
+
+# ── Сводка ФФ: скорость сборки ↔ отказы ↔ деньги ──────────────────────────────
+sheet(wb.create_sheet('Сводка ФФ'),
+      ['Фулфилмент', 'Сборка медиана, ч', 'Отказ ФФ', '% ФФ', 'Упущ. выручка, ₽', 'Штрафы, ₽', 'Обр. логистика, ₽', 'ИТОГО потерь, ₽'],
+      s.get('scorecard', []),
+      lambda r: [r.get('ff', ''), r.get('asmMedianHours'), r.get('sellerCancel', 0), r.get('sellerCancelPct', 0),
+                 round(r.get('cancelLostRub', 0)), round(r.get('penaltyRub', 0)), round(r.get('returnLogRub', 0)), round(r.get('totalLossRub', 0))],
+      rub_cols=(5, 6, 7, 8), pct_cols=(4,))
+
+# ── Деньги из реализации (только если доступны) ───────────────────────────────
+money = s.get('money', {}) or {}
+if money.get('available'):
+    sheet(wb.create_sheet('Деньги по ФФ'),
+          ['Фулфилмент', 'Штрафы, ₽', 'Обр. логистика, ₽', 'По вине ФФ, ₽', 'Удержания, ₽', 'Строк'],
+          money.get('byFF', []),
+          lambda r: [r.get('ff', ''), round(r.get('penalty', 0)), round(r.get('returnLogistics', 0)),
+                     round(r.get('ffLossRub', 0)), round(r.get('deduction', 0)), r.get('rows', 0)],
+          rub_cols=(2, 3, 4, 5))
+    sheet(wb.create_sheet('Причины реализации'),
+          ['Причина (bonusTypeName)', 'Штраф, ₽', 'Удержание, ₽', 'Итого, ₽', 'Строк'],
+          money.get('reasons', []),
+          lambda r: [r.get('reason', ''), round(r.get('penalty', 0)), round(r.get('deduction', 0)), round(r.get('rub', 0)), r.get('count', 0)],
+          rub_cols=(2, 3, 4))
 
 wb.save(OUT)
 print('OK', OUT)

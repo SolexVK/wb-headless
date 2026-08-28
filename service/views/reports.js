@@ -82,8 +82,8 @@ export function reportsPage(p) {
         ${card(`/org/${org.id}/reports/logistics`, 'Логистика',
           'Сроки на каждом этапе жизни товара: сборка на ФФ (создание → отгрузка), доставка до клиента (отгрузка → выкуп) и путь возврата — из какого ФФ уехал, где продан, откуда и в какой склад WB вернулся, сколько пробыл у клиента.',
           'контроль SLA сборки/доставки и разбор возвратов (куда и почему)', !!active)}
-        ${card(`/org/${org.id}/reports/cancels`, 'Отказы по фулфилментам',
-          'Где фулфилмент проваливает заказы: сколько заданий отменил продавец (не собрал/не успел), брак и отказы клиента — по каждому ФФ, с долей отказов и упущенной выручкой в рублях.',
+        ${card(`/org/${org.id}/reports/cancels`, 'Потери по фулфилментам',
+          'Где ФФ теряет деньги: отказы (упущенная выручка), штрафы/удержания/обратная логистика из отчёта реализации и сводка «скорость сборки ↔ отказы ↔ деньги» по каждому фулфилменту.',
           'найти, какой ФФ теряет деньги из-за некорректной/долгой работы', !!active)}
       </div>
       <p style="margin-top:16px"><a class="dl" href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив отчётов</a></p>
@@ -1047,17 +1047,22 @@ export function logisticsPage(p) {
   });
 }
 
-// ── Отказы по фулфилментам: где ФФ проваливает заказы и во что это обходится ──
-export function cancelsView() { return {}; }
+// ── Потери по фулфилментам: отказы + деньги из реализации + сводка ФФ ─────────
+export function cancelsView(q = {}) {
+  const tab = ['refusals', 'money', 'scorecard'].includes(String(q.tab)) ? String(q.tab) : 'refusals';
+  return { tab };
+}
+const rubFmt = (v) => `${nf(Math.round(Number(v) || 0))} ₽`;
 
-function cancelsResults(snap, { downloadHref, whenLabel }) {
+// Разрез «Отказы»: провалы сборки по ФФ (упущенная выручка).
+function cancelsRefusals(snap) {
   const t = snap.totals || {};
   const byFF = snap.byFF || [];
   const reasons = snap.reasons || [];
-  const rub = (v) => `${nf(Math.round(Number(v) || 0))} ₽`;
-  const note = `<p class="kv" style="margin:0 0 12px">По каждому нашему складу-фулфилменту: сколько сборочных заданий создано, выкуплено, отменено <b>продавцом</b> (= отказ ФФ), клиентом и браком. «Отказ ФФ» = supplierStatus <code>cancel</code> (ФФ не собрал/не успел). «Потери по вине ФФ» = упущенная выручка по отказам продавца и браку (по цене заказа). Статус — текущий, WB хранит FBS-заказы ~90 дней. За ${snap.days} дн.</p>`;
+  const rub = rubFmt;
+  const note = `<p class="kv" style="margin:0 0 12px">По каждому складу-фулфилменту: сколько сборочных заданий создано, выкуплено, отменено <b>продавцом</b> (= отказ ФФ), клиентом и браком. «Отказ ФФ» = supplierStatus <code>cancel</code> (ФФ не собрал/не успел). «Потери по вине ФФ» = упущенная выручка по отказам продавца и браку (по цене заказа). Статус — текущий, WB хранит FBS-заказы ~90 дней. За ${snap.days} дн.</p>`;
   const tiles = [
-    dkKpi(rub(t.lostRub), 'потери по вине ФФ', { icon: '💸', accent: DKAC.red }),
+    dkKpi(rub(t.lostRub), 'упущенная выручка (отказы ФФ)', { icon: '💸', accent: DKAC.red }),
     dkKpi(`${t.sellerCancelPct || 0}%`, 'отказов ФФ (от решённых)', { icon: '⛔', accent: DKAC.amber }),
     dkKpi(nf(t.sellerCancel || 0), 'заказов отменил ФФ', { icon: '🏭', accent: DKAC.violet }),
     dkKpi(rub(t.clientRefusalRub), 'отказы клиента при получении', { icon: '↩️', accent: DKAC.teal }),
@@ -1074,52 +1079,123 @@ function cancelsResults(snap, { downloadHref, whenLabel }) {
   const head = `<tr>${thT('Фулфилмент', 'Наш склад-фулфилмент', 'tl')}${thT('Заданий', 'Сборочных заданий за период', 'num')}${thT('Выкуплено', 'Дошло до выкупа', 'num')}${thT('Отказ ФФ', 'Отменено продавцом (не собрал/не успел)', 'num')}${thT('% ФФ', 'Доля отказов ФФ от решённых (без «в работе»)', 'num')}${thT('Брак', 'Отменено по браку', 'num')}${thT('Отказ клиента', 'Клиент отказался при получении', 'num')}${thT('В работе', 'Ещё не финализировано', 'num')}${thT('Потери', 'Упущенная выручка: отказ ФФ + брак', 'num')}</tr>`;
   const rows = byFF.map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="num" data-v="${r.made}">${nf(r.made)}</td><td class="num" data-v="${r.sold}">${nf(r.sold)}</td><td class="num" data-v="${r.sellerCancel}">${nf(r.sellerCancel)}</td><td class="num" data-v="${r.sellerCancelPct}">${r.sellerCancelPct}%</td><td class="num" data-v="${r.defect}">${nf(r.defect)}</td><td class="num" data-v="${r.clientRefusal}">${nf(r.clientRefusal)}</td><td class="num" data-v="${r.inWork}">${nf(r.inWork)}</td><td class="num" data-v="${r.lostRub}">${rub(r.lostRub)}</td></tr>`).join('');
   const table = byFF.length ? `<div class="scroll"><table class="rt sortable"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Нет заданий за период.</p>';
-  return `<div class="section">
-      <p class="kv" style="margin:0 0 10px">Данные за ${snap.days} дн, с ${esc(snap.from || '')}.${whenLabel ? ` <b>${esc(whenLabel)}</b>` : ''}</p>
-      <div style="margin-bottom:12px">${downloadBar(downloadHref)}</div>
-      ${note}
+  return `${note}
       <div class="dk-kpis">${tiles}</div>
       ${insightRow}
-      ${ph('💸', 'Потери и отмены по причинам', 'сумма упущенной выручки по каждой причине', DKAC.red)}
+      ${ph('💸', 'Упущенная выручка по причинам', 'по каждой причине отказа/брака', DKAC.red)}
       ${reasonBars}
       <div style="margin-top:22px"></div>
       ${ph('🏭', 'Разбор по фулфилментам', 'задания, выкупы, отказы и потери · клик по заголовку — сортировка', DKAC.violet)}
-      ${table}</div>`;
+      ${table}`;
+}
+
+// Разрез «Деньги»: штрафы/удержания/обратная логистика из отчёта реализации.
+function cancelsMoney(snap) {
+  const m = snap.money || { available: false };
+  const rub = rubFmt;
+  const note = `<p class="kv" style="margin:0 0 12px">Реальные деньги из <b>детализации отчёта реализации</b> (finance-api), привязанные к нашим ФФ по номеру заказа (srid = rid). «Потери по вине ФФ (деньги)» = штраф + обратная логистика возвратов. <b>Удержания</b> (подписки WB, хранение, продвижение) показаны отдельно — они не всегда вина ФФ. Реализация формируется по неделям и запаздывает на 1–2 недели. За ${snap.days} дн.</p>`;
+  if (!m.available) {
+    return `${note}<div class="dk-insights"><div class="dk-insight" style="--kc:var(--c-amber)"><span class="ic">🔒</span><span class="tx">Данные о деньгах недоступны: ${esc(m.reason || 'нет данных')}. Для этого блока в токене WB нужна включённая категория <b>«Финансы»</b> (перевыпустите токен с этой категорией). Остальные вкладки работают без неё.</span></div></div>`;
+  }
+  const t = m.totals || {};
+  const byFF = m.byFF || [];
+  const reasons = m.reasons || [];
+  const tiles = [
+    dkKpi(rub(t.penalty), 'штрафы', { icon: '⚖️', accent: DKAC.red }),
+    dkKpi(rub(t.returnLogistics), 'обратная логистика', { icon: '🚚', accent: DKAC.amber }),
+    dkKpi(rub(t.ffLossRub), 'деньги по вине ФФ (штраф+логистика)', { icon: '💸', accent: DKAC.violet }),
+    dkKpi(rub(t.deduction), 'удержания (подписки/хранение)', { icon: '📉', accent: DKAC.teal }),
+    dkKpi(nf(m.matched || 0), 'строк реализации по нашим ФФ', { icon: '🔗', accent: DKAC.blue }),
+  ].join('');
+  const worstMoney = byFF[0];
+  const insightRow = dkInsights([
+    worstMoney && worstMoney.ffLossRub > 0 ? { icon: '💸', accent: DKAC.red, text: `Больше всего денежных потерь на ФФ: <b>${esc(worstMoney.ff)}</b> — ${rub(worstMoney.ffLossRub)}` } : { icon: '✅', accent: DKAC.green, text: 'Штрафов и обратной логистики по ФФ за период нет' },
+    reasons[0] ? { icon: '🧾', accent: DKAC.amber, text: `Крупнейшая статья удержаний/штрафов: <b>${esc(reasons[0].reason)}</b> — ${rub(reasons[0].rub)}` } : null,
+    m.unmatched ? { icon: 'ℹ️', accent: DKAC.teal, text: `Строк реализации не по нашим FBS-ФФ (FBW/вне окна): <b>${nf(m.unmatched)}</b> — не учтены` } : null,
+  ]);
+  const reasonBars = logiBars(reasons.slice(0, 12).map((r) => ({ label: r.reason, value: r.rub })), 'var(--c-red)', rub);
+  const head = `<tr>${thT('Фулфилмент', '', 'tl')}${thT('Штрафы', 'penalty из реализации', 'num')}${thT('Обр. логистика', 'логистика возвратов + перевыставление', 'num')}${thT('По вине ФФ', 'штраф + обратная логистика', 'num')}${thT('Удержания', 'подписки/хранение/продвижение (не всегда вина ФФ)', 'num')}${thT('Строк', 'строк реализации', 'num')}</tr>`;
+  const rows = byFF.map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="num" data-v="${r.penalty}">${rub(r.penalty)}</td><td class="num" data-v="${r.returnLogistics}">${rub(r.returnLogistics)}</td><td class="num" data-v="${r.ffLossRub}">${rub(r.ffLossRub)}</td><td class="num" data-v="${r.deduction}">${rub(r.deduction)}</td><td class="num" data-v="${r.rows}">${nf(r.rows)}</td></tr>`).join('');
+  const table = byFF.length ? `<div class="scroll"><table class="rt sortable"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">За период нет штрафов/удержаний, привязанных к нашим ФФ.</p>';
+  const rHead = `<tr>${thT('Причина (bonusTypeName)', 'формулировка WB', 'tl')}${thT('Штраф', '', 'num')}${thT('Удержание', '', 'num')}${thT('Итого', '', 'num')}${thT('Строк', '', 'num')}</tr>`;
+  const rRows = reasons.map((r) => `<tr><td class="tl">${esc(r.reason)}</td><td class="num" data-v="${r.penalty}">${rub(r.penalty)}</td><td class="num" data-v="${r.deduction}">${rub(r.deduction)}</td><td class="num" data-v="${r.rub}">${rub(r.rub)}</td><td class="num" data-v="${r.count}">${nf(r.count)}</td></tr>`).join('');
+  const rTable = reasons.length ? `<div class="scroll"><table class="rt sortable"><thead>${rHead}</thead><tbody>${rRows}</tbody></table></div>` : '';
+  return `${note}
+      <div class="dk-kpis">${tiles}</div>
+      ${insightRow}
+      ${ph('🧾', 'Штрафы и удержания по причинам', 'формулировки WB (bonusTypeName)', DKAC.red)}
+      ${reasonBars}
+      <div style="margin-top:22px"></div>
+      ${ph('🏭', 'Деньги по фулфилментам', 'штраф · обратная логистика · удержания', DKAC.violet)}
+      ${table}
+      ${rTable ? `<div style="margin-top:22px"></div>${ph('📋', 'Все статьи удержаний/штрафов', 'детально по причине', DKAC.amber)}${rTable}` : ''}`;
+}
+
+// Разрез «Сводка ФФ»: скорость сборки ↔ отказы ↔ деньги в одной таблице.
+function cancelsScorecard(snap) {
+  const sc = snap.scorecard || [];
+  const rub = rubFmt;
+  const hrs = (v) => (v == null ? '—' : fmtHrs(v));
+  const note = `<p class="kv" style="margin:0 0 12px">Единая карточка на фулфилмент: как быстро собирает, как часто отказывается от заказов и во сколько это обходится в деньгах. <b>ИТОГО потерь</b> = упущенная выручка от отказов ФФ + денежные потери (штраф + обратная логистика). Медленный ФФ обычно даёт больше отказов и штрафов — тут это видно в одной строке.</p>`;
+  if (!sc.length) return `${note}<p class="muted">Нет данных за период.</p>`;
+  const slow = [...sc].filter((r) => r.asmMedianHours != null && r.made >= 5).sort((a, b) => b.asmMedianHours - a.asmMedianHours)[0];
+  const insightRow = dkInsights([
+    sc[0] && sc[0].totalLossRub > 0 ? { icon: '💸', accent: DKAC.red, text: `Наибольшие суммарные потери: <b>${esc(sc[0].ff)}</b> — ${rub(sc[0].totalLossRub)}` } : { icon: '✅', accent: DKAC.green, text: 'Существенных потерь по ФФ за период нет' },
+    slow ? { icon: '🐢', accent: DKAC.amber, text: `Медленнее всех собирает: <b>${esc(slow.ff)}</b> — медиана ${hrs(slow.asmMedianHours)}` } : null,
+  ]);
+  const head = `<tr>${thT('Фулфилмент', '', 'tl')}${thT('Сборка (медиана)', 'медиана времени сборки', 'num')}${thT('Отказ ФФ', 'отменено продавцом', 'num')}${thT('% ФФ', 'доля отказов ФФ', 'num')}${thT('Упущ. выручка', 'от отказов ФФ', 'num')}${thT('Штрафы', 'из реализации', 'num')}${thT('Обр. логистика', 'из реализации', 'num')}${thT('ИТОГО потерь', 'упущенная выручка + деньги', 'num')}</tr>`;
+  const rows = sc.map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="num" data-v="${r.asmMedianHours ?? -1}">${hrs(r.asmMedianHours)}</td><td class="num" data-v="${r.sellerCancel}">${nf(r.sellerCancel)}</td><td class="num" data-v="${r.sellerCancelPct}">${r.sellerCancelPct}%</td><td class="num" data-v="${r.cancelLostRub}">${rub(r.cancelLostRub)}</td><td class="num" data-v="${r.penaltyRub}">${rub(r.penaltyRub)}</td><td class="num" data-v="${r.returnLogRub}">${rub(r.returnLogRub)}</td><td class="num" data-v="${r.totalLossRub}">${rub(r.totalLossRub)}</td></tr>`).join('');
+  return `${note}
+      ${insightRow}
+      ${ph('🎯', 'Сводка по фулфилментам', 'скорость сборки ↔ отказы ↔ деньги · клик по заголовку — сортировка', DKAC.blue)}
+      <div class="scroll"><table class="rt sortable"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function cancelsResults(snap, { view = { tab: 'refusals' }, nav = null, downloadHref, whenLabel }) {
+  const seg = logiSeg(view, nav);
+  const tabBar = nav ? `<div class="mv-bar">${seg('Разрез', 'tab', [{ v: 'refusals', label: 'Отказы' }, { v: 'money', label: 'Деньги' }, { v: 'scorecard', label: 'Сводка ФФ' }])}</div>` : '';
+  const content = view.tab === 'money' ? cancelsMoney(snap) : view.tab === 'scorecard' ? cancelsScorecard(snap) : cancelsRefusals(snap);
+  return `<div class="section">
+      <p class="kv" style="margin:0 0 10px">Данные за ${snap.days} дн, с ${esc(snap.from || '')}.${whenLabel ? ` <b>${esc(whenLabel)}</b>` : ''}</p>
+      <div style="margin-bottom:12px">${downloadBar(downloadHref)}</div>
+      ${tabBar}
+      ${content}</div>`;
 }
 
 export function cancelsPage(p) {
-  const { user, csrf, base = '', org, role, active, latest, job, form } = p;
+  const { user, csrf, base = '', org, role, active, latest, job, view, form } = p;
   const u = (path) => base + path;
   const back = `<div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>`;
   if (!active) {
-    return layout({ title: `Отказы по фулфилментам — ${org.name}`, user, csrf, base,
-      body: `<div class="wrap">${back}<h1>Отказы по фулфилментам</h1><div class="warn">Нет активного кабинета с токеном. <a href="${u(`/org/${org.id}`)}">Настройте кабинет</a>.</div></div>` });
+    return layout({ title: `Потери по фулфилментам — ${org.name}`, user, csrf, base,
+      body: `<div class="wrap">${back}<h1>Потери по фулфилментам</h1><div class="warn">Нет активного кабинета с токеном. <a href="${u(`/org/${org.id}`)}">Настройте кабинет</a>.</div></div>` });
   }
   const running = job && job.state === 'running';
   const head = running ? '<meta http-equiv="refresh" content="4">' : '';
-  const statusBox = runStatus(job, active, { verb: 'Считаю отказы и статусы заданий', hint: 'Запрос к WB (заказы + статусы), может занять 1–3 минуты.' });
+  const statusBox = runStatus(job, active, { verb: 'Считаю отказы, статусы и деньги реализации', hint: 'Запрос к WB (заказы + статусы + реализация 1/мин), может занять 1–3 минуты.' });
   const f = form;
   const formSection = `<div class="section">
     <h2>Параметры</h2>
     <form method="post" action="${u(`/org/${org.id}/reports/cancels/refresh`)}">
       ${csrfField(csrf)}
       <div class="row-form" style="gap:14px;align-items:flex-end">
-        <div><label for="cdays" title="За сколько последних дней считать отказы (WB хранит FBS-заказы ~90 дней).">Период, дней</label>
+        <div><label for="cdays" title="За сколько последних дней считать (WB хранит FBS-заказы ~90 дней; реализация — по неделям).">Период, дней</label>
           <select id="cdays" name="days" style="width:130px">${[7, 14, 30, 60, 90].map((n) => `<option value="${n}"${Number(f.days) === n ? ' selected' : ''}>${n} дней</option>`).join('')}</select></div>
       </div>
       <button class="btn" type="submit" style="max-width:280px;margin-top:16px"${running ? ' disabled' : ''}>${running ? 'Идёт сбор…' : 'Обновить данные'}</button>
     </form></div>`;
+  const nav = (patch) => { const v = { ...view, ...patch }; return u(`/org/${org.id}/reports/cancels?tab=${v.tab}#cancels`); };
   const results = latest?.data
-    ? cancelsResults(latest.data, { downloadHref: (k) => u(`/org/${org.id}/reports/cancels/download/${k}`), whenLabel: whenLabel(latest.createdAt) })
+    ? cancelsResults(latest.data, { view, nav, downloadHref: (k) => u(`/org/${org.id}/reports/cancels/download/${k}`), whenLabel: whenLabel(latest.createdAt) })
     : `<div class="section"><p class="muted">Данных пока нет — задайте период и нажмите «Обновить данные».</p></div>`;
   return layout({
-    title: `Отказы по фулфилментам — ${org.name}`, user, csrf, base, head,
+    title: `Потери по фулфилментам — ${org.name}`, user, csrf, base, head,
     body: `<div class="wrap">${back}
-      <h1>Отказы по фулфилментам <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
-      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Где фулфилмент проваливает заказы (отмены продавцом), сколько это в упущенной выручке, доля отказов по каждому ФФ. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
+      <h1>Потери по фулфилментам <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
+      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Где ФФ теряет деньги: отказы (упущенная выручка), штрафы/удержания/обратная логистика из реализации и сводка «скорость ↔ отказы ↔ деньги» по каждому фулфилменту. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
       ${statusBox}
       ${formSection}
-      ${results}
+      <div id="cancels" style="scroll-margin-top:14px">${results}</div>
     </div>`,
   });
 }
@@ -1141,7 +1217,7 @@ export function archivePage({ user, csrf, base = '', org, role, runs, report = '
     if (r.report === 'movement') return `принято ${nf(sm.acceptedTotal)} · передано ${nf(sm.deliveredTotal)} · Δ ${sm.diffTotal >= 0 ? '+' : ''}${nf(sm.diffTotal)} · ${nf(sm.deliveredMoney)} ₽ (${nf(sm.days)} дн)`;
     if (r.report === 'geo') return `продаж ${nf(sm.salesCount)} · возвратов ${nf(sm.returnCount)} (${sm.returnPct}%) · регионов ${nf(sm.regions)} (${nf(sm.days)} дн)`;
     if (r.report === 'logistics') return `сборка медиана ${fmtHrs(sm.asmMedianHours)} (${nf(sm.asmProcessed)}) · доставка медиана ${fmtHrs(sm.delMedianHours)} (${nf(sm.delCount)}) (${nf(sm.days)} дн)`;
-    if (r.report === 'cancels') return `отказ ФФ ${nf(sm.sellerCancel)} (${sm.sellerCancelPct}%) · потери ${nf(sm.lostRub)} ₽ · заданий ${nf(sm.made)}${sm.worst ? ` · худший: ${esc(sm.worst)}` : ''} (${nf(sm.days)} дн)`;
+    if (r.report === 'cancels') return `отказ ФФ ${nf(sm.sellerCancel)} (${sm.sellerCancelPct}%) · упущено ${nf(sm.lostRub)} ₽${sm.penalty != null ? ` · штрафы ${nf(sm.penalty)} ₽` : ''}${sm.worst ? ` · худший: ${esc(sm.worst)}` : ''} (${nf(sm.days)} дн)`;
     return `подсорт ${nf(sm.reorderUnits)} · риск ${nf(sm.riskRows)} · завоз ${nf(sm.seedUnits)}${(sm.articles && sm.articles.length) ? ` · арт: ${esc(sm.articles.join(', '))}` : ''}`;
   };
   // Кто может удалить конкретный запуск: автор — свой; владелец — любой авторский.
@@ -1205,7 +1281,7 @@ export function archiveViewPage({ user, csrf, base = '', org, role, run }) {
           : run.report === 'logistics'
             ? logisticsResults(run.data, { view: logisticsView({}), nav: null, downloadHref: dl, whenLabel: '' })
             : run.report === 'cancels'
-              ? cancelsResults(run.data, { downloadHref: dl, whenLabel: '' })
+              ? cancelsResults(run.data, { view: cancelsView({}), nav: null, downloadHref: dl, whenLabel: '' })
               : podsortResults(run.data, { downloadHref: dl, whenLabel: '' });
   const p = run.params || {};
   return layout({

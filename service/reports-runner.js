@@ -10,7 +10,8 @@ import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { ReportRuns } from './models.js';
-import { buildCancels } from '../scripts/lib/agg/cancels.mjs';
+import { buildCancels, buildMoney, buildScorecard } from '../scripts/lib/agg/cancels.mjs';
+import { buildAssembly } from '../scripts/lib/agg/logistics.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -391,22 +392,36 @@ export function normalizeCancels(body = {}) {
 export function fakeCancels(params) {
   const price = 1000; const orders = []; const st = new Map(); let id = 1;
   const push = (ff, wid, wbStatus, supplierStatus, n) => {
-    for (let k = 0; k < n; k++) { const oid = id++; orders.push({ id: oid, ff, warehouseId: wid, priceRub: price }); st.set(oid, { supplierStatus, wbStatus }); }
+    for (let k = 0; k < n; k++) {
+      const oid = id++; const rid = 'r' + oid;
+      orders.push({ id: oid, rid, ff, warehouseId: wid, priceRub: price, createdAt: '2026-08-01T00:00:00Z', closedAt: '2026-08-01T10:00:00Z', supplyId: 'sup-' + wid });
+      st.set(oid, { supplierStatus, wbStatus });
+    }
   };
   push('Мск зелёная зона', 1939911, 'sold', 'complete', 80);
   push('Мск зелёная зона', 1939911, 'canceled', 'cancel', 6);
   push('Мск зелёная зона', 1939911, 'defect', 'confirm', 2);
   push('Мск зелёная зона', 1939911, 'canceled_by_client', 'complete', 5);
   push('Мск зелёная зона', 1939911, 'declined_by_client', 'new', 3);
-  push('Мск зелёная зона', 1939911, 'waiting', 'confirm', 4);
+  push('Мск зелёная зона', 1939911, 'waiting', 'confirm', 4);   // Мск: id 1..100
   push('Казань', 700, 'sold', 'complete', 35);
   push('Казань', 700, 'canceled', 'cancel', 8);
   push('Казань', 700, 'defect', 'confirm', 1);
   push('Казань', 700, 'canceled_by_client', 'complete', 3);
   push('Казань', 700, 'declined_by_client', 'new', 1);
-  push('Казань', 700, 'waiting', 'confirm', 2);
+  push('Казань', 700, 'waiting', 'confirm', 2);                 // Казань: id 101..150
   const result = buildCancels(orders, (o) => st.get(o.id) || null);
-  return { generatedAt: new Date().toISOString(), days: params.days || 30, from: '2026-07-29', ordDays: params.days || 30, warehouseList: result.byFF.map((r) => r.ff), ...result };
+  const assembly = buildAssembly(orders, (o) => o.closedAt || null, { critH: 48, asmFromSec: Math.floor(Date.parse('2026-01-01') / 1000) });
+  const ridToFF = new Map(orders.map((o) => [o.rid, { ff: o.ff, warehouseId: o.warehouseId }]));
+  const details = [
+    { srid: 'r1', docTypeName: 'Возврат', penalty: '0', deduction: '0', deliveryAmount: '80', rebillLogisticCost: '0', bonusTypeName: 'Логистика возврата' },
+    { srid: 'r2', docTypeName: 'Продажа', penalty: '0', deduction: '150', deliveryAmount: '0', bonusTypeName: 'Платное хранение возвратов на ПВЗ' },
+    { srid: 'r101', docTypeName: 'Продажа', penalty: '500', deduction: '0', deliveryAmount: '0', bonusTypeName: 'Штраф МП. Невыполненный заказ (отмена продавцом)' },
+    { srid: 'fbw-999', docTypeName: 'Продажа', penalty: '300', deduction: '0', deliveryAmount: '0', bonusTypeName: 'Штраф (не наш ФФ)' },
+  ];
+  const money = buildMoney(details, ridToFF);
+  const scorecard = buildScorecard(result.byFF, assembly.byFF, money.byFF);
+  return { generatedAt: new Date().toISOString(), days: params.days || 30, from: '2026-07-29', ordDays: params.days || 30, warehouseList: result.byFF.map((r) => r.ff), ...result, assembly, money, scorecard };
 }
 async function runCancelsPipeline(cabinet, token, meta, params, onLog) {
   const dir = cabinetDir(cabinet.id);
@@ -420,8 +435,8 @@ async function runCancelsPipeline(cabinet, token, meta, params, onLog) {
   return snap;
 }
 function cancelsSummary(snap, p) {
-  const t = snap?.totals || {};
-  return { days: p.days || snap.days || 30, made: t.made || 0, sellerCancel: t.sellerCancel || 0, sellerCancelPct: t.sellerCancelPct || 0, lostRub: t.lostRub || 0, worst: snap?.worst?.ff || null };
+  const t = snap?.totals || {}; const m = snap?.money || {};
+  return { days: p.days || snap.days || 30, made: t.made || 0, sellerCancel: t.sellerCancel || 0, sellerCancelPct: t.sellerCancelPct || 0, lostRub: t.lostRub || 0, penalty: m.available ? (m.totals?.penalty || 0) : null, worst: snap?.worst?.ff || null };
 }
 export function startCancels(cabinet, token, meta, params, userId) {
   return startRun({ cabinet, token, meta, params, userId, report: 'cancels', pipeline: runCancelsPipeline, summarize: cancelsSummary });

@@ -268,31 +268,36 @@ try {
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Логистика') && /сборка медиана/.test(r.text), 'Ф2: логистика видна в архиве');
 
-  // ── Отчёт «Отказы по фулфилментам» (провалы сборки + потери) ────────────────
+  // ── Отчёт «Потери по фулфилментам» (отказы + деньги реализации + сводка ФФ) ──
   r = await req('GET', `/org/${orgId}/reports/cancels`);
-  ok(r.status === 200 && r.text.includes('Отказы по фулфилментам') && r.text.includes('Параметры'), 'Ф2: страница отказов');
+  ok(r.status === 200 && r.text.includes('Потери по фулфилментам') && r.text.includes('Параметры'), 'Ф2: страница потерь');
   r = await req('POST', `/org/${orgId}/reports/cancels/refresh`, form({ _csrf: csrfOf(r.text), days: 30 }));
-  ok(r.status === 302, 'Ф2: запуск отказов → 302');
+  ok(r.status === 302, 'Ф2: запуск потерь → 302');
   let canDone = false;
   for (let i = 0; i < 30 && !canDone; i++) {
     await sleep(80);
     r = await req('GET', `/org/${orgId}/reports/cancels`);
     if (r.text.includes('Разбор по фулфилментам') && r.text.includes('Казань')) canDone = true;
   }
-  ok(canDone, 'Ф2: отказы собрались (разбор по ФФ)');
-  ok(r.text.includes('потери по вине ФФ') && r.text.includes('% ФФ'), 'Ф2: отказы — KPI потерь и доля отказов ФФ');
+  ok(canDone, 'Ф2: потери собрались (разбор по ФФ)');
+  ok(r.text.includes('упущенная выручка (отказы ФФ)') && r.text.includes('% ФФ'), 'Ф2: потери — KPI упущенной выручки и доля отказов ФФ');
   const cj = await req('GET', `/org/${orgId}/reports/cancels/download/json`);
   let cp = null; try { cp = JSON.parse(cj.text); } catch { /* */ }
-  ok(cj.status === 200 && cp?.byFF?.length >= 2 && typeof cp?.totals?.lostRub === 'number', 'Ф2: выгрузка отказов (JSON)');
+  ok(cj.status === 200 && cp?.byFF?.length >= 2 && typeof cp?.totals?.lostRub === 'number' && cp?.money && Array.isArray(cp?.scorecard), 'Ф2: выгрузка потерь (JSON: отказы+деньги+сводка)');
+  ok(cp?.money?.available === true && typeof cp?.money?.totals?.penalty === 'number', 'Ф2: деньги реализации привязаны к ФФ (fake)');
   const cx = await fetch(base + `/org/${orgId}/reports/cancels/download/xlsx`, { headers: { cookie } });
   const cxb = Buffer.from(await cx.arrayBuffer());
-  ok(cx.status === 200 && cxb.length > 500 && cxb[0] === 0x50 && cxb[1] === 0x4b, 'Ф2: выгрузка отказов (Excel .xlsx)');
+  ok(cx.status === 200 && cxb.length > 500 && cxb[0] === 0x50 && cxb[1] === 0x4b, 'Ф2: выгрузка потерь (Excel .xlsx)');
   const ch = await fetch(base + `/org/${orgId}/reports/cancels/download/html`, { headers: { cookie } });
   const chx = await ch.text();
-  ok(ch.status === 200 && chx.includes('Отказы по фулфилментам') && chx.includes('Где теряем деньги'), 'Ф2: HTML-дашборд отказов');
-  await pdfCheck(`/org/${orgId}/reports/cancels/download/pdf`, 'Ф2: PDF-дашборд отказов');
+  ok(ch.status === 200 && chx.includes('Потери по фулфилментам') && chx.includes('Деньги из реализации') && chx.includes('Сводка по фулфилментам'), 'Ф2: HTML-дашборд потерь (деньги + сводка)');
+  await pdfCheck(`/org/${orgId}/reports/cancels/download/pdf`, 'Ф2: PDF-дашборд потерь');
+  r = await req('GET', `/org/${orgId}/reports/cancels?tab=money`);
+  ok(r.status === 200 && r.text.includes('Деньги по фулфилментам') && r.text.includes('штрафы'), 'Ф2: потери — вкладка «Деньги»');
+  r = await req('GET', `/org/${orgId}/reports/cancels?tab=scorecard`);
+  ok(r.status === 200 && r.text.includes('Сводка по фулфилментам') && r.text.includes('ИТОГО потерь'), 'Ф2: потери — вкладка «Сводка ФФ»');
   r = await req('GET', `/org/${orgId}/reports/archive`);
-  ok(r.text.includes('Отказы по фулфилментам') && /отказ ФФ/.test(r.text), 'Ф2: отказы видны в архиве');
+  ok(r.text.includes('Потери по фулфилментам') && /отказ ФФ/.test(r.text), 'Ф2: потери видны в архиве');
 
   // HTML-выгрузка из архива (новое: рядом с Excel/JSON).
   r = await req('GET', `/org/${orgId}/reports/archive`);

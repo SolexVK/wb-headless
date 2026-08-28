@@ -84,4 +84,29 @@ export async function fetchSales(wb, { dateFrom, maxPages = 8, pageThreshold = 8
   return rows;
 }
 
+// Детализация к отчётам реализации за период (finance-api, scope «Финансы»).
+//   POST /api/finance/v1/sales-reports/detailed  — пагинация по rrdId до 204/пустого.
+//   Лимит метода — 1 запрос/мин (задаётся снаружи через methodLimit).
+// Поля (camelCase): srid, docTypeName (Продажа/Возврат), sellerOperName, bonusTypeName,
+//   penalty, deduction, additionalPayment, rebillLogisticCost, deliveryAmount, returnAmount,
+//   paidStorage, paidAcceptance, nmId, orderId — денежные приходят СТРОКАМИ.
+// Возврат: массив «сырых» строк (каждый потребитель агрегирует под себя).
+export async function fetchFinanceDetail(wb, { dateFrom, dateTo, period = 'weekly', maxPages = 40, methodLimit, onLog } = {}) {
+  const rows = [];
+  let rrdId = 0;
+  for (let page = 1; page <= maxPages; page++) {
+    const { status, data } = await wb.request('finance', '/api/finance/v1/sales-reports/detailed', {
+      method: 'POST', body: { dateFrom, dateTo, limit: 100000, rrdId, period }, methodLimit,
+    });
+    const b = Array.isArray(data) ? data : [];
+    if (status === 204 || !b.length) break;
+    for (const r of b) rows.push(r);
+    const lastId = b[b.length - 1].rrdId;
+    onLog?.(`реализация стр.${page}: +${b.length} (всего ${rows.length})`);
+    if (lastId == null || lastId === rrdId || b.length < 100000) break; // последняя страница
+    rrdId = lastId;
+  }
+  return rows;
+}
+
 const isoDay = (sec) => new Date(sec * 1000).toISOString().slice(0, 10);

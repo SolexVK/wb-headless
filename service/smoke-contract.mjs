@@ -18,7 +18,7 @@ process.env.DB_PATH = path.join(os.tmpdir(), `fbs-contract-${process.pid}.sqlite
 const { fakeSnapshot, fakeStock, fakeMovement, fakeGeo, fakeLogistics, fakeCancels, normalizePodsort, normalizeMovement, geoDefaults, logisticsDefaults, cancelsDefaults } = await import('./reports-runner.js');
 const { buildAssembly, buildDelivery, buildReturnPath } = await import('../scripts/lib/agg/logistics.mjs');
 const { aggregateRegions, aggregateFbs } = await import('../scripts/lib/agg/geo.mjs');
-const { buildCancels } = await import('../scripts/lib/agg/cancels.mjs');
+const { buildCancels, buildMoney, buildScorecard } = await import('../scripts/lib/agg/cancels.mjs');
 
 let failed = 0;
 // Проверка формы: строка → typeof; массив ['array', spec?] → Array + форма первого элемента;
@@ -101,6 +101,14 @@ const cancelsSpec = {
   totals: { made: 'number', decided: 'number', sold: 'number', sellerCancel: 'number', sellerCancelPct: 'number', defect: 'number', clientRefusal: 'number', inWork: 'number', unknown: 'number', lostRub: 'number', clientRefusalRub: 'number' },
   byFF: ['array', { ff: 'string', made: 'number', sold: 'number', sellerCancel: 'number', sellerCancelPct: 'number', defect: 'number', clientRefusal: 'number', inWork: 'number', lostRub: 'number' }],
   reasons: ['array', { key: 'string', ru: 'string', blame: 'string', count: 'number', rub: 'number' }],
+  assembly: { byFF: ['array', { ff: 'string', medianHours: 'number' }] },
+  money: {
+    available: 'boolean',
+    totals: { penalty: 'number', deduction: 'number', returnLogistics: 'number', ffLossRub: 'number' },
+    byFF: ['array', { ff: 'string', penalty: 'number', returnLogistics: 'number', deduction: 'number', ffLossRub: 'number' }],
+    reasons: ['array', { reason: 'string', penalty: 'number', deduction: 'number', rub: 'number', count: 'number' }],
+  },
+  scorecard: ['array', { ff: 'string', sellerCancel: 'number', sellerCancelPct: 'number', cancelLostRub: 'number', penaltyRub: 'number', returnLogRub: 'number', totalLossRub: 'number' }],
 };
 
 // ── fake-снимки (демо/тестовый путь) ────────────────────────────────────────────
@@ -135,11 +143,16 @@ const logiLive = {
 contract('логистика (агрегатор)', logiLive, logisticsSpec);
 
 const cOrders = [
-  { id: 1, ff: 'A', warehouseId: 1, priceRub: 1000 }, { id: 2, ff: 'A', warehouseId: 1, priceRub: 1000 },
-  { id: 3, ff: 'B', warehouseId: 2, priceRub: 1000 },
+  { id: 1, rid: 'r1', ff: 'A', warehouseId: 1, priceRub: 1000, createdAt: '2026-08-01T00:00:00Z', closedAt: '2026-08-01T10:00:00Z' },
+  { id: 2, rid: 'r2', ff: 'A', warehouseId: 1, priceRub: 1000, createdAt: '2026-08-01T00:00:00Z', closedAt: '2026-08-01T10:00:00Z' },
+  { id: 3, rid: 'r3', ff: 'B', warehouseId: 2, priceRub: 1000, createdAt: '2026-08-01T00:00:00Z', closedAt: '2026-08-01T10:00:00Z' },
 ];
 const cStatus = new Map([[1, { supplierStatus: 'complete', wbStatus: 'sold' }], [2, { supplierStatus: 'cancel', wbStatus: 'canceled' }], [3, { supplierStatus: 'confirm', wbStatus: 'defect' }]]);
-const cancelsLive = { days: 30, warehouseList: ['A', 'B'], ...buildCancels(cOrders, (o) => cStatus.get(o.id) || null) };
+const cRes = buildCancels(cOrders, (o) => cStatus.get(o.id) || null);
+const cAsm = buildAssembly(cOrders, (o) => o.closedAt || null, { critH: 48, asmFromSec: Math.floor(Date.parse('2026-01-01') / 1000) });
+const cMoney = buildMoney([{ srid: 'r2', docTypeName: 'Продажа', penalty: '100', bonusTypeName: 'Штраф' }], new Map(cOrders.map((o) => [o.rid, { ff: o.ff, warehouseId: o.warehouseId }])));
+const cScore = buildScorecard(cRes.byFF, cAsm.byFF, cMoney.byFF);
+const cancelsLive = { days: 30, warehouseList: ['A', 'B'], ...cRes, assembly: cAsm, money: cMoney, scorecard: cScore };
 contract('отказы (агрегатор)', cancelsLive, cancelsSpec);
 
 console.log(`\nКонтракт снимков (contract): ${failed ? failed + ' ПРОВАЛ(ов)' : 'все проверки зелёные'}`);

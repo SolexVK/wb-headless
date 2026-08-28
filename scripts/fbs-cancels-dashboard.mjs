@@ -39,6 +39,39 @@ const topInsights = insights([
 const lostBars = hbars(byFF.filter((r) => r.lostRub > 0).map((r) => ({ label: r.ff, value: r.lostRub, sub: `${nf(r.sellerCancel)} отказов`, color: 'var(--c-red)' })), { fmt: (v) => rub(v) });
 const reasonBars = hbars(reasons.map((r) => ({ label: r.ru, value: r.rub, sub: `${nf(r.count)} шт`, color: r.blame === 'ff' ? 'var(--c-violet)' : 'var(--s1)' })), { fmt: (v) => rub(v) });
 
+// ── Деньги из реализации (штрафы/удержания/обратная логистика) ────────────────
+const money = s.money || { available: false };
+const mt = money.totals || {};
+let moneyPanel;
+if (!money.available) {
+  moneyPanel = `<section class="panel">${panelHead('🧾', 'Деньги из реализации', 'штрафы, удержания, обратная логистика', AC.red)}
+    <p class="note">Недоступно: ${esc(money.reason || 'нет данных')}. Нужна категория «Финансы» в токене WB.</p></section>`;
+} else {
+  const mBars = hbars((money.reasons || []).slice(0, 12).map((r) => ({ label: r.reason, value: r.rub, sub: `${nf(r.count)} шт`, color: 'var(--c-red)' })), { fmt: (v) => rub(v) });
+  const mRows = (money.byFF || []).map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="cellnum" data-v="${r.penalty}">${rub(r.penalty)}</td><td class="cellnum" data-v="${r.returnLogistics}">${rub(r.returnLogistics)}</td><td class="cellnum" data-v="${r.ffLossRub}">${rub(r.ffLossRub)}</td><td class="cellnum" data-v="${r.deduction}">${rub(r.deduction)}</td></tr>`).join('');
+  moneyPanel = `<section class="panel">
+    ${panelHead('🧾', 'Деньги из реализации', `штрафы + обратная логистика по вине ФФ · удержания отдельно · за ${s.days} дн`, AC.red)}
+    <section class="kpis" style="margin:0 0 12px">${[
+      kpi(rub(mt.penalty), 'штрафы', { icon: '⚖️', accent: AC.red }),
+      kpi(rub(mt.returnLogistics), 'обратная логистика', { icon: '🚚', accent: AC.amber }),
+      kpi(rub(mt.ffLossRub), 'деньги по вине ФФ', { icon: '💸', accent: AC.violet }),
+      kpi(rub(mt.deduction), 'удержания (подписки/хранение)', { icon: '📉', accent: AC.teal }),
+    ].join('')}</section>
+    <div class="panel-sub" style="margin-bottom:8px">Штрафы и удержания по причинам (bonusTypeName)</div>
+    <div class="chart-wrap">${mBars || '<p class="note">Нет штрафов/удержаний по нашим ФФ за период.</p>'}</div>
+    <div class="table-scroll" style="margin-top:14px"><table class="sortable"><thead><tr><th class="tl">Фулфилмент</th><th class="ta-r">Штрафы</th><th class="ta-r">Обр. логистика</th><th class="ta-r">По вине ФФ</th><th class="ta-r">Удержания</th></tr></thead><tbody>${mRows}</tbody></table></div>
+  </section>`;
+}
+
+// ── Сводка ФФ: скорость ↔ отказы ↔ деньги ─────────────────────────────────────
+const sc = s.scorecard || [];
+const fmtH = (v) => (v == null ? '—' : (Number(v) >= 24 ? nf(Number(v) / 24) + ' сут' : nf(v) + ' ч'));
+const scRows = sc.map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="cellnum" data-v="${r.asmMedianHours ?? -1}">${fmtH(r.asmMedianHours)}</td><td class="cellnum" data-v="${r.sellerCancel}">${nf(r.sellerCancel)}</td><td class="cellnum" data-v="${r.sellerCancelPct}">${r.sellerCancelPct}%</td><td class="cellnum" data-v="${r.cancelLostRub}">${rub(r.cancelLostRub)}</td><td class="cellnum" data-v="${r.penaltyRub}">${rub(r.penaltyRub)}</td><td class="cellnum" data-v="${r.returnLogRub}">${rub(r.returnLogRub)}</td><td class="cellnum" data-v="${r.totalLossRub}">${rub(r.totalLossRub)}</td></tr>`).join('');
+const scorePanel = sc.length ? `<section class="panel">
+  ${panelHead('🎯', 'Сводка по фулфилментам', 'скорость сборки ↔ отказы ↔ деньги · ИТОГО потерь', AC.blue)}
+  <div class="table-scroll"><table class="sortable"><thead><tr><th class="tl">Фулфилмент</th><th class="ta-r">Сборка (медиана)</th><th class="ta-r">Отказ ФФ</th><th class="ta-r">% ФФ</th><th class="ta-r">Упущ. выручка</th><th class="ta-r">Штрафы</th><th class="ta-r">Обр. логистика</th><th class="ta-r">ИТОГО потерь</th></tr></thead><tbody>${scRows}</tbody></table></div>
+</section>` : '';
+
 // ── Таблица по ФФ ─────────────────────────────────────────────────────────────
 const rows = byFF.map((r) => `<tr>
   <td class="tl">${esc(r.ff)}</td>
@@ -55,8 +88,8 @@ const body = `<div class="wrap">
   <header class="head">
     <div>
       <p class="eyebrow">Wildberries · FBS · потери</p>
-      <h1>Отказы по фулфилментам</h1>
-      <p class="sub">Где ФФ проваливает заказы и во что это обходится: по каждому складу-фулфилменту — сколько сборочных заданий создано, выкуплено, отменено продавцом (отказ ФФ), клиентом и браком, за ${s.days} дней с ${esc(s.from || '')}. «Потери по вине ФФ» = упущенная выручка по отказам продавца и браку. Статус — текущий (WB хранит FBS-заказы ~90 дней).</p>
+      <h1>Потери по фулфилментам</h1>
+      <p class="sub">Где ФФ теряет деньги: отказы (упущенная выручка), штрафы/удержания/обратная логистика из отчёта реализации и сводка «скорость сборки ↔ отказы ↔ деньги» по каждому фулфилменту, за ${s.days} дней с ${esc(s.from || '')}. Деньги привязаны к ФФ по srid = rid. Реализация формируется по неделям (запаздывает на 1–2 недели).</p>
     </div>
     <div class="stamp">Снимок<br><b>${stamp}</b></div>
   </header>
@@ -69,13 +102,15 @@ const body = `<div class="wrap">
       <div><div class="panel-sub" style="margin-bottom:8px">Потери и отмены по причинам</div><div class="chart-wrap">${reasonBars || '<p class="note">Отмен за период нет.</p>'}</div></div>
     </div>
   </section>
+  ${scorePanel}
+  ${moneyPanel}
   <section class="panel">
-    ${panelHead('🏭', 'Разбор по фулфилментам', 'задания, выкупы, отказы и потери по каждому ФФ', AC.violet)}
-    <div class="table-scroll"><table class="sortable"><thead><tr><th class="tl">Фулфилмент</th><th class="ta-r">Заданий</th><th class="ta-r">Выкуплено</th><th class="ta-r">Отказ ФФ</th><th class="ta-r">% ФФ</th><th class="ta-r">Брак</th><th class="ta-r">Отказ клиента</th><th class="ta-r">В работе</th><th class="ta-r">Потери</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${panelHead('🏭', 'Разбор отказов по фулфилментам', 'задания, выкупы, отказы и упущенная выручка по каждому ФФ', AC.violet)}
+    <div class="table-scroll"><table class="sortable"><thead><tr><th class="tl">Фулфилмент</th><th class="ta-r">Заданий</th><th class="ta-r">Выкуплено</th><th class="ta-r">Отказ ФФ</th><th class="ta-r">% ФФ</th><th class="ta-r">Брак</th><th class="ta-r">Отказ клиента</th><th class="ta-r">В работе</th><th class="ta-r">Упущено</th></tr></thead><tbody>${rows}</tbody></table></div>
   </section>
-  <footer class="foot">Источник: marketplace /api/v3/orders (создание задания, warehouseId = ФФ, цена) + /api/v3/orders/status (supplierStatus/wbStatus). «Отказ ФФ» = supplierStatus cancel (отменено продавцом). Упущенная выручка — по цене заказа; штрафы и обратная логистика в деньгах — из детализации отчёта реализации (следующая итерация).</footer>
+  <footer class="foot">Источник: marketplace /api/v3/orders + /api/v3/orders/status (отказы, warehouseId = ФФ) и finance /api/finance/v1/sales-reports/detailed (штрафы, удержания, обратная логистика по srid). «Отказ ФФ» = supplierStatus cancel. Упущенная выручка — по цене заказа; денежные потери — из детализации отчёта реализации (по неделям, с задержкой).</footer>
 </div>`;
 
-fs.writeFileSync(R('fbs-cancels-dashboard.html'), page('Отказы по фулфилментам — дашборд', body));
-fs.writeFileSync(R('fbs-cancels-dashboard.artifact.html'), artifact('Отказы по фулфилментам — дашборд', body));
+fs.writeFileSync(R('fbs-cancels-dashboard.html'), page('Потери по фулфилментам — дашборд', body));
+fs.writeFileSync(R('fbs-cancels-dashboard.artifact.html'), artifact('Потери по фулфилментам — дашборд', body));
 process.stderr.write(`→ ${path.relative(process.cwd(), R('fbs-cancels-dashboard.html'))}\n`);
