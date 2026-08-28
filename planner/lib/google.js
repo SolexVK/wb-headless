@@ -117,6 +117,8 @@ function postFormatRequests(sheets, docProps, offs = []) {
     if (hasImg && dataEndNoTotal > dataStart) reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'ROWS', startIndex: dataStart, endIndex: dataEndNoTotal }, properties: { pixelSize: 54 }, fields: 'pixelSize' } });
     // «Итого»: жирный, крупнее; высота обычная
     if (sheets[i].totalRow && nRows >= 2) reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: dataEndAll - 1, endRowIndex: dataEndAll }, cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } }, fields: 'userEnteredFormat.textFormat' } });
+    // скрытые вспомогательные столбцы (напр. «Месяц заказа» — служит только для среза)
+    for (const c of (sheets[i].hiddenCols || [])) reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'COLUMNS', startIndex: c, endIndex: c + 1 }, properties: { hiddenByUser: true }, fields: 'hiddenByUser' } });
   });
   return reqs;
 }
