@@ -155,15 +155,27 @@ export function buildReportsData(state, schedule, opts = {}) {
     articles: [...new Map(dem.map((d) => [d.articleId, d.articleName])).entries()].map(([id, name]) => ({ id, name })).sort((a, b) => artNum(a.id) - artNum(b.id)),
     months: [...new Set(dem.map((d) => d.prodMonth))].sort().map((m) => ({ ym: m, label: ymLabel(m) })),          // месяцы производства (для 2a)
     purchaseMonths: [...new Set(dem.map((d) => d.purchaseMonth).filter(Boolean))].sort().map((m) => ({ ym: m, label: ymLabel(m) })), // месяцы закупа (для 2b)
+    sources: [...new Set(dem.map((d) => d.source))].filter(Boolean),   // 'china' | 'bishkek'
+    seasons: [...new Set(dem.map((d) => (d.isSummer ? 'summer' : 'demi')))],
   };
-  // фильтры — МНОЖЕСТВЕННЫЙ выбор (массивы). Пустой набор = «все».
+  // фильтры — МНОЖЕСТВЕННЫЙ выбор (массивы) + свободный поиск. Пустой набор = «все».
   const F = opts.filters || {};
   const asArr = (a, single) => Array.isArray(a) ? a.filter(Boolean) : (single ? [single] : []);
   const fPlans = asArr(F.plansheets, F.plansheet);
   const fArts = asArr(F.articleIds, F.articleId);
   const fMonths = asArr(F.months, F.month);
-  const filtered = !!(fPlans.length || fArts.length || fMonths.length);
-  if (filtered) dem = dem.filter((d) => (!fPlans.length || fPlans.includes(d.plansheet)) && (!fArts.length || fArts.includes(d.articleId)) && (!fMonths.length || fMonths.includes(d[monthField])));
+  const fSources = asArr(F.sources, F.source);   // 'china' | 'bishkek'
+  const fSeasons = asArr(F.seasons, F.season);   // 'summer' | 'demi'
+  const fText = String(F.text || '').trim().toLowerCase(); // свободный поиск (муслин, марлёвка, цвет, планшет…)
+  const seasonOf = (d) => (d.isSummer ? 'summer' : 'demi');
+  const textOf = (d) => `${d.articleId} ${d.articleName} ${d.plansheet} ${d.colorNo} ${d.color}`.toLowerCase();
+  const filtered = !!(fPlans.length || fArts.length || fMonths.length || fSources.length || fSeasons.length || fText);
+  if (filtered) dem = dem.filter((d) => (!fPlans.length || fPlans.includes(d.plansheet))
+    && (!fArts.length || fArts.includes(d.articleId))
+    && (!fMonths.length || fMonths.includes(d[monthField]))
+    && (!fSources.length || fSources.includes(d.source))
+    && (!fSeasons.length || fSeasons.includes(seasonOf(d)))
+    && (!fText || textOf(d).includes(fText)));
 
   // ── Отчёт 2a: помесячная детализация ткани (месяц × артикул × планшет × №цвета × метраж) ──
   const r2 = {};
@@ -304,7 +316,7 @@ export function buildReportsData(state, schedule, opts = {}) {
     summerIds: [...summer],
     rates: (opts.rates && typeof opts.rates === 'object') ? opts.rates : null, // курсы валют на момент отчёта
     periodMode,
-    fabricFilters, filters: { plansheets: fPlans, articleIds: fArts, months: fMonths }, filtered, // фильтры отчётов по ткани (множественные)
+    fabricFilters, filters: { plansheets: fPlans, articleIds: fArts, months: fMonths, sources: fSources, seasons: fSeasons, text: fText }, filtered, // фильтры отчётов по ткани (множественные) + свободный поиск
     plansheetInfo, // сводка по планшетам для панели «Источник и цена ткани»
     fabricConsolidated, consTotals, // консолидированный вид при активном фильтре
     grand: {
@@ -1076,6 +1088,22 @@ function googleBarHtml() {
   return box(`<span style="color:#256b45;font-size:13px">подключено${g.email ? ': <b>' + esc(g.email) + '</b>' : ''}</span><button class="btn btn-subtle" id="g-disconnect" style="margin-left:auto">Отключить</button>`);
 }
 
+// ── нейросеть: «умный» разбор запросов в отчётах (командная строка на естественном языке) ──
+let nlqKeyStatus = null; // null — не запрашивали; undefined — идёт запрос; {hasKey,masked,…} | false
+function nlqBarHtml() {
+  const s = nlqKeyStatus;
+  const box = (inner) => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 0;padding:8px 12px;background:${C.zebra};border:1px solid ${C.border};border-radius:10px">
+    <span style="font-weight:700;color:${C.head};font-size:13px">🤖 Нейросеть (умные запросы):</span>${inner}</div>`;
+  if (s == null || s === undefined) return box('<span style="color:#889;font-size:13px">проверка…</span>');
+  const keyInput = `<input id="nlq-key" type="password" placeholder="ключ Anthropic (sk-ant-…)" style="flex:1;min-width:200px;padding:6px 10px;border:1px solid ${C.border};border-radius:8px;font-size:12.5px">
+    <button class="btn btn-accent" id="nlq-key-save">Сохранить</button>`;
+  if (s === false || !s.hasKey) {
+    return box(`<span style="color:#556;font-size:13px">не подключена — вставьте ключ, чтобы описывать отчёты словами</span>${keyInput}`);
+  }
+  return box(`<span style="color:#256b45;font-size:13px">подключена${s.masked ? ': <b>' + esc(s.masked) + '</b>' : ''}${s.source === 'env' ? ' <span style=\"color:#889\">(.env)</span>' : ''}</span>
+    <button class="btn btn-subtle" id="nlq-key-clear" style="margin-left:auto">Убрать</button>`);
+}
+
 // ============================ КУРСЫ ВАЛЮТ ============================
 let currencyRates = null; // null — не загружено; объект — курсы; false — ошибка загрузки
 const cur2 = (n) => (Math.round((+n || 0) * 100) / 100).toLocaleString('ru', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1201,7 +1229,9 @@ function sourcingPanelHtml(data, cfg) {
 // ============================ СТРАНИЦА (2 под-вкладки: Отчёты / Архив) ============================
 let reportsSubTab = 'build';       // 'build' | 'archive' — сохраняется между перерисовками
 let reportPeriodMode = 'month';    // 'month' | '2month' — период закупа ткани
-let reportFabricFilters = { plansheets: [], articleIds: [], months: [] }; // фильтры отчётов по ткани (множественные)
+let reportFabricFilters = { plansheets: [], articleIds: [], months: [], sources: [], seasons: [], text: '' }; // фильтры отчётов по ткани (множественные) + свободный поиск
+let nlqStatus = null;              // null — не проверяли; undefined — идёт запрос; {enabled} | false — нет ключа/ошибка
+let nlqLastExplain = '';           // человекочитаемое описание последнего разбора запроса нейросетью
 let openReportId = null, openReportGenAt = null; // какой отчёт открыт (чтобы переоткрыть после перерисовки)
 let currentReportRefresh = null;   // перерисовать ТОЛЬКО тело открытого отчёта (не трогая панель настроек)
 let sourcingSaveTimer = null;      // дебаунс сохранения настроек источника/цены
@@ -1223,6 +1253,7 @@ export function renderReportsPage(container, state, schedule, ctx = {}) {
       <div style="color:#667;font-size:13px">Текущие данные: ${fmtNum(data.grand.units)} шт производства · ${fmtNum(data.grand.fabricMeters)} м ткани.</div></div>
     ${currencyBarHtml()}
     ${googleBarHtml()}
+    ${nlqBarHtml()}
     ${coveragePanelHtml(data)}
     ${sourcingPanelHtml(data, (state.settings && state.settings.fabricSourcing) || {})}
     <div style="display:flex;gap:4px;margin:14px 0 0">${tabBtn('build', '📄 Получить отчёт')}${tabBtn('archive', '🗄 Архив')}</div>
@@ -1271,6 +1302,33 @@ export function renderReportsPage(container, state, schedule, ctx = {}) {
     googleStatus = undefined;
     api('/api/google/status').then((r) => { googleStatus = (r && r.ok) ? r : false; rerender(); }).catch(() => { googleStatus = false; rerender(); });
   }
+  // статус нейросети (умный разбор запросов) — один раз
+  if (nlqStatus === null && api) {
+    nlqStatus = undefined;
+    api('/api/reports/nlq-status').then((r) => { nlqStatus = (r && r.ok) ? r : false; rerender(); }).catch(() => { nlqStatus = false; rerender(); });
+  }
+  // статус ключа нейросети (для панели подключения) — один раз
+  if (nlqKeyStatus === null && api) {
+    nlqKeyStatus = undefined;
+    api('/api/settings/anthropic').then((r) => { nlqKeyStatus = (r && r.ok) ? r : false; rerender(); }).catch(() => { nlqKeyStatus = false; rerender(); });
+  }
+  container.querySelector('#nlq-key-save')?.addEventListener('click', async () => {
+    if (!api) return;
+    const key = (container.querySelector('#nlq-key')?.value || '').trim();
+    if (!key) { toast('Вставьте ключ', true); return; }
+    try {
+      const r = await api('/api/settings/anthropic', { method: 'PUT', body: JSON.stringify({ key }) });
+      nlqKeyStatus = (r && r.ok) ? r : false; nlqStatus = null; // перепроверить включённость
+      toast('Ключ сохранён — умные запросы включены');
+    } catch (e) { toast('Не удалось сохранить ключ: ' + e.message, true); }
+    rerender();
+  });
+  container.querySelector('#nlq-key-clear')?.addEventListener('click', async () => {
+    if (!api) return;
+    try { const r = await api('/api/settings/anthropic', { method: 'DELETE' }); nlqKeyStatus = (r && r.ok) ? r : false; nlqStatus = null; toast('Ключ убран'); }
+    catch (e) { toast('Не удалось убрать ключ: ' + e.message, true); }
+    rerender();
+  });
   container.querySelector('#g-disconnect')?.addEventListener('click', async () => {
     if (!api) return;
     try { await api('/api/google/disconnect', { method: 'POST' }); googleStatus = null; toast('Google отключён'); }
@@ -1323,23 +1381,58 @@ function showReport(result, rep, data, genAtIso, ctx) {
   const view = (isFabric && ctx && ctx.rebuild) ? ctx.rebuild({ filters: { ...reportFabricFilters }, monthField: monthMode }) : data;
   const body = rep.html(view);
 
-  // панель фильтров (планшет / артикул / месяц) — только для отчётов по ткани
+  // панель фильтров (командная строка + активные фильтры + ручной выбор) — только для отчётов по ткани
   let filterBar = '';
   if (isFabric) {
     const ff = view.fabricFilters || { plansheets: [], articles: [], months: [] };
     const cur = reportFabricFilters;
-    // множественный выбор: наборами (Ctrl/Cmd-клик), пустой набор = все
+    const monthOpts = (rep.id === 'r2b' ? ff.purchaseMonths : ff.months) || [];
+    const monthLabel = (ym) => (monthOpts.find((m) => m.ym === ym) || {}).label || ym;
+    const srcLabel = (s) => (s === 'china' ? 'Китай' : s === 'bishkek' ? 'Бишкек (Мадина)' : s);
+    const seasonLabel = (s) => (s === 'summer' ? 'Лето (муслин/марлёвка)' : s === 'demi' ? 'Демисезон' : s);
+    const artLabel = (id) => { const a = (ff.articles || []).find((x) => x.id === id); return a ? (a.id + (a.name ? ' · ' + a.name : '')) : id; };
+    // ── командная строка (естественный язык) ──
+    const smart = !!(nlqStatus && nlqStatus.enabled);
+    const hint = smart
+      ? 'нейросеть подключена · опишите отчёт словами'
+      : 'поиск по тексту (для «умных» запросов подключите нейросеть в шапке)';
+    const cmdBar = `<div style="display:flex;gap:8px;align-items:center;margin:0 0 10px">
+        <span style="font-size:18px" title="${smart ? 'Умный разбор запроса нейросетью' : 'Поиск по тексту'}">${smart ? '✨' : '🔎'}</span>
+        <input id="nlq-input" type="text" value="${esc(cur.text || '')}" placeholder="Напр.: товары к закупу по ткани Муслин первого этапа в Китае"
+          style="flex:1;min-width:260px;padding:9px 12px;border:1px solid ${C.border};border-radius:10px;font-size:13.5px">
+        <button class="btn btn-accent" id="nlq-go">Показать</button>
+        <button class="btn btn-subtle" id="nlq-clear"${view.filtered ? '' : ' disabled'}>Сбросить</button>
+      </div>
+      <div style="font-size:11px;color:#889;margin:-4px 0 8px">${hint}</div>`;
+    // ── активные фильтры «чипами» ──
+    const chip = (field, val, label) => `<span data-chip="${field}" data-val="${esc(String(val))}" style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;background:#eef6ff;border:1px solid #cfe2ff;border-radius:14px;font-size:12px;color:${C.head};cursor:pointer" title="Убрать">${label}<b style="color:#c0392b;font-size:13px">×</b></span>`;
+    const chips = [];
+    cur.plansheets.forEach((v) => chips.push(chip('plansheets', v, 'Планшет: ' + esc(v))));
+    cur.articleIds.forEach((v) => chips.push(chip('articleIds', v, 'Артикул: ' + esc(artLabel(v)))));
+    cur.months.forEach((v) => chips.push(chip('months', v, (rep.id === 'r2b' ? 'Закуп: ' : 'Месяц: ') + esc(monthLabel(v)))));
+    (cur.sources || []).forEach((v) => chips.push(chip('sources', v, 'Источник: ' + esc(srcLabel(v)))));
+    (cur.seasons || []).forEach((v) => chips.push(chip('seasons', v, esc(seasonLabel(v)))));
+    if (cur.text) chips.push(chip('text', cur.text, 'Поиск: «' + esc(cur.text) + '»'));
+    const chipsRow = chips.length
+      ? `<div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:0 0 10px">
+          <span style="font-size:12px;color:#667;font-weight:700">Фильтр:</span>${chips.join('')}
+          ${nlqLastExplain ? `<span style="font-size:11px;color:${C.accent};font-style:italic">✨ ${esc(nlqLastExplain)}</span>` : ''}
+          <span style="font-size:12px;color:${C.accent};font-weight:700;margin-left:auto">консолидированный вид</span></div>`
+      : '';
+    // ── ручной выбор (сворачиваемый) ──
     const optM = (v, label, arr) => `<option value="${esc(v)}"${arr.includes(v) ? ' selected' : ''}>${esc(label)}</option>`;
     const selBox = (id, label, inner) => `<label style="display:flex;flex-direction:column;font-size:11px;color:#667;gap:3px">${label}<select id="${id}" multiple size="5" style="padding:4px 6px;border:1px solid ${C.border};border-radius:8px;font-size:12.5px;min-width:150px;max-width:220px">${inner}</select></label>`;
-    const monthOpts = (rep.id === 'r2b' ? ff.purchaseMonths : ff.months) || [];
     const plan = selBox('f-plan', 'Планшет', ff.plansheets.map((p) => optM(p, p, cur.plansheets)).join('') || '<option disabled>нет планшетов</option>');
-    const art = selBox('f-art', 'Артикул', ff.articles.map((a) => optM(a.id, a.id + (a.name ? ' · ' + a.name : ''), cur.articleIds)).join('') || '<option disabled>нет артикулов</option>');
+    const art = selBox('f-art', 'Артикул', (ff.articles || []).map((a) => optM(a.id, a.id + (a.name ? ' · ' + a.name : ''), cur.articleIds)).join('') || '<option disabled>нет артикулов</option>');
     const mon = selBox('f-month', rep.id === 'r2b' ? 'Месяц закупа' : 'Месяц', monthOpts.map((m) => optM(m.ym, m.label, cur.months)).join('') || '<option disabled>нет месяцев</option>');
-    const reset = `<button class="btn btn-subtle" id="f-reset"${view.filtered ? '' : ' disabled'} style="align-self:flex-end">Сбросить</button>`;
-    filterBar = `<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0 0 12px;padding:10px 12px;background:${C.zebra};border:1px solid ${C.border};border-radius:10px">
-      <span style="font-weight:700;color:${C.head};font-size:13px;align-self:flex-end">🔎 Фильтр ткани:</span>${plan}${art}${mon}${reset}
-      <span style="align-self:flex-end;font-size:11px;color:#889">выбор наборами: Ctrl/Cmd-клик · пусто = все</span>
-      ${view.filtered ? `<span style="align-self:flex-end;font-size:12px;color:${C.accent};font-weight:700">консолидированный вид</span>` : ''}</div>`;
+    const srcBox = selBox('f-src', 'Источник', (ff.sources || []).map((s) => optM(s, srcLabel(s), cur.sources || [])).join('') || '<option disabled>—</option>');
+    const seaBox = selBox('f-season', 'Сезон', (ff.seasons || []).map((s) => optM(s, seasonLabel(s), cur.seasons || [])).join('') || '<option disabled>—</option>');
+    const manualOpen = chips.length ? '' : ' open';
+    const manual = `<details${manualOpen} style="margin:0 0 12px">
+      <summary style="cursor:pointer;font-size:12.5px;color:#667;font-weight:700;user-select:none">⚙ Ручной фильтр (наборами: Ctrl/Cmd-клик · пусто = все)</summary>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:8px 0 0;padding:10px 12px;background:${C.zebra};border:1px solid ${C.border};border-radius:10px">
+        ${plan}${art}${mon}${srcBox}${seaBox}</div></details>`;
+    filterBar = cmdBar + chipsRow + manual;
   }
 
   // период закупа — только для «Закупка ткани» и только БЕЗ активного фильтра (иначе вид консолидированный)
@@ -1367,7 +1460,47 @@ function showReport(result, rep, data, genAtIso, ctx) {
   result.querySelector('#f-plan')?.addEventListener('change', () => { reportFabricFilters.plansheets = readSel('f-plan'); rerender(); });
   result.querySelector('#f-art')?.addEventListener('change', () => { reportFabricFilters.articleIds = readSel('f-art'); rerender(); });
   result.querySelector('#f-month')?.addEventListener('change', () => { reportFabricFilters.months = readSel('f-month'); rerender(); });
-  result.querySelector('#f-reset')?.addEventListener('click', () => { reportFabricFilters = { plansheets: [], articleIds: [], months: [] }; rerender(); });
+  result.querySelector('#f-src')?.addEventListener('change', () => { reportFabricFilters.sources = readSel('f-src'); rerender(); });
+  result.querySelector('#f-season')?.addEventListener('change', () => { reportFabricFilters.seasons = readSel('f-season'); rerender(); });
+  // убрать один фильтр по клику на «чип»
+  result.querySelectorAll('[data-chip]').forEach((el) => el.addEventListener('click', () => {
+    const field = el.dataset.chip, val = el.dataset.val;
+    if (field === 'text') { reportFabricFilters.text = ''; nlqLastExplain = ''; }
+    else reportFabricFilters[field] = (reportFabricFilters[field] || []).filter((x) => String(x) !== val);
+    rerender();
+  }));
+  // командная строка: разобрать запрос (нейросетью, если подключена) → применить фильтр
+  const runNlq = async () => {
+    const q = (result.querySelector('#nlq-input')?.value || '').trim();
+    if (!q) { reportFabricFilters.text = ''; nlqLastExplain = ''; rerender(); return; }
+    const goBtn = result.querySelector('#nlq-go'); const old = goBtn ? goBtn.textContent : '';
+    if (goBtn) { goBtn.disabled = true; goBtn.textContent = '…'; }
+    const applyLocal = () => { reportFabricFilters = { plansheets: [], articleIds: [], months: [], sources: [], seasons: [], text: q }; nlqLastExplain = ''; };
+    try {
+      if (nlqStatus && nlqStatus.enabled && api) {
+        const dims = view.fabricFilters || {};
+        const r = await api('/api/reports/nl-query', { method: 'POST', body: JSON.stringify({ query: q, reportKind: rep.id, dimensions: {
+          plansheets: dims.plansheets || [], articles: dims.articles || [],
+          months: (rep.id === 'r2b' ? dims.purchaseMonths : dims.months) || [],
+          sources: dims.sources || [], seasons: dims.seasons || [] } }) });
+        if (r && r.ok && r.filter) {
+          const f = r.filter;
+          reportFabricFilters = {
+            plansheets: Array.isArray(f.plansheets) ? f.plansheets : [],
+            articleIds: Array.isArray(f.articleIds) ? f.articleIds : [],
+            months: Array.isArray(f.months) ? f.months : [],
+            sources: Array.isArray(f.sources) ? f.sources : [],
+            seasons: Array.isArray(f.seasons) ? f.seasons : [],
+            text: typeof f.text === 'string' ? f.text : '' };
+          nlqLastExplain = String(r.explain || '');
+        } else applyLocal();
+      } else applyLocal();
+    } catch (e) { applyLocal(); toast('Нейросеть недоступна — ищу по тексту', true); }
+    finally { if (goBtn) { goBtn.disabled = false; goBtn.textContent = old; } rerender(); }
+  };
+  result.querySelector('#nlq-go')?.addEventListener('click', runNlq);
+  result.querySelector('#nlq-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runNlq(); } });
+  result.querySelector('#nlq-clear')?.addEventListener('click', () => { reportFabricFilters = { plansheets: [], articleIds: [], months: [], sources: [], seasons: [], text: '' }; nlqLastExplain = ''; rerender(); });
 
   const saveBtn = result.querySelector('#rep-save');
   saveBtn.addEventListener('click', async () => {

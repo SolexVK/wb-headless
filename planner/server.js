@@ -17,6 +17,7 @@ import { fetchRates } from './lib/currency.js';
 import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList, metaGet, metaSet, snapshotSave, snapshotList, snapshotGet, snapshotDelete, snapshotPrune, reportArchiveSave, reportArchiveList, reportArchiveGet, reportArchiveDelete } from './lib/db.js';
 import { installAuth, requireView, requireEdit } from './lib/authMiddleware.js';
 import * as google from './lib/google.js';
+import * as nlq from './lib/nlq.js';
 import { applyWritePolicy, filterStateForRead, canEditAnything } from './lib/permissions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,7 +26,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'reports-gsheets-noslicers-2026-08-28';
+const BACKEND_BUILD = 'reports-nl-query-2026-08-28';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -61,7 +62,19 @@ function loadMpstatsTokenFromDb() {
   try { const m = metaGet('mpstats_token'); if (m && m.value) process.env.MPSTATS_TOKEN = m.value; } catch { /* нет БД — остаётся .env */ }
 }
 loadMpstatsTokenFromDb();
+// Ключ Anthropic (умный разбор запросов в отчётах). Задаётся из интерфейса или .env; БД ПЕРЕОПРЕДЕЛЯЕТ .env.
+const ENV_ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
+function loadAnthropicKeyFromDb() {
+  try { const m = metaGet('anthropic_key'); if (m && m.value) process.env.ANTHROPIC_API_KEY = m.value; } catch { /* нет БД — остаётся .env */ }
+}
+loadAnthropicKeyFromDb();
 const maskToken = (t) => { t = String(t || ''); return t.length > 12 ? t.slice(0, 6) + '…' + t.slice(-4) : (t ? '…' : ''); };
+function anthropicKeyStatus() {
+  const cur = process.env.ANTHROPIC_API_KEY || '';
+  let dbSet = false;
+  try { const m = metaGet('anthropic_key'); dbSet = !!(m && m.value); } catch { /* ignore */ }
+  return { hasKey: !!cur, source: dbSet ? 'ui' : (ENV_ANTHROPIC_KEY ? 'env' : 'none'), masked: maskToken(cur), envAvailable: !!ENV_ANTHROPIC_KEY };
+}
 function mpstatsTokenStatus() {
   const cur = process.env.MPSTATS_TOKEN || '';
   let dbSet = false;
@@ -650,6 +663,38 @@ app.get('/api/reports/archive/:id', requireView('data'), (req, res) => {
 app.delete('/api/reports/archive/:id', requireEdit('data'), (req, res) => {
   try { reportArchiveDelete(+req.params.id); res.json({ ok: true }); }
   catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// ── «Умный» разбор запроса (нейросеть Anthropic) → структурный фильтр отчёта ──
+app.get('/api/reports/nlq-status', requireView('data'), (req, res) => {
+  res.json({ ok: true, enabled: nlq.isEnabled() });
+});
+app.post('/api/reports/nl-query', requireView('data'), async (req, res) => {
+  try {
+    const { query, dimensions, reportKind } = req.body || {};
+    if (!query || !String(query).trim()) return res.status(400).json({ ok: false, error: 'пустой запрос' });
+    const r = await nlq.parseQuery(String(query), dimensions || {}, reportKind || 'r2b');
+    if (!r.ok) return res.json(r); // {ok:false, reason:'no_key'|'network'|'api_error'|…} — клиент откатится на текстовый поиск
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, reason: 'server', error: String(e.message || e) }); }
+});
+// Ключ Anthropic из интерфейса (шапка отчётов). Хранится в БД, ПЕРЕОПРЕДЕЛЯЕТ .env.
+app.get('/api/settings/anthropic', requireView('data'), (req, res) => res.json({ ok: true, ...anthropicKeyStatus() }));
+app.put('/api/settings/anthropic', requireEdit('data'), (req, res) => {
+  try {
+    const key = String((req.body && req.body.key) || '').trim();
+    if (!key) return res.status(400).json({ ok: false, error: 'пустой ключ' });
+    metaSet('anthropic_key', key);
+    process.env.ANTHROPIC_API_KEY = key; // подхватится сразу
+    res.json({ ok: true, ...anthropicKeyStatus() });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+app.delete('/api/settings/anthropic', requireEdit('data'), (req, res) => {
+  try {
+    metaSet('anthropic_key', '');
+    process.env.ANTHROPIC_API_KEY = ENV_ANTHROPIC_KEY; // вернуть из .env (или пусто)
+    res.json({ ok: true, ...anthropicKeyStatus() });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 
 // «Экономная раскладка (JIT)»: пересобрать даты старта пошива под оборачиваемость денег.
