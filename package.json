@@ -12,7 +12,8 @@
     "start": "node server.js",
     "report:stock": "node report-stock.js",
     "report:niche": "node report-niche.js",
-    "report:fines": "node report-fines.js"
+    "report:fines": "node report-fines.js",
+    "report:forensics": "node report-forensics.mjs"
   },
   "engines": {
     "node": ">=18"
