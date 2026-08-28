@@ -969,7 +969,8 @@ function sheetsConsolidated(data) {
   let cnt = 0;
   for (const x of (data.fabricConsolidated || [])) { rows.push([TXT(x.plansheet || '—'), TXT(x.colorNo || '—'), x.color, IMG((x.images && x.images[0]) || ''), TXT(x.arts.join(', ')), x.meters, price2n(x.price), x.cost]); cnt++; }
   rows.push(totalRow(cols, cnt, 'Итого по фильтру'));
-  return [{ title: 'Ткань по фильтру', rows, cols, table: cnt > 0, totalRow: true }];
+  // срезы (slicers) по Планшет / № цвета / Цвет / Артикулы
+  return [{ title: 'Ткань по фильтру', rows, cols, table: cnt > 0, totalRow: true, slicerCols: cnt > 0 ? [0, 1, 2, 4] : [] }];
 }
 function sheetsReport1(data) {
   const cols = ['text', 'text', 'text', 'num', 'num'];
@@ -1007,7 +1008,8 @@ function sheetsReport2b(data) {
       if (R) row.push(som(it.cost)); rows.push(row); cnt++;
     }
     rows.push(totalRow(cols, cnt, 'Итого')); // SUBTOTAL — пересчёт при фильтрации
-    return { title, rows, cols, table: cnt > 0, totalRow: true };
+    // срезы (slicers) по Планшет / № цвета / Цвет / Артикулы
+    return { title, rows, cols, table: cnt > 0, totalRow: true, slicerCols: cnt > 0 ? [3, 4, 5, 7] : [] };
   };
   const P = data.fabricPurchase || {};
   return [

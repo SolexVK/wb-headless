@@ -85,22 +85,25 @@ function preFormatRequests(sheets, docProps) {
 }
 // ПОСЛЕ таблицы: переопределяем стиль таблицы — числовой формат (пробел-разделитель), формат даты
 // (дд.мм.гггг), выравнивание по колонкам, размеры под картинки, жирный крупный «Итого», шапка (не-таблица).
-function postFormatRequests(sheets, docProps) {
+function postFormatRequests(sheets, docProps, offs = []) {
   const reqs = []; const HEADER_BG = { red: 0.20, green: 0.42, blue: 0.28 }; const WHITE = { red: 1, green: 1, blue: 1 };
   docProps.forEach((dp, i) => {
     const sid = dp.sheetId, cols = (sheets[i].cols || []).map(NC), rows = sheets[i].rows || [];
+    const off = offs[i] || 0;               // зарезервированные строки сверху под срезы
     const nRows = rows.length;
-    const dataEnd = nRows - (sheets[i].totalRow ? 1 : 0); // строки данных без «Итого»
+    const hdr = off;                        // строка шапки
+    const dataStart = off + 1;              // первая строка данных
+    const dataEndAll = off + nRows;         // конец всех строк данных (с «Итого»)
+    const dataEndNoTotal = off + nRows - (sheets[i].totalRow ? 1 : 0);
     // шапка: жирная, БЕЛЫЙ шрифт, зелёный фон, по центру
-    reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true, foregroundColor: WHITE }, backgroundColor: HEADER_BG, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment)' } });
+    reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: hdr, endRowIndex: hdr + 1 }, cell: { userEnteredFormat: { textFormat: { bold: true, foregroundColor: WHITE }, backgroundColor: HEADER_BG, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment)' } });
     let hasImg = false;
     cols.forEach((col, c) => {
-      // выравнивание + числовой формат
       const uf = { horizontalAlignment: col.a, verticalAlignment: 'MIDDLE' };
       let fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment)';
       if (col.t === 'num' || col.t === 'price' || col.t === 'date') { uf.numberFormat = numFmt(col.t); fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment,numberFormat)'; }
-      reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 1, endRowIndex: Math.max(1, nRows), startColumnIndex: c, endColumnIndex: c + 1 }, cell: { userEnteredFormat: uf }, fields } });
-      // ШИРИНА колонки: по самой длинной надписи (шапка/данные) + запас под воронку фильтра; картинки — фикс.
+      reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: dataStart, endRowIndex: Math.max(dataStart, dataEndAll), startColumnIndex: c, endColumnIndex: c + 1 }, cell: { userEnteredFormat: uf }, fields } });
+      // ШИРИНА колонки по самой длинной надписи (+запас под фильтр); картинки — фикс.
       let px = 100;
       if (col.t === 'img') { hasImg = true; }
       else {
@@ -110,10 +113,10 @@ function postFormatRequests(sheets, docProps) {
       }
       reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'COLUMNS', startIndex: c, endIndex: c + 1 }, properties: { pixelSize: px }, fields: 'pixelSize' } });
     });
-    // высота строк с картинками — ТОЛЬКО для строк данных (строку «Итого» не трогаем — обычная высота)
-    if (hasImg && dataEnd > 1) reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'ROWS', startIndex: 1, endIndex: dataEnd }, properties: { pixelSize: 54 }, fields: 'pixelSize' } });
-    // «Итого»: жирный, чуть крупнее; высота остаётся обычной (не задаём)
-    if (sheets[i].totalRow && nRows >= 2) reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: nRows - 1, endRowIndex: nRows }, cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } }, fields: 'userEnteredFormat.textFormat' } });
+    // высота строк с картинками — только строки данных (без «Итого»)
+    if (hasImg && dataEndNoTotal > dataStart) reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'ROWS', startIndex: dataStart, endIndex: dataEndNoTotal }, properties: { pixelSize: 54 }, fields: 'pixelSize' } });
+    // «Итого»: жирный, крупнее; высота обычная
+    if (sheets[i].totalRow && nRows >= 2) reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: dataEndAll - 1, endRowIndex: dataEndAll }, cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } }, fields: 'userEnteredFormat.textFormat' } });
   });
   return reqs;
 }
@@ -121,27 +124,70 @@ function postFormatRequests(sheets, docProps) {
 // Оформить листы как ТАБЛИЦУ: нативная таблица Google (фильтры + типы колонок),
 // а если API таблиц недоступен — запасной вариант: базовый фильтр + чередование строк.
 // Диапазон таблицы НЕ включает строку «Итого» (там SUBTOTAL, пересчитывается при фильтре).
-async function applyTables(at, id, sheets, docProps) {
-  const targets = sheets.map((s, i) => ({ s, dp: docProps[i] })).filter((x) => x.s && x.s.table);
+async function applyTables(at, id, sheets, docProps, offs = []) {
+  const targets = sheets.map((s, i) => ({ s, dp: docProps[i], off: offs[i] || 0 })).filter((x) => x.s && x.s.table);
   if (!targets.length) return;
   // Оформляем как ФИЛЬТР + чередование строк (визуально «таблица»: фильтры на колонках, полосы,
   // авто-пересчёт итога через SUBTOTAL). НЕ используем нативную таблицу Google: её типы столбцов
   // навязывают свой формат/выравнивание (US-дата, правый край, без пробелов) и перебивают наш.
-  const rangeOf = (s, dp) => {
+  const rangeOf = (s, dp, off) => {
     const rows = s.rows || [], cols = s.cols || [];
     const nCols = Math.max(cols.length, rows.reduce((m, r) => Math.max(m, r.length), 0), 1);
-    const endRow = rows.length - (s.totalRow ? 1 : 0); // без строки «Итого» (там SUBTOTAL — вне фильтра)
-    return { sheetId: dp.sheetId, startRowIndex: 0, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: nCols };
+    const endRow = off + rows.length - (s.totalRow ? 1 : 0); // без строки «Итого» (там SUBTOTAL — вне фильтра)
+    return { sheetId: dp.sheetId, startRowIndex: off, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: nCols };
   };
   try {
     const reqs = [];
-    for (const { s, dp } of targets) {
-      const range = rangeOf(s, dp);
+    for (const { s, dp, off } of targets) {
+      const range = rangeOf(s, dp, off);
       reqs.push({ setBasicFilter: { filter: { range } } });
       reqs.push({ addBanding: { bandedRange: { range, rowProperties: { headerColor: { red: 0.20, green: 0.42, blue: 0.28 }, firstBandColor: { red: 1, green: 1, blue: 1 }, secondBandColor: { red: 0.95, green: 0.97, blue: 0.95 } } } } });
     }
     await batchUpdate(at, id, reqs, 30000);
   } catch { /* фильтр/полосы не критичны — данные и формат уже применены */ }
+}
+
+const SLICER_RES = 3; // зарезервированные строки сверху под панель срезов
+// Добавить СРЕЗЫ (slicers) по указанным столбцам — как «срез» в Excel. Плавающие кнопки-фильтры сверху.
+async function addSlicers(at, id, sheets, docProps, offs) {
+  const reqs = [];
+  sheets.forEach((s, i) => {
+    const scols = s.slicerCols || []; if (!scols.length) return;
+    const dp = docProps[i], off = offs[i] || 0, rows = s.rows || [], cols = s.cols || [];
+    const nCols = Math.max(cols.length, rows.reduce((m, r) => Math.max(m, r.length), 0), 1);
+    const endRow = off + rows.length - (s.totalRow ? 1 : 0); // шапка+данные (без «Итого»)
+    const dataRange = { sheetId: dp.sheetId, startRowIndex: off, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: nCols };
+    scols.forEach((c, k) => {
+      const title = String((rows[0] && rows[0][c]) || ('Столбец ' + (c + 1)));
+      reqs.push({ addSlicer: { slicer: {
+        spec: { dataRange, columnIndex: c, title, applyToPivotTables: false },
+        position: { overlayPosition: { anchorCell: { sheetId: dp.sheetId, rowIndex: 0, columnIndex: 0 }, offsetXPixels: 6 + k * 190, offsetYPixels: 4, widthPixels: 182, heightPixels: 56 } },
+      } } });
+    });
+  });
+  if (reqs.length) await batchUpdate(at, id, reqs, 30000).catch(() => { /* срезы не критичны */ });
+}
+
+// Записать значения и оформить листы: текст-формат → запись → резерв строк под срезы →
+// формат/выравнивание → фильтр+полосы → срезы. Общий для создания и обновления таблицы.
+async function writeAndDecorate(at, id, sheets, docProps) {
+  const pre = preFormatRequests(sheets, docProps);
+  if (pre.length) await batchUpdate(at, id, pre, 30000).catch(() => {}); // текст ДО записи (ведущие нули)
+  await writeValues(at, id, sheets, docProps);
+  // резерв строк сверху под панель срезов: вставка сдвигает данные вниз, формулы SUBTOTAL авто-корректируются
+  const offs = sheets.map((s) => (s.slicerCols && s.slicerCols.length) ? SLICER_RES : 0);
+  const insReqs = [];
+  docProps.forEach((dp, i) => {
+    if (offs[i] > 0) {
+      insReqs.push({ insertDimension: { range: { sheetId: dp.sheetId, dimension: 'ROWS', startIndex: 0, endIndex: offs[i] }, inheritFromBefore: false } });
+      insReqs.push({ updateSheetProperties: { properties: { sheetId: dp.sheetId, gridProperties: { frozenRowCount: offs[i] + 1 } }, fields: 'gridProperties.frozenRowCount' } }); // закрепить срезы + шапку
+    }
+  });
+  if (insReqs.length) await batchUpdate(at, id, insReqs, 30000).catch(() => {});
+  const post = postFormatRequests(sheets, docProps, offs);
+  if (post.length) await batchUpdate(at, id, post, 30000).catch(() => {}); // формат/выравнивание
+  await applyTables(at, id, sheets, docProps, offs);  // фильтр + чередование
+  await addSlicers(at, id, sheets, docProps, offs);   // срезы (slicers)
 }
 
 // Создать НОВУЮ таблицу. Возвращает { url, id }.
@@ -154,12 +200,7 @@ export async function createReport(at, title, sheets) {
   const doc = await r.json().catch(() => ({}));
   if (!r.ok || !doc.spreadsheetId) throw new Error('Google Sheets: не удалось создать таблицу' + (doc.error ? `: ${doc.error.message || ''}` : ''));
   const docProps = doc.sheets.map((sh) => ({ sheetId: sh.properties.sheetId, title: sh.properties.title }));
-  const pre = preFormatRequests(sheets, docProps);
-  if (pre.length) await batchUpdate(at, doc.spreadsheetId, pre, 30000).catch(() => {}); // текст ДО записи (ведущие нули)
-  await writeValues(at, doc.spreadsheetId, sheets, docProps);
-  const post = postFormatRequests(sheets, docProps);
-  if (post.length) await batchUpdate(at, doc.spreadsheetId, post, 30000).catch(() => {}); // формат/выравнивание
-  await applyTables(at, doc.spreadsheetId, sheets, docProps);          // фильтр + чередование (после форматирования)
+  await writeAndDecorate(at, doc.spreadsheetId, sheets, docProps);
   return { url: doc.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${doc.spreadsheetId}`, id: doc.spreadsheetId };
 }
 
@@ -189,12 +230,7 @@ export async function updateReport(at, id, title, sheets) {
   reqsB.push({ deleteSheet: { sheetId: tmpId } });
   const repB = await batchUpdate(at, id, reqsB, 30000);
   const docProps = sheets.map((s, i) => ({ sheetId: repB[i].addSheet.properties.sheetId, title: repB[i].addSheet.properties.title }));
-  const pre = preFormatRequests(sheets, docProps);
-  if (pre.length) await batchUpdate(at, id, pre, 30000).catch(() => {}); // текст ДО записи (ведущие нули)
-  await writeValues(at, id, sheets, docProps);
-  const post = postFormatRequests(sheets, docProps);
-  if (post.length) await batchUpdate(at, id, post, 30000).catch(() => {}); // формат/выравнивание
-  await applyTables(at, id, sheets, docProps);          // фильтр + чередование (после форматирования)
+  await writeAndDecorate(at, id, sheets, docProps);
   return { url: meta.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${id}`, id };
 }
 
