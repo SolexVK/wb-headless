@@ -949,13 +949,72 @@ function report3Excel(data, fname) {
   X.writeFile(wb, fname || 'Отчёт_сводка_собственника.xlsx');
 }
 
+// ============================ ДАННЫЕ ДЛЯ GOOGLE SHEETS (значения по листам, без стилей) ============================
+// Каждая функция возвращает [{ title, rows: [[...], ...] }] — числа остаются числами.
+const price2n = (n) => Math.round((+n || 0) * 100) / 100;
+function sheetsConsolidated(data) {
+  const rows = [['Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $']];
+  for (const x of (data.fabricConsolidated || [])) rows.push([x.plansheet || '—', x.colorNo || '—', x.color, x.arts.join(', '), x.meters, price2n(x.price), x.cost]);
+  const T = data.consTotals || { meters: 0, cost: 0 };
+  rows.push(['Итого по фильтру', '', '', '', T.meters, '', T.cost]);
+  return [{ title: 'Ткань (фильтр)', rows }];
+}
+function sheetsReport1(data) {
+  const rows = [['Месяц', 'Цех', 'Артикул', 'Штук', 'Итого']];
+  for (const m of data.workshopMonthly) {
+    rows.push([m.label, '', '', '', m.total]);
+    for (const w of m.workshops) w.arts.forEach((a, i) => rows.push(['', w.name, a.art, a.units, i === 0 ? w.total : '']));
+  }
+  rows.push(['ИТОГО', '', '', '', data.grand.units]);
+  return [{ title: 'Цеха × Артикулы', rows }];
+}
+function sheetsReport2a(data) {
+  if (data.filtered) return sheetsConsolidated(data);
+  const rows = [['Месяц', 'Артикул', 'Планшет', '№ цвета', 'Цвет', 'Метраж, м']];
+  for (const m of data.fabricMonthly) {
+    for (const r of m.rows) rows.push([m.label, r.articleId, r.plansheet || '—', r.colorNo || '—', r.color, r.meters]);
+    rows.push([`Итого ${m.label}`, '', '', '', '', m.total]);
+  }
+  return [{ title: 'Ткань помесячно', rows }];
+}
+function sheetsReport2b(data) {
+  if (data.filtered) return sheetsConsolidated(data);
+  const R = data.rates; const som = (u) => R ? Math.round(u * R.usdKgs) : '';
+  const head = ['Тип', 'Заказ', 'Заказать', 'Приход ткани', 'Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $'];
+  if (R) head.push('Сумма, сом');
+  const rows = [head]; const P = data.fabricPurchase || {};
+  for (const [kind, orders] of [['Бишкек', P.bishkek || []], ['Демисезон', P.demi || []], ['Лето', P.summer || []]]) {
+    for (const o of orders) for (const it of o.items) {
+      const row = [kind, o.label, dmy(o.purchaseDate), o.arrival ? ymLabel(String(o.arrival).slice(0, 7)) : '—', it.plansheet || '—', it.colorNo || '—', it.color || '—', it.arts.join(', '), it.meters, price2n(it.price), it.cost];
+      if (R) row.push(som(it.cost)); rows.push(row);
+    }
+  }
+  return [{ title: 'Закупка ткани', rows }];
+}
+function sheetsReport3(data) {
+  const R = data.rates; const som = (u) => R ? Math.round(u * R.usdKgs) : '';
+  const wm = data.workshopMonthly || [], wc = data.workshopColors || {};
+  const wsNames = {}; for (const m of wm) for (const w of m.workshops) wsNames[w.workshopId] = w.name;
+  const wsOrder = Object.keys(wc).filter((id) => wsNames[id]); for (const id of Object.keys(wsNames)) if (!wsOrder.includes(id)) wsOrder.push(id);
+  const s1 = [['Месяц', ...wsOrder.map((id) => wsNames[id]), 'Итого']]; const wsTot = {};
+  for (const m of wm) { const row = [m.label]; for (const id of wsOrder) { const v = (m.workshops.find((w) => w.workshopId === id) || {}).total || 0; wsTot[id] = (wsTot[id] || 0) + v; row.push(v || ''); } row.push(m.total); s1.push(row); }
+  s1.push(['Итого', ...wsOrder.map((id) => wsTot[id] || 0), data.grand.units]);
+  const s2 = [['Месяц', 'Метраж, м']]; for (const m of (data.fabricMonthly || [])) s2.push([m.label, m.total]); s2.push(['Итого', data.grand.fabricMeters]);
+  const orders = [...(data.fabricPurchase.bishkek || []).map((o) => ({ ...o, kind: 'Бишкек' })), ...(data.fabricPurchase.demi || []).map((o) => ({ ...o, kind: 'Демисезон' })), ...(data.fabricPurchase.summer || []).map((o) => ({ ...o, kind: 'Лето' }))].sort((a, b) => String(a.purchaseDate).localeCompare(String(b.purchaseDate)));
+  const h3 = ['Тип', 'Заказ', 'Заказать', 'Приход', 'Метраж, м', 'Сумма, $']; if (R) h3.push('Сумма, сом');
+  const s3 = [h3]; let tm = 0, tc = 0;
+  for (const o of orders) { const row = [o.kind, o.label, dmy(o.purchaseDate), o.arrival ? ymLabel(String(o.arrival).slice(0, 7)) : '—', o.totalMeters, o.totalCost]; if (R) row.push(som(o.totalCost)); s3.push(row); tm += o.totalMeters; tc += o.totalCost; }
+  const tot = ['Итого', '', '', '', tm, tc]; if (R) tot.push(som(tc)); s3.push(tot);
+  return [{ title: 'Пошив по цехам', rows: s1 }, { title: 'Расход ткани', rows: s2 }, { title: 'Закупка по периодам', rows: s3 }];
+}
+
 // ============================ РЕЕСТР ОТЧЁТОВ ============================
-// Каждый отчёт: id, имя (для списка/архива), html(data), excel(data,fname), pdfTitle, имя файла.
+// Каждый отчёт: id, имя (для списка/архива), html(data), excel(data,fname), sheets(data), pdfTitle, имя файла.
 const REPORTS = [
-  { id: 'r3', name: 'Сводка для собственника (объёмы · периоды · суммы)', html: report3Html, excel: report3Excel, pdfTitle: 'Сводка для собственника', file: 'Отчёт_сводка.xlsx' },
-  { id: 'r1', name: 'Производство помесячно (цеха × артикулы)', html: report1Html, excel: report1Excel, pdfTitle: 'Производство помесячно: цеха × артикулы', file: 'Отчёт_производство.xlsx' },
-  { id: 'r2a', name: 'Ткань помесячно (планшет / цвет / метраж)', html: report2aHtml, excel: report2aExcel, pdfTitle: 'Ткань помесячно', file: 'Отчёт_ткань_помесячно.xlsx' },
-  { id: 'r2b', name: 'Закупка ткани (консолидация цветов)', html: report2bHtml, excel: report2bExcel, pdfTitle: 'Закупка ткани — консолидация', file: 'Отчёт_закупка_ткани.xlsx' },
+  { id: 'r3', name: 'Сводка для собственника (объёмы · периоды · суммы)', html: report3Html, excel: report3Excel, sheets: sheetsReport3, pdfTitle: 'Сводка для собственника', file: 'Отчёт_сводка.xlsx' },
+  { id: 'r1', name: 'Производство помесячно (цеха × артикулы)', html: report1Html, excel: report1Excel, sheets: sheetsReport1, pdfTitle: 'Производство помесячно: цеха × артикулы', file: 'Отчёт_производство.xlsx' },
+  { id: 'r2a', name: 'Ткань помесячно (планшет / цвет / метраж)', html: report2aHtml, excel: report2aExcel, sheets: sheetsReport2a, pdfTitle: 'Ткань помесячно', file: 'Отчёт_ткань_помесячно.xlsx' },
+  { id: 'r2b', name: 'Закупка ткани (консолидация цветов)', html: report2bHtml, excel: report2bExcel, sheets: sheetsReport2b, pdfTitle: 'Закупка ткани — консолидация', file: 'Отчёт_закупка_ткани.xlsx' },
 ];
 const reportById = (id) => REPORTS.find((r) => r.id === id) || REPORTS[0];
 
@@ -969,6 +1028,18 @@ function reportExcel(rep, data, savedAtIso) {
   const stamp = dmyhm(savedAtIso).replace(/[.: ]/g, '-');
   const base = rep.file.replace(/\.xlsx$/, '');
   rep.excel(data, `${base}_${stamp}.xlsx`);
+}
+
+// ============================ GOOGLE SHEETS ============================
+let googleStatus = null; // null — не проверяли; undefined — идёт запрос; {enabled,connected,email} | false — ошибка
+function googleBarHtml() {
+  const g = googleStatus;
+  const box = (inner) => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 0;padding:8px 12px;background:${C.zebra};border:1px solid ${C.border};border-radius:10px">
+    <span style="font-weight:700;color:${C.head};font-size:13px">📗 Google Sheets:</span>${inner}</div>`;
+  if (g == null) return box('<span style="color:#889;font-size:13px">проверка…</span>');
+  if (g === false || !g.enabled) return box('<span style="color:#889;font-size:13px">не настроено на сервере (нужны переменные PLANNER_GOOGLE_CLIENT_ID / SECRET)</span>');
+  if (!g.connected) return box('<span style="color:#556;font-size:13px">аккаунт не подключён</span><a class="btn btn-accent" href="/api/google/auth" style="margin-left:auto">Подключить Google</a>');
+  return box(`<span style="color:#256b45;font-size:13px">подключено${g.email ? ': <b>' + esc(g.email) + '</b>' : ''}</span><button class="btn btn-subtle" id="g-disconnect" style="margin-left:auto">Отключить</button>`);
 }
 
 // ============================ КУРСЫ ВАЛЮТ ============================
@@ -1117,6 +1188,7 @@ export function renderReportsPage(container, state, schedule, ctx = {}) {
     <div style="margin:0 0 4px"><div style="font-size:20px;font-weight:800;color:${C.head}">Отчёты</div>
       <div style="color:#667;font-size:13px">Текущие данные: ${fmtNum(data.grand.units)} шт производства · ${fmtNum(data.grand.fabricMeters)} м ткани.</div></div>
     ${currencyBarHtml()}
+    ${googleBarHtml()}
     ${coveragePanelHtml(data)}
     ${sourcingPanelHtml(data, (state.settings && state.settings.fabricSourcing) || {})}
     <div style="display:flex;gap:4px;margin:14px 0 0">${tabBtn('build', '📄 Получить отчёт')}${tabBtn('archive', '🗄 Архив')}</div>
@@ -1160,6 +1232,17 @@ export function renderReportsPage(container, state, schedule, ctx = {}) {
     api('/api/currency').then((r) => { currencyRates = (r && r.rates) || false; rerender(); })
       .catch(() => { currencyRates = false; rerender(); });
   }
+  // статус Google (один раз)
+  if (googleStatus === null && api) {
+    googleStatus = undefined;
+    api('/api/google/status').then((r) => { googleStatus = (r && r.ok) ? r : false; rerender(); }).catch(() => { googleStatus = false; rerender(); });
+  }
+  container.querySelector('#g-disconnect')?.addEventListener('click', async () => {
+    if (!api) return;
+    try { await api('/api/google/disconnect', { method: 'POST' }); googleStatus = null; toast('Google отключён'); }
+    catch (e) { toast('Не удалось отключить: ' + e.message, true); }
+    rerender();
+  });
 
   const panel = container.querySelector('#rep-panel');
   if (reportsSubTab === 'archive') renderArchive(panel, ctx2);
@@ -1237,6 +1320,7 @@ function showReport(result, rep, data, genAtIso, ctx) {
       ${periodCtl}
       <button class="btn btn-accent" id="rep-save">💾 Сохранить отчёт</button>
       <button class="btn" id="rep-xlsx">⤓ Excel</button>
+      <button class="btn" id="rep-gsheet" title="Выгрузить в Google Sheets">📗 Google</button>
       <button class="btn" id="rep-pdf">⤓ PDF</button>
     </div>
     ${filterBar}
@@ -1265,6 +1349,21 @@ function showReport(result, rep, data, genAtIso, ctx) {
   result.querySelector('#rep-xlsx').addEventListener('click', () => {
     if (!window.XLSX) { toast('Библиотека xlsx не загрузилась — обнови страницу', true); return; }
     try { reportExcel(rep, view, genAtIso); toast('Excel сформирован'); } catch (e) { toast('Ошибка Excel: ' + e.message, true); }
+  });
+  const gBtn = result.querySelector('#rep-gsheet');
+  gBtn?.addEventListener('click', async () => {
+    if (!api) { toast('Выгрузка недоступна', true); return; }
+    if (!(googleStatus && googleStatus.enabled)) { toast('Google Sheets не настроен на сервере', true); return; }
+    if (!googleStatus.connected) { toast('Сначала подключите Google в шапке отчётов', true); return; }
+    if (!rep.sheets) { toast('Этот отчёт нельзя выгрузить в Google', true); return; }
+    const old = gBtn.textContent; gBtn.disabled = true; gBtn.textContent = '📗 …';
+    try {
+      const sheets = rep.sheets(view);
+      const r = await api('/api/google/export', { method: 'POST', body: JSON.stringify({ title: `${rep.pdfTitle} — ${dmyhm(genAtIso)}`, sheets }) });
+      if (r && r.url) { window.open(r.url, '_blank'); toast('Таблица создана в Google'); }
+      else toast('Не удалось создать таблицу', true);
+    } catch (e) { toast('Google: ' + e.message, true); }
+    finally { gBtn.disabled = false; gBtn.textContent = old; }
   });
   result.querySelector('#rep-pdf').addEventListener('click', () => printReport(`${rep.pdfTitle} — ${dmyhm(genAtIso)}`, reportHeaderHtml(rep, genAtIso) + body));
 }

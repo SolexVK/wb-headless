@@ -16,6 +16,7 @@ import { computeWbLogistics } from './lib/wb/logistics.js';
 import { fetchRates } from './lib/currency.js';
 import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList, metaGet, metaSet, snapshotSave, snapshotList, snapshotGet, snapshotDelete, snapshotPrune, reportArchiveSave, reportArchiveList, reportArchiveGet, reportArchiveDelete } from './lib/db.js';
 import { installAuth, requireView, requireEdit } from './lib/authMiddleware.js';
+import * as google from './lib/google.js';
 import { applyWritePolicy, filterStateForRead, canEditAnything } from './lib/permissions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -24,7 +25,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'reports-sourcing-noreset-2026-08-27';
+const BACKEND_BUILD = 'reports-google-sheets-2026-08-28';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -516,6 +517,59 @@ app.post('/api/currency/refresh', requireView('data'), async (req, res) => {
     try { metaSet('currency_rates', JSON.stringify(rates)); } catch { /* нет БД */ }
     res.json({ ok: true, rates });
   } catch (e) { res.status(502).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// ── Google Sheets (OAuth 2.0 + Sheets API) — выгрузка отчётов в Google-таблицу ──
+// Токены храним в meta('google_tokens'). OAuth-поток идёт в уже авторизованном браузере владельца,
+// поэтому /auth и /callback проходят обычный guard (в запросе есть сессия).
+function googleLoadTokens() { try { const m = metaGet('google_tokens'); return m && m.value ? JSON.parse(m.value) : null; } catch { return null; } }
+function googleSaveTokens(t) { try { metaSet('google_tokens', JSON.stringify(t)); } catch { /* нет БД */ } }
+function googleConnected(t) { return !!(t && (t.refresh_token || t.access_token)); }
+async function googleAccessToken() {
+  const t = googleLoadTokens();
+  if (!googleConnected(t)) throw new Error('Google не подключён');
+  if (t.expires_at && t.expires_at - Date.now() > 60000 && t.access_token) return t.access_token; // ещё живой
+  if (!t.refresh_token) throw new Error('Google: нет refresh-токена — переподключите аккаунт');
+  const r = await google.refreshAccessToken(t.refresh_token);
+  t.access_token = r.access_token; t.expires_at = r.expires_at; googleSaveTokens(t);
+  return t.access_token;
+}
+function googleRedirectUri(req) {
+  const base = (process.env.PLANNER_PUBLIC_URL || '').replace(/\/+$/, '') || `${req.protocol}://${req.get('host')}`;
+  return base + '/api/google/callback';
+}
+app.get('/api/google/status', requireView('data'), (req, res) => {
+  const t = googleLoadTokens();
+  res.json({ ok: true, enabled: google.isEnabled(), connected: googleConnected(t), email: (t && t.email) || '' });
+});
+app.get('/api/google/auth', (req, res) => {
+  if (!google.isEnabled()) return res.status(400).type('html').send('<meta charset="utf-8">Google OAuth не настроен на сервере (нет PLANNER_GOOGLE_CLIENT_ID/SECRET). <a href="/">Назад</a>');
+  res.redirect(google.authUrl(googleRedirectUri(req), google.makeState()));
+});
+app.get('/api/google/callback', async (req, res) => {
+  try {
+    const { code, state, error } = req.query;
+    if (error) throw new Error(String(error));
+    if (!code || !google.checkState(state)) throw new Error('неверный state или код');
+    const tok = await google.exchangeCode(code, googleRedirectUri(req));
+    const prev = googleLoadTokens() || {};
+    if (!tok.refresh_token && prev.refresh_token) tok.refresh_token = prev.refresh_token; // Google шлёт refresh не каждый раз
+    googleSaveTokens(tok);
+    res.type('html').send('<!doctype html><meta charset="utf-8"><body style="font-family:-apple-system,sans-serif;padding:28px;color:#1f3a5f">✓ Google подключён. Возвращаемся в планировщик…<script>setTimeout(function(){location.href="/"},1200)</script></body>');
+  } catch (e) {
+    res.status(400).type('html').send('<meta charset="utf-8"><body style="font-family:sans-serif;padding:28px">Ошибка подключения Google: ' + String(e.message || e) + '.<br><a href="/">Назад</a></body>');
+  }
+});
+app.post('/api/google/disconnect', requireView('data'), (req, res) => { googleSaveTokens({}); res.json({ ok: true }); });
+app.post('/api/google/export', requireView('data'), async (req, res) => {
+  try {
+    if (!google.isEnabled()) return res.status(400).json({ ok: false, error: 'Google OAuth не настроен на сервере' });
+    const { title, sheets } = req.body || {};
+    if (!Array.isArray(sheets) || !sheets.length) return res.status(400).json({ ok: false, error: 'нет данных для выгрузки' });
+    const at = await googleAccessToken();
+    const out = await google.createReport(at, title, sheets);
+    res.json({ ok: true, url: out.url });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 
 // ── Архив отчётов ──
