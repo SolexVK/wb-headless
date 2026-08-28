@@ -949,63 +949,81 @@ function report3Excel(data, fname) {
   X.writeFile(wb, fname || 'Отчёт_сводка_собственника.xlsx');
 }
 
-// ============================ ДАННЫЕ ДЛЯ GOOGLE SHEETS (значения по листам, без стилей) ============================
-// Каждая функция возвращает [{ title, rows: [[...], ...] }] — числа остаются числами.
+// ============================ ДАННЫЕ ДЛЯ GOOGLE SHEETS ============================
+// Каждая функция возвращает [{ title, rows, cols }]. cols[i] ∈ 'text'|'num'|'price'|'img'.
+// Числа остаются числами (формат/выравнивание задаёт сервер). Ячейка-образец = '@IMG:<путь>'.
 const price2n = (n) => Math.round((+n || 0) * 100) / 100;
+const IMG = (p) => (p ? '@IMG:' + p : ''); // маркер картинки-образца для сервера
+
 function sheetsConsolidated(data) {
-  const rows = [['Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $']];
-  for (const x of (data.fabricConsolidated || [])) rows.push([x.plansheet || '—', x.colorNo || '—', x.color, x.arts.join(', '), x.meters, price2n(x.price), x.cost]);
+  const cols = ['text', 'text', 'text', 'img', 'text', 'num', 'price', 'num'];
+  const rows = [['Планшет', '№ цвета', 'Цвет', 'Образец', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $']];
+  for (const x of (data.fabricConsolidated || [])) rows.push([x.plansheet || '—', x.colorNo || '—', x.color, IMG((x.images && x.images[0]) || ''), x.arts.join(', '), x.meters, price2n(x.price), x.cost]);
   const T = data.consTotals || { meters: 0, cost: 0 };
-  rows.push(['Итого по фильтру', '', '', '', T.meters, '', T.cost]);
-  return [{ title: 'Ткань (фильтр)', rows }];
+  rows.push(['Итого по фильтру', '', '', '', '', T.meters, '', T.cost]);
+  return [{ title: 'Ткань (фильтр)', rows, cols }];
 }
 function sheetsReport1(data) {
+  const cols = ['text', 'text', 'text', 'num', 'num'];
   const rows = [['Месяц', 'Цех', 'Артикул', 'Штук', 'Итого']];
   for (const m of data.workshopMonthly) {
     rows.push([m.label, '', '', '', m.total]);
     for (const w of m.workshops) w.arts.forEach((a, i) => rows.push(['', w.name, a.art, a.units, i === 0 ? w.total : '']));
   }
   rows.push(['ИТОГО', '', '', '', data.grand.units]);
-  return [{ title: 'Цеха × Артикулы', rows }];
+  return [{ title: 'Цеха × Артикулы', rows, cols }];
 }
 function sheetsReport2a(data) {
   if (data.filtered) return sheetsConsolidated(data);
-  const rows = [['Месяц', 'Артикул', 'Планшет', '№ цвета', 'Цвет', 'Метраж, м']];
+  const cols = ['text', 'text', 'text', 'text', 'text', 'img', 'num'];
+  const rows = [['Месяц', 'Артикул', 'Планшет', '№ цвета', 'Цвет', 'Образец', 'Метраж, м']];
   for (const m of data.fabricMonthly) {
-    for (const r of m.rows) rows.push([m.label, r.articleId, r.plansheet || '—', r.colorNo || '—', r.color, r.meters]);
-    rows.push([`Итого ${m.label}`, '', '', '', '', m.total]);
+    for (const r of m.rows) rows.push([m.label, r.articleId, r.plansheet || '—', r.colorNo || '—', r.color, IMG(r.image || ''), r.meters]);
+    rows.push([`Итого ${m.label}`, '', '', '', '', '', m.total]);
   }
-  return [{ title: 'Ткань помесячно', rows }];
+  return [{ title: 'Ткань помесячно', rows, cols }];
 }
+// Закупка: ОТДЕЛЬНЫЕ листы — Бишкек / демисезон Китай / лето (муслин+марлёвка) Китай. Со столбцом «Образец».
 function sheetsReport2b(data) {
   if (data.filtered) return sheetsConsolidated(data);
   const R = data.rates; const som = (u) => R ? Math.round(u * R.usdKgs) : '';
-  const head = ['Тип', 'Заказ', 'Заказать', 'Приход ткани', 'Планшет', '№ цвета', 'Цвет', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $'];
-  if (R) head.push('Сумма, сом');
-  const rows = [head]; const P = data.fabricPurchase || {};
-  for (const [kind, orders] of [['Бишкек', P.bishkek || []], ['Демисезон', P.demi || []], ['Лето', P.summer || []]]) {
+  const HEAD = ['Заказ', 'Заказать', 'Приход ткани', 'Планшет', '№ цвета', 'Цвет', 'Образец', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $'];
+  const cols = ['text', 'text', 'text', 'text', 'text', 'text', 'img', 'text', 'num', 'price', 'num'];
+  const head = HEAD.slice(); if (R) { head.push('Сумма, сом'); cols.push('num'); }
+  const mk = (title, orders) => {
+    const rows = [head]; let tm = 0, tc = 0;
     for (const o of orders) for (const it of o.items) {
-      const row = [kind, o.label, dmy(o.purchaseDate), o.arrival ? ymLabel(String(o.arrival).slice(0, 7)) : '—', it.plansheet || '—', it.colorNo || '—', it.color || '—', it.arts.join(', '), it.meters, price2n(it.price), it.cost];
-      if (R) row.push(som(it.cost)); rows.push(row);
+      const row = [o.label, dmy(o.purchaseDate), o.arrival ? ymLabel(String(o.arrival).slice(0, 7)) : '—', it.plansheet || '—', it.colorNo || '—', it.color || '—', IMG((it.images && it.images[0]) || ''), it.arts.join(', '), it.meters, price2n(it.price), it.cost];
+      if (R) row.push(som(it.cost)); rows.push(row); tm += it.meters; tc += it.cost;
     }
-  }
-  return [{ title: 'Закупка ткани', rows }];
+    const tot = ['Итого', '', '', '', '', '', '', '', tm, '', tc]; if (R) tot.push(som(tc));
+    rows.push(tot);
+    return { title, rows, cols };
+  };
+  const P = data.fabricPurchase || {};
+  return [
+    mk('Бишкек (Мадина)', P.bishkek || []),
+    mk('Демисезон (Китай)', P.demi || []),
+    mk('Лето — муслин, марлёвка (Китай)', P.summer || []),
+  ];
 }
 function sheetsReport3(data) {
   const R = data.rates; const som = (u) => R ? Math.round(u * R.usdKgs) : '';
   const wm = data.workshopMonthly || [], wc = data.workshopColors || {};
   const wsNames = {}; for (const m of wm) for (const w of m.workshops) wsNames[w.workshopId] = w.name;
   const wsOrder = Object.keys(wc).filter((id) => wsNames[id]); for (const id of Object.keys(wsNames)) if (!wsOrder.includes(id)) wsOrder.push(id);
+  const cols1 = ['text', ...wsOrder.map(() => 'num'), 'num'];
   const s1 = [['Месяц', ...wsOrder.map((id) => wsNames[id]), 'Итого']]; const wsTot = {};
   for (const m of wm) { const row = [m.label]; for (const id of wsOrder) { const v = (m.workshops.find((w) => w.workshopId === id) || {}).total || 0; wsTot[id] = (wsTot[id] || 0) + v; row.push(v || ''); } row.push(m.total); s1.push(row); }
   s1.push(['Итого', ...wsOrder.map((id) => wsTot[id] || 0), data.grand.units]);
   const s2 = [['Месяц', 'Метраж, м']]; for (const m of (data.fabricMonthly || [])) s2.push([m.label, m.total]); s2.push(['Итого', data.grand.fabricMeters]);
   const orders = [...(data.fabricPurchase.bishkek || []).map((o) => ({ ...o, kind: 'Бишкек' })), ...(data.fabricPurchase.demi || []).map((o) => ({ ...o, kind: 'Демисезон' })), ...(data.fabricPurchase.summer || []).map((o) => ({ ...o, kind: 'Лето' }))].sort((a, b) => String(a.purchaseDate).localeCompare(String(b.purchaseDate)));
+  const cols3 = ['text', 'text', 'text', 'text', 'num', 'num']; if (R) cols3.push('num');
   const h3 = ['Тип', 'Заказ', 'Заказать', 'Приход', 'Метраж, м', 'Сумма, $']; if (R) h3.push('Сумма, сом');
   const s3 = [h3]; let tm = 0, tc = 0;
   for (const o of orders) { const row = [o.kind, o.label, dmy(o.purchaseDate), o.arrival ? ymLabel(String(o.arrival).slice(0, 7)) : '—', o.totalMeters, o.totalCost]; if (R) row.push(som(o.totalCost)); s3.push(row); tm += o.totalMeters; tc += o.totalCost; }
   const tot = ['Итого', '', '', '', tm, tc]; if (R) tot.push(som(tc)); s3.push(tot);
-  return [{ title: 'Пошив по цехам', rows: s1 }, { title: 'Расход ткани', rows: s2 }, { title: 'Закупка по периодам', rows: s3 }];
+  return [{ title: 'Пошив по цехам', rows: s1, cols: cols1 }, { title: 'Расход ткани', rows: s2, cols: ['text', 'num'] }, { title: 'Закупка по периодам', rows: s3, cols: cols3 }];
 }
 
 // ============================ РЕЕСТР ОТЧЁТОВ ============================

@@ -25,7 +25,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'reports-google-sheets-2026-08-28';
+const BACKEND_BUILD = 'reports-gsheets-images-2026-08-28';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -561,12 +561,50 @@ app.get('/api/google/callback', async (req, res) => {
   }
 });
 app.post('/api/google/disconnect', requireView('data'), (req, res) => { googleSaveTokens({}); res.json({ ok: true }); });
+// прочитать байты образца ткани по пути (/samples/<файл> или data:-URL)
+function readSampleBuffer(p) {
+  const s = String(p || '');
+  if (s.startsWith('data:')) { const m = /^data:(image\/[\w.+-]+);base64,([\s\S]+)$/.exec(s); if (!m) return null; const buf = Buffer.from(m[2], 'base64'); return buf.length ? { buf, mime: m[1] } : null; }
+  const m = /^\/samples\/([\w.\-]+)$/.exec(s); if (!m) return null;
+  const fp = path.join(SAMPLES_DIR, m[1]); if (!fs.existsSync(fp)) return null;
+  const ext = (m[1].split('.').pop() || '').toLowerCase();
+  const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'gif' ? 'image/gif' : ext === 'svg' ? 'image/svg+xml' : 'image/jpeg';
+  return { buf: fs.readFileSync(fp), mime };
+}
+// кэш «путь образца → Drive fileId», чтобы не заливать одну и ту же картинку повторно
+function googleImgCacheLoad() { try { const m = metaGet('google_img_cache'); return m && m.value ? JSON.parse(m.value) : {}; } catch { return {}; } }
+function googleImgCacheSave(c) { try { metaSet('google_img_cache', JSON.stringify(c)); } catch { /* нет БД */ } }
+// заменить ячейки-маркеры «@IMG:<путь>» на формулы =IMAGE(...), заливая образцы в Google Drive
+async function googleResolveImageCells(accessToken, sheets) {
+  const cache = googleImgCacheLoad(); let touched = false;
+  const idFor = async (p) => {
+    if (cache[p]) return cache[p];
+    const s = readSampleBuffer(p); if (!s) return '';
+    const id = await google.uploadImageToDrive(accessToken, s.buf, s.mime, 'ткань ' + p.split('/').pop());
+    await google.makeFilePublic(accessToken, id);
+    cache[p] = id; touched = true; return id;
+  };
+  for (const sh of sheets) {
+    if (!Array.isArray(sh.rows)) continue;
+    for (const row of sh.rows) {
+      for (let c = 0; c < row.length; c++) {
+        const v = row[c];
+        if (typeof v === 'string' && v.startsWith('@IMG:')) {
+          try { const id = await idFor(v.slice(5)); row[c] = id ? google.imageFormula(id) : ''; }
+          catch { row[c] = ''; } // образец не залился — оставим пусто, отчёт всё равно выгрузим
+        }
+      }
+    }
+  }
+  if (touched) googleImgCacheSave(cache);
+}
 app.post('/api/google/export', requireView('data'), async (req, res) => {
   try {
     if (!google.isEnabled()) return res.status(400).json({ ok: false, error: 'Google OAuth не настроен на сервере' });
     const { title, sheets } = req.body || {};
     if (!Array.isArray(sheets) || !sheets.length) return res.status(400).json({ ok: false, error: 'нет данных для выгрузки' });
     const at = await googleAccessToken();
+    await googleResolveImageCells(at, sheets); // образцы ткани → картинки в ячейках (через Drive)
     const out = await google.createReport(at, title, sheets);
     res.json({ ok: true, url: out.url });
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }

@@ -55,31 +55,76 @@ export async function refreshAccessToken(refreshToken) {
 }
 
 // Создать таблицу с листами и данными + лёгкое оформление (жирная шапка, заморозка строки, автоширина).
-// sheets: [{ title, rows: [[...], ...] }]. Возвращает { url, id }.
+// sheets: [{ title, rows: [[...], ...], cols: ['text'|'num'|'price'|'img', ...] }]. Возвращает { url, id }.
+// Локаль ru_RU → разделитель тысяч = пробел. Выравнивание: text — влево, num/price/img — по центру.
 export async function createReport(accessToken, title, sheets) {
   const H = { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' };
   const safeTitle = (s, i) => String(s || `Лист ${i + 1}`).replace(/[\[\]\*\/\\\?:]/g, ' ').slice(0, 90).trim() || `Лист ${i + 1}`;
-  // 1) создать таблицу со всеми листами (заморозка первой строки)
+  // 1) создать таблицу со всеми листами (заморозка первой строки, русская локаль → пробел-разделитель)
   const createBody = {
-    properties: { title: String(title || 'Отчёт').slice(0, 200) },
+    properties: { title: String(title || 'Отчёт').slice(0, 200), locale: 'ru_RU' },
     sheets: sheets.map((s, i) => ({ properties: { sheetId: i, title: safeTitle(s.title, i), gridProperties: { frozenRowCount: 1 } } })),
   };
   let r = await fetch('https://sheets.googleapis.com/v4/spreadsheets', { method: 'POST', headers: H, body: JSON.stringify(createBody) });
   let doc = await r.json().catch(() => ({}));
   if (!r.ok || !doc.spreadsheetId) throw new Error('Google Sheets: не удалось создать таблицу' + (doc.error ? `: ${doc.error.message || ''}` : ''));
-  // 2) записать значения (числа станут числами, текст — текстом)
+  // 2) записать значения (числа → числа, =IMAGE(...) → живая картинка). Локаль ru → разделитель ';' в формулах.
   const data = sheets.map((s, i) => ({ range: `'${doc.sheets[i].properties.title}'!A1`, majorDimension: 'ROWS', values: s.rows || [] }));
   r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${doc.spreadsheetId}/values:batchUpdate`, {
     method: 'POST', headers: H, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }),
   });
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error('Google Sheets: не удалось записать данные' + (e.error ? `: ${e.error.message || ''}` : '')); }
-  // 3) оформление: жирная шапка с заливкой + автоширина колонок
+  // 3) оформление: шапка + выравнивание/числовой формат по колонкам + картинки
   const reqs = [];
-  for (const sh of doc.sheets) {
+  const HEADER_BG = { red: 0.90, green: 0.93, blue: 0.96 };
+  doc.sheets.forEach((sh, i) => {
     const sid = sh.properties.sheetId;
-    reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: { red: 0.90, green: 0.93, blue: 0.96 } } }, fields: 'userEnteredFormat(textFormat,backgroundColor)' } });
-    reqs.push({ autoResizeDimensions: { dimensions: { sheetId: sid, dimension: 'COLUMNS', startIndex: 0, endIndex: 30 } } });
-  }
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${doc.spreadsheetId}:batchUpdate`, { method: 'POST', headers: H, body: JSON.stringify({ requests: reqs }) }).catch(() => { /* оформление не критично */ });
+    const cols = sheets[i].cols || [];
+    const rows = sheets[i].rows || [];
+    const nRows = rows.length;
+    const nCols = Math.max(cols.length, rows.reduce((mx, r) => Math.max(mx, r.length), 0), 1);
+    // шапка: жирная, заливка, по центру
+    reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: HEADER_BG, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment)' } });
+    // автоширина всех колонок (потом переопределим ширину колонки с картинками)
+    reqs.push({ autoResizeDimensions: { dimensions: { sheetId: sid, dimension: 'COLUMNS', startIndex: 0, endIndex: nCols } } });
+    // выравнивание + числовой формат по колонкам (строки данных)
+    let hasImg = false;
+    cols.forEach((t, c) => {
+      const align = (t === 'num' || t === 'price' || t === 'img') ? 'CENTER' : 'LEFT';
+      const uf = { horizontalAlignment: align, verticalAlignment: 'MIDDLE' };
+      let fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment)';
+      if (t === 'num') { uf.numberFormat = { type: 'NUMBER', pattern: '#,##0' }; fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment,numberFormat)'; }
+      if (t === 'price') { uf.numberFormat = { type: 'NUMBER', pattern: '#,##0.00' }; fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment,numberFormat)'; }
+      reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 1, endRowIndex: Math.max(1, nRows), startColumnIndex: c, endColumnIndex: c + 1 }, cell: { userEnteredFormat: uf }, fields } });
+      if (t === 'img') { hasImg = true; reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'COLUMNS', startIndex: c, endIndex: c + 1 }, properties: { pixelSize: 100 }, fields: 'pixelSize' } }); }
+    });
+    if (hasImg && nRows > 1) reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'ROWS', startIndex: 1, endIndex: nRows }, properties: { pixelSize: 54 }, fields: 'pixelSize' } });
+  });
+  if (reqs.length) await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${doc.spreadsheetId}:batchUpdate`, { method: 'POST', headers: H, body: JSON.stringify({ requests: reqs }) }).catch(() => { /* оформление не критично */ });
   return { url: doc.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${doc.spreadsheetId}`, id: doc.spreadsheetId };
+}
+
+// Формула картинки в ячейке (локаль ru → аргументы через ';'). Режим 4: фикс. размер в пикселях.
+export function imageFormula(fileId) {
+  return `=IMAGE("https://drive.google.com/thumbnail?id=${fileId}&sz=w300"; 4; 46; 86)`;
+}
+// Загрузить картинку в Google Drive (drive.file) — multipart. Возвращает fileId.
+export async function uploadImageToDrive(accessToken, buffer, mime, name) {
+  const boundary = 'planner' + Math.random().toString(16).slice(2);
+  const meta = JSON.stringify({ name: (name || 'sample').slice(0, 120), mimeType: mime });
+  const pre = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`;
+  const post = `\r\n--${boundary}--`;
+  const body = Buffer.concat([Buffer.from(pre, 'utf8'), buffer, Buffer.from(post, 'utf8')]);
+  const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': `multipart/related; boundary=${boundary}` }, body,
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.id) throw new Error('Google Drive: не удалось загрузить образец' + (d.error ? `: ${d.error.message || ''}` : ''));
+  return d.id;
+}
+// Сделать файл доступным «по ссылке для чтения» (нужно, чтобы =IMAGE подтянул картинку с серверов Google).
+export async function makeFilePublic(accessToken, fileId) {
+  await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
+    method: 'POST', headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+  }).catch(() => { /* если не вышло — картинка просто не отрисуется */ });
 }
