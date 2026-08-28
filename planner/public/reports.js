@@ -167,15 +167,32 @@ export function buildReportsData(state, schedule, opts = {}) {
   const fSources = asArr(F.sources, F.source);   // 'china' | 'bishkek'
   const fSeasons = asArr(F.seasons, F.season);   // 'summer' | 'demi'
   const fText = String(F.text || '').trim().toLowerCase(); // свободный поиск (муслин, марлёвка, цвет, планшет…)
+  // ИСКЛЮЧЕНИЕ (отрицание): «кроме / без / исключить X». Пустой набор = ничего не исключаем.
+  const X = F.exclude || {};
+  const xArrText = (v) => (Array.isArray(v) ? v : (v ? [v] : [])).map((s) => String(s).trim().toLowerCase()).filter(Boolean);
+  const xPlans = asArr(X.plansheets, X.plansheet);
+  const xArts = asArr(X.articleIds, X.articleId);
+  const xMonths = asArr(X.months, X.month);
+  const xSources = asArr(X.sources, X.source);
+  const xSeasons = asArr(X.seasons, X.season);
+  const xText = xArrText(X.text); // исключить, если текст содержит ЛЮБОЕ из слов
+  const hasExclude = !!(xPlans.length || xArts.length || xMonths.length || xSources.length || xSeasons.length || xText.length);
   const seasonOf = (d) => (d.isSummer ? 'summer' : 'demi');
   const textOf = (d) => `${d.articleId} ${d.articleName} ${d.plansheet} ${d.colorNo} ${d.color}`.toLowerCase();
-  const filtered = !!(fPlans.length || fArts.length || fMonths.length || fSources.length || fSeasons.length || fText);
+  const filtered = !!(fPlans.length || fArts.length || fMonths.length || fSources.length || fSeasons.length || fText || hasExclude);
   if (filtered) dem = dem.filter((d) => (!fPlans.length || fPlans.includes(d.plansheet))
     && (!fArts.length || fArts.includes(d.articleId))
     && (!fMonths.length || fMonths.includes(d[monthField]))
     && (!fSources.length || fSources.includes(d.source))
     && (!fSeasons.length || fSeasons.includes(seasonOf(d)))
-    && (!fText || textOf(d).includes(fText)));
+    && (!fText || textOf(d).includes(fText))
+    // условия исключения — позиция выпадает, если попадает под любое из них
+    && !xPlans.includes(d.plansheet)
+    && !xArts.includes(d.articleId)
+    && !xMonths.includes(d[monthField])
+    && !xSources.includes(d.source)
+    && !xSeasons.includes(seasonOf(d))
+    && !xText.some((t) => textOf(d).includes(t)));
 
   // ── Отчёт 2a: помесячная детализация ткани (месяц × артикул × планшет × №цвета × метраж) ──
   const r2 = {};
@@ -316,7 +333,7 @@ export function buildReportsData(state, schedule, opts = {}) {
     summerIds: [...summer],
     rates: (opts.rates && typeof opts.rates === 'object') ? opts.rates : null, // курсы валют на момент отчёта
     periodMode,
-    fabricFilters, filters: { plansheets: fPlans, articleIds: fArts, months: fMonths, sources: fSources, seasons: fSeasons, text: fText }, filtered, // фильтры отчётов по ткани (множественные) + свободный поиск
+    fabricFilters, filters: { plansheets: fPlans, articleIds: fArts, months: fMonths, sources: fSources, seasons: fSeasons, text: fText, exclude: { plansheets: xPlans, articleIds: xArts, months: xMonths, sources: xSources, seasons: xSeasons, text: xText } }, filtered, // фильтры отчётов по ткани (множественные) + свободный поиск + исключения
     plansheetInfo, // сводка по планшетам для панели «Источник и цена ткани»
     fabricConsolidated, consTotals, // консолидированный вид при активном фильтре
     grand: {
@@ -1289,7 +1306,8 @@ function sourcingPanelHtml(data, cfg) {
 // ============================ СТРАНИЦА (2 под-вкладки: Отчёты / Архив) ============================
 let reportsSubTab = 'build';       // 'build' | 'archive' — сохраняется между перерисовками
 let reportPeriodMode = 'month';    // 'month' | '2month' — период закупа ткани
-let reportFabricFilters = { plansheets: [], articleIds: [], months: [], sources: [], seasons: [], text: '' }; // фильтры отчётов по ткани (множественные) + свободный поиск
+const emptyFF = () => ({ plansheets: [], articleIds: [], months: [], sources: [], seasons: [], text: '', exclude: { plansheets: [], articleIds: [], months: [], sources: [], seasons: [], text: [] } });
+let reportFabricFilters = emptyFF(); // фильтры отчётов по ткани (множественные) + свободный поиск + исключения
 let nlqStatus = null;              // null — не проверяли; undefined — идёт запрос; {enabled} | false — нет ключа/ошибка
 let nlqLastExplain = '';           // человекочитаемое описание последнего разбора запроса нейросетью
 let nlqPending = null;             // предпросмотр разбора до применения: {query, filter, explain, cached}
@@ -1311,6 +1329,13 @@ function describeFilterParts(f, ff, repId) {
   (f.sources || []).forEach((v) => parts.push('Источник: ' + sl(v)));
   (f.seasons || []).forEach((v) => parts.push(sel(v)));
   if (f.text) parts.push('Поиск: «' + f.text + '»');
+  const X = f.exclude || {};
+  (X.plansheets || []).forEach((v) => parts.push({ neg: true, t: 'Кроме планшета: ' + v }));
+  (X.articleIds || []).forEach((v) => parts.push({ neg: true, t: 'Кроме артикула: ' + al(v) }));
+  (X.months || []).forEach((v) => parts.push({ neg: true, t: 'Кроме: ' + ml(v) }));
+  (X.sources || []).forEach((v) => parts.push({ neg: true, t: 'Кроме источника: ' + sl(v) }));
+  (X.seasons || []).forEach((v) => parts.push({ neg: true, t: 'Кроме: ' + sel(v) }));
+  (X.text || []).forEach((v) => parts.push({ neg: true, t: 'Исключить: «' + v + '»' }));
   return parts;
 }
 let openReportId = null, openReportGenAt = null; // какой отчёт открыт (чтобы переоткрыть после перерисовки)
@@ -1512,8 +1537,11 @@ function showReport(result, rep, data, genAtIso, ctx) {
     let previewCard = '';
     if (nlqPending && nlqPending.repId === rep.id) {
       const parts = describeFilterParts(nlqPending.filter, ff, rep.id);
+      const pchip = (p) => (typeof p === 'object' && p.neg)
+        ? `<span style="display:inline-block;padding:3px 9px;background:#fdecea;border:1px solid #f5b5ae;border-radius:14px;font-size:12px;color:#9b1c1c">🚫 ${esc(p.t)}</span>`
+        : `<span style="display:inline-block;padding:3px 9px;background:#fff;border:1px solid #cfe2ff;border-radius:14px;font-size:12px;color:${C.head}">${esc(p)}</span>`;
       const pchips = parts.length
-        ? parts.map((p) => `<span style="display:inline-block;padding:3px 9px;background:#fff;border:1px solid #cfe2ff;border-radius:14px;font-size:12px;color:${C.head}">${esc(p)}</span>`).join(' ')
+        ? parts.map(pchip).join(' ')
         : '<span style="color:#a05a00;font-size:12.5px">фильтр пустой — под запрос ничего конкретного не выделено (покажет всё)</span>';
       previewCard = `<div style="margin:0 0 12px;padding:12px 14px;background:#f2f8ff;border:1px solid #bcd8ff;border-radius:10px">
           <div style="font-size:12.5px;color:${C.head};font-weight:700;margin-bottom:6px">🧠 Как система поняла запрос${nlqPending.cached ? ' <span style="color:#256b45;font-weight:600">· ⚡ из кэша</span>' : ''}</div>
@@ -1536,6 +1564,15 @@ function showReport(result, rep, data, genAtIso, ctx) {
     (cur.sources || []).forEach((v) => chips.push(chip('sources', v, 'Источник: ' + esc(srcLabel(v)))));
     (cur.seasons || []).forEach((v) => chips.push(chip('seasons', v, esc(seasonLabel(v)))));
     if (cur.text) chips.push(chip('text', cur.text, 'Поиск: «' + esc(cur.text) + '»'));
+    // исключающие чипы (красные) — удаляются кликом, поле помечено префиксом x-
+    const xchip = (field, val, label) => `<span data-chip="x-${field}" data-val="${esc(String(val))}" style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;background:#fdecea;border:1px solid #f5b5ae;border-radius:14px;font-size:12px;color:#9b1c1c;cursor:pointer" title="Убрать исключение">🚫 ${label}<b style="color:#c0392b;font-size:13px">×</b></span>`;
+    const cx = cur.exclude || {};
+    (cx.plansheets || []).forEach((v) => chips.push(xchip('plansheets', v, 'Кроме планшета: ' + esc(v))));
+    (cx.articleIds || []).forEach((v) => chips.push(xchip('articleIds', v, 'Кроме артикула: ' + esc(artLabel(v)))));
+    (cx.months || []).forEach((v) => chips.push(xchip('months', v, 'Кроме: ' + esc(monthLabel(v)))));
+    (cx.sources || []).forEach((v) => chips.push(xchip('sources', v, 'Кроме источника: ' + esc(srcLabel(v)))));
+    (cx.seasons || []).forEach((v) => chips.push(xchip('seasons', v, 'Кроме: ' + esc(seasonLabel(v)))));
+    (cx.text || []).forEach((v) => chips.push(xchip('text', v, 'Исключить: «' + esc(v) + '»')));
     const chipsRow = chips.length
       ? `<div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:0 0 10px">
           <span style="font-size:12px;color:#667;font-weight:700">Фильтр:</span>${chips.join('')}
@@ -1589,18 +1626,21 @@ function showReport(result, rep, data, genAtIso, ctx) {
   result.querySelectorAll('[data-chip]').forEach((el) => el.addEventListener('click', () => {
     const field = el.dataset.chip, val = el.dataset.val;
     if (field === 'text') { reportFabricFilters.text = ''; nlqLastExplain = ''; }
-    else reportFabricFilters[field] = (reportFabricFilters[field] || []).filter((x) => String(x) !== val);
+    else if (field.startsWith('x-')) { // исключающий чип: x-<поле>
+      const f2 = field.slice(2), ex = reportFabricFilters.exclude || {};
+      ex[f2] = (ex[f2] || []).filter((x) => String(x) !== val);
+    } else reportFabricFilters[field] = (reportFabricFilters[field] || []).filter((x) => String(x) !== val);
     rerender();
   }));
   // применить разобранный фильтр к отчёту (общая точка для «Применить» и авто-применения)
+  const arrOf = (v) => (Array.isArray(v) ? v : []);
   const applyFilter = (f, explain) => {
+    const X = f.exclude || {};
     reportFabricFilters = {
-      plansheets: Array.isArray(f.plansheets) ? f.plansheets : [],
-      articleIds: Array.isArray(f.articleIds) ? f.articleIds : [],
-      months: Array.isArray(f.months) ? f.months : [],
-      sources: Array.isArray(f.sources) ? f.sources : [],
-      seasons: Array.isArray(f.seasons) ? f.seasons : [],
-      text: typeof f.text === 'string' ? f.text : '' };
+      plansheets: arrOf(f.plansheets), articleIds: arrOf(f.articleIds), months: arrOf(f.months),
+      sources: arrOf(f.sources), seasons: arrOf(f.seasons), text: typeof f.text === 'string' ? f.text : '',
+      exclude: { plansheets: arrOf(X.plansheets), articleIds: arrOf(X.articleIds), months: arrOf(X.months),
+        sources: arrOf(X.sources), seasons: arrOf(X.seasons), text: arrOf(X.text) } };
     nlqLastExplain = String(explain || '');
   };
   // командная строка: разобрать запрос (нейросетью, если подключена) → предпросмотр → применить
@@ -1628,7 +1668,7 @@ function showReport(result, rep, data, genAtIso, ctx) {
   };
   result.querySelector('#nlq-go')?.addEventListener('click', runNlq);
   result.querySelector('#nlq-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runNlq(); } });
-  result.querySelector('#nlq-clear')?.addEventListener('click', () => { reportFabricFilters = { plansheets: [], articleIds: [], months: [], sources: [], seasons: [], text: '' }; nlqLastExplain = ''; nlqPending = null; rerender(); });
+  result.querySelector('#nlq-clear')?.addEventListener('click', () => { reportFabricFilters = emptyFF(); nlqLastExplain = ''; nlqPending = null; rerender(); });
   // предпросмотр: применить / отменить
   result.querySelector('#nlq-apply')?.addEventListener('click', () => {
     if (!nlqPending) return;

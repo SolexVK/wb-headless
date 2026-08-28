@@ -132,7 +132,19 @@ const FILTER_TOOL = {
       sources: { type: 'array', items: { type: 'string', enum: ['china', 'bishkek'] }, description: 'Источник закупа: china = Китай, bishkek = Бишкек/Мадина.' },
       seasons: { type: 'array', items: { type: 'string', enum: ['summer', 'demi'] }, description: 'Сезон ткани: summer = лето (муслин/марлёвка), demi = демисезон.' },
       text: { type: 'string', description: 'Свободный текст для подстрочного поиска (тип ткани, цвет и т.п.), если его нельзя выразить полями выше. Иначе пустая строка.' },
-      explain: { type: 'string', description: 'Короткое (до 12 слов) описание применённого фильтра по-русски.' },
+      exclude: {
+        type: 'object',
+        description: 'ИСКЛЮЧЕНИЕ (отрицание): «кроме / без / исключить X». Позиции, попадающие сюда, УБИРАЮТСЯ из выборки.',
+        properties: {
+          plansheets: { type: 'array', items: { type: 'string' } },
+          articleIds: { type: 'array', items: { type: 'string' } },
+          months: { type: 'array', items: { type: 'string' } },
+          sources: { type: 'array', items: { type: 'string', enum: ['china', 'bishkek'] } },
+          seasons: { type: 'array', items: { type: 'string', enum: ['summer', 'demi'] } },
+          text: { type: 'array', items: { type: 'string' }, description: 'Слова/названия тканей/цветов для исключения по тексту (напр. ["муслин","марлёвка"]).' },
+        },
+      },
+      explain: { type: 'string', description: 'Короткое (до 15 слов) описание применённого фильтра по-русски, включая исключения.' },
     },
     required: ['explain'],
   },
@@ -151,10 +163,11 @@ function buildSystem(dims, reportKind) {
 - Массив можно оставить пустым (пустой = «все»).
 - «Муслин», «марлёвка», «муслин/марлёвка», «летние ткани» → seasons: ["summer"]. «Демисезон», «зимние/осенние ткани» → seasons: ["demi"].
 - «в Китае», «китайская закупка» → sources: ["china"]. «на Мадине», «в Бишкеке», «Мадина» → sources: ["bishkek"].
-- Конкретное название ткани («Муслин», «Кулирка», цвет) без явного поля клади в text.
+- Конкретное название ткани («Муслин», «Кулирка», цвет) для ВКЛЮЧЕНИЯ клади в text.
+- ОТРИЦАНИЕ. «кроме / без / исключить / не показывай / убрать X» → клади X в соответствующее поле внутри exclude (а НЕ в include). Названия тканей/цветов для исключения → exclude.text (массив слов). Примеры: «исключить муслин и марлёвку» → exclude.text: ["муслин","марлёвка"]; «все кроме планшета 12» → exclude.plansheets: ["12"]; «без закупа в Китае» → exclude.sources: ["china"]. НИКОГДА не клади слово «исключить/кроме» в text — это команда, а не искомый текст.
 - «первый этап/транш закупа», «второй этап» относятся к летним тканям — если это нельзя выразить месяцем из списка, добавь фразу в text.
 - months — это ${monthMeaning}, формат YYYY-MM.
-- explain — короткая фраза, что именно ты отфильтровал.
+- explain — короткая фраза, что именно ты отфильтровал (включая, что исключил).
 
 Разрешённые планшеты: ${plans}
 
@@ -171,6 +184,8 @@ function validateFilter(inp, dimensions) {
   const okPlan = new Set((dimensions.plansheets || []).map(String));
   const okArt = new Set((dimensions.articles || []).map((a) => String(a.id)));
   const okMon = new Set((dimensions.months || []).map((m) => String(m.ym)));
+  const words = (v) => (Array.isArray(v) ? v : (v ? [v] : [])).map((x) => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 20);
+  const X = inp.exclude || {};
   return {
     plansheets: arr(inp.plansheets).filter((v) => okPlan.has(v)),
     articleIds: arr(inp.articleIds).filter((v) => okArt.has(v)),
@@ -178,6 +193,14 @@ function validateFilter(inp, dimensions) {
     sources: arr(inp.sources).filter((v) => v === 'china' || v === 'bishkek'),
     seasons: arr(inp.seasons).filter((v) => v === 'summer' || v === 'demi'),
     text: typeof inp.text === 'string' ? inp.text.trim().slice(0, 120) : '',
+    exclude: {
+      plansheets: arr(X.plansheets).filter((v) => okPlan.has(v)),
+      articleIds: arr(X.articleIds).filter((v) => okArt.has(v)),
+      months: arr(X.months).filter((v) => okMon.has(v)),
+      sources: arr(X.sources).filter((v) => v === 'china' || v === 'bishkek'),
+      seasons: arr(X.seasons).filter((v) => v === 'summer' || v === 'demi'),
+      text: words(X.text),
+    },
   };
 }
 
