@@ -1076,14 +1076,18 @@ function cancelsRefusals(snap) {
     t.unknown ? { icon: 'ℹ️', accent: DKAC.teal, text: `Без статуса (вне окна ретеншена WB): <b>${nf(t.unknown)}</b> из ${nf(t.made)} — в % отказов не входят` } : null,
   ]);
   const reasonBars = logiBars(reasons.map((r) => ({ label: r.ru, value: r.rub })), 'var(--c-violet)', rub);
+  const reasonNote = `<p class="blk-hint" style="margin:4px 0 10px">Это <b>розничная цена заказов</b> по каждой причине (упущенная выручка), <b>не расход и не штрафы</b>. Реальные удержания и штрафы в рублях — на вкладке «Деньги».</p>`;
+  const declineRef = t.clientDecline ? `<p class="kv" style="margin:8px 0 0;font-size:12px">ℹ️ Справочно (не потеря): отмена клиентом в 1-й час — <b>${nf(t.clientDecline)}</b> заказов на <b>${rub(t.clientDeclineRub)}</b>. Заказ отменён до сборки/отправки, реальных денег по нему нет — поэтому в график выше не включён.</p>` : '';
   const head = `<tr>${thT('Фулфилмент', 'Наш склад-фулфилмент', 'tl')}${thT('Заданий', 'Сборочных заданий за период', 'num')}${thT('Выкуплено', 'Дошло до выкупа', 'num')}${thT('Отказ ФФ', 'Отменено продавцом (не собрал/не успел)', 'num')}${thT('% ФФ', 'Доля отказов ФФ от решённых (без «в работе»)', 'num')}${thT('Брак', 'Отменено по браку', 'num')}${thT('Отказ клиента', 'Клиент отказался при получении', 'num')}${thT('В работе', 'Ещё не финализировано', 'num')}${thT('Потери', 'Упущенная выручка: отказ ФФ + брак', 'num')}</tr>`;
   const rows = byFF.map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="num" data-v="${r.made}">${nf(r.made)}</td><td class="num" data-v="${r.sold}">${nf(r.sold)}</td><td class="num" data-v="${r.sellerCancel}">${nf(r.sellerCancel)}</td><td class="num" data-v="${r.sellerCancelPct}">${r.sellerCancelPct}%</td><td class="num" data-v="${r.defect}">${nf(r.defect)}</td><td class="num" data-v="${r.clientRefusal}">${nf(r.clientRefusal)}</td><td class="num" data-v="${r.inWork}">${nf(r.inWork)}</td><td class="num" data-v="${r.lostRub}">${rub(r.lostRub)}</td></tr>`).join('');
   const table = byFF.length ? `<div class="scroll"><table class="rt sortable"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Нет заданий за период.</p>';
   return `${note}
       <div class="dk-kpis">${tiles}</div>
       ${insightRow}
-      ${ph('💸', 'Упущенная выручка по причинам', 'по каждой причине отказа/брака', DKAC.red)}
+      ${ph('💸', 'Стоимость заказов по причине (упущенная выручка, не расход)', 'розничная цена заказов, а не штрафы', DKAC.red)}
+      ${reasonNote}
       ${reasonBars}
+      ${declineRef}
       <div style="margin-top:22px"></div>
       ${ph('🏭', 'Разбор по фулфилментам', 'задания, выкупы, отказы и потери · клик по заголовку — сортировка', DKAC.violet)}
       ${table}`;

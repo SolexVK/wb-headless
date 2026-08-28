@@ -209,7 +209,9 @@ eq(cx.totals.clientRefusalRub, 1000, 'отказы: обратная логис�
 eq(cx.byFF.map((r) => r.ff), ['B', 'A'], 'отказы: ФФ по потерям, tiebreak по отказам ФФ (B впереди)');
 eq(cx.byFF[0], { ff: 'B', warehouseId: 2, made: 4, decided: 4, sold: 1, sellerCancel: 2, clientRefusal: 0, clientDecline: 1, defect: 0, carrier: 0, inWork: 0, unknown: 0, sellerCancelPct: 50, failCount: 2, lostRub: 2000, clientRefusalRub: 0 }, 'отказы: строка ФФ «B» точная');
 eq(cx.worst, { ff: 'B', lostRub: 2000, sellerCancel: 2, sellerCancelPct: 50 }, 'отказы: худший ФФ = B');
-eq(cx.reasons.map((r) => [r.key, r.rub]), [['cancelSeller', 3000], ['defect', 1000], ['canceledClient', 1000], ['declinedClient', 1000]], 'отказы: причины по сумме (отказ ФФ первым)');
+eq(cx.reasons.map((r) => [r.key, r.rub]), [['cancelSeller', 3000], ['defect', 1000], ['canceledClient', 1000]], 'отказы: причины по сумме (без отмены 1-й час, отказ ФФ первым)');
+eq(cx.reasons.some((r) => r.key === 'declinedClient'), false, 'отказы: отмена 1-й час НЕ в графике причин');
+eq([cx.totals.clientDecline, cx.totals.clientDeclineRub], [1, 1000], 'отказы: отмена 1-й час — справочно (кол-во+₽)');
 // «Без статуса» уменьшает decided и не входит в % отказов.
 const cU = buildCancels([{ id: 1, ff: 'A', priceRub: 0 }, { id: 2, ff: 'A', priceRub: 0 }], (o) => (o.id === 1 ? { supplierStatus: 'cancel', wbStatus: 'canceled' } : null));
 eq([cU.totals.made, cU.totals.withStatus, cU.totals.decided, cU.totals.sellerCancelPct], [2, 1, 1, 100], 'отказы: unknown вне decided/% (1 из 2 без статуса)');

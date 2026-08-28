@@ -99,7 +99,10 @@ const body = `<div class="wrap">
     ${panelHead('💸', 'Где теряем деньги', `упущенная выручка по вине ФФ и разбивка по причинам · за ${s.days} дн`, AC.red)}
     <div class="cols cols-2">
       <div><div class="panel-sub" style="margin-bottom:8px">Потери по ФФ</div><div class="chart-wrap">${lostBars || '<p class="note">Потерь по вине ФФ за период нет.</p>'}</div></div>
-      <div><div class="panel-sub" style="margin-bottom:8px">Потери и отмены по причинам</div><div class="chart-wrap">${reasonBars || '<p class="note">Отмен за период нет.</p>'}</div></div>
+      <div><div class="panel-sub" style="margin-bottom:8px">Стоимость заказов по причине (упущенная выручка, не расход)</div>
+        <p class="note" style="margin:0 0 8px">Розничная цена заказов по причине — не штрафы и не расход. Реальные удержания — в отчёте реализации.</p>
+        <div class="chart-wrap">${reasonBars || '<p class="note">Отмен за период нет.</p>'}</div>
+        ${t.clientDecline ? `<p class="note" style="margin:8px 0 0">ℹ️ Справочно (не потеря): отмена клиентом в 1-й час — ${nf(t.clientDecline)} заказов на ${rub(t.clientDeclineRub)}. Отменено до сборки, реальных денег нет — в график не включено.</p>` : ''}</div>
     </div>
   </section>
   ${scorePanel}

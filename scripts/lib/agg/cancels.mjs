@@ -85,9 +85,12 @@ export function buildCancels(orders, statusOf) {
     sellerCancelPct: decidedAll ? r2((catTot.cancelSeller / decidedAll) * 100) : 0,
     lostRub: Math.round(moneyTot.cancelSeller + moneyTot.defect),
     clientRefusalRub: Math.round(moneyTot.canceledClient),
+    clientDeclineRub: Math.round(moneyTot.declinedClient), // справочно: отмена в 1-й час — НЕ потеря
   };
+  // Отмену клиентом в 1-й час (declinedClient) в график причин НЕ включаем: заказ
+  // отменён до сборки/отправки — реальных денег по нему нет; показываем справочно отдельно.
   const reasons = CANCEL_CATS
-    .filter((c) => c.blame !== 'ok' && c.blame !== 'na' && catTot[c.key] > 0)
+    .filter((c) => c.blame !== 'ok' && c.blame !== 'na' && c.key !== 'declinedClient' && catTot[c.key] > 0)
     .map((c) => ({ key: c.key, ru: c.ru, blame: c.blame, count: catTot[c.key], rub: Math.round(moneyTot[c.key]) }))
     .sort((a, b) => b.rub - a.rub || b.count - a.count);
 
