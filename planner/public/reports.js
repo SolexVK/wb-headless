@@ -954,14 +954,18 @@ function report3Excel(data, fname) {
 // Числа остаются числами (формат/выравнивание задаёт сервер). Ячейка-образец = '@IMG:<путь>'.
 const price2n = (n) => Math.round((+n || 0) * 100) / 100;
 const IMG = (p) => (p ? '@IMG:' + p : ''); // маркер картинки-образца для сервера
+const colL = (i) => { let s = ''; i += 1; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+// строка «Итого» с формулами SUBTOTAL(109) по числовым колонкам — пересчитывается при фильтрации.
+// cnt — число строк данных (шапка = строка 1, данные 2..cnt+1). label — текст в первой ячейке.
+const totalRow = (cols, cnt, label) => cols.map((t, ci) => ci === 0 ? label : (t === 'num' && cnt > 0 ? `=SUBTOTAL(109; ${colL(ci)}2:${colL(ci)}${cnt + 1})` : ''));
 
 function sheetsConsolidated(data) {
   const cols = ['text', 'text', 'text', 'img', 'text', 'num', 'price', 'num'];
   const rows = [['Планшет', '№ цвета', 'Цвет', 'Образец', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $']];
-  for (const x of (data.fabricConsolidated || [])) rows.push([x.plansheet || '—', x.colorNo || '—', x.color, IMG((x.images && x.images[0]) || ''), x.arts.join(', '), x.meters, price2n(x.price), x.cost]);
-  const T = data.consTotals || { meters: 0, cost: 0 };
-  rows.push(['Итого по фильтру', '', '', '', '', T.meters, '', T.cost]);
-  return [{ title: 'Ткань (фильтр)', rows, cols }];
+  let cnt = 0;
+  for (const x of (data.fabricConsolidated || [])) { rows.push([x.plansheet || '—', x.colorNo || '—', x.color, IMG((x.images && x.images[0]) || ''), x.arts.join(', '), x.meters, price2n(x.price), x.cost]); cnt++; }
+  rows.push(totalRow(cols, cnt, 'Итого по фильтру'));
+  return [{ title: 'Ткань (фильтр)', rows, cols, table: cnt > 0, totalRow: true }];
 }
 function sheetsReport1(data) {
   const cols = ['text', 'text', 'text', 'num', 'num'];
@@ -991,14 +995,13 @@ function sheetsReport2b(data) {
   const cols = ['text', 'text', 'text', 'text', 'text', 'text', 'img', 'text', 'num', 'price', 'num'];
   const head = HEAD.slice(); if (R) { head.push('Сумма, сом'); cols.push('num'); }
   const mk = (title, orders) => {
-    const rows = [head]; let tm = 0, tc = 0;
+    const rows = [head]; let cnt = 0;
     for (const o of orders) for (const it of o.items) {
       const row = [o.label, dmy(o.purchaseDate), o.arrival ? ymLabel(String(o.arrival).slice(0, 7)) : '—', it.plansheet || '—', it.colorNo || '—', it.color || '—', IMG((it.images && it.images[0]) || ''), it.arts.join(', '), it.meters, price2n(it.price), it.cost];
-      if (R) row.push(som(it.cost)); rows.push(row); tm += it.meters; tc += it.cost;
+      if (R) row.push(som(it.cost)); rows.push(row); cnt++;
     }
-    const tot = ['Итого', '', '', '', '', '', '', '', tm, '', tc]; if (R) tot.push(som(tc));
-    rows.push(tot);
-    return { title, rows, cols };
+    rows.push(totalRow(cols, cnt, 'Итого')); // SUBTOTAL — пересчёт при фильтрации
+    return { title, rows, cols, table: cnt > 0, totalRow: true };
   };
   const P = data.fabricPurchase || {};
   return [

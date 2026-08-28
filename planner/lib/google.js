@@ -91,6 +91,44 @@ function formatRequests(sheets, docProps) {
   return reqs;
 }
 
+// Оформить листы как ТАБЛИЦУ: нативная таблица Google (фильтры + типы колонок),
+// а если API таблиц недоступен — запасной вариант: базовый фильтр + чередование строк.
+// Диапазон таблицы НЕ включает строку «Итого» (там SUBTOTAL, пересчитывается при фильтре).
+async function applyTables(at, id, sheets, docProps) {
+  const targets = sheets.map((s, i) => ({ s, dp: docProps[i] })).filter((x) => x.s && x.s.table);
+  if (!targets.length) return;
+  const colType = (t) => (t === 'num' || t === 'price') ? 'DOUBLE' : 'TEXT';
+  const rangeOf = (s, dp) => {
+    const rows = s.rows || [], cols = s.cols || [];
+    const nCols = Math.max(cols.length, rows.reduce((m, r) => Math.max(m, r.length), 0), 1);
+    const endRow = rows.length - (s.totalRow ? 1 : 0); // без строки «Итого»
+    return { sheetId: dp.sheetId, startRowIndex: 0, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: nCols };
+  };
+  // 1) пробуем нативные таблицы
+  try {
+    const reqs = targets.map(({ s, dp }) => {
+      const cols = s.cols || [], head = (s.rows && s.rows[0]) || [];
+      return { addTable: { table: {
+        name: 'T' + dp.sheetId + '_' + Math.random().toString(36).slice(2, 7),
+        range: rangeOf(s, dp),
+        columnProperties: cols.map((t, i) => ({ columnIndex: i, columnName: String(head[i] || ('Колонка ' + (i + 1))), columnType: colType(t) })),
+      } } };
+    });
+    await batchUpdate(at, id, reqs, 30000);
+    return;
+  } catch { /* нативные таблицы недоступны — идём в запасной вариант */ }
+  // 2) запасной вариант: базовый фильтр + чередование строк
+  try {
+    const reqs = [];
+    for (const { s, dp } of targets) {
+      const range = rangeOf(s, dp);
+      reqs.push({ setBasicFilter: { filter: { range } } });
+      reqs.push({ addBanding: { bandedRange: { range, rowProperties: { headerColor: { red: 0.20, green: 0.42, blue: 0.28 }, firstBandColor: { red: 1, green: 1, blue: 1 }, secondBandColor: { red: 0.95, green: 0.97, blue: 0.95 } } } } });
+    }
+    await batchUpdate(at, id, reqs, 30000);
+  } catch { /* и фильтр не вышел — не критично, данные уже записаны */ }
+}
+
 // Создать НОВУЮ таблицу. Возвращает { url, id }.
 export async function createReport(at, title, sheets) {
   const createBody = {
@@ -104,6 +142,7 @@ export async function createReport(at, title, sheets) {
   await writeValues(at, doc.spreadsheetId, sheets, docProps);
   const reqs = formatRequests(sheets, docProps);
   if (reqs.length) await batchUpdate(at, doc.spreadsheetId, reqs, 30000).catch(() => { /* оформление не критично */ });
+  await applyTables(at, doc.spreadsheetId, sheets, docProps);
   return { url: doc.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${doc.spreadsheetId}`, id: doc.spreadsheetId };
 }
 
@@ -136,6 +175,7 @@ export async function updateReport(at, id, title, sheets) {
   await writeValues(at, id, sheets, docProps);
   const reqs = formatRequests(sheets, docProps);
   if (reqs.length) await batchUpdate(at, id, reqs, 30000).catch(() => {});
+  await applyTables(at, id, sheets, docProps);
   return { url: meta.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${id}`, id };
 }
 
