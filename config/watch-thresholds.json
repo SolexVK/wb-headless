@@ -1,0 +1,12 @@
+{
+  "description": "Пороги сторожа удержаний (agent-wb-watch.mjs). Суммы — в валюте отчётов продавца.",
+  "penaltyAmountAlert": 500,
+  "penaltyShareOfRevenuePct": 0.5,
+  "costShareOfRevenuePct": 45,
+  "logisticsShareOfRevenuePct": 5,
+  "spikeFactor": 3,
+  "clusterMinCount": 5,
+  "pvzFreeDays": 2,
+  "pendingLogisticsAlert": 50000,
+  "baselineDays": 30
+}

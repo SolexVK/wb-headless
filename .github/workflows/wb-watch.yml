@@ -1,0 +1,112 @@
+name: Сторож удержаний WB (07:00 и 18:00 МСК)
+
+on:
+  schedule:
+    # Время в UTC. МСК = UTC+3, поэтому 04:00 UTC = 07:00 МСК, 15:00 UTC = 18:00 МСК.
+    # GitHub может запускать cron с задержкой в несколько минут — это нормально.
+    - cron: '0 4,15 * * *'
+  workflow_dispatch:
+    inputs:
+      window:
+        description: 'Окно проверки, дней назад (по умолчанию 3)'
+        required: false
+        default: '3'
+      dry_run:
+        description: 'Только показать сообщение, не отправлять в Telegram'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+# Нужно, чтобы сторож мог сохранить своё состояние (что уже сообщал) обратно в репозиторий.
+permissions:
+  contents: write
+
+# Два запуска подряд не должны драться за состояние.
+concurrency:
+  group: wb-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    # Лимит WB — 1 запрос в минуту на финансовых методах: запуск идёт минутами.
+    timeout-minutes: 45
+    steps:
+      - name: Забрать код
+        uses: actions/checkout@v4
+
+      - name: Установить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Установить зависимости
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: '1'
+        run: npm ci
+
+      - name: Поставить Chromium для PDF
+        id: chrome
+        continue-on-error: true
+        run: |
+          # PDF — приятное дополнение: если браузер не встал, сторож всё равно
+          # отправит текстовое сообщение с находками.
+          npx --yes @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/chrome" > "$RUNNER_TEMP/chrome.txt" 2>&1 || exit 0
+          BIN=$(find "$RUNNER_TEMP/chrome" -type f -name chrome | head -1)
+          echo "CHROME_PATH=$BIN" >> "$GITHUB_ENV"
+          echo "Chromium: $BIN"
+
+      - name: Проверить секреты
+        env:
+          WB_API_TOKEN: ${{ secrets.Wildberries_API }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALLOWED_CHAT: ${{ secrets.TELEGRAM_ALLOWED_CHAT }}
+        run: |
+          fail=0
+          for v in WB_API_TOKEN TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_CHAT; do
+            if [ -z "${!v}" ]; then echo "::error::Секрет для $v не задан"; fail=1; fi
+          done
+          if [ "$fail" = "1" ]; then
+            echo "Settings → Secrets and variables → Actions → New repository secret."
+            echo "Нужны: Wildberries_API (токен WB), TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_CHAT."
+            exit 1
+          fi
+          echo "Секреты на месте ✓"
+
+      - name: Проверка удержаний и отправка в Telegram
+        env:
+          WB_API_TOKEN: ${{ secrets.Wildberries_API }}
+          WB_TOKEN_TYPE: personal
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALLOWED_CHAT: ${{ secrets.TELEGRAM_ALLOWED_CHAT }}
+          WATCH_WINDOW_DAYS: ${{ github.event.inputs.window || '3' }}
+        run: |
+          EXTRA=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then EXTRA="--dry-run"; fi
+          node agent-wb-watch.mjs $EXTRA
+
+      - name: Сохранить состояние сторожа
+        if: github.event.inputs.dry_run != 'true'
+        run: |
+          # Состояние отличает «новую» проблему от той, о которой уже сообщали утром.
+          if [ -n "$(git status --porcelain state/)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state/
+            git commit -m "chore(watch): состояние сторожа удержаний $(date -u +%F\ %H:%M) UTC"
+            git push
+          else
+            echo "Состояние не изменилось."
+          fi
+
+      - name: Приложить отчёты к запуску
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wb-watch-${{ github.run_id }}
+          path: |
+            reports-output/watch-*.pdf
+            reports-output/watch-*.html
+          if-no-files-found: ignore
+          retention-days: 30

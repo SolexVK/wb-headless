@@ -13,7 +13,9 @@
     "report:stock": "node report-stock.js",
     "report:niche": "node report-niche.js",
     "report:fines": "node report-fines.js",
-    "report:forensics": "node report-forensics.mjs"
+    "report:forensics": "node report-forensics.mjs",
+    "watch:wb": "node agent-wb-watch.mjs",
+    "watch:wb:dry": "node agent-wb-watch.mjs --dry-run"
   },
   "engines": {
     "node": ">=18"
