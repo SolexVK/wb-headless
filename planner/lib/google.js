@@ -68,25 +68,44 @@ async function writeValues(at, id, sheets, docProps) {
   const r = await fetchT(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values:batchUpdate`, { method: 'POST', headers: hdrs(at), body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) }, 40000);
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error('Google Sheets: не удалось записать данные' + (e.error ? `: ${e.error.message || ''}` : '')); }
 }
-// запросы оформления: шапка, выравнивание/числовой формат по колонкам, ширина/высота под картинки
-function formatRequests(sheets, docProps) {
+// колонка может быть строкой ('text'|'num'|'price'|'img'|'date') или объектом {t, a}.
+// a — выравнивание 'LEFT'|'CENTER'|'RIGHT' (если не задано — text/date влево, остальное по центру).
+const NC = (c) => (typeof c === 'string') ? { t: c, a: (c === 'text' || c === 'date') ? 'LEFT' : 'CENTER' } : { t: c.t || 'text', a: c.a || ((c.t === 'text' || c.t === 'date') ? 'LEFT' : 'CENTER') };
+
+// ЧИСЛОВОЙ ФОРМАТ по колонкам — применяем ДО записи значений, чтобы «текст» сохранял ведущие нули,
+// а «дата» распозналась (текст/дата парсятся USER_ENTERED с учётом уже заданного формата ячейки).
+function numberFormatRequests(sheets, docProps) {
+  const reqs = [];
+  docProps.forEach((dp, i) => {
+    const sid = dp.sheetId, cols = (sheets[i].cols || []).map(NC), nRows = (sheets[i].rows || []).length;
+    cols.forEach((col, c) => {
+      let nf = null;
+      if (col.t === 'text') nf = { type: 'TEXT' };
+      else if (col.t === 'date') nf = { type: 'DATE', pattern: 'dd.mm.yyyy' };
+      else if (col.t === 'num') nf = { type: 'NUMBER', pattern: '#,##0' };
+      else if (col.t === 'price') nf = { type: 'NUMBER', pattern: '#,##0.00' };
+      if (nf) reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 1, endRowIndex: Math.max(1, nRows), startColumnIndex: c, endColumnIndex: c + 1 }, cell: { userEnteredFormat: { numberFormat: nf } }, fields: 'userEnteredFormat.numberFormat' } });
+    });
+  });
+  return reqs;
+}
+// ОФОРМЛЕНИЕ (после записи): шапка, выравнивание по колонкам, ширина/высота под картинки,
+// строка «Итого» — жирная и крупнее.
+function styleRequests(sheets, docProps) {
   const reqs = []; const HEADER_BG = { red: 0.90, green: 0.93, blue: 0.96 };
   docProps.forEach((dp, i) => {
-    const sid = dp.sheetId, cols = sheets[i].cols || [], rows = sheets[i].rows || [];
+    const sid = dp.sheetId, cols = (sheets[i].cols || []).map(NC), rows = sheets[i].rows || [];
     const nRows = rows.length, nCols = Math.max(cols.length, rows.reduce((mx, r) => Math.max(mx, r.length), 0), 1);
     reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: HEADER_BG, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment)' } });
     reqs.push({ autoResizeDimensions: { dimensions: { sheetId: sid, dimension: 'COLUMNS', startIndex: 0, endIndex: nCols } } });
     let hasImg = false;
-    cols.forEach((t, c) => {
-      const align = (t === 'num' || t === 'price' || t === 'img') ? 'CENTER' : 'LEFT';
-      const uf = { horizontalAlignment: align, verticalAlignment: 'MIDDLE' };
-      let fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment)';
-      if (t === 'num') { uf.numberFormat = { type: 'NUMBER', pattern: '#,##0' }; fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment,numberFormat)'; }
-      if (t === 'price') { uf.numberFormat = { type: 'NUMBER', pattern: '#,##0.00' }; fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment,numberFormat)'; }
-      reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 1, endRowIndex: Math.max(1, nRows), startColumnIndex: c, endColumnIndex: c + 1 }, cell: { userEnteredFormat: uf }, fields } });
-      if (t === 'img') { hasImg = true; reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'COLUMNS', startIndex: c, endIndex: c + 1 }, properties: { pixelSize: 100 }, fields: 'pixelSize' } }); }
+    cols.forEach((col, c) => {
+      reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 1, endRowIndex: Math.max(1, nRows), startColumnIndex: c, endColumnIndex: c + 1 }, cell: { userEnteredFormat: { horizontalAlignment: col.a, verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat(horizontalAlignment,verticalAlignment)' } });
+      if (col.t === 'img') { hasImg = true; reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'COLUMNS', startIndex: c, endIndex: c + 1 }, properties: { pixelSize: 100 }, fields: 'pixelSize' } }); }
     });
     if (hasImg && nRows > 1) reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'ROWS', startIndex: 1, endIndex: nRows }, properties: { pixelSize: 54 }, fields: 'pixelSize' } });
+    // строка «Итого» — жирная, крупнее обычного шрифта
+    if (sheets[i].totalRow && nRows >= 2) reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: nRows - 1, endRowIndex: nRows }, cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } }, fields: 'userEnteredFormat.textFormat' } });
   });
   return reqs;
 }
@@ -97,27 +116,26 @@ function formatRequests(sheets, docProps) {
 async function applyTables(at, id, sheets, docProps) {
   const targets = sheets.map((s, i) => ({ s, dp: docProps[i] })).filter((x) => x.s && x.s.table);
   if (!targets.length) return;
-  const colType = (t) => (t === 'num' || t === 'price') ? 'DOUBLE' : 'TEXT';
+  const colType = (t) => (t === 'num' || t === 'price') ? 'DOUBLE' : (t === 'date') ? 'DATE' : 'TEXT';
   const rangeOf = (s, dp) => {
     const rows = s.rows || [], cols = s.cols || [];
     const nCols = Math.max(cols.length, rows.reduce((m, r) => Math.max(m, r.length), 0), 1);
     const endRow = rows.length - (s.totalRow ? 1 : 0); // без строки «Итого»
     return { sheetId: dp.sheetId, startRowIndex: 0, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: nCols };
   };
-  // 1) пробуем нативные таблицы
-  try {
-    const reqs = targets.map(({ s, dp }) => {
-      const cols = s.cols || [], head = (s.rows && s.rows[0]) || [];
-      return { addTable: { table: {
-        name: 'T' + dp.sheetId + '_' + Math.random().toString(36).slice(2, 7),
-        range: rangeOf(s, dp),
-        columnProperties: cols.map((t, i) => ({ columnIndex: i, columnName: String(head[i] || ('Колонка ' + (i + 1))), columnType: colType(t) })),
-      } } };
-    });
+  const ident = (t) => String(t || '').replace(/[^\wА-Яа-яЁё ]+/g, ' ').replace(/\s+/g, '_').replace(/^_+|_+$/g, '') || 'Таблица';
+  // нативные таблицы: сперва с именем = имя листа, затем с «безопасным» именем-идентификатором
+  const tryTables = async (nameOf) => {
+    const reqs = targets.map(({ s, dp }) => ({ addTable: { table: {
+      name: nameOf(dp.title, dp.sheetId),
+      range: rangeOf(s, dp),
+      columnProperties: (s.cols || []).map(NC).map((col, i) => ({ columnIndex: i, columnName: String((s.rows && s.rows[0] && s.rows[0][i]) || ('Колонка ' + (i + 1))), columnType: colType(col.t) })),
+    } } }));
     await batchUpdate(at, id, reqs, 30000);
-    return;
-  } catch { /* нативные таблицы недоступны — идём в запасной вариант */ }
-  // 2) запасной вариант: базовый фильтр + чередование строк
+  };
+  try { await tryTables((title) => String(title || 'Таблица')); return; } catch { /* имя листа не подошло */ }
+  try { await tryTables((title) => ident(title)); return; } catch { /* нативные таблицы недоступны */ }
+  // запасной вариант: базовый фильтр + чередование строк
   try {
     const reqs = [];
     for (const { s, dp } of targets) {
@@ -139,9 +157,11 @@ export async function createReport(at, title, sheets) {
   const doc = await r.json().catch(() => ({}));
   if (!r.ok || !doc.spreadsheetId) throw new Error('Google Sheets: не удалось создать таблицу' + (doc.error ? `: ${doc.error.message || ''}` : ''));
   const docProps = doc.sheets.map((sh) => ({ sheetId: sh.properties.sheetId, title: sh.properties.title }));
+  const nf = numberFormatRequests(sheets, docProps);
+  if (nf.length) await batchUpdate(at, doc.spreadsheetId, nf, 30000).catch(() => {}); // формат ДО записи (нули/даты)
   await writeValues(at, doc.spreadsheetId, sheets, docProps);
-  const reqs = formatRequests(sheets, docProps);
-  if (reqs.length) await batchUpdate(at, doc.spreadsheetId, reqs, 30000).catch(() => { /* оформление не критично */ });
+  const st = styleRequests(sheets, docProps);
+  if (st.length) await batchUpdate(at, doc.spreadsheetId, st, 30000).catch(() => { /* оформление не критично */ });
   await applyTables(at, doc.spreadsheetId, sheets, docProps);
   return { url: doc.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${doc.spreadsheetId}`, id: doc.spreadsheetId };
 }
@@ -172,9 +192,11 @@ export async function updateReport(at, id, title, sheets) {
   reqsB.push({ deleteSheet: { sheetId: tmpId } });
   const repB = await batchUpdate(at, id, reqsB, 30000);
   const docProps = sheets.map((s, i) => ({ sheetId: repB[i].addSheet.properties.sheetId, title: repB[i].addSheet.properties.title }));
+  const nf = numberFormatRequests(sheets, docProps);
+  if (nf.length) await batchUpdate(at, id, nf, 30000).catch(() => {}); // формат ДО записи (нули/даты)
   await writeValues(at, id, sheets, docProps);
-  const reqs = formatRequests(sheets, docProps);
-  if (reqs.length) await batchUpdate(at, id, reqs, 30000).catch(() => {});
+  const st = styleRequests(sheets, docProps);
+  if (st.length) await batchUpdate(at, id, st, 30000).catch(() => {});
   await applyTables(at, id, sheets, docProps);
   return { url: meta.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${id}`, id };
 }

@@ -955,17 +955,21 @@ function report3Excel(data, fname) {
 const price2n = (n) => Math.round((+n || 0) * 100) / 100;
 const IMG = (p) => (p ? '@IMG:' + p : ''); // маркер картинки-образца для сервера
 const colL = (i) => { let s = ''; i += 1; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+// принудительно текстовая ячейка (ведущий апостроф) — чтобы номера с ведущим нулём («003») не теряли ноль
+const TXT = (v) => { const s = String(v == null ? '' : v); return /^\d/.test(s) ? "'" + s : s; };
+const colType = (col) => (typeof col === 'string' ? col : col.t); // тип колонки (для SUBTOTAL)
 // строка «Итого» с формулами SUBTOTAL(109) по числовым колонкам — пересчитывается при фильтрации.
 // cnt — число строк данных (шапка = строка 1, данные 2..cnt+1). label — текст в первой ячейке.
-const totalRow = (cols, cnt, label) => cols.map((t, ci) => ci === 0 ? label : (t === 'num' && cnt > 0 ? `=SUBTOTAL(109; ${colL(ci)}2:${colL(ci)}${cnt + 1})` : ''));
+const totalRow = (cols, cnt, label) => cols.map((col, ci) => ci === 0 ? label : (colType(col) === 'num' && cnt > 0 ? `=SUBTOTAL(109; ${colL(ci)}2:${colL(ci)}${cnt + 1})` : ''));
 
 function sheetsConsolidated(data) {
-  const cols = ['text', 'text', 'text', 'img', 'text', 'num', 'price', 'num'];
+  // {t: тип, a: выравнивание}. Цвет — слева; планшет/№/артикулы/метраж/цена/сумма — по центру.
+  const cols = [{ t: 'text', a: 'CENTER' }, { t: 'text', a: 'CENTER' }, { t: 'text', a: 'LEFT' }, { t: 'img', a: 'CENTER' }, { t: 'text', a: 'CENTER' }, { t: 'num', a: 'CENTER' }, { t: 'price', a: 'CENTER' }, { t: 'num', a: 'CENTER' }];
   const rows = [['Планшет', '№ цвета', 'Цвет', 'Образец', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $']];
   let cnt = 0;
-  for (const x of (data.fabricConsolidated || [])) { rows.push([x.plansheet || '—', x.colorNo || '—', x.color, IMG((x.images && x.images[0]) || ''), x.arts.join(', '), x.meters, price2n(x.price), x.cost]); cnt++; }
+  for (const x of (data.fabricConsolidated || [])) { rows.push([TXT(x.plansheet || '—'), TXT(x.colorNo || '—'), x.color, IMG((x.images && x.images[0]) || ''), TXT(x.arts.join(', ')), x.meters, price2n(x.price), x.cost]); cnt++; }
   rows.push(totalRow(cols, cnt, 'Итого по фильтру'));
-  return [{ title: 'Ткань (фильтр)', rows, cols, table: cnt > 0, totalRow: true }];
+  return [{ title: 'Ткань по фильтру', rows, cols, table: cnt > 0, totalRow: true }];
 }
 function sheetsReport1(data) {
   const cols = ['text', 'text', 'text', 'num', 'num'];
@@ -988,16 +992,18 @@ function sheetsReport2a(data) {
   return [{ title: 'Ткань помесячно', rows, cols }];
 }
 // Закупка: ОТДЕЛЬНЫЕ листы — Бишкек / демисезон Китай / лето (муслин+марлёвка) Китай. Со столбцом «Образец».
+// Формат/выравнивание по колонкам: Заказать — дата (центр); Заказ/Приход/Цвет — текст, слева;
+// Планшет/№цвета/Артикулы — текст, по центру; Метраж/Цена/Сумма — числа, по центру.
 function sheetsReport2b(data) {
   if (data.filtered) return sheetsConsolidated(data);
   const R = data.rates; const som = (u) => R ? Math.round(u * R.usdKgs) : '';
   const HEAD = ['Заказ', 'Заказать', 'Приход ткани', 'Планшет', '№ цвета', 'Цвет', 'Образец', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $'];
-  const cols = ['text', 'text', 'text', 'text', 'text', 'text', 'img', 'text', 'num', 'price', 'num'];
-  const head = HEAD.slice(); if (R) { head.push('Сумма, сом'); cols.push('num'); }
+  const COLS = [{ t: 'text', a: 'LEFT' }, { t: 'date', a: 'CENTER' }, { t: 'text', a: 'LEFT' }, { t: 'text', a: 'CENTER' }, { t: 'text', a: 'CENTER' }, { t: 'text', a: 'LEFT' }, { t: 'img', a: 'CENTER' }, { t: 'text', a: 'CENTER' }, { t: 'num', a: 'CENTER' }, { t: 'price', a: 'CENTER' }, { t: 'num', a: 'CENTER' }];
+  const head = HEAD.slice(); const cols = COLS.slice(); if (R) { head.push('Сумма, сом'); cols.push({ t: 'num', a: 'CENTER' }); }
   const mk = (title, orders) => {
     const rows = [head]; let cnt = 0;
     for (const o of orders) for (const it of o.items) {
-      const row = [o.label, dmy(o.purchaseDate), o.arrival ? ymLabel(String(o.arrival).slice(0, 7)) : '—', it.plansheet || '—', it.colorNo || '—', it.color || '—', IMG((it.images && it.images[0]) || ''), it.arts.join(', '), it.meters, price2n(it.price), it.cost];
+      const row = [TXT(o.label), dmy(o.purchaseDate), TXT(o.arrival ? ymLabel(String(o.arrival).slice(0, 7)) : '—'), TXT(it.plansheet || '—'), TXT(it.colorNo || '—'), it.color || '—', IMG((it.images && it.images[0]) || ''), TXT(it.arts.join(', ')), it.meters, price2n(it.price), it.cost];
       if (R) row.push(som(it.cost)); rows.push(row); cnt++;
     }
     rows.push(totalRow(cols, cnt, 'Итого')); // SUBTOTAL — пересчёт при фильтрации
@@ -1005,9 +1011,9 @@ function sheetsReport2b(data) {
   };
   const P = data.fabricPurchase || {};
   return [
-    mk('Бишкек (Мадина)', P.bishkek || []),
-    mk('Демисезон (Китай)', P.demi || []),
-    mk('Лето — муслин, марлёвка (Китай)', P.summer || []),
+    mk('Бишкек Мадина', P.bishkek || []),
+    mk('Демисезон Китай', P.demi || []),
+    mk('Лето муслин марлёвка Китай', P.summer || []),
   ];
 }
 function sheetsReport3(data) {
