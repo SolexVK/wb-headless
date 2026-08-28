@@ -7,5 +7,6 @@ export const REPORT_RU = {
   movement: 'Движение заказов',
   geo: 'География',
   logistics: 'Логистика',
+  cancels: 'Отказы по фулфилментам',
 };
 export const reportRu = (r) => REPORT_RU[r] || r;

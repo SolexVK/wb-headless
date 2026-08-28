@@ -5,8 +5,8 @@
 import express from 'express';
 import { Orgs, Cabinets, ReportRuns } from './models.js';
 import { requireAuth } from './security.js';
-import { reportsPage, podsortPage, stockPage, movementPage, movementView, geoPage, geoView, logisticsPage, logisticsView, archivePage, archiveViewPage } from './views.js';
-import { podsortDefaults, normalizePodsort, movementDefaults, normalizeMovement, geoDefaults, normalizeGeo, logisticsDefaults, normalizeLogistics, startPodsort, startStock, startMovement, startGeo, startLogistics, getJob, buildXlsx, buildStockXlsx, buildMovementXlsx, buildGeoXlsx, buildLogisticsXlsx, buildDashboardHtml, buildStockDashboardHtml, buildMovementDashboardHtml, buildGeoDashboardHtml, buildLogisticsDashboardHtml, buildStockDynamicsHtml, dashboardToPdf } from './reports-runner.js';
+import { reportsPage, podsortPage, stockPage, movementPage, movementView, geoPage, geoView, logisticsPage, logisticsView, cancelsPage, cancelsView, archivePage, archiveViewPage } from './views.js';
+import { podsortDefaults, normalizePodsort, movementDefaults, normalizeMovement, geoDefaults, normalizeGeo, logisticsDefaults, normalizeLogistics, cancelsDefaults, normalizeCancels, startPodsort, startStock, startMovement, startGeo, startLogistics, startCancels, getJob, buildXlsx, buildStockXlsx, buildMovementXlsx, buildGeoXlsx, buildLogisticsXlsx, buildCancelsXlsx, buildDashboardHtml, buildStockDashboardHtml, buildMovementDashboardHtml, buildGeoDashboardHtml, buildLogisticsDashboardHtml, buildCancelsDashboardHtml, buildStockDynamicsHtml, dashboardToPdf } from './reports-runner.js';
 import { logger } from './logger.js';
 import { REPORT_RU } from './report-names.js';
 
@@ -24,6 +24,7 @@ const REG = {
   movement: { normalize: normalizeMovement, start: startMovement, xlsx: buildMovementXlsx, html: buildMovementDashboardHtml, cost: true },
   geo: { normalize: normalizeGeo, start: startGeo, xlsx: buildGeoXlsx, html: buildGeoDashboardHtml },
   logistics: { normalize: normalizeLogistics, start: startLogistics, xlsx: buildLogisticsXlsx, html: buildLogisticsDashboardHtml },
+  cancels: { normalize: normalizeCancels, start: startCancels, xlsx: buildCancelsXlsx, html: buildCancelsDashboardHtml },
 };
 
 function loadOrg(req, res, next) {
@@ -182,6 +183,20 @@ reportsRouter.get('/org/:id/reports/logistics', requireAuth, loadOrg, (req, res)
     active: cab ? { id: cab.id, name: cab.name } : null,
     latest, job: cab ? getJob(cab.id, 'logistics') : null,
     view: logisticsView(req.query), form,
+  }));
+});
+
+// ── Отказы по фулфилментам: страница ─────────────────────────────────────────
+reportsRouter.get('/org/:id/reports/cancels', requireAuth, loadOrg, (req, res) => {
+  const cab = Cabinets.activeOf(req.org.id);
+  const latest = cab ? ReportRuns.latest(cab.id, 'cancels') : null;
+  const form = latest?.data ? { days: latest.data.days || cancelsDefaults().days } : cancelsDefaults();
+  res.send(cancelsPage({
+    user: req.session.user, csrf: res.locals.csrf, base: res.locals.base,
+    org: req.org, role: req.role,
+    active: cab ? { id: cab.id, name: cab.name } : null,
+    latest, job: cab ? getJob(cab.id, 'cancels') : null,
+    view: cancelsView(req.query), form,
   }));
 });
 

@@ -7,6 +7,7 @@ import { avg, median, pct, r2, mskDate } from '../scripts/lib/agg/stats.mjs';
 import { buildAssembly, buildDelivery, buildReturnPath } from '../scripts/lib/agg/logistics.mjs';
 import { aggregateRegions, aggregateFbs } from '../scripts/lib/agg/geo.mjs';
 import { stockMetrics, oosLabel } from '../scripts/lib/agg/stock.mjs';
+import { buildCancels, classify } from '../scripts/lib/agg/cancels.mjs';
 
 let failed = 0;
 const ok = (cond, msg) => { console.log(`${cond ? '✓' : '✗'}  ${msg}`); if (!cond) failed++; };
@@ -173,6 +174,45 @@ eq([sm.soonest.name, sm.soonest.daysToZero], ['C', 0], 'динамика: быс
 eq(sm.riskCount, 2, 'динамика: 2 ФФ в риске (<14 дн)');
 eq(oosLabel(null), 'растёт/стаб.', 'динамика: подпись OOS для null');
 eq(oosLabel(8), '≈ 8 дн до 0', 'динамика: подпись OOS для числа');
+
+// ── ОТКАЗЫ ПО ФФ: классификация исхода + агрегатор потерь ────────────────────────
+eq(classify('cancel', 'canceled'), 'cancelSeller', 'отказы: cancel → отказ ФФ');
+eq(classify('complete', 'sold'), 'sold', 'отказы: sold → выкуплено');
+eq(classify('complete', 'canceled_by_client'), 'canceledClient', 'отказы: отказ клиента при получении');
+eq(classify('new', 'declined_by_client'), 'declinedClient', 'отказы: отмена клиентом в 1-й час');
+eq(classify('confirm', 'defect'), 'defect', 'отказы: брак');
+eq(classify('confirm', 'waiting'), 'inWork', 'отказы: в работе');
+eq(classify('', ''), 'unknown', 'отказы: нет статуса → unknown');
+// Фикстура: FF A (sold×2, отказ ФФ×1, брак×1, отказ клиента×1, в работе×1);
+// FF B (sold×1, отказ ФФ×2, отмена 1-й час×1). Цена каждого заказа 1000 ₽.
+const cOrders = [
+  { id: 1, ff: 'A', warehouseId: 1, priceRub: 1000 }, { id: 2, ff: 'A', warehouseId: 1, priceRub: 1000 },
+  { id: 3, ff: 'A', warehouseId: 1, priceRub: 1000 }, { id: 4, ff: 'A', warehouseId: 1, priceRub: 1000 },
+  { id: 5, ff: 'A', warehouseId: 1, priceRub: 1000 }, { id: 6, ff: 'A', warehouseId: 1, priceRub: 1000 },
+  { id: 7, ff: 'B', warehouseId: 2, priceRub: 1000 }, { id: 8, ff: 'B', warehouseId: 2, priceRub: 1000 },
+  { id: 9, ff: 'B', warehouseId: 2, priceRub: 1000 }, { id: 10, ff: 'B', warehouseId: 2, priceRub: 1000 },
+];
+const cStatus = new Map([
+  [1, { supplierStatus: 'complete', wbStatus: 'sold' }], [2, { supplierStatus: 'complete', wbStatus: 'sold' }],
+  [3, { supplierStatus: 'cancel', wbStatus: 'canceled' }], [4, { supplierStatus: 'confirm', wbStatus: 'defect' }],
+  [5, { supplierStatus: 'complete', wbStatus: 'canceled_by_client' }], [6, { supplierStatus: 'new', wbStatus: 'waiting' }],
+  [7, { supplierStatus: 'complete', wbStatus: 'sold' }], [8, { supplierStatus: 'cancel', wbStatus: 'canceled' }],
+  [9, { supplierStatus: 'cancel', wbStatus: 'canceled' }], [10, { supplierStatus: 'new', wbStatus: 'declined_by_client' }],
+]);
+const cx = buildCancels(cOrders, (o) => cStatus.get(o.id) || null);
+eq(cx.totals.made, 10, 'отказы: всего заданий 10');
+eq(cx.totals.decided, 9, 'отказы: решено 9 (минус «в работе»)');
+eq(cx.totals.sellerCancel, 3, 'отказы: отказ ФФ 3');
+eq(cx.totals.sellerCancelPct, 33.33, 'отказы: % отказов ФФ = 3/9 = 33.33');
+eq(cx.totals.lostRub, 4000, 'отказы: потери = (3 отказа + 1 брак)×1000 = 4000');
+eq(cx.totals.clientRefusalRub, 1000, 'отказы: обратная логистика клиента = 1000');
+eq(cx.byFF.map((r) => r.ff), ['B', 'A'], 'отказы: ФФ по потерям, tiebreak по отказам ФФ (B впереди)');
+eq(cx.byFF[0], { ff: 'B', warehouseId: 2, made: 4, decided: 4, sold: 1, sellerCancel: 2, clientRefusal: 0, clientDecline: 1, defect: 0, carrier: 0, inWork: 0, unknown: 0, sellerCancelPct: 50, failCount: 2, lostRub: 2000, clientRefusalRub: 0 }, 'отказы: строка ФФ «B» точная');
+eq(cx.worst, { ff: 'B', lostRub: 2000, sellerCancel: 2, sellerCancelPct: 50 }, 'отказы: худший ФФ = B');
+eq(cx.reasons.map((r) => [r.key, r.rub]), [['cancelSeller', 3000], ['defect', 1000], ['canceledClient', 1000], ['declinedClient', 1000]], 'отказы: причины по сумме (отказ ФФ первым)');
+// «Без статуса» уменьшает decided и не входит в % отказов.
+const cU = buildCancels([{ id: 1, ff: 'A', priceRub: 0 }, { id: 2, ff: 'A', priceRub: 0 }], (o) => (o.id === 1 ? { supplierStatus: 'cancel', wbStatus: 'canceled' } : null));
+eq([cU.totals.made, cU.totals.withStatus, cU.totals.decided, cU.totals.sellerCancelPct], [2, 1, 1, 100], 'отказы: unknown вне decided/% (1 из 2 без статуса)');
 
 console.log(`\nАгрегаторы (agg): ${failed ? failed + ' ПРОВАЛ(ов)' : 'все проверки зелёные'}`);
 process.exit(failed ? 1 : 0);

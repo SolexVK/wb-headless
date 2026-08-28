@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { ReportRuns } from './models.js';
+import { buildCancels } from '../scripts/lib/agg/cancels.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
@@ -377,6 +378,59 @@ export async function buildLogisticsXlsx(cabinet, snapshot) {
 }
 export async function buildLogisticsDashboardHtml(cabinet, snapshot) {
   return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-logistics-service.json', cmd: process.execPath, script: path.join(SCRIPTS, 'fbs-logistics-dashboard.mjs'), outName: 'fbs-logistics-dashboard.html', errMsg: 'Не удалось собрать HTML-дашборд логистики' });
+}
+
+// ── Пайплайн «Отказы по фулфилментам» (провалы сборки + деньги) ──────────────
+export const cancelsDefaults = () => ({ days: 30 });
+export function normalizeCancels(body = {}) {
+  const days = [7, 14, 30, 60, 90].includes(Number(body.days)) ? Number(body.days) : 30;
+  return { days };
+}
+// Фейковый снимок для тестов — собираем через тот же агрегатор, что и боевой
+// пайплайн, чтобы форма снимка гарантированно совпадала (см. contract-тест).
+export function fakeCancels(params) {
+  const price = 1000; const orders = []; const st = new Map(); let id = 1;
+  const push = (ff, wid, wbStatus, supplierStatus, n) => {
+    for (let k = 0; k < n; k++) { const oid = id++; orders.push({ id: oid, ff, warehouseId: wid, priceRub: price }); st.set(oid, { supplierStatus, wbStatus }); }
+  };
+  push('Мск зелёная зона', 1939911, 'sold', 'complete', 80);
+  push('Мск зелёная зона', 1939911, 'canceled', 'cancel', 6);
+  push('Мск зелёная зона', 1939911, 'defect', 'confirm', 2);
+  push('Мск зелёная зона', 1939911, 'canceled_by_client', 'complete', 5);
+  push('Мск зелёная зона', 1939911, 'declined_by_client', 'new', 3);
+  push('Мск зелёная зона', 1939911, 'waiting', 'confirm', 4);
+  push('Казань', 700, 'sold', 'complete', 35);
+  push('Казань', 700, 'canceled', 'cancel', 8);
+  push('Казань', 700, 'defect', 'confirm', 1);
+  push('Казань', 700, 'canceled_by_client', 'complete', 3);
+  push('Казань', 700, 'declined_by_client', 'new', 1);
+  push('Казань', 700, 'waiting', 'confirm', 2);
+  const result = buildCancels(orders, (o) => st.get(o.id) || null);
+  return { generatedAt: new Date().toISOString(), days: params.days || 30, from: '2026-07-29', ordDays: params.days || 30, warehouseList: result.byFF.map((r) => r.ff), ...result };
+}
+async function runCancelsPipeline(cabinet, token, meta, params, onLog) {
+  const dir = cabinetDir(cabinet.id);
+  fs.mkdirSync(dir, { recursive: true });
+  if (process.env.PODSORT_FAKE) return fakeCancels(params);
+  const env = envFor(token, meta, dir);
+  onLog?.('Собираю задания и их статусы (fbs-cancels)…');
+  const r = await spawnCapture(process.execPath, [path.join(SCRIPTS, 'fbs-cancels.mjs'), '--days', String(params.days), '--json'], { env, cwd: REPO, timeoutMs: 12 * 60_000 });
+  if (r.code !== 0) throw new Error('Ошибка сбора отказов (fbs-cancels):\n' + tail(r.err));
+  let snap; try { snap = JSON.parse(r.out); } catch { throw new Error('Не удалось разобрать отказы.'); }
+  return snap;
+}
+function cancelsSummary(snap, p) {
+  const t = snap?.totals || {};
+  return { days: p.days || snap.days || 30, made: t.made || 0, sellerCancel: t.sellerCancel || 0, sellerCancelPct: t.sellerCancelPct || 0, lostRub: t.lostRub || 0, worst: snap?.worst?.ff || null };
+}
+export function startCancels(cabinet, token, meta, params, userId) {
+  return startRun({ cabinet, token, meta, params, userId, report: 'cancels', pipeline: runCancelsPipeline, summarize: cancelsSummary });
+}
+export async function buildCancelsXlsx(cabinet, snapshot) {
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-cancels-service.json', cmd: 'python3', script: path.join(SCRIPTS, 'fbs-cancels-xlsx.py'), outName: 'fbs-cancels.xlsx', errMsg: 'Не удалось собрать Excel отказов' });
+}
+export async function buildCancelsDashboardHtml(cabinet, snapshot) {
+  return genArtifact({ cabinetId: cabinet.id, snapshot, inName: 'fbs-cancels-service.json', cmd: process.execPath, script: path.join(SCRIPTS, 'fbs-cancels-dashboard.mjs'), outName: 'fbs-cancels-dashboard.html', errMsg: 'Не удалось собрать HTML-дашборд отказов' });
 }
 
 // ── Single-flight + фоновый статус (ключ = кабинет:отчёт) ────────────────────

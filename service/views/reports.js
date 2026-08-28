@@ -82,6 +82,9 @@ export function reportsPage(p) {
         ${card(`/org/${org.id}/reports/logistics`, 'Логистика',
           'Сроки на каждом этапе жизни товара: сборка на ФФ (создание → отгрузка), доставка до клиента (отгрузка → выкуп) и путь возврата — из какого ФФ уехал, где продан, откуда и в какой склад WB вернулся, сколько пробыл у клиента.',
           'контроль SLA сборки/доставки и разбор возвратов (куда и почему)', !!active)}
+        ${card(`/org/${org.id}/reports/cancels`, 'Отказы по фулфилментам',
+          'Где фулфилмент проваливает заказы: сколько заданий отменил продавец (не собрал/не успел), брак и отказы клиента — по каждому ФФ, с долей отказов и упущенной выручкой в рублях.',
+          'найти, какой ФФ теряет деньги из-за некорректной/долгой работы', !!active)}
       </div>
       <p style="margin-top:16px"><a class="dl" href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив отчётов</a></p>
     </div>`,
@@ -1044,6 +1047,83 @@ export function logisticsPage(p) {
   });
 }
 
+// ── Отказы по фулфилментам: где ФФ проваливает заказы и во что это обходится ──
+export function cancelsView() { return {}; }
+
+function cancelsResults(snap, { downloadHref, whenLabel }) {
+  const t = snap.totals || {};
+  const byFF = snap.byFF || [];
+  const reasons = snap.reasons || [];
+  const rub = (v) => `${nf(Math.round(Number(v) || 0))} ₽`;
+  const note = `<p class="kv" style="margin:0 0 12px">По каждому нашему складу-фулфилменту: сколько сборочных заданий создано, выкуплено, отменено <b>продавцом</b> (= отказ ФФ), клиентом и браком. «Отказ ФФ» = supplierStatus <code>cancel</code> (ФФ не собрал/не успел). «Потери по вине ФФ» = упущенная выручка по отказам продавца и браку (по цене заказа). Статус — текущий, WB хранит FBS-заказы ~90 дней. За ${snap.days} дн.</p>`;
+  const tiles = [
+    dkKpi(rub(t.lostRub), 'потери по вине ФФ', { icon: '💸', accent: DKAC.red }),
+    dkKpi(`${t.sellerCancelPct || 0}%`, 'отказов ФФ (от решённых)', { icon: '⛔', accent: DKAC.amber }),
+    dkKpi(nf(t.sellerCancel || 0), 'заказов отменил ФФ', { icon: '🏭', accent: DKAC.violet }),
+    dkKpi(rub(t.clientRefusalRub), 'отказы клиента при получении', { icon: '↩️', accent: DKAC.teal }),
+    dkKpi(nf(t.made || 0), 'заданий за период', { icon: '📦', accent: DKAC.blue }),
+  ].join('');
+  const worst = snap.worst;
+  const worstPct = [...byFF].filter((r) => r.decided >= 5).sort((a, b) => b.sellerCancelPct - a.sellerCancelPct)[0];
+  const insightRow = dkInsights([
+    worst ? { icon: '💸', accent: DKAC.red, text: `Больше всего теряем на ФФ: <b>${esc(worst.ff)}</b> — ${rub(worst.lostRub)} (${nf(worst.sellerCancel)} отказов)` } : { icon: '✅', accent: DKAC.green, text: 'Отказов по вине ФФ за период нет' },
+    worstPct ? { icon: '⛔', accent: DKAC.amber, text: `Наибольшая доля отказов ФФ: <b>${esc(worstPct.ff)}</b> — ${worstPct.sellerCancelPct}%` } : null,
+    t.unknown ? { icon: 'ℹ️', accent: DKAC.teal, text: `Без статуса (вне окна ретеншена WB): <b>${nf(t.unknown)}</b> из ${nf(t.made)} — в % отказов не входят` } : null,
+  ]);
+  const reasonBars = logiBars(reasons.map((r) => ({ label: r.ru, value: r.rub })), 'var(--c-violet)', rub);
+  const head = `<tr>${thT('Фулфилмент', 'Наш склад-фулфилмент', 'tl')}${thT('Заданий', 'Сборочных заданий за период', 'num')}${thT('Выкуплено', 'Дошло до выкупа', 'num')}${thT('Отказ ФФ', 'Отменено продавцом (не собрал/не успел)', 'num')}${thT('% ФФ', 'Доля отказов ФФ от решённых (без «в работе»)', 'num')}${thT('Брак', 'Отменено по браку', 'num')}${thT('Отказ клиента', 'Клиент отказался при получении', 'num')}${thT('В работе', 'Ещё не финализировано', 'num')}${thT('Потери', 'Упущенная выручка: отказ ФФ + брак', 'num')}</tr>`;
+  const rows = byFF.map((r) => `<tr><td class="tl">${esc(r.ff)}</td><td class="num" data-v="${r.made}">${nf(r.made)}</td><td class="num" data-v="${r.sold}">${nf(r.sold)}</td><td class="num" data-v="${r.sellerCancel}">${nf(r.sellerCancel)}</td><td class="num" data-v="${r.sellerCancelPct}">${r.sellerCancelPct}%</td><td class="num" data-v="${r.defect}">${nf(r.defect)}</td><td class="num" data-v="${r.clientRefusal}">${nf(r.clientRefusal)}</td><td class="num" data-v="${r.inWork}">${nf(r.inWork)}</td><td class="num" data-v="${r.lostRub}">${rub(r.lostRub)}</td></tr>`).join('');
+  const table = byFF.length ? `<div class="scroll"><table class="rt sortable"><thead>${head}</thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">Нет заданий за период.</p>';
+  return `<div class="section">
+      <p class="kv" style="margin:0 0 10px">Данные за ${snap.days} дн, с ${esc(snap.from || '')}.${whenLabel ? ` <b>${esc(whenLabel)}</b>` : ''}</p>
+      <div style="margin-bottom:12px">${downloadBar(downloadHref)}</div>
+      ${note}
+      <div class="dk-kpis">${tiles}</div>
+      ${insightRow}
+      ${ph('💸', 'Потери и отмены по причинам', 'сумма упущенной выручки по каждой причине', DKAC.red)}
+      ${reasonBars}
+      <div style="margin-top:22px"></div>
+      ${ph('🏭', 'Разбор по фулфилментам', 'задания, выкупы, отказы и потери · клик по заголовку — сортировка', DKAC.violet)}
+      ${table}</div>`;
+}
+
+export function cancelsPage(p) {
+  const { user, csrf, base = '', org, role, active, latest, job, form } = p;
+  const u = (path) => base + path;
+  const back = `<div class="crumbs"><a href="${u(`/org/${org.id}/reports`)}">← Отчёты</a></div>`;
+  if (!active) {
+    return layout({ title: `Отказы по фулфилментам — ${org.name}`, user, csrf, base,
+      body: `<div class="wrap">${back}<h1>Отказы по фулфилментам</h1><div class="warn">Нет активного кабинета с токеном. <a href="${u(`/org/${org.id}`)}">Настройте кабинет</a>.</div></div>` });
+  }
+  const running = job && job.state === 'running';
+  const head = running ? '<meta http-equiv="refresh" content="4">' : '';
+  const statusBox = runStatus(job, active, { verb: 'Считаю отказы и статусы заданий', hint: 'Запрос к WB (заказы + статусы), может занять 1–3 минуты.' });
+  const f = form;
+  const formSection = `<div class="section">
+    <h2>Параметры</h2>
+    <form method="post" action="${u(`/org/${org.id}/reports/cancels/refresh`)}">
+      ${csrfField(csrf)}
+      <div class="row-form" style="gap:14px;align-items:flex-end">
+        <div><label for="cdays" title="За сколько последних дней считать отказы (WB хранит FBS-заказы ~90 дней).">Период, дней</label>
+          <select id="cdays" name="days" style="width:130px">${[7, 14, 30, 60, 90].map((n) => `<option value="${n}"${Number(f.days) === n ? ' selected' : ''}>${n} дней</option>`).join('')}</select></div>
+      </div>
+      <button class="btn" type="submit" style="max-width:280px;margin-top:16px"${running ? ' disabled' : ''}>${running ? 'Идёт сбор…' : 'Обновить данные'}</button>
+    </form></div>`;
+  const results = latest?.data
+    ? cancelsResults(latest.data, { downloadHref: (k) => u(`/org/${org.id}/reports/cancels/download/${k}`), whenLabel: whenLabel(latest.createdAt) })
+    : `<div class="section"><p class="muted">Данных пока нет — задайте период и нажмите «Обновить данные».</p></div>`;
+  return layout({
+    title: `Отказы по фулфилментам — ${org.name}`, user, csrf, base, head,
+    body: `<div class="wrap">${back}
+      <h1>Отказы по фулфилментам <span class="badge ${esc(role)}">${esc(roleRu(role))}</span></h1>
+      <p class="kv">Кабинет: <b>${esc(active.name)}</b>. Где фулфилмент проваливает заказы (отмены продавцом), сколько это в упущенной выручке, доля отказов по каждому ФФ. <a href="${u(`/org/${org.id}/reports/archive`)}">🗂 Архив запусков</a></p>
+      ${statusBox}
+      ${formSection}
+      ${results}
+    </div>`,
+  });
+}
+
 // ── Архив отчётов компании: список запусков ─────────────────────────────────
 export function archivePage({ user, csrf, base = '', org, role, runs, report = '', types = [] }) {
   const u = (p) => base + p;
@@ -1061,6 +1141,7 @@ export function archivePage({ user, csrf, base = '', org, role, runs, report = '
     if (r.report === 'movement') return `принято ${nf(sm.acceptedTotal)} · передано ${nf(sm.deliveredTotal)} · Δ ${sm.diffTotal >= 0 ? '+' : ''}${nf(sm.diffTotal)} · ${nf(sm.deliveredMoney)} ₽ (${nf(sm.days)} дн)`;
     if (r.report === 'geo') return `продаж ${nf(sm.salesCount)} · возвратов ${nf(sm.returnCount)} (${sm.returnPct}%) · регионов ${nf(sm.regions)} (${nf(sm.days)} дн)`;
     if (r.report === 'logistics') return `сборка медиана ${fmtHrs(sm.asmMedianHours)} (${nf(sm.asmProcessed)}) · доставка медиана ${fmtHrs(sm.delMedianHours)} (${nf(sm.delCount)}) (${nf(sm.days)} дн)`;
+    if (r.report === 'cancels') return `отказ ФФ ${nf(sm.sellerCancel)} (${sm.sellerCancelPct}%) · потери ${nf(sm.lostRub)} ₽ · заданий ${nf(sm.made)}${sm.worst ? ` · худший: ${esc(sm.worst)}` : ''} (${nf(sm.days)} дн)`;
     return `подсорт ${nf(sm.reorderUnits)} · риск ${nf(sm.riskRows)} · завоз ${nf(sm.seedUnits)}${(sm.articles && sm.articles.length) ? ` · арт: ${esc(sm.articles.join(', '))}` : ''}`;
   };
   // Кто может удалить конкретный запуск: автор — свой; владелец — любой авторский.
@@ -1123,7 +1204,9 @@ export function archiveViewPage({ user, csrf, base = '', org, role, run }) {
           ? geoResults(run.data, { view: geoView({}), nav: null, downloadHref: dl, whenLabel: '' })
           : run.report === 'logistics'
             ? logisticsResults(run.data, { view: logisticsView({}), nav: null, downloadHref: dl, whenLabel: '' })
-            : podsortResults(run.data, { downloadHref: dl, whenLabel: '' });
+            : run.report === 'cancels'
+              ? cancelsResults(run.data, { downloadHref: dl, whenLabel: '' })
+              : podsortResults(run.data, { downloadHref: dl, whenLabel: '' });
   const p = run.params || {};
   return layout({
     title: `Архив: ${reportRu(run.report)} — ${org.name}`, user, csrf, base,

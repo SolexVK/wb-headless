@@ -268,6 +268,32 @@ try {
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(r.text.includes('Логистика') && /сборка медиана/.test(r.text), 'Ф2: логистика видна в архиве');
 
+  // ── Отчёт «Отказы по фулфилментам» (провалы сборки + потери) ────────────────
+  r = await req('GET', `/org/${orgId}/reports/cancels`);
+  ok(r.status === 200 && r.text.includes('Отказы по фулфилментам') && r.text.includes('Параметры'), 'Ф2: страница отказов');
+  r = await req('POST', `/org/${orgId}/reports/cancels/refresh`, form({ _csrf: csrfOf(r.text), days: 30 }));
+  ok(r.status === 302, 'Ф2: запуск отказов → 302');
+  let canDone = false;
+  for (let i = 0; i < 30 && !canDone; i++) {
+    await sleep(80);
+    r = await req('GET', `/org/${orgId}/reports/cancels`);
+    if (r.text.includes('Разбор по фулфилментам') && r.text.includes('Казань')) canDone = true;
+  }
+  ok(canDone, 'Ф2: отказы собрались (разбор по ФФ)');
+  ok(r.text.includes('потери по вине ФФ') && r.text.includes('% ФФ'), 'Ф2: отказы — KPI потерь и доля отказов ФФ');
+  const cj = await req('GET', `/org/${orgId}/reports/cancels/download/json`);
+  let cp = null; try { cp = JSON.parse(cj.text); } catch { /* */ }
+  ok(cj.status === 200 && cp?.byFF?.length >= 2 && typeof cp?.totals?.lostRub === 'number', 'Ф2: выгрузка отказов (JSON)');
+  const cx = await fetch(base + `/org/${orgId}/reports/cancels/download/xlsx`, { headers: { cookie } });
+  const cxb = Buffer.from(await cx.arrayBuffer());
+  ok(cx.status === 200 && cxb.length > 500 && cxb[0] === 0x50 && cxb[1] === 0x4b, 'Ф2: выгрузка отказов (Excel .xlsx)');
+  const ch = await fetch(base + `/org/${orgId}/reports/cancels/download/html`, { headers: { cookie } });
+  const chx = await ch.text();
+  ok(ch.status === 200 && chx.includes('Отказы по фулфилментам') && chx.includes('Где теряем деньги'), 'Ф2: HTML-дашборд отказов');
+  await pdfCheck(`/org/${orgId}/reports/cancels/download/pdf`, 'Ф2: PDF-дашборд отказов');
+  r = await req('GET', `/org/${orgId}/reports/archive`);
+  ok(r.text.includes('Отказы по фулфилментам') && /отказ ФФ/.test(r.text), 'Ф2: отказы видны в архиве');
+
   // HTML-выгрузка из архива (новое: рядом с Excel/JSON).
   r = await req('GET', `/org/${orgId}/reports/archive`);
   ok(/\/archive\/\d+\/download\/html/.test(r.text), 'Ф2: в списке архива есть ссылка HTML');

@@ -15,9 +15,10 @@ process.env.SESSION_SECRET = 'test-secret-please-change';
 process.env.TOKEN_ENC_KEY = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
 process.env.DB_PATH = path.join(os.tmpdir(), `fbs-contract-${process.pid}.sqlite`);
 
-const { fakeSnapshot, fakeStock, fakeMovement, fakeGeo, fakeLogistics, normalizePodsort, normalizeMovement, geoDefaults, logisticsDefaults } = await import('./reports-runner.js');
+const { fakeSnapshot, fakeStock, fakeMovement, fakeGeo, fakeLogistics, fakeCancels, normalizePodsort, normalizeMovement, geoDefaults, logisticsDefaults, cancelsDefaults } = await import('./reports-runner.js');
 const { buildAssembly, buildDelivery, buildReturnPath } = await import('../scripts/lib/agg/logistics.mjs');
 const { aggregateRegions, aggregateFbs } = await import('../scripts/lib/agg/geo.mjs');
+const { buildCancels } = await import('../scripts/lib/agg/cancels.mjs');
 
 let failed = 0;
 // Проверка формы: строка → typeof; массив ['array', spec?] → Array + форма первого элемента;
@@ -95,12 +96,20 @@ const logisticsSpec = {
   },
 };
 
+const cancelsSpec = {
+  days: 'number', warehouseList: ['array'],
+  totals: { made: 'number', decided: 'number', sold: 'number', sellerCancel: 'number', sellerCancelPct: 'number', defect: 'number', clientRefusal: 'number', inWork: 'number', unknown: 'number', lostRub: 'number', clientRefusalRub: 'number' },
+  byFF: ['array', { ff: 'string', made: 'number', sold: 'number', sellerCancel: 'number', sellerCancelPct: 'number', defect: 'number', clientRefusal: 'number', inWork: 'number', lostRub: 'number' }],
+  reasons: ['array', { key: 'string', ru: 'string', blame: 'string', count: 'number', rub: 'number' }],
+};
+
 // ── fake-снимки (демо/тестовый путь) ────────────────────────────────────────────
 contract('подсорт (fake)', fakeSnapshot(normalizePodsort({})), podsortSpec);
 contract('остатки (fake)', fakeStock(), stockSpec);
 contract('движение (fake)', fakeMovement(normalizeMovement({})), movementSpec);
 contract('география (fake)', fakeGeo(geoDefaults()), geoSpec);
 contract('логистика (fake)', fakeLogistics(logisticsDefaults()), logisticsSpec);
+contract('отказы (fake)', fakeCancels(cancelsDefaults()), cancelsSpec);
 
 // ── живой выход агрегаторов на фикстурах — та же форма, что fake ────────────────
 const gsales = [
@@ -124,6 +133,14 @@ const logiLive = {
   returnPath: buildReturnPath(lsales, lridMap, () => '2026-08-10T00:00:00Z'),
 };
 contract('логистика (агрегатор)', logiLive, logisticsSpec);
+
+const cOrders = [
+  { id: 1, ff: 'A', warehouseId: 1, priceRub: 1000 }, { id: 2, ff: 'A', warehouseId: 1, priceRub: 1000 },
+  { id: 3, ff: 'B', warehouseId: 2, priceRub: 1000 },
+];
+const cStatus = new Map([[1, { supplierStatus: 'complete', wbStatus: 'sold' }], [2, { supplierStatus: 'cancel', wbStatus: 'canceled' }], [3, { supplierStatus: 'confirm', wbStatus: 'defect' }]]);
+const cancelsLive = { days: 30, warehouseList: ['A', 'B'], ...buildCancels(cOrders, (o) => cStatus.get(o.id) || null) };
+contract('отказы (агрегатор)', cancelsLive, cancelsSpec);
 
 console.log(`\nКонтракт снимков (contract): ${failed ? failed + ' ПРОВАЛ(ов)' : 'все проверки зелёные'}`);
 process.exit(failed ? 1 : 0);
