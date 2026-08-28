@@ -219,7 +219,7 @@ async function parseViaApi(query, dimensions, reportKind) {
   let data; try { data = await resp.json(); } catch { return { ok: false, reason: 'bad_json' }; }
   const tu = (data.content || []).find((c) => c.type === 'tool_use');
   if (!tu || !tu.input) return { ok: false, reason: 'no_tool_use' };
-  return { ok: true, filter: validateFilter(tu.input, dimensions), explain: String(tu.input.explain || '').slice(0, 160), mode: 'api', model: DEFAULT_API_MODEL };
+  return { ok: true, raw: tu.input, explain: String(tu.input.explain || '').slice(0, 160), mode: 'api', model: DEFAULT_API_MODEL };
 }
 
 // ── режим CLI (по подписке через Claude Code, при необходимости через прокси) ──
@@ -232,12 +232,36 @@ async function parseViaCli(query, dimensions, reportKind) {
   if (!r.ok) return r;
   const parsed = extractJson(typeof r.envelope.result === 'string' ? r.envelope.result : '');
   if (!parsed) return { ok: false, reason: 'bad_json', detail: String(r.envelope.result || '').slice(0, 200) };
-  return { ok: true, filter: validateFilter(parsed, dimensions), explain: String(parsed.explain || '').slice(0, 160), mode: 'cli' };
+  return { ok: true, raw: parsed, explain: String(parsed.explain || '').slice(0, 160), mode: 'cli' };
 }
 
-// Разобрать запрос. Возвращает {ok, filter, explain, mode} либо {ok:false, reason}.
+// Кэш «фраза → разбор» (сырой ответ модели). Повтор той же фразы — мгновенно, без запуска claude.
+// Храним raw (до валидации) и валидируем на каждом обращении под текущие данные (справочники).
+const cache = new Map();
+const CACHE_MAX = 300;
+const normQ = (q) => String(q || '').trim().toLowerCase().replace(/\s+/g, ' ');
+function cachePut(key, val) {
+  if (cache.has(key)) cache.delete(key);
+  cache.set(key, val);
+  if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value); // вытеснить самый старый
+}
+export function clearCache() { cache.clear(); }
+
+// Разобрать запрос. Возвращает {ok, filter, explain, mode, cached} либо {ok:false, reason}.
 export async function parseQuery(query, dimensions = {}, reportKind = 'r2b') {
-  if (apiEnabled()) return parseViaApi(query, dimensions, reportKind);
-  if (cliEnabled()) return noteError(await parseViaCli(query, dimensions, reportKind));
-  return { ok: false, reason: 'no_key' };
+  const key = reportKind + '::' + normQ(query);
+  const hit = cache.get(key);
+  if (hit) { // мгновенно — из кэша, без API/CLI (валидируем под актуальные справочники)
+    cache.delete(key); cache.set(key, hit); // LRU-освежение
+    return { ok: true, filter: validateFilter(hit.raw, dimensions), explain: hit.explain, mode: hit.mode, cached: true };
+  }
+  let r;
+  if (apiEnabled()) r = await parseViaApi(query, dimensions, reportKind);
+  else if (cliEnabled()) r = noteError(await parseViaCli(query, dimensions, reportKind));
+  else return { ok: false, reason: 'no_key' };
+  if (r && r.ok) {
+    cachePut(key, { raw: r.raw, explain: r.explain, mode: r.mode });
+    return { ok: true, filter: validateFilter(r.raw, dimensions), explain: r.explain, mode: r.mode, cached: false };
+  }
+  return r;
 }

@@ -1292,6 +1292,27 @@ let reportPeriodMode = 'month';    // 'month' | '2month' — период зак
 let reportFabricFilters = { plansheets: [], articleIds: [], months: [], sources: [], seasons: [], text: '' }; // фильтры отчётов по ткани (множественные) + свободный поиск
 let nlqStatus = null;              // null — не проверяли; undefined — идёт запрос; {enabled} | false — нет ключа/ошибка
 let nlqLastExplain = '';           // человекочитаемое описание последнего разбора запроса нейросетью
+let nlqPending = null;             // предпросмотр разбора до применения: {query, filter, explain, cached}
+// фразы, которые пользователь уже подтвердил — применяются мгновенно без предпросмотра (localStorage)
+let nlqConfirmed = (() => { try { return new Set(JSON.parse(localStorage.getItem('nlqConfirmed') || '[]')); } catch { return new Set(); } })();
+const nlqRemember = (q) => { try { nlqConfirmed.add(q); localStorage.setItem('nlqConfirmed', JSON.stringify([...nlqConfirmed].slice(-200))); } catch { /* ignore */ } };
+const nlqNorm = (q) => String(q || '').trim().toLowerCase().replace(/\s+/g, ' ');
+// человекочитаемое описание фильтра для панели предпросмотра/чипов
+function describeFilterParts(f, ff, repId) {
+  const monthOpts = (repId === 'r2b' ? ff.purchaseMonths : ff.months) || [];
+  const ml = (ym) => (monthOpts.find((m) => m.ym === ym) || {}).label || ym;
+  const sl = (s) => (s === 'china' ? 'Китай' : s === 'bishkek' ? 'Бишкек (Мадина)' : s);
+  const sel = (s) => (s === 'summer' ? 'Лето (муслин/марлёвка)' : s === 'demi' ? 'Демисезон' : s);
+  const al = (id) => { const a = (ff.articles || []).find((x) => x.id === id); return a ? (a.id + (a.name ? ' · ' + a.name : '')) : id; };
+  const parts = [];
+  (f.plansheets || []).forEach((v) => parts.push('Планшет: ' + v));
+  (f.articleIds || []).forEach((v) => parts.push('Артикул: ' + al(v)));
+  (f.months || []).forEach((v) => parts.push((repId === 'r2b' ? 'Закуп: ' : 'Месяц: ') + ml(v)));
+  (f.sources || []).forEach((v) => parts.push('Источник: ' + sl(v)));
+  (f.seasons || []).forEach((v) => parts.push(sel(v)));
+  if (f.text) parts.push('Поиск: «' + f.text + '»');
+  return parts;
+}
 let openReportId = null, openReportGenAt = null; // какой отчёт открыт (чтобы переоткрыть после перерисовки)
 let currentReportRefresh = null;   // перерисовать ТОЛЬКО тело открытого отчёта (не трогая панель настроек)
 let sourcingSaveTimer = null;      // дебаунс сохранения настроек источника/цены
@@ -1487,6 +1508,25 @@ function showReport(result, rep, data, genAtIso, ctx) {
         <button class="btn btn-subtle" id="nlq-clear"${view.filtered ? '' : ' disabled'}>Сбросить</button>
       </div>
       <div style="font-size:11px;color:#889;margin:-4px 0 8px">${hint}</div>`;
+    // ── предпросмотр разбора: «как система поняла запрос» (до применения) ──
+    let previewCard = '';
+    if (nlqPending && nlqPending.repId === rep.id) {
+      const parts = describeFilterParts(nlqPending.filter, ff, rep.id);
+      const pchips = parts.length
+        ? parts.map((p) => `<span style="display:inline-block;padding:3px 9px;background:#fff;border:1px solid #cfe2ff;border-radius:14px;font-size:12px;color:${C.head}">${esc(p)}</span>`).join(' ')
+        : '<span style="color:#a05a00;font-size:12.5px">фильтр пустой — под запрос ничего конкретного не выделено (покажет всё)</span>';
+      previewCard = `<div style="margin:0 0 12px;padding:12px 14px;background:#f2f8ff;border:1px solid #bcd8ff;border-radius:10px">
+          <div style="font-size:12.5px;color:${C.head};font-weight:700;margin-bottom:6px">🧠 Как система поняла запрос${nlqPending.cached ? ' <span style="color:#256b45;font-weight:600">· ⚡ из кэша</span>' : ''}</div>
+          <div style="font-size:12px;color:#667;margin-bottom:8px">Запрос: «${esc(nlqPending.query)}»</div>
+          ${nlqPending.explain ? `<div style="font-size:12.5px;color:${C.accent};font-style:italic;margin-bottom:8px">✨ ${esc(nlqPending.explain)}</div>` : ''}
+          <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">${pchips}</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-accent" id="nlq-apply">✓ Применить</button>
+            <button class="btn btn-subtle" id="nlq-cancel">✗ Отмена</button>
+            <span style="font-size:11px;color:#889">эту фразу дальше применю сразу, без переспроса</span>
+          </div>
+        </div>`;
+    }
     // ── активные фильтры «чипами» ──
     const chip = (field, val, label) => `<span data-chip="${field}" data-val="${esc(String(val))}" style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;background:#eef6ff;border:1px solid #cfe2ff;border-radius:14px;font-size:12px;color:${C.head};cursor:pointer" title="Убрать">${label}<b style="color:#c0392b;font-size:13px">×</b></span>`;
     const chips = [];
@@ -1515,7 +1555,7 @@ function showReport(result, rep, data, genAtIso, ctx) {
       <summary style="cursor:pointer;font-size:12.5px;color:#667;font-weight:700;user-select:none">⚙ Ручной фильтр (наборами: Ctrl/Cmd-клик · пусто = все)</summary>
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:8px 0 0;padding:10px 12px;background:${C.zebra};border:1px solid ${C.border};border-radius:10px">
         ${plan}${art}${mon}${srcBox}${seaBox}</div></details>`;
-    filterBar = cmdBar + chipsRow + manual;
+    filterBar = cmdBar + previewCard + chipsRow + manual;
   }
 
   // период закупа — только для «Закупка ткани» и только БЕЗ активного фильтра (иначе вид консолидированный)
@@ -1552,13 +1592,25 @@ function showReport(result, rep, data, genAtIso, ctx) {
     else reportFabricFilters[field] = (reportFabricFilters[field] || []).filter((x) => String(x) !== val);
     rerender();
   }));
-  // командная строка: разобрать запрос (нейросетью, если подключена) → применить фильтр
+  // применить разобранный фильтр к отчёту (общая точка для «Применить» и авто-применения)
+  const applyFilter = (f, explain) => {
+    reportFabricFilters = {
+      plansheets: Array.isArray(f.plansheets) ? f.plansheets : [],
+      articleIds: Array.isArray(f.articleIds) ? f.articleIds : [],
+      months: Array.isArray(f.months) ? f.months : [],
+      sources: Array.isArray(f.sources) ? f.sources : [],
+      seasons: Array.isArray(f.seasons) ? f.seasons : [],
+      text: typeof f.text === 'string' ? f.text : '' };
+    nlqLastExplain = String(explain || '');
+  };
+  // командная строка: разобрать запрос (нейросетью, если подключена) → предпросмотр → применить
   const runNlq = async () => {
     const q = (result.querySelector('#nlq-input')?.value || '').trim();
+    nlqPending = null;
     if (!q) { reportFabricFilters.text = ''; nlqLastExplain = ''; rerender(); return; }
     const goBtn = result.querySelector('#nlq-go'); const old = goBtn ? goBtn.textContent : '';
     if (goBtn) { goBtn.disabled = true; goBtn.textContent = '…'; }
-    const applyLocal = () => { reportFabricFilters = { plansheets: [], articleIds: [], months: [], sources: [], seasons: [], text: q }; nlqLastExplain = ''; };
+    const applyLocal = () => { applyFilter({ text: q }, ''); };
     try {
       if (nlqStatus && nlqStatus.enabled && api) {
         const dims = view.fabricFilters || {};
@@ -1567,15 +1619,8 @@ function showReport(result, rep, data, genAtIso, ctx) {
           months: (rep.id === 'r2b' ? dims.purchaseMonths : dims.months) || [],
           sources: dims.sources || [], seasons: dims.seasons || [] } }) });
         if (r && r.ok && r.filter) {
-          const f = r.filter;
-          reportFabricFilters = {
-            plansheets: Array.isArray(f.plansheets) ? f.plansheets : [],
-            articleIds: Array.isArray(f.articleIds) ? f.articleIds : [],
-            months: Array.isArray(f.months) ? f.months : [],
-            sources: Array.isArray(f.sources) ? f.sources : [],
-            seasons: Array.isArray(f.seasons) ? f.seasons : [],
-            text: typeof f.text === 'string' ? f.text : '' };
-          nlqLastExplain = String(r.explain || '');
+          if (nlqConfirmed.has(nlqNorm(q))) applyFilter(r.filter, r.explain); // уже подтверждали → сразу
+          else nlqPending = { repId: rep.id, query: q, filter: r.filter, explain: String(r.explain || ''), cached: !!r.cached }; // иначе — предпросмотр
         } else applyLocal();
       } else applyLocal();
     } catch (e) { applyLocal(); toast('Нейросеть недоступна — ищу по тексту', true); }
@@ -1583,7 +1628,15 @@ function showReport(result, rep, data, genAtIso, ctx) {
   };
   result.querySelector('#nlq-go')?.addEventListener('click', runNlq);
   result.querySelector('#nlq-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runNlq(); } });
-  result.querySelector('#nlq-clear')?.addEventListener('click', () => { reportFabricFilters = { plansheets: [], articleIds: [], months: [], sources: [], seasons: [], text: '' }; nlqLastExplain = ''; rerender(); });
+  result.querySelector('#nlq-clear')?.addEventListener('click', () => { reportFabricFilters = { plansheets: [], articleIds: [], months: [], sources: [], seasons: [], text: '' }; nlqLastExplain = ''; nlqPending = null; rerender(); });
+  // предпросмотр: применить / отменить
+  result.querySelector('#nlq-apply')?.addEventListener('click', () => {
+    if (!nlqPending) return;
+    applyFilter(nlqPending.filter, nlqPending.explain);
+    nlqRemember(nlqNorm(nlqPending.query)); // впредь применять эту фразу сразу
+    nlqPending = null; rerender();
+  });
+  result.querySelector('#nlq-cancel')?.addEventListener('click', () => { nlqPending = null; rerender(); });
 
   const saveBtn = result.querySelector('#rep-save');
   saveBtn.addEventListener('click', async () => {
