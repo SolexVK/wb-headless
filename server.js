@@ -8,6 +8,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { buildStockAvailabilityReport, reportToCSV } from './lib/stockReport.js';
 import { buildNicheAnalysis } from './lib/nicheAnalysis.js';
 import { nicheReportToCSV } from './lib/nicheReport.js';
+import { buildFinesReport, finesReportToCSV, finesByReasonToCSV } from './lib/finesReport.js';
+import { selectScope } from './report-fines.js';
+import { resolveWbToken } from './lib/wbToken.js';
 import { defaultPeriod, loadItems, selectItems, selectByGroup, writeOutputs } from './report-stock.js';
 
 const app = express();
@@ -254,6 +257,51 @@ app.get('/reports/niche', requireKey, async (req, res) => {
       );
     }
     return res.json(analysis);
+  } catch (err) {
+    return res.status(500).json({ error: 'report_failed', detail: String(err?.message || err) });
+  }
+});
+
+// ---------- REPORT: штрафы и затраты WB ----------
+// GET /reports/fines?d1=YYYY-MM-DD&d2=YYYY-MM-DD&format=json|csv&sheet=sku|reasons
+// Раскладывает удержания Wildberries на статьи: комиссия, логистика, хранение,
+// платная приёмка, штрафы (с причинами), прочие удержания и доплаты.
+// Источник — детализация к отчётам реализации WB Finance API (нужен токен
+// категории «Финансы»: WB_API_TOKEN / Wildberries_API).
+// Без d1/d2 берётся период = последние REPORT_DAYS дней; period=weekly|daily.
+// filter/group — те же правила выбора товаров, что и в отчёте по наличию;
+// без них отчёт строится по всему кабинету (штрафы часто идут без артикула).
+// ВНИМАНИЕ: лимит WB — 1 запрос в минуту, ответ может идти минуты.
+app.get('/reports/fines', requireKey, async (req, res) => {
+  try {
+    if (!resolveWbToken().token) {
+      return res.status(500).json({
+        error: 'wb_token_missing',
+        detail: 'Не найден токен WB (категория «Финансы»). Задайте WB_API_TOKEN или Wildberries_API в .env и перезапустите сервер.'
+      });
+    }
+    let { d1, d2, format, sheet, filter, group, period } = req.query;
+    if (!d1 || !d2) ({ d1, d2 } = defaultPeriod(Number(process.env.REPORT_DAYS) || 30));
+
+    const { items } = selectScope({ filter, group });
+    const report = await buildFinesReport({
+      d1,
+      d2,
+      period: period === 'daily' ? 'daily' : 'weekly',
+      items,
+      control: process.env.FINES_CONTROL !== '0',
+    });
+
+    if (format === 'csv') {
+      const byReasons = String(sheet || '').toLowerCase() === 'reasons';
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="fines-${d1}_${d2}${byReasons ? '-reasons' : ''}.csv"`
+      );
+      return res.send(byReasons ? finesByReasonToCSV(report) : finesReportToCSV(report));
+    }
+    return res.json(report);
   } catch (err) {
     return res.status(500).json({ error: 'report_failed', detail: String(err?.message || err) });
   }

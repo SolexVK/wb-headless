@@ -1,0 +1,123 @@
+name: Отчёт — штрафы и затраты WB
+
+# Запуск ТОЛЬКО вручную кнопкой «Run workflow» на вкладке Actions.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'За сколько последних дней считать (если не заданы точные даты)'
+        required: false
+        default: '30'
+      d1:
+        description: 'Дата начала (YYYY-MM-DD) — необязательно'
+        required: false
+        default: ''
+      d2:
+        description: 'Дата конца (YYYY-MM-DD) — необязательно'
+        required: false
+        default: ''
+      group:
+        description: 'Группа товаров (линейка). «Все» = весь кабинет — так видно штрафы без артикула'
+        required: false
+        default: 'Все'
+        type: choice
+        options:
+          - 'Все'
+          - 'РЖК'
+          - 'РЖП'
+          - 'РЖМ'
+          - 'МС'
+          - 'РМП'
+          - 'РММ'
+          - 'РМЖ'
+          - 'МР'
+          - 'РЖВП'
+          - 'РУБАШКА'
+          - 'РММ-СВ'
+          - 'МПР'
+          - 'МПТ'
+          - 'РВП'
+          - 'РМК-ТВИД'
+          - 'ЛК'
+          - 'ПШР'
+          - 'РМ'
+          - 'МК'
+          - 'НСР'
+          - 'НРС'
+          - 'РЖКО'
+      filter:
+        description: 'ТОЧЕЧНО (необязательно): артикулы через запятую. Если заполнено — перебивает группу'
+        required: false
+        default: ''
+      period:
+        description: 'Периодичность отчётов реализации WB'
+        required: false
+        default: 'weekly'
+        type: choice
+        options:
+          - 'weekly'
+          - 'daily'
+
+  # ▼▼▼ Чтобы отчёт собирался сам КАЖДЫЙ ПОНЕДЕЛЬНИК — уберите '#' ниже.
+  #     WB формирует отчёты о реализации раз в неделю. 7:00 UTC = 10:00 МСК.
+  # schedule:
+  #   - cron: '0 7 * * 1'
+
+jobs:
+  fines:
+    runs-on: ubuntu-latest
+    # Лимит WB — 1 запрос в минуту: постраничная выгрузка может идти долго.
+    timeout-minutes: 60
+    steps:
+      - name: Забрать код из репозитория
+        uses: actions/checkout@v4
+
+      - name: Установить Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Установить зависимости (без скачивания Chromium)
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: '1'
+        run: npm ci
+
+      - name: Проверить, что токен WB доступен
+        env:
+          WB_API_TOKEN: ${{ secrets.Wildberries_API }}
+        run: |
+          if [ -z "$WB_API_TOKEN" ]; then
+            echo "::error::Секрет Wildberries_API пуст или не найден."
+            echo "Добавьте его: Settings → Secrets and variables → Actions →"
+            echo "вкладка Secrets → New repository secret, имя РОВНО: Wildberries_API"
+            echo "Токен должен быть категории «Финансы» (кабинет → Доступ к API)."
+            exit 1
+          fi
+          echo "Токен получен ✓ (длина ${#WB_API_TOKEN} символов, значение скрыто)"
+
+      - name: Собрать отчёт
+        env:
+          WB_API_TOKEN: ${{ secrets.Wildberries_API }}
+          WB_TOKEN_TYPE: 'personal'
+          REPORT_DAYS: ${{ github.event.inputs.days }}
+          # Выбор товаров через env (безопасно для кириллицы/пробелов).
+          REPORT_GROUP: ${{ github.event.inputs.group }}
+          REPORT_FILTER: ${{ github.event.inputs.filter }}
+          FINES_PERIOD: ${{ github.event.inputs.period }}
+        run: |
+          if [ -n "${{ github.event.inputs.d1 }}" ] && [ -n "${{ github.event.inputs.d2 }}" ]; then
+            echo "Период: ${{ github.event.inputs.d1 }} … ${{ github.event.inputs.d2 }}"
+            node report-fines.js "${{ github.event.inputs.d1 }}" "${{ github.event.inputs.d2 }}"
+          else
+            echo "Период: последние ${REPORT_DAYS} дней"
+            node report-fines.js
+          fi
+
+      - name: Приложить готовый отчёт (CSV + JSON) к запуску
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fines-report
+          path: reports-output/*
+          if-no-files-found: warn
+          retention-days: 90

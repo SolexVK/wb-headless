@@ -6,6 +6,8 @@
 плюс срезы `category/trends|sellers|brands|price_segmentation`).
 
 > Полная методика, источники и ограничения API — `docs/niche-analysis-methodology.md`.
+> Другие отчёты: наличие и упущенная выручка — [REPORTS.md](REPORTS.md);
+> штрафы и затраты WB — [FINES.md](FINES.md).
 > Оформлено также как навык `.claude/skills/wb-niche-analysis/` (пороги скоринга —
 > в `references/scoring.md`).
 
