@@ -26,7 +26,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'reports-nl-query-2026-08-28';
+const BACKEND_BUILD = 'reports-nl-subscription-2026-08-28';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -667,7 +667,7 @@ app.delete('/api/reports/archive/:id', requireEdit('data'), (req, res) => {
 
 // ── «Умный» разбор запроса (нейросеть Anthropic) → структурный фильтр отчёта ──
 app.get('/api/reports/nlq-status', requireView('data'), (req, res) => {
-  res.json({ ok: true, enabled: nlq.isEnabled() });
+  res.json({ ok: true, ...nlq.status() });
 });
 app.post('/api/reports/nl-query', requireView('data'), async (req, res) => {
   try {
@@ -886,4 +886,10 @@ app.listen(PORT, HOST, () => {
   console.log(`[planner] слушает ${HOST}:${PORT}`);
   console.log(`[planner] локально: http://localhost:${PORT}`);
   snapshotOnBoot();
+  // Проверяем локальный Claude Code (умные запросы по подписке) — без ключа API.
+  nlq.probeCli().then((c) => {
+    if (nlq.apiEnabled()) console.log('[planner] умные запросы: режим API (ключ ANTHROPIC_API_KEY)');
+    else if (c && c.available) console.log(`[planner] умные запросы: режим подписки (Claude Code ${c.version})`);
+    else console.log('[planner] умные запросы: выкл (нет ключа и не найден claude — текстовый поиск)');
+  }).catch(() => {});
 });

@@ -1091,17 +1091,30 @@ function googleBarHtml() {
 // ── нейросеть: «умный» разбор запросов в отчётах (командная строка на естественном языке) ──
 let nlqKeyStatus = null; // null — не запрашивали; undefined — идёт запрос; {hasKey,masked,…} | false
 function nlqBarHtml() {
-  const s = nlqKeyStatus;
+  const s = nlqKeyStatus;   // {hasKey,masked,source} — только про API-ключ
+  const st = nlqStatus;     // {enabled,mode,cli:{available,version}} — фактический режим
   const box = (inner) => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 0;padding:8px 12px;background:${C.zebra};border:1px solid ${C.border};border-radius:10px">
     <span style="font-weight:700;color:${C.head};font-size:13px">🤖 Нейросеть (умные запросы):</span>${inner}</div>`;
-  if (s == null || s === undefined) return box('<span style="color:#889;font-size:13px">проверка…</span>');
-  const keyInput = `<input id="nlq-key" type="password" placeholder="ключ Anthropic (sk-ant-…)" style="flex:1;min-width:200px;padding:6px 10px;border:1px solid ${C.border};border-radius:8px;font-size:12.5px">
+  if (s == null || s === undefined || st == null || st === undefined) return box('<span style="color:#889;font-size:13px">проверка…</span>');
+  const keyInput = `<input id="nlq-key" type="password" placeholder="ключ Anthropic (sk-ant-…)" style="flex:1;min-width:180px;padding:6px 10px;border:1px solid ${C.border};border-radius:8px;font-size:12.5px">
     <button class="btn btn-accent" id="nlq-key-save">Сохранить</button>`;
-  if (s === false || !s.hasKey) {
-    return box(`<span style="color:#556;font-size:13px">не подключена — вставьте ключ, чтобы описывать отчёты словами</span>${keyInput}`);
+  const mode = st && st.mode;
+  // Режим подписки (Claude Code) — работает без ключа, по подписке Pro/Max
+  if (mode === 'cli') {
+    const ver = (st.cli && st.cli.version) ? ' ' + esc(String(st.cli.version).replace(/\s*\(.*/, '')) : '';
+    return box(`<span style="color:#256b45;font-size:13px">работает <b>по подписке</b> (Claude Code${ver}) — без оплаты за токены</span>`);
   }
-  return box(`<span style="color:#256b45;font-size:13px">подключена${s.masked ? ': <b>' + esc(s.masked) + '</b>' : ''}${s.source === 'env' ? ' <span style=\"color:#889\">(.env)</span>' : ''}</span>
-    <button class="btn btn-subtle" id="nlq-key-clear" style="margin-left:auto">Убрать</button>`);
+  // Режим API-ключа
+  if (mode === 'api' || (s && s.hasKey)) {
+    return box(`<span style="color:#256b45;font-size:13px">подключена по <b>API-ключу</b>${s.masked ? ': <b>' + esc(s.masked) + '</b>' : ''}${s.source === 'env' ? ' <span style=\"color:#889\">(.env)</span>' : ''}</span>
+      <button class="btn btn-subtle" id="nlq-key-clear" style="margin-left:auto">Убрать ключ</button>`);
+  }
+  // Не подключена: предлагаем оба пути — подписка (без ключа) или ключ API
+  return box(`<div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:260px">
+      <span style="color:#556;font-size:13px">не подключена — доступны два способа:</span>
+      <span style="color:#667;font-size:12px">① <b>По подписке (бесплатно):</b> на сервере залогиньте Claude Code (<code>claude</code>) вашей подпиской и перезапустите — ключ не нужен.</span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="color:#667;font-size:12px">② <b>По API-ключу</b> (оплата по токенам):</span>${keyInput}</div>
+    </div>`);
 }
 
 // ============================ КУРСЫ ВАЛЮТ ============================
@@ -1393,8 +1406,9 @@ function showReport(result, rep, data, genAtIso, ctx) {
     const artLabel = (id) => { const a = (ff.articles || []).find((x) => x.id === id); return a ? (a.id + (a.name ? ' · ' + a.name : '')) : id; };
     // ── командная строка (естественный язык) ──
     const smart = !!(nlqStatus && nlqStatus.enabled);
+    const modeNote = (nlqStatus && nlqStatus.mode === 'cli') ? ' (по подписке)' : (nlqStatus && nlqStatus.mode === 'api') ? ' (по API-ключу)' : '';
     const hint = smart
-      ? 'нейросеть подключена · опишите отчёт словами'
+      ? `нейросеть подключена${modeNote} · опишите отчёт словами`
       : 'поиск по тексту (для «умных» запросов подключите нейросеть в шапке)';
     const cmdBar = `<div style="display:flex;gap:8px;align-items:center;margin:0 0 10px">
         <span style="font-size:18px" title="${smart ? 'Умный разбор запроса нейросетью' : 'Поиск по тексту'}">${smart ? '✨' : '🔎'}</span>
