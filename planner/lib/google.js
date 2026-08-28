@@ -86,24 +86,33 @@ function preFormatRequests(sheets, docProps) {
 // ПОСЛЕ таблицы: переопределяем стиль таблицы — числовой формат (пробел-разделитель), формат даты
 // (дд.мм.гггг), выравнивание по колонкам, размеры под картинки, жирный крупный «Итого», шапка (не-таблица).
 function postFormatRequests(sheets, docProps) {
-  const reqs = []; const HEADER_BG = { red: 0.90, green: 0.93, blue: 0.96 };
+  const reqs = []; const HEADER_BG = { red: 0.20, green: 0.42, blue: 0.28 }; const WHITE = { red: 1, green: 1, blue: 1 };
   docProps.forEach((dp, i) => {
     const sid = dp.sheetId, cols = (sheets[i].cols || []).map(NC), rows = sheets[i].rows || [];
-    const nRows = rows.length, nCols = Math.max(cols.length, rows.reduce((mx, r) => Math.max(mx, r.length), 0), 1);
-    reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: HEADER_BG, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment)' } });
-    reqs.push({ autoResizeDimensions: { dimensions: { sheetId: sid, dimension: 'COLUMNS', startIndex: 0, endIndex: nCols } } });
+    const nRows = rows.length;
+    const dataEnd = nRows - (sheets[i].totalRow ? 1 : 0); // строки данных без «Итого»
+    // шапка: жирная, БЕЛЫЙ шрифт, зелёный фон, по центру
+    reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true, foregroundColor: WHITE }, backgroundColor: HEADER_BG, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment)' } });
     let hasImg = false;
     cols.forEach((col, c) => {
+      // выравнивание + числовой формат
       const uf = { horizontalAlignment: col.a, verticalAlignment: 'MIDDLE' };
       let fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment)';
-      if (col.t === 'num') { uf.numberFormat = { type: 'NUMBER', pattern: '#,##0' }; fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment,numberFormat)'; }
-      else if (col.t === 'price') { uf.numberFormat = { type: 'NUMBER', pattern: '#,##0.00' }; fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment,numberFormat)'; }
-      else if (col.t === 'date') { uf.numberFormat = { type: 'DATE', pattern: 'dd.mm.yyyy' }; fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment,numberFormat)'; }
-      // строки данных (с итоговой включительно — там SUBTOTAL с тем же форматом)
+      if (col.t === 'num' || col.t === 'price' || col.t === 'date') { uf.numberFormat = numFmt(col.t); fields = 'userEnteredFormat(horizontalAlignment,verticalAlignment,numberFormat)'; }
       reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 1, endRowIndex: Math.max(1, nRows), startColumnIndex: c, endColumnIndex: c + 1 }, cell: { userEnteredFormat: uf }, fields } });
-      if (col.t === 'img') { hasImg = true; reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'COLUMNS', startIndex: c, endIndex: c + 1 }, properties: { pixelSize: 100 }, fields: 'pixelSize' } }); }
+      // ШИРИНА колонки: по самой длинной надписи (шапка/данные) + запас под воронку фильтра; картинки — фикс.
+      let px = 100;
+      if (col.t === 'img') { hasImg = true; }
+      else {
+        let maxLen = 0;
+        for (let r = 0; r < nRows; r++) { const v = rows[r] && rows[r][c]; if (v == null) continue; const s = String(v); if (s.startsWith('=')) continue; if (s.length > maxLen) maxLen = s.length; }
+        px = Math.min(320, Math.max(64, Math.round(maxLen * 7.2) + 40));
+      }
+      reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'COLUMNS', startIndex: c, endIndex: c + 1 }, properties: { pixelSize: px }, fields: 'pixelSize' } });
     });
-    if (hasImg && nRows > 1) reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'ROWS', startIndex: 1, endIndex: nRows }, properties: { pixelSize: 54 }, fields: 'pixelSize' } });
+    // высота строк с картинками — ТОЛЬКО для строк данных (строку «Итого» не трогаем — обычная высота)
+    if (hasImg && dataEnd > 1) reqs.push({ updateDimensionProperties: { range: { sheetId: sid, dimension: 'ROWS', startIndex: 1, endIndex: dataEnd }, properties: { pixelSize: 54 }, fields: 'pixelSize' } });
+    // «Итого»: жирный, чуть крупнее; высота остаётся обычной (не задаём)
     if (sheets[i].totalRow && nRows >= 2) reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: nRows - 1, endRowIndex: nRows }, cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } }, fields: 'userEnteredFormat.textFormat' } });
   });
   return reqs;
