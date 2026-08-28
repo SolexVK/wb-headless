@@ -958,6 +958,9 @@ const colL = (i) => { let s = ''; i += 1; while (i > 0) { const m = (i - 1) % 26
 // принудительно текстовая ячейка (ведущий апостроф) — чтобы номера с ведущим нулём («003») не теряли ноль
 const TXT = (v) => { const s = String(v == null ? '' : v); return /^\d/.test(s) ? "'" + s : s; };
 const colType = (col) => (typeof col === 'string' ? col : col.t); // тип колонки (для SUBTOTAL)
+// Срезы (slicers) в Google-таблице. По умолчанию ВЫКЛ: фильтруем в приложении и выгружаем готовый
+// срез — так таблица чище и корректно печатается. Поставить true, чтобы вернуть срезы.
+const GS_SLICERS = false;
 // строка «Итого» с формулами SUBTOTAL(109) по числовым колонкам — пересчитывается при фильтрации.
 // cnt — число строк данных (шапка = строка 1, данные 2..cnt+1). label — текст в первой ячейке.
 const totalRow = (cols, cnt, label) => cols.map((col, ci) => ci === 0 ? label : (colType(col) === 'num' && cnt > 0 ? `=SUBTOTAL(109; ${colL(ci)}2:${colL(ci)}${cnt + 1})` : ''));
@@ -969,8 +972,7 @@ function sheetsConsolidated(data) {
   let cnt = 0;
   for (const x of (data.fabricConsolidated || [])) { rows.push([TXT(x.plansheet || '—'), TXT(x.colorNo || '—'), x.color, IMG((x.images && x.images[0]) || ''), TXT(x.arts.join(', ')), x.meters, price2n(x.price), x.cost]); cnt++; }
   rows.push(totalRow(cols, cnt, 'Итого по фильтру'));
-  // срезы (slicers) по Планшет / № цвета / Цвет / Артикулы
-  return [{ title: 'Ткань по фильтру', rows, cols, table: cnt > 0, totalRow: true, slicerCols: cnt > 0 ? [0, 1, 2, 4] : [] }];
+  return [{ title: 'Ткань по фильтру', rows, cols, table: cnt > 0, totalRow: true, slicerCols: (GS_SLICERS && cnt > 0) ? [0, 1, 2, 4] : [] }];
 }
 function sheetsReport1(data) {
   const cols = ['text', 'text', 'text', 'num', 'num'];
@@ -1001,19 +1003,18 @@ function sheetsReport2b(data) {
   const HEAD = ['Заказ', 'Заказать', 'Приход ткани', 'Планшет', '№ цвета', 'Цвет', 'Образец', 'Артикулы', 'Метраж, м', 'Цена, $/м', 'Сумма, $'];
   const COLS = [{ t: 'text', a: 'LEFT' }, { t: 'date', a: 'CENTER' }, { t: 'text', a: 'LEFT' }, { t: 'text', a: 'CENTER' }, { t: 'text', a: 'CENTER' }, { t: 'text', a: 'LEFT' }, { t: 'img', a: 'CENTER' }, { t: 'text', a: 'CENTER' }, { t: 'num', a: 'CENTER' }, { t: 'price', a: 'CENTER' }, { t: 'num', a: 'CENTER' }];
   const head = HEAD.slice(); const cols = COLS.slice(); if (R) { head.push('Сумма, сом'); cols.push({ t: 'num', a: 'CENTER' }); }
-  // СКРЫТЫЙ вспомогательный столбец «Месяц заказа» — чтобы срез показывал МЕСЯЦ (а не каждую дату)
-  const monthIdx = head.length; head.push('Месяц заказа'); cols.push({ t: 'text', a: 'CENTER' });
+  // СКРЫТЫЙ вспомогательный столбец «Месяц заказа» (для среза по месяцу) — только если срезы включены
+  const monthIdx = head.length; if (GS_SLICERS) { head.push('Месяц заказа'); cols.push({ t: 'text', a: 'CENTER' }); }
   const mk = (title, orders) => {
     const rows = [head]; let cnt = 0;
     for (const o of orders) for (const it of o.items) {
       const row = [TXT(o.label), dmy(o.purchaseDate), TXT(o.arrival ? ymLabel(String(o.arrival).slice(0, 7)) : '—'), TXT(it.plansheet || '—'), TXT(it.colorNo || '—'), it.color || '—', IMG((it.images && it.images[0]) || ''), TXT(it.arts.join(', ')), it.meters, price2n(it.price), it.cost];
       if (R) row.push(som(it.cost));
-      row.push(ymLabel(ym(o.purchaseDate))); // месяц заказа (для среза)
+      if (GS_SLICERS) row.push(ymLabel(ym(o.purchaseDate))); // месяц заказа (для среза)
       rows.push(row); cnt++;
     }
     rows.push(totalRow(cols, cnt, 'Итого')); // SUBTOTAL — пересчёт при фильтрации
-    // срезы (slicers): Месяц заказа (по месяцу) + Планшет / № цвета / Цвет / Артикулы
-    return { title, rows, cols, table: cnt > 0, totalRow: true, slicerCols: cnt > 0 ? [monthIdx, 3, 4, 5, 7] : [], hiddenCols: [monthIdx] };
+    return { title, rows, cols, table: cnt > 0, totalRow: true, slicerCols: (GS_SLICERS && cnt > 0) ? [monthIdx, 3, 4, 5, 7] : [], hiddenCols: GS_SLICERS ? [monthIdx] : [] };
   };
   const P = data.fabricPurchase || {};
   return [
