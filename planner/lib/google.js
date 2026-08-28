@@ -72,13 +72,14 @@ async function writeValues(at, id, sheets, docProps) {
 // a — выравнивание 'LEFT'|'CENTER'|'RIGHT' (если не задано — text/date влево, остальное по центру).
 const NC = (c) => (typeof c === 'string') ? { t: c, a: (c === 'text' || c === 'date') ? 'LEFT' : 'CENTER' } : { t: c.t || 'text', a: c.a || ((c.t === 'text' || c.t === 'date') ? 'LEFT' : 'CENTER') };
 
-// ДО записи: текстовые колонки → формат «текст» (чтобы ведущие нули «003» не исчезали).
-// Числа/дату форматируем ПОСЛЕ таблицы — иначе нативная таблица навяжет свой формат/выравнивание.
+const numFmt = (t) => t === 'text' ? { type: 'TEXT' } : t === 'date' ? { type: 'DATE', pattern: 'dd.mm.yyyy' } : t === 'num' ? { type: 'NUMBER', pattern: '#,##0' } : t === 'price' ? { type: 'NUMBER', pattern: '#,##0.00' } : null;
+// ДО записи: числовой формат по колонкам (текст → ведущие нули «003» не пропадут; дата распознаётся).
+// Таблицу создаём БЕЗ типов столбцов (см. applyTables), поэтому этот формат не перебивается.
 function preFormatRequests(sheets, docProps) {
   const reqs = [];
   docProps.forEach((dp, i) => {
     const sid = dp.sheetId, cols = (sheets[i].cols || []).map(NC), nRows = (sheets[i].rows || []).length;
-    cols.forEach((col, c) => { if (col.t === 'text') reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 1, endRowIndex: Math.max(1, nRows), startColumnIndex: c, endColumnIndex: c + 1 }, cell: { userEnteredFormat: { numberFormat: { type: 'TEXT' } } }, fields: 'userEnteredFormat.numberFormat' } }); });
+    cols.forEach((col, c) => { const nf = numFmt(col.t); if (nf) reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 1, endRowIndex: Math.max(1, nRows), startColumnIndex: c, endColumnIndex: c + 1 }, cell: { userEnteredFormat: { numberFormat: nf } }, fields: 'userEnteredFormat.numberFormat' } }); });
   });
   return reqs;
 }
@@ -89,7 +90,7 @@ function postFormatRequests(sheets, docProps) {
   docProps.forEach((dp, i) => {
     const sid = dp.sheetId, cols = (sheets[i].cols || []).map(NC), rows = sheets[i].rows || [];
     const nRows = rows.length, nCols = Math.max(cols.length, rows.reduce((mx, r) => Math.max(mx, r.length), 0), 1);
-    if (!sheets[i].table) reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: HEADER_BG, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment)' } });
+    reqs.push({ repeatCell: { range: { sheetId: sid, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: HEADER_BG, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment)' } });
     reqs.push({ autoResizeDimensions: { dimensions: { sheetId: sid, dimension: 'COLUMNS', startIndex: 0, endIndex: nCols } } });
     let hasImg = false;
     cols.forEach((col, c) => {
@@ -114,27 +115,15 @@ function postFormatRequests(sheets, docProps) {
 async function applyTables(at, id, sheets, docProps) {
   const targets = sheets.map((s, i) => ({ s, dp: docProps[i] })).filter((x) => x.s && x.s.table);
   if (!targets.length) return;
-  const colType = (t) => (t === 'num' || t === 'price') ? 'DOUBLE' : (t === 'date') ? 'DATE' : 'TEXT';
+  // Оформляем как ФИЛЬТР + чередование строк (визуально «таблица»: фильтры на колонках, полосы,
+  // авто-пересчёт итога через SUBTOTAL). НЕ используем нативную таблицу Google: её типы столбцов
+  // навязывают свой формат/выравнивание (US-дата, правый край, без пробелов) и перебивают наш.
   const rangeOf = (s, dp) => {
     const rows = s.rows || [], cols = s.cols || [];
     const nCols = Math.max(cols.length, rows.reduce((m, r) => Math.max(m, r.length), 0), 1);
-    const endRow = rows.length - (s.totalRow ? 1 : 0); // без строки «Итого»
+    const endRow = rows.length - (s.totalRow ? 1 : 0); // без строки «Итого» (там SUBTOTAL — вне фильтра)
     return { sheetId: dp.sheetId, startRowIndex: 0, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: nCols };
   };
-  const ident = (t) => String(t || '').replace(/[^\wА-Яа-яЁё ]+/g, ' ').replace(/\s+/g, '_').replace(/^_+|_+$/g, '') || 'Таблица';
-  // нативные таблицы: сперва с именем = имя листа, затем с «безопасным» именем-идентификатором
-  const tryTables = async (nameOf) => {
-    const reqs = targets.map(({ s, dp }) => ({ addTable: { table: {
-      name: nameOf(dp.title, dp.sheetId),
-      range: rangeOf(s, dp),
-      // «Образец» (картинка) — БЕЗ типа столбца («Нет»), иначе Google ругается на формулу-картинку
-      columnProperties: (s.cols || []).map(NC).map((col, i) => ({ col, i })).filter(({ col }) => col.t !== 'img').map(({ col, i }) => ({ columnIndex: i, columnName: String((s.rows && s.rows[0] && s.rows[0][i]) || ('Колонка ' + (i + 1))), columnType: colType(col.t) })),
-    } } }));
-    await batchUpdate(at, id, reqs, 30000);
-  };
-  try { await tryTables((title) => String(title || 'Таблица')); return; } catch { /* имя листа не подошло */ }
-  try { await tryTables((title) => ident(title)); return; } catch { /* нативные таблицы недоступны */ }
-  // запасной вариант: базовый фильтр + чередование строк
   try {
     const reqs = [];
     for (const { s, dp } of targets) {
@@ -143,7 +132,7 @@ async function applyTables(at, id, sheets, docProps) {
       reqs.push({ addBanding: { bandedRange: { range, rowProperties: { headerColor: { red: 0.20, green: 0.42, blue: 0.28 }, firstBandColor: { red: 1, green: 1, blue: 1 }, secondBandColor: { red: 0.95, green: 0.97, blue: 0.95 } } } } });
     }
     await batchUpdate(at, id, reqs, 30000);
-  } catch { /* и фильтр не вышел — не критично, данные уже записаны */ }
+  } catch { /* фильтр/полосы не критичны — данные и формат уже применены */ }
 }
 
 // Создать НОВУЮ таблицу. Возвращает { url, id }.
@@ -159,9 +148,9 @@ export async function createReport(at, title, sheets) {
   const pre = preFormatRequests(sheets, docProps);
   if (pre.length) await batchUpdate(at, doc.spreadsheetId, pre, 30000).catch(() => {}); // текст ДО записи (ведущие нули)
   await writeValues(at, doc.spreadsheetId, sheets, docProps);
-  await applyTables(at, doc.spreadsheetId, sheets, docProps);          // таблица
   const post = postFormatRequests(sheets, docProps);
-  if (post.length) await batchUpdate(at, doc.spreadsheetId, post, 30000).catch(() => {}); // формат/выравнивание ПОСЛЕ таблицы
+  if (post.length) await batchUpdate(at, doc.spreadsheetId, post, 30000).catch(() => {}); // формат/выравнивание
+  await applyTables(at, doc.spreadsheetId, sheets, docProps);          // фильтр + чередование (после форматирования)
   return { url: doc.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${doc.spreadsheetId}`, id: doc.spreadsheetId };
 }
 
@@ -194,9 +183,9 @@ export async function updateReport(at, id, title, sheets) {
   const pre = preFormatRequests(sheets, docProps);
   if (pre.length) await batchUpdate(at, id, pre, 30000).catch(() => {}); // текст ДО записи (ведущие нули)
   await writeValues(at, id, sheets, docProps);
-  await applyTables(at, id, sheets, docProps);          // таблица
   const post = postFormatRequests(sheets, docProps);
-  if (post.length) await batchUpdate(at, id, post, 30000).catch(() => {}); // формат/выравнивание ПОСЛЕ таблицы
+  if (post.length) await batchUpdate(at, id, post, 30000).catch(() => {}); // формат/выравнивание
+  await applyTables(at, id, sheets, docProps);          // фильтр + чередование (после форматирования)
   return { url: meta.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${id}`, id };
 }
 
