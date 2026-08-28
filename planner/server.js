@@ -26,7 +26,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'reports-nl-subscription-2026-08-28';
+const BACKEND_BUILD = 'reports-nlq-proxy-2026-08-28';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -68,7 +68,32 @@ function loadAnthropicKeyFromDb() {
   try { const m = metaGet('anthropic_key'); if (m && m.value) process.env.ANTHROPIC_API_KEY = m.value; } catch { /* нет БД — остаётся .env */ }
 }
 loadAnthropicKeyFromDb();
+// Прокси (страна пользователя) и long-lived токен Claude Code (подписка, headless) для умных
+// запросов. Хранятся в БД; подставляются в дочерний процесс `claude` при разборе запроса.
+// Прокси — process.env.PLANNER_NLQ_PROXY; токен — process.env.CLAUDE_CODE_OAUTH_TOKEN.
+const ENV_NLQ_PROXY = process.env.PLANNER_NLQ_PROXY || '';
+const ENV_CLI_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN || '';
+function loadNlqRuntimeFromDb() {
+  try { const m = metaGet('nlq_proxy'); if (m && m.value) process.env.PLANNER_NLQ_PROXY = m.value; } catch { /* нет БД */ }
+  try { const m = metaGet('nlq_cli_token'); if (m && m.value) process.env.CLAUDE_CODE_OAUTH_TOKEN = m.value; } catch { /* нет БД */ }
+}
+loadNlqRuntimeFromDb();
 const maskToken = (t) => { t = String(t || ''); return t.length > 12 ? t.slice(0, 6) + '…' + t.slice(-4) : (t ? '…' : ''); };
+// Прокси маскируем, сохраняя схему и хост (пароль/порт скрываем): http://user:***@host
+function maskProxy(u) {
+  u = String(u || ''); if (!u) return '';
+  try { const p = new URL(u); const host = p.hostname || ''; const user = p.username ? p.username + ':***@' : ''; return `${p.protocol}//${user}${host}${p.port ? ':' + p.port : ''}`; }
+  catch { return u.length > 16 ? u.slice(0, 10) + '…' : '…'; }
+}
+function nlqRuntimeStatus() {
+  const proxy = process.env.PLANNER_NLQ_PROXY || '';
+  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN || '';
+  return {
+    proxy: { set: !!proxy, masked: maskProxy(proxy) },
+    cliToken: { set: !!token, masked: maskToken(token) },
+    apiKey: anthropicKeyStatus(),
+  };
+}
 function anthropicKeyStatus() {
   const cur = process.env.ANTHROPIC_API_KEY || '';
   let dbSet = false;
@@ -695,6 +720,35 @@ app.delete('/api/settings/anthropic', requireEdit('data'), (req, res) => {
     process.env.ANTHROPIC_API_KEY = ENV_ANTHROPIC_KEY; // вернуть из .env (или пусто)
     res.json({ ok: true, ...anthropicKeyStatus() });
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+// Прокси + токен Claude Code (подписка). Пустая строка в поле = очистить.
+app.get('/api/settings/nlq', requireView('data'), (req, res) => res.json({ ok: true, ...nlqRuntimeStatus() }));
+app.put('/api/settings/nlq', requireEdit('data'), (req, res) => {
+  try {
+    const b = req.body || {};
+    if (b.proxy !== undefined) {
+      const v = String(b.proxy || '').trim();
+      metaSet('nlq_proxy', v);
+      process.env.PLANNER_NLQ_PROXY = v || ENV_NLQ_PROXY;
+    }
+    if (b.cliToken !== undefined) {
+      const v = String(b.cliToken || '').trim();
+      metaSet('nlq_cli_token', v);
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = v || ENV_CLI_TOKEN;
+    }
+    if (b.apiKey !== undefined) {
+      const v = String(b.apiKey || '').trim();
+      metaSet('anthropic_key', v);
+      process.env.ANTHROPIC_API_KEY = v || ENV_ANTHROPIC_KEY;
+    }
+    nlq.clearLastError();
+    res.json({ ok: true, ...nlqRuntimeStatus() });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+// Проверка соединения: пробный вызов через прокси+токен. Классифицирует сбой (прокси/авторизация).
+app.post('/api/reports/nlq-test', requireView('data'), async (req, res) => {
+  try { res.json({ ok: true, ...(await nlq.healthCheck()) }); }
+  catch (e) { res.status(500).json({ ok: false, reason: 'server', detail: String(e.message || e) }); }
 });
 
 // «Экономная раскладка (JIT)»: пересобрать даты старта пошива под оборачиваемость денег.

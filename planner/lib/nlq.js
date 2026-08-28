@@ -45,12 +45,78 @@ export function apiEnabled() { return !!(process.env.ANTHROPIC_API_KEY || '').tr
 export function cliEnabled() { return !!(cliInfo.available || process.env.CLAUDE_CLI_PATH); }
 export function activeMode() { return apiEnabled() ? 'api' : (cliEnabled() ? 'cli' : 'none'); }
 export function isEnabled() { return apiEnabled() || cliEnabled(); }
+
+// Последняя ошибка режима подписки (прокси протух / авторизация протухла и т.п.) — для баннера в UI.
+let lastError = null; // { at, reason, detail } | null
+export function clearLastError() { lastError = null; }
+function noteError(r) {
+  if (r && r.ok) { lastError = null; return r; }
+  if (r && r.reason && r.reason !== 'no_key' && r.reason !== 'no_cli') {
+    lastError = { at: new Date().toISOString(), reason: r.reason, detail: String(r.detail || '').slice(0, 200) };
+  }
+  return r;
+}
+
 export function status() {
   return {
     enabled: isEnabled(), mode: activeMode(),
     api: apiEnabled(),
     cli: { available: cliEnabled(), version: cliInfo.version || '' },
+    proxy: !!(process.env.PLANNER_NLQ_PROXY || '').trim(),
+    cliToken: !!(process.env.CLAUDE_CODE_OAUTH_TOKEN || '').trim(),
+    lastError,
   };
+}
+
+// Окружение для дочернего `claude`: прокси страны + токен подписки (headless).
+function childEnv() {
+  const env = { ...process.env };
+  const proxy = (process.env.PLANNER_NLQ_PROXY || '').trim();
+  if (proxy) { env.HTTPS_PROXY = proxy; env.HTTP_PROXY = proxy; env.ALL_PROXY = proxy; env.https_proxy = proxy; env.http_proxy = proxy; env.all_proxy = proxy; }
+  const token = (process.env.CLAUDE_CODE_OAUTH_TOKEN || '').trim();
+  if (token) { env.CLAUDE_CODE_OAUTH_TOKEN = token; delete env.ANTHROPIC_API_KEY; } // токен подписки не должен конкурировать с ключом API
+  return env;
+}
+
+// Классификация сбоя CLI по тексту ошибки: прокси / авторизация / прочее.
+function classifyCli(detail) {
+  const d = String(detail || '').toLowerCase();
+  if (/proxy|econnrefused|etimedout|enotfound|getaddrinfo|tunnel|network|socket hang|econnreset|unreachable/.test(d)) return 'proxy';
+  if (/401|403|unauthor|invalid.*(token|api key|credential)|expired|please (run )?.*login|not logged|authenticat|forbidden|revoked|setup-token/.test(d)) return 'auth';
+  return 'cli_error';
+}
+
+// Запустить `claude` headless, вернуть {ok, envelope} или {ok:false, reason, detail}.
+function runCli(args, timeoutMs) {
+  return new Promise((resolve) => {
+    let out = '', err = '', done = false, child;
+    try { child = spawn(cliBin(), args, { env: childEnv() }); }
+    catch (e) { return resolve({ ok: false, reason: (e && e.code === 'ENOENT') ? 'no_cli' : 'spawn_error', detail: String((e && e.message) || e) }); }
+    const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* ignore */ } finish({ ok: false, reason: 'timeout', detail: 'превышено время ожидания (прокси/сеть?)' }); }, timeoutMs);
+    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.stderr.on('data', (d) => { err += d.toString(); });
+    child.on('error', (e) => finish({ ok: false, reason: (e && e.code === 'ENOENT') ? 'no_cli' : 'spawn_error', detail: String((e && e.message) || e) }));
+    child.on('close', (code) => {
+      if (code !== 0) { const detail = (err || out).slice(0, 400); return finish({ ok: false, reason: classifyCli(detail), detail }); }
+      let env; try { env = JSON.parse(out); } catch { return finish({ ok: false, reason: 'bad_envelope', detail: out.slice(0, 200) }); }
+      if (env && env.is_error) { const detail = String(env.result || '').slice(0, 400); return finish({ ok: false, reason: classifyCli(detail), detail }); }
+      finish({ ok: true, envelope: env });
+    });
+  });
+}
+
+// Проверка соединения (кнопка «Проверить»): пробный однословный вызов.
+export async function healthCheck() {
+  if (apiEnabled()) return { ok: true, mode: 'api', note: 'режим API-ключа (проверка сети не выполняется)' };
+  if (!cliEnabled()) return noteError({ ok: false, reason: 'no_cli' });
+  const t0 = Date.now();
+  const r = await runCli(['-p', 'Ответь ровно одним словом: ok', '--output-format', 'json'], 25000);
+  const ms = Date.now() - t0;
+  if (!r.ok) return noteError({ ...r, ms });
+  clearLastError();
+  const txt = (r.envelope && typeof r.envelope.result === 'string') ? r.envelope.result : '';
+  return { ok: true, mode: 'cli', ms, reply: txt.slice(0, 40) };
 }
 
 // Инструмент структурированного вывода (API-режим) — модель обязана вернуть именно такой объект.
@@ -156,35 +222,22 @@ async function parseViaApi(query, dimensions, reportKind) {
   return { ok: true, filter: validateFilter(tu.input, dimensions), explain: String(tu.input.explain || '').slice(0, 160), mode: 'api', model: DEFAULT_API_MODEL };
 }
 
-// ── режим CLI (по подписке через Claude Code) ──
+// ── режим CLI (по подписке через Claude Code, при необходимости через прокси) ──
 async function parseViaCli(query, dimensions, reportKind) {
   const sys = buildSystem(dimensions, reportKind)
     + '\n\nВыведи ТОЛЬКО один JSON-объект с полями: plansheets, articleIds, months, sources, seasons (массивы строк), text (строка), explain (строка). Без пояснений и без Markdown-ограждения.';
   const args = ['-p', String(query || '').slice(0, 2000), '--output-format', 'json', '--append-system-prompt', sys];
   if (process.env.ANTHROPIC_MODEL) args.push('--model', process.env.ANTHROPIC_MODEL);
-  return await new Promise((resolve) => {
-    let out = '', err = '', done = false, child;
-    try { child = spawn(cliBin(), args, { env: process.env }); }
-    catch (e) { return resolve({ ok: false, reason: 'no_cli', detail: String((e && e.message) || e) }); }
-    const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
-    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* ignore */ } finish({ ok: false, reason: 'timeout' }); }, 30000);
-    child.stdout.on('data', (d) => { out += d.toString(); });
-    child.stderr.on('data', (d) => { err += d.toString(); });
-    child.on('error', (e) => finish({ ok: false, reason: e && e.code === 'ENOENT' ? 'no_cli' : 'spawn_error', detail: String((e && e.message) || e) }));
-    child.on('close', (code) => {
-      if (code !== 0) return finish({ ok: false, reason: 'cli_error', status: code, detail: (err || out).slice(0, 300) });
-      let env; try { env = JSON.parse(out); } catch { return finish({ ok: false, reason: 'bad_envelope', detail: out.slice(0, 200) }); }
-      if (env && env.is_error) return finish({ ok: false, reason: 'cli_error', detail: String(env.result || '').slice(0, 300) });
-      const parsed = extractJson(typeof env.result === 'string' ? env.result : '');
-      if (!parsed) return finish({ ok: false, reason: 'bad_json', detail: String(env.result || '').slice(0, 200) });
-      finish({ ok: true, filter: validateFilter(parsed, dimensions), explain: String(parsed.explain || '').slice(0, 160), mode: 'cli' });
-    });
-  });
+  const r = await runCli(args, 30000);
+  if (!r.ok) return r;
+  const parsed = extractJson(typeof r.envelope.result === 'string' ? r.envelope.result : '');
+  if (!parsed) return { ok: false, reason: 'bad_json', detail: String(r.envelope.result || '').slice(0, 200) };
+  return { ok: true, filter: validateFilter(parsed, dimensions), explain: String(parsed.explain || '').slice(0, 160), mode: 'cli' };
 }
 
 // Разобрать запрос. Возвращает {ok, filter, explain, mode} либо {ok:false, reason}.
 export async function parseQuery(query, dimensions = {}, reportKind = 'r2b') {
   if (apiEnabled()) return parseViaApi(query, dimensions, reportKind);
-  if (cliEnabled()) return parseViaCli(query, dimensions, reportKind);
+  if (cliEnabled()) return noteError(await parseViaCli(query, dimensions, reportKind));
   return { ok: false, reason: 'no_key' };
 }

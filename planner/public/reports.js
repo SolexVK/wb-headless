@@ -1088,33 +1088,80 @@ function googleBarHtml() {
   return box(`<span style="color:#256b45;font-size:13px">подключено${g.email ? ': <b>' + esc(g.email) + '</b>' : ''}</span><button class="btn btn-subtle" id="g-disconnect" style="margin-left:auto">Отключить</button>`);
 }
 
-// ── нейросеть: «умный» разбор запросов в отчётах (командная строка на естественном языке) ──
-let nlqKeyStatus = null; // null — не запрашивали; undefined — идёт запрос; {hasKey,masked,…} | false
+// ── нейросеть: «умный» разбор запросов + настройки подключения (прокси / токен / ключ) ──
+let nlqKeyStatus = null; // null — не запрашивали; undefined — идёт запрос; {proxy,cliToken,apiKey} | false
+let nlqTestResult = null; // результат последней проверки соединения {ok,reason,ms,…}
+let nlqPanelOpen = false; // держим форму настроек раскрытой между перерисовками
+const ERR_RU = { proxy: 'нет связи через прокси (протух/недоступен)', auth: 'авторизация Claude Code протухла — обновите токен', timeout: 'превышено время ожидания (прокси/сеть)', no_cli: 'не найден claude на сервере', bad_json: 'нейросеть вернула неожиданный ответ', bad_envelope: 'claude вернул неожиданный вывод', cli_error: 'ошибка Claude Code', spawn_error: 'не удалось запустить claude', api_error: 'ошибка API', network: 'нет сети' };
 function nlqBarHtml() {
-  const s = nlqKeyStatus;   // {hasKey,masked,source} — только про API-ключ
-  const st = nlqStatus;     // {enabled,mode,cli:{available,version}} — фактический режим
-  const box = (inner) => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 0;padding:8px 12px;background:${C.zebra};border:1px solid ${C.border};border-radius:10px">
-    <span style="font-weight:700;color:${C.head};font-size:13px">🤖 Нейросеть (умные запросы):</span>${inner}</div>`;
-  if (s == null || s === undefined || st == null || st === undefined) return box('<span style="color:#889;font-size:13px">проверка…</span>');
-  const keyInput = `<input id="nlq-key" type="password" placeholder="ключ Anthropic (sk-ant-…)" style="flex:1;min-width:180px;padding:6px 10px;border:1px solid ${C.border};border-radius:8px;font-size:12.5px">
-    <button class="btn btn-accent" id="nlq-key-save">Сохранить</button>`;
+  const cfg = nlqKeyStatus; // {proxy:{set,masked}, cliToken:{set,masked}, apiKey:{hasKey,masked,source}}
+  const st = nlqStatus;     // {enabled,mode,cli,proxy,cliToken,lastError}
+  const box = (inner) => `<div style="margin:8px 0 0;padding:8px 12px;background:${C.zebra};border:1px solid ${C.border};border-radius:10px">${inner}</div>`;
+  const head = (extra) => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-weight:700;color:${C.head};font-size:13px">🤖 Нейросеть (умные запросы):</span>${extra}</div>`;
+  if (cfg == null || cfg === undefined || st == null || st === undefined) return box(head('<span style="color:#889;font-size:13px">проверка…</span>'));
   const mode = st && st.mode;
-  // Режим подписки (Claude Code) — работает без ключа, по подписке Pro/Max
+  // краткая строка статуса
+  let statusLine;
   if (mode === 'cli') {
     const ver = (st.cli && st.cli.version) ? ' ' + esc(String(st.cli.version).replace(/\s*\(.*/, '')) : '';
-    return box(`<span style="color:#256b45;font-size:13px">работает <b>по подписке</b> (Claude Code${ver}) — без оплаты за токены</span>`);
+    statusLine = `<span style="color:#256b45;font-size:13px">работает <b>по подписке</b> (Claude Code${ver})${st.proxy ? ' · через прокси' : ''} — без оплаты за токены</span>`;
+  } else if (mode === 'api') {
+    statusLine = `<span style="color:#256b45;font-size:13px">подключена по <b>API-ключу</b>${cfg.apiKey && cfg.apiKey.masked ? ': <b>' + esc(cfg.apiKey.masked) + '</b>' : ''} (оплата по токенам)</span>`;
+  } else {
+    statusLine = `<span style="color:#a05a00;font-size:13px">не подключена — настройте ниже (текстовый поиск работает и так)</span>`;
   }
-  // Режим API-ключа
-  if (mode === 'api' || (s && s.hasKey)) {
-    return box(`<span style="color:#256b45;font-size:13px">подключена по <b>API-ключу</b>${s.masked ? ': <b>' + esc(s.masked) + '</b>' : ''}${s.source === 'env' ? ' <span style=\"color:#889\">(.env)</span>' : ''}</span>
-      <button class="btn btn-subtle" id="nlq-key-clear" style="margin-left:auto">Убрать ключ</button>`);
+  // баннер протухшего прокси/авторизации
+  const le = st && st.lastError;
+  const banner = le ? `<div style="margin:8px 0 0;padding:8px 10px;background:#fdecea;border:1px solid #f5b5ae;border-radius:8px;color:#9b1c1c;font-size:12.5px">
+      ⚠ <b>${esc(ERR_RU[le.reason] || le.reason)}</b>${le.detail ? ' — <span style="color:#7a2b2b">' + esc(le.detail) + '</span>' : ''}
+      <span style="color:#b06">· ${esc(dmyhm(le.at))}</span></div>` : '';
+  // результат ручной проверки
+  let testLine = '';
+  if (nlqTestResult) {
+    const t = nlqTestResult;
+    testLine = t.ok
+      ? `<span style="color:#256b45;font-size:12.5px">✓ связь есть${t.ms ? ' · ' + t.ms + ' мс' : ''}${t.mode === 'api' ? ' (режим API)' : ''}</span>`
+      : `<span style="color:#9b1c1c;font-size:12.5px">✗ ${esc(ERR_RU[t.reason] || t.reason)}${t.detail ? ' — ' + esc(t.detail) : ''}</span>`;
   }
-  // Не подключена: предлагаем оба пути — подписка (без ключа) или ключ API
-  return box(`<div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:260px">
-      <span style="color:#556;font-size:13px">не подключена — доступны два способа:</span>
-      <span style="color:#667;font-size:12px">① <b>По подписке (бесплатно):</b> на сервере залогиньте Claude Code (<code>claude</code>) вашей подпиской и перезапустите — ключ не нужен.</span>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="color:#667;font-size:12px">② <b>По API-ключу</b> (оплата по токенам):</span>${keyInput}</div>
-    </div>`);
+  // форма настроек (сворачиваемая; раскрыта, если ещё не подключено)
+  const fld = (id, ph, val, type) => `<input id="${id}" type="${type || 'text'}" placeholder="${esc(ph)}" value="${esc(val || '')}" autocomplete="off"
+      style="flex:1;min-width:220px;padding:7px 10px;border:1px solid ${C.border};border-radius:8px;font-size:12.5px">`;
+  const proxyVal = (cfg.proxy && cfg.proxy.masked) || '';
+  const formOpen = (nlqPanelOpen || mode === 'none') ? ' open' : '';
+  const form = `<details id="nlq-panel"${formOpen} style="margin:8px 0 0">
+    <summary style="cursor:pointer;font-size:12.5px;color:#667;font-weight:700;user-select:none">⚙ Настройки подключения (прокси · подписка Claude Code · ключ API)</summary>
+    <div style="display:flex;flex-direction:column;gap:10px;margin:10px 0 0">
+      <div>
+        <div style="font-size:12px;color:#556;font-weight:700;margin-bottom:3px">① Прокси вашей страны ${cfg.proxy && cfg.proxy.set ? `<span style="color:#256b45">· задан: ${esc(proxyVal)}</span>` : '<span style="color:#889">· не задан</span>'}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          ${fld('nlq-proxy', 'http://логин:пароль@хост:порт  (или socks5://…)', '', 'text')}
+          <button class="btn btn-accent" id="nlq-proxy-save">Сохранить</button>
+          ${cfg.proxy && cfg.proxy.set ? '<button class="btn btn-subtle" id="nlq-proxy-clear">Убрать</button>' : ''}
+        </div>
+        <div style="font-size:11px;color:#889;margin-top:3px">Через него Claude Code выходит в интернет. Формат: <code>http://user:pass@host:port</code> или <code>socks5://host:port</code>.</div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:#556;font-weight:700;margin-bottom:3px">② Токен подписки Claude Code ${cfg.cliToken && cfg.cliToken.set ? `<span style="color:#256b45">· задан: ${esc(cfg.cliToken.masked)}</span>` : '<span style="color:#889">· не задан</span>'}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          ${fld('nlq-token', 'вставьте токен из `claude setup-token`', '', 'password')}
+          <button class="btn btn-accent" id="nlq-token-save">Сохранить</button>
+          ${cfg.cliToken && cfg.cliToken.set ? '<button class="btn btn-subtle" id="nlq-token-clear">Убрать</button>' : ''}
+        </div>
+        <div style="font-size:11px;color:#889;margin-top:3px">На сервере выполните <code>claude setup-token</code> (через ваш прокси), скопируйте выданный токен и вставьте сюда. Работает по вашей подписке, без оплаты за токены.</div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:#556;font-weight:700;margin-bottom:3px">③ Либо API-ключ ${cfg.apiKey && cfg.apiKey.hasKey ? `<span style="color:#256b45">· задан: ${esc(cfg.apiKey.masked)}</span>` : '<span style="color:#889">· не задан</span>'} <span style="color:#889;font-weight:400">(альтернатива подписке, оплата по токенам)</span></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          ${fld('nlq-key', 'ключ Anthropic (sk-ant-…)', '', 'password')}
+          <button class="btn btn-accent" id="nlq-key-save">Сохранить</button>
+          ${cfg.apiKey && cfg.apiKey.hasKey ? '<button class="btn btn-subtle" id="nlq-key-clear">Убрать</button>' : ''}
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid ${C.border};padding-top:10px">
+        <button class="btn" id="nlq-test">🔌 Проверить соединение</button>${testLine}
+      </div>
+    </div></details>`;
+  return box(head(statusLine) + banner + form);
 }
 
 // ============================ КУРСЫ ВАЛЮТ ============================
@@ -1320,27 +1367,49 @@ export function renderReportsPage(container, state, schedule, ctx = {}) {
     nlqStatus = undefined;
     api('/api/reports/nlq-status').then((r) => { nlqStatus = (r && r.ok) ? r : false; rerender(); }).catch(() => { nlqStatus = false; rerender(); });
   }
-  // статус ключа нейросети (для панели подключения) — один раз
+  // статус подключения нейросети (прокси/токен/ключ) — один раз
   if (nlqKeyStatus === null && api) {
     nlqKeyStatus = undefined;
-    api('/api/settings/anthropic').then((r) => { nlqKeyStatus = (r && r.ok) ? r : false; rerender(); }).catch(() => { nlqKeyStatus = false; rerender(); });
+    api('/api/settings/nlq').then((r) => { nlqKeyStatus = (r && r.ok) ? r : false; rerender(); }).catch(() => { nlqKeyStatus = false; rerender(); });
   }
-  container.querySelector('#nlq-key-save')?.addEventListener('click', async () => {
+  // держим форму настроек раскрытой между перерисовками
+  container.querySelector('#nlq-panel')?.addEventListener('toggle', (e) => { nlqPanelOpen = e.target.open; });
+  // сохранить/очистить поле настроек нейросети; body — часть {proxy|cliToken|apiKey}
+  const saveNlq = async (body, okMsg) => {
     if (!api) return;
-    const key = (container.querySelector('#nlq-key')?.value || '').trim();
-    if (!key) { toast('Вставьте ключ', true); return; }
+    nlqPanelOpen = true; // не сворачивать форму после сохранения
     try {
-      const r = await api('/api/settings/anthropic', { method: 'PUT', body: JSON.stringify({ key }) });
-      nlqKeyStatus = (r && r.ok) ? r : false; nlqStatus = null; // перепроверить включённость
-      toast('Ключ сохранён — умные запросы включены');
-    } catch (e) { toast('Не удалось сохранить ключ: ' + e.message, true); }
+      const r = await api('/api/settings/nlq', { method: 'PUT', body: JSON.stringify(body) });
+      nlqKeyStatus = (r && r.ok) ? r : false; nlqStatus = null; nlqTestResult = null; // перепроверить режим
+      toast(okMsg);
+    } catch (e) { toast('Не удалось сохранить: ' + e.message, true); }
     rerender();
+  };
+  container.querySelector('#nlq-proxy-save')?.addEventListener('click', () => {
+    const v = (container.querySelector('#nlq-proxy')?.value || '').trim();
+    if (!v) { toast('Впишите адрес прокси', true); return; }
+    saveNlq({ proxy: v }, 'Прокси сохранён');
   });
-  container.querySelector('#nlq-key-clear')?.addEventListener('click', async () => {
+  container.querySelector('#nlq-proxy-clear')?.addEventListener('click', () => saveNlq({ proxy: '' }, 'Прокси убран'));
+  container.querySelector('#nlq-token-save')?.addEventListener('click', () => {
+    const v = (container.querySelector('#nlq-token')?.value || '').trim();
+    if (!v) { toast('Вставьте токен', true); return; }
+    saveNlq({ cliToken: v }, 'Токен подписки сохранён');
+  });
+  container.querySelector('#nlq-token-clear')?.addEventListener('click', () => saveNlq({ cliToken: '' }, 'Токен убран'));
+  container.querySelector('#nlq-key-save')?.addEventListener('click', () => {
+    const v = (container.querySelector('#nlq-key')?.value || '').trim();
+    if (!v) { toast('Вставьте ключ', true); return; }
+    saveNlq({ apiKey: v }, 'API-ключ сохранён');
+  });
+  container.querySelector('#nlq-key-clear')?.addEventListener('click', () => saveNlq({ apiKey: '' }, 'API-ключ убран'));
+  container.querySelector('#nlq-test')?.addEventListener('click', async (e) => {
     if (!api) return;
-    try { const r = await api('/api/settings/anthropic', { method: 'DELETE' }); nlqKeyStatus = (r && r.ok) ? r : false; nlqStatus = null; toast('Ключ убран'); }
-    catch (e) { toast('Не удалось убрать ключ: ' + e.message, true); }
-    rerender();
+    nlqPanelOpen = true;
+    const b = e.currentTarget; const old = b.textContent; b.disabled = true; b.textContent = '🔌 проверяю…';
+    try { const r = await api('/api/reports/nlq-test', { method: 'POST' }); nlqTestResult = r || { ok: false, reason: 'server' }; nlqStatus = null; }
+    catch (err) { nlqTestResult = { ok: false, reason: 'server', detail: err.message }; }
+    finally { b.disabled = false; b.textContent = old; rerender(); }
   });
   container.querySelector('#g-disconnect')?.addEventListener('click', async () => {
     if (!api) return;
