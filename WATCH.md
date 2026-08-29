@@ -50,23 +50,72 @@ Settings → Secrets and variables → Actions → New repository secret:
 Кнопка «Run workflow» на вкладке Actions запускает проверку вручную; там же
 переключатель `dry_run` — показать сообщение, ничего не отправляя.
 
-### 3. Локально или на Mac Mini
+### 3. Установка на Mac Mini (рекомендуемый способ)
+
+Сторожу не нужны ни порт, ни Caddy, ни Tailscale Funnel — это задача по
+расписанию, соседние сервисы она не задевает. Ставится одним скриптом:
 
 ```bash
-# .env: WB_API_TOKEN (или Wildberries_API), TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_CHAT
-npm run watch:wb:dry      # проверить и показать сообщение, не отправляя
-npm run watch:wb          # проверить и отправить
+git clone https://github.com/SolexVK/wb-headless.git ~/wb-headless
+cd ~/wb-headless
+git checkout claude/wildberries-branch-fines-costs-tn58of
+bash scripts/mac-mini-install.sh
 ```
 
-cron на хосте (время локальное, МСК):
+Скрипт идемпотентный (можно запускать повторно): проверит node, поставит
+зависимости, создаст пустой `.env` с правами 600 и загрузит LaunchAgent
+`com.wbheadless.finewatch` на 07:00 и 18:00 по времени машины. Чужие агенты
+он не трогает.
+
+**Куда вписывать секреты.** Только в `~/wb-headless/.env` на самой машине:
+
+```bash
+nano ~/wb-headless/.env
+```
+
+```
+Wildberries_API=<токен WB: Финансы, Аналитика, Статистика, Маркетплейс>
+TELEGRAM_BOT_TOKEN=<токен от @BotFather>
+TELEGRAM_ALLOWED_CHAT=<ваш chat id>
+```
+
+Файл лежит вне git (`.gitignore`), права 600 — читает только владелец.
+**Ни в чат, ни в команды терминала, ни в репозиторий секреты вставлять не нужно:**
+всё, что видит сторож и его проверки, — это маска вида `eyJh…Gi2g (len 424)`.
+Если токен всё же где-то засветился — отзовите его в кабинете WB / у @BotFather
+и выпустите новый; правка только в `.env`, код менять не придётся.
+
+**Проверка после установки** (по возрастанию последствий):
+
+```bash
+cd ~/wb-headless
+node scripts/wb-watch-selftest.mjs          # ничего не отправляет
+node scripts/wb-watch-selftest.mjs --send   # одно тестовое сообщение в чат
+node agent-wb-watch.mjs --dry-run           # полный анализ, без отправки
+./scripts/run-watch.sh                      # боевой прогон, как по расписанию
+```
+
+Self-test проверяет: права на `.env`, срок и категории токена WB, живой ответ
+API, доступность бота (`getMe`) и список получателей. Секреты при этом
+маскируются.
+
+**Управление:**
+
+```bash
+tail -f ~/wb-headless/logs/wb-watch.log             # что делал сторож
+launchctl list | grep finewatch                     # загружен ли агент
+launchctl bootout gui/$UID/com.wbheadless.finewatch # выключить
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.wbheadless.finewatch.plist
+```
+
+Часы можно изменить: `WATCH_HOUR_MORNING=8 WATCH_HOUR_EVENING=20 bash scripts/mac-mini-install.sh`.
+Время — по часовому поясу машины; если он не МСК, скрипт об этом предупредит.
+
+Обычный cron (если launchd не нужен):
 
 ```cron
-0 7,18 * * *  cd /path/to/wb-headless && /usr/local/bin/node agent-wb-watch.mjs >> watch.log 2>&1
+0 7,18 * * *  cd /path/to/wb-headless && ./scripts/run-watch.sh
 ```
-
-На Mac Mini — launchd по образцу из `MACMINI-DEPLOY.md`; чужие агенты
-(`com.tandemtrace.*`, `com.getcourse.*`, `com.wbheadless.planner`) не трогать,
-свой назвать, например, `com.wbheadless.finewatch`.
 
 ## Как читать сообщения
 

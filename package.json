@@ -15,7 +15,9 @@
     "report:fines": "node report-fines.js",
     "report:forensics": "node report-forensics.mjs",
     "watch:wb": "node agent-wb-watch.mjs",
-    "watch:wb:dry": "node agent-wb-watch.mjs --dry-run"
+    "watch:wb:dry": "node agent-wb-watch.mjs --dry-run",
+    "watch:selftest": "node scripts/wb-watch-selftest.mjs",
+    "watch:install": "bash scripts/mac-mini-install.sh"
   },
   "engines": {
     "node": ">=18"

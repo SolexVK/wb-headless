@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.wbheadless.finewatch</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__ROOT__/scripts/run-watch.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__ROOT__</string>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Hour</key><integer>__HOUR_MORNING__</integer>
+      <key>Minute</key><integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key><integer>__HOUR_EVENING__</integer>
+      <key>Minute</key><integer>0</integer>
+    </dict>
+  </array>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__ROOT__/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__ROOT__/logs/launchd.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
