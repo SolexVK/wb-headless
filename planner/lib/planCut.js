@@ -11,6 +11,20 @@ import { fetchCards, resolveArticleCards, vendorColor } from './wb/wbApi.js';
 const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^0-9a-zа-я]+/gi, ' ').trim();
 const wbColorOf = (c) => (c.color || vendorColor(c.vendorCode) || '');
 
+// Расширить набор карточек до ВСЕЙ цветовой семьи по imtID: цвета одного товара на ВБ
+// объединены imtID. Дав один nmID/префикс, подтягиваем все цвета этого товара — чтобы в
+// выборе были все расцветки (напр. «морская волна»), даже если их nmID не перечислили.
+function expandByImt(sibs, cards) {
+  const imts = new Set(); const nms = new Set();
+  for (const c of sibs) { if (c.imtID != null) imts.add(c.imtID); nms.add(String(c.nmID)); }
+  const seen = new Set(); const out = [];
+  for (const c of cards) {
+    const inFamily = (c.imtID != null && imts.has(c.imtID)) || nms.has(String(c.nmID));
+    if (inFamily && !seen.has(String(c.nmID))) { seen.add(String(c.nmID)); out.push(c); }
+  }
+  return out;
+}
+
 // Штук плана по артикул→цвет из партий (status=plan, не historical); по размеру берём МАКС
 // по этапам (одна вещь = один комплект, проходит все этапы, суммировать этапы нельзя).
 function planUnitsByArticleColor(state) {
@@ -53,7 +67,8 @@ export async function buildCoverage(state, { force = false } = {}) {
     const activeColors = (a.colors || []).filter((c) => !((a.archivedColors || []).includes(c)));
     const units = planU[a.id] || {};
     const map = (a.wbColorMap && typeof a.wbColorMap === 'object') ? a.wbColorMap : {};
-    const sibs = a.wbKey ? resolveArticleCards(a.wbKey, cards, byNm) : [];
+    let sibs = a.wbKey ? resolveArticleCards(a.wbKey, cards, byNm) : [];
+    if (sibs.length) sibs = expandByImt(sibs, cards); // подтянуть все цвета товара по imtID
 
     const wbByColor = new Map(); // норм-цвет ВБ → карточка (для авто-сшивки)
     const wbByNm = new Map();    // nmID → карточка (для ручной сшивки)
