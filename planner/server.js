@@ -18,6 +18,7 @@ import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, r
 import { installAuth, requireView, requireEdit } from './lib/authMiddleware.js';
 import * as google from './lib/google.js';
 import * as nlq from './lib/nlq.js';
+import * as planCut from './lib/planCut.js';
 import { applyWritePolicy, filterStateForRead, canEditAnything } from './lib/permissions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,7 +27,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'instance-label-2026-08-30';
+const BACKEND_BUILD = 'plan-cut-phase0-2026-08-30';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -904,6 +905,16 @@ app.get('/api/supply/wb-vendors', requireView('season'), async (req, res) => {
     if (!hasWbToken()) return res.status(400).json({ ok: false, error: 'WB-токен не задан.' });
     res.json({ ok: true, ...(await listVendorPrefixes({ force: req.query.force === '1' })) });
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// ── Сокращение плана (Фаза 0): карта соответствия «расцветка ↔ карточка WB» + покрытие ──
+app.get('/api/plancut/coverage', requireView('data'), async (req, res) => {
+  try {
+    if (!hasWbToken()) return res.json({ ok: false, error: 'нет токена WB (WB_API_TOKEN / Wildberries_API) на этом сервере' });
+    const state = loadState();
+    const r = await planCut.buildCoverage(state, { force: req.query.force === '1' });
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
 });
 
 // ── Wildberries API: карточки (маппинг+габариты) и логистика по тарифам ──

@@ -20,7 +20,7 @@ function vendorPrefix(vc) {
   return ci > 0 ? segs.slice(0, ci).join('_') : '';
 }
 // Цвет из артикула продавца (сегмент, распознанный как цвет).
-function vendorColor(vc) {
+export function vendorColor(vc) {
   const segs = vcSegments(vc);
   const seg = segs.find(isColorWord);
   return seg || '';
@@ -177,7 +177,7 @@ export async function fetchFbsStockMap({ skus = [], force = false } = {}) {
  */
 // Найти все цветовые карточки товара по ключу привязки: ключ = nmID (тогда берём imtID +
 // префикс артикула продавца) ИЛИ префикс артикула продавца (023_рвп) → все карточки с ним.
-function resolveArticleCards(key, cards, byNm) {
+export function resolveArticleCards(key, cards, byNm) {
   const keys = String(key || '').split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean); // можно несколько ключей
   const dedupe = (arr) => { const seen = new Set(), out = []; for (const c of arr) if (!seen.has(c.nmID)) { seen.add(c.nmID); out.push(c); } return out; };
   const all = [];
