@@ -28,6 +28,15 @@
     <p class="sub">Вход по Telegram-аккаунту. Доступ выдаётся администратором.</p>
     <div id="err" class="err" style="display:none"></div>
     <div id="widget"><span class="spin">Загрузка…</span></div>
+    <div id="codebox" style="display:none;margin-top:18px;border-top:1px solid #262a33;padding-top:16px">
+      <div style="color:#9aa4b2;font-size:13px;margin-bottom:8px">Или вход по коду доступа (если виджет Telegram недоступен):</div>
+      <div style="display:flex;gap:8px">
+        <input id="code" type="password" placeholder="код доступа" autocomplete="off"
+          style="flex:1;padding:9px 12px;border:1px solid #333a45;border-radius:8px;background:#0f1115;color:#e6e6e6;font-size:14px">
+        <button id="codebtn" style="padding:9px 16px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer">Войти</button>
+      </div>
+      <div id="codeerr" style="display:none;color:#ffb4b4;font-size:13px;margin-top:8px"></div>
+    </div>
     <div class="hint" id="hint"></div>
   </div>
   <script>
@@ -50,6 +59,24 @@
           // Авторизация выключена — сервис открыт.
           document.getElementById('widget').innerHTML = '<a href="/" style="color:#6ea8fe">Войти без авторизации →</a>';
           return;
+        }
+        // Резервный вход по коду — показываем всегда, когда включён (даже если виджет не грузится).
+        if (d.codeLogin) {
+          var cb = document.getElementById('codebox');
+          cb.style.display = 'block';
+          var doCode = function () {
+            var code = document.getElementById('code').value;
+            var ce = document.getElementById('codeerr'); ce.style.display = 'none';
+            fetch('/auth/code', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code }) })
+              .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+              .then(function (res) {
+                if (res.ok && res.j && res.j.ok) { location.replace('/'); return; }
+                ce.textContent = (res.j && res.j.error) || 'Не удалось войти'; ce.style.display = 'block';
+              })
+              .catch(function () { ce.textContent = 'Сервер недоступен'; ce.style.display = 'block'; });
+          };
+          document.getElementById('codebtn').addEventListener('click', doCode);
+          document.getElementById('code').addEventListener('keydown', function (e) { if (e.key === 'Enter') doCode(); });
         }
         var bot = d.botUsername;
         var w = document.getElementById('widget');

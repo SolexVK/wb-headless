@@ -114,11 +114,22 @@ function accessDenial(user) {
  * Установить авторизацию на app. Возвращает { enabled }.
  * publicPaths — пути/префиксы, доступные без входа (страница логина, статика виджета).
  */
+// Таймингобезопасное сравнение строк (защита от подбора по времени ответа).
+function safeEqualStr(a, b) {
+  const ab = Buffer.from(String(a || '')); const bb = Buffer.from(String(b || ''));
+  if (ab.length !== bb.length) return false;
+  try { return crypto.timingSafeEqual(ab, bb); } catch { return false; }
+}
+
 export function installAuth(app) {
   const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
   const BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME || '';
   const OWNER_ID = Number(process.env.OWNER_TELEGRAM_ID) || 0;
   const SECRET = resolveSessionSecret();
+  // Резервный вход по секретному коду (для регионов, где Telegram-виджет не грузится).
+  // Задаётся в planner/data/.env как PLANNER_LOGIN_CODE=... — входит КАК ВЛАДЕЛЕЦ (admin).
+  const LOGIN_CODE = (process.env.PLANNER_LOGIN_CODE || '').trim();
+  let codeFails = 0, codeLockUntil = 0; // простой троттлинг перебора
 
   // Владелец всегда админ с бессрочным доступом (bootstrap при старте).
   if (OWNER_ID && dbAvailable()) {
@@ -154,7 +165,7 @@ export function installAuth(app) {
   }
 
   // Публичные пути (без входа): страница логина, health, сам callback авторизации.
-  const PUBLIC_EXACT = new Set(['/login', '/login.html', '/api/health', '/auth/telegram', '/api/me']);
+  const PUBLIC_EXACT = new Set(['/login', '/login.html', '/api/health', '/auth/telegram', '/auth/code', '/api/me']);
   const isPublic = (p) => PUBLIC_EXACT.has(p) || p.startsWith('/styles') || p === '/favicon.ico';
 
   // ── Callback Telegram Login Widget: проверка подписи → allowlist → сессия ──
@@ -196,6 +207,29 @@ export function installAuth(app) {
     res.redirect('/');
   });
 
+  // ── Резервный вход по секретному коду (без Telegram): выдаёт сессию ВЛАДЕЛЬЦА ──
+  app.post('/auth/code', (req, res) => {
+    if (!LOGIN_CODE) return res.status(404).json({ ok: false, error: 'вход по коду не настроен' });
+    if (!OWNER_ID) return res.status(500).json({ ok: false, error: 'не задан OWNER_TELEGRAM_ID' });
+    const now = Date.now();
+    if (now < codeLockUntil) return res.status(429).json({ ok: false, error: 'слишком много попыток — подождите минуту' });
+    const code = String((req.body && req.body.code) || '');
+    if (!safeEqualStr(code, LOGIN_CODE)) {
+      codeFails += 1;
+      if (codeFails >= 5) { codeLockUntil = now + 60000; codeFails = 0; }
+      return res.status(401).json({ ok: false, error: 'неверный код' });
+    }
+    codeFails = 0;
+    // вход как владелец: гарантируем аккаунт-владельца, выдаём сессию (ротация вытесняет прочие)
+    let user = userGet(OWNER_ID);
+    if (!user) { userUpsert({ telegramId: OWNER_ID, isAdmin: 1, status: 'active', note: 'owner' }); user = userGet(OWNER_ID); }
+    const sid = newSessionId();
+    userMarkLogin(OWNER_ID, { name: (user && user.name) || 'Владелец' }, sid);
+    const token = signSession({ tid: OWNER_ID, sid, iat: Math.floor(now / 1000) }, SECRET);
+    setSessionCookie(req, res, token);
+    res.json({ ok: true });
+  });
+
   app.post('/auth/logout', (req, res) => {
     const u = currentUser(req);
     if (u) userMarkLogin(u.telegramId, {}, null); // сбрасываем activeSession
@@ -207,7 +241,7 @@ export function installAuth(app) {
   app.get('/api/me', (req, res) => {
     const u = currentUser(req);
     // botUsername нужен странице логина ДО входа (для виджета Telegram) — отдаём всегда.
-    if (!u) return res.json({ authEnabled: true, user: null, botUsername: BOT_USERNAME });
+    if (!u) return res.json({ authEnabled: true, user: null, botUsername: BOT_USERNAME, codeLogin: !!LOGIN_CODE });
     const perms = permsFor(u);
     res.json({
       authEnabled: true,
