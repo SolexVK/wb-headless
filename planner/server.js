@@ -26,7 +26,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'currency-exchange-office-2026-08-28';
+const BACKEND_BUILD = 'instance-label-2026-08-30';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -240,10 +240,20 @@ const NO_CACHE_RE = /\.(?:html|js|css)$/i;
 const PUB_DIR = path.join(__dirname, 'public');
 function indexHtmlVersioned() {
   let html = fs.readFileSync(path.join(PUB_DIR, 'index.html'), 'utf8');
-  return html.replace(/(?:src|href)="(app\.js|styles\.css)"/g, (m, file) => {
+  html = html.replace(/(?:src|href)="(app\.js|styles\.css)"/g, (m, file) => {
     let v = ''; try { v = String(Math.floor(fs.statSync(path.join(PUB_DIR, file)).mtimeMs)); } catch { /* нет файла — как есть */ }
     return v ? m.replace(`"${file}"`, `"${file}?v=${v}"`) : m;
   });
+  // Подпись экземпляра (напр. «АРХИВ · Версия 1») из PLANNER_INSTANCE_LABEL:
+  // заголовок вкладки + оранжевая плашка в шапке + тонкая полоса сверху. Пусто — ничего не добавляем.
+  const label = (process.env.PLANNER_INSTANCE_LABEL || '').trim();
+  if (label) {
+    const L = label.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    html = html.replace(/<title>([\s\S]*?)<\/title>/, (m, t) => `<title>${L} — ${t}</title>`);
+    html = html.replace(/(<div class="brand">[\s\S]*?<\/div>)/, `$1<span style="margin-left:10px;padding:3px 10px;border-radius:12px;background:#b45309;color:#fff;font-size:12px;font-weight:800;white-space:nowrap">📦 ${L}</span>`);
+    html = html.replace(/<body>/, '<body><div style="position:fixed;top:0;left:0;right:0;height:4px;background:#b45309;z-index:99999"></div>');
+  }
+  return html;
 }
 app.get(['/', '/index.html'], (req, res) => {
   try {
