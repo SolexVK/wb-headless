@@ -316,6 +316,11 @@ export function normalizeState(input) {
     a.unit = normalizeUnitArticle(a.unit);
     // ключ привязки к WB для авто-остатков: nmID ИЛИ префикс артикула продавца (023_рвп)
     a.wbKey = typeof a.wbKey === 'string' ? a.wbKey.trim().slice(0, 80) : '';
+    // ручная сшивка расцветки с карточкой ВБ: { расцветка(из a.colors) → nmID }. Для «Сокращения плана»,
+    // когда авто-сшивка по названию цвета не сходится. Чистим мусор: ключи — валидные цвета, значения — цифры.
+    { const cm = (a.wbColorMap && typeof a.wbColorMap === 'object') ? a.wbColorMap : {}; const clean = {};
+      for (const [k, v] of Object.entries(cm)) { const nm = String(v || '').trim(); if (a.colors.includes(k) && /^\d{3,}$/.test(nm)) clean[k] = nm; }
+      a.wbColorMap = clean; }
     // «начинать пошив не раньше» (сезонное окно артикула): пошив этого артикула не ставится в
     // график до этой даты. Пусто = без ограничения. Планировщик берёт позднейшую из этой и
     // пер-партийной earliestStart, распределяя нагрузку по цехам по мощности.

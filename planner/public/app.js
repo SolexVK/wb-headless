@@ -7,7 +7,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'plan-cut-phase0-2026-08-30';
+const APP_BUILD = 'plan-cut-phase0b-2026-08-30';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -5970,7 +5970,27 @@ function bindUnit() {
 
 // ---------- СОКРАЩЕНИЕ ПЛАНА ----------
 // Фаза 0: карта соответствия «расцветка плана ↔ карточка WB (nmID)» + покрытие.
-let plancutCoverage = null; // null — не строили; undefined — идёт запрос; {rows,summary} | false — ошибка
+// Поля Ключа WB и ручной сшивки цвета редактируются прямо здесь, с автосохранением.
+let plancutCoverage = null; // null — не строили; undefined — идёт запрос; {articles,summary} | false — ошибка
+let pcSaveT = null;
+async function pcRebuild(force) {
+  try {
+    const r = await api('/api/plancut/coverage' + (force ? '?force=1' : ''));
+    plancutCoverage = (r && r.ok) ? r : false;
+    if (!(r && r.ok)) toast((r && r.error) || 'Не удалось построить карту', true);
+  } catch (e) { plancutCoverage = false; toast('Ошибка: ' + e.message, true); }
+  renderPlanCut();
+}
+// сохранить state (полный PUT, дебаунс) и перестроить карту под новую сшивку
+function pcPersistRebuild() {
+  dirty = true; setStatus();
+  clearTimeout(pcSaveT);
+  pcSaveT = setTimeout(async () => {
+    try { await api('/api/state', { method: 'PUT', body: JSON.stringify(state) }); dirty = false; setStatus(); }
+    catch { /* оставляем dirty — сохранится общей кнопкой */ }
+    await pcRebuild(false);
+  }, 500);
+}
 function renderPlanCut() {
   const root = document.getElementById('plancut');
   if (!root) return;
@@ -5979,41 +5999,61 @@ function renderPlanCut() {
 
   const head = `<div class="panel">
     <h3 style="margin:0 0 6px">✂️ Сокращение плана — Фаза 0: карта соответствия расцветок с ВБ</h3>
-    <div class="mini" style="margin-bottom:8px">Прежде чем анализировать продажи, сверяем: каждая ли расцветка плана сшита со своей карточкой ВБ (по «Ключу WB» артикула и названию цвета). Ниже — покрытие и что не сошлось. Несошедшиеся цвета вы поправите (Ключ WB / архив цвета на листе «Данные»), затем пойдём к сбору выкупов за 6 мес.</div>
+    <div class="mini" style="margin-bottom:8px">Сверяем сшивку каждой расцветки плана с карточкой ВБ. <b>Ключ WB</b> и <b>ручную сшивку цвета</b> можно править прямо в таблице — сохраняется автоматически, карта пересобирается. Цель — поднять покрытие (в идеале 85%+), затем идём к сбору выкупов за 6 мес.</div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <button class="btn btn-primary" id="pc-build">Построить карту соответствия</button>
+      <button class="btn btn-primary" id="pc-build">${cov && cov.summary ? 'Пересобрать карту' : 'Построить карту соответствия'}</button>
       <label class="mini" style="display:flex;align-items:center;gap:5px"><input type="checkbox" id="pc-force"> свежие карточки ВБ (без кэша, дольше)</label>
     </div>
   </div>`;
 
   let body = '';
   if (cov === undefined) body = '<div class="panel"><div class="mini">Строю карту (тяну карточки ВБ)…</div></div>';
-  else if (cov === false) body = '<div class="panel"><div class="mini bad">Не удалось построить карту (см. сообщение выше или консоль).</div></div>';
+  else if (cov === false) body = '<div class="panel"><div class="mini bad">Не удалось построить карту (см. сообщение или консоль).</div></div>';
   else if (cov && cov.summary) {
     const s = cov.summary;
     const pctColor = s.coveragePct >= 85 ? '#256b45' : s.coveragePct >= 60 ? '#a05a00' : '#9b1c1c';
     const kpi = (label, val, sub) => `<div style="flex:1;min-width:150px;padding:10px 12px;background:#fff;border:1px solid var(--border,#dde);border-radius:10px">
       <div style="font-size:12px;color:#667">${label}</div><div style="font-size:22px;font-weight:800">${val}</div>${sub ? `<div class="mini">${sub}</div>` : ''}</div>`;
-    const summary = `<div class="panel">
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
+    const summary = `<div class="panel"><div style="display:flex;gap:10px;flex-wrap:wrap">
         ${kpi('Покрытие плана данными ВБ', `<span style="color:${pctColor}">${s.coveragePct}%</span>`, `${nf(s.matchedUnits)} из ${nf(s.totalUnits)} шт сшито`)}
         ${kpi('Расцветки сшиты', `${s.colorsMatched} / ${s.colorsTotal}`, `${s.colorsUnmatched} без пары в ВБ`)}
         ${kpi('Артикулы без «Ключа WB»', String(s.noKey.length), s.noKey.length ? 'их продажи не подтянуть' : 'все привязаны')}
         ${kpi('Карточек в кабинете ВБ', nf(s.cardsCount), '')}
-      </div>
-      ${s.noKey.length ? `<div class="mini" style="margin-top:8px;color:#9b1c1c">Без Ключа WB: ${s.noKey.map((x) => seEsc(x.articleId)).join(', ')} — впишите nmID/префикс на листе «Остатки и поставки».</div>` : ''}
-    </div>`;
+      </div></div>`;
 
-    const rows = cov.rows || [];
-    const tr = (r) => {
-      if (r.extraWb) return `<tr style="color:#8892a0"><td>${seEsc(r.articleId)}</td><td colspan="2"><i>лишний цвет ВБ (нет в плане): ${seEsc(r.wbColor || '—')}</i></td><td class="num">—</td><td class="num">${r.nmID || '—'}</td></tr>`;
-      const bg = r.matched ? '' : 'background:#fdecea';
-      const mk = r.matched ? '<span style="color:#256b45;font-weight:700">✓ сшито</span>' : '<span style="color:#9b1c1c;font-weight:700">✗ нет пары</span>';
-      return `<tr style="${bg}"><td>${seEsc(r.articleId)}</td><td>${seEsc(r.color)}</td><td>${mk}</td><td class="num">${nf(r.units)}</td><td class="num">${r.nmID || '—'}${r.wbColor && r.matched ? ` <span class="mini">(${seEsc(r.wbColor)})</span>` : ''}</td></tr>`;
+    // блок на артикул: редактируемый Ключ WB + таблица расцветок с выпадающей сшивкой
+    const artBlock = (a) => {
+      const opt = (nm, label, sel) => `<option value="${nm}"${sel ? ' selected' : ''}>${seEsc(label)}</option>`;
+      const wbOpts = (curNm) => [`<option value=""${!curNm ? ' selected' : ''}>— авто по названию цвета —</option>`]
+        .concat((a.wbCards || []).map((w) => opt(w.nmID, `${w.nmID} · ${w.wbColor || 'без цвета'}`, String(curNm) === String(w.nmID)))).join('');
+      const rows = (a.colors || []).map((c) => {
+        const bg = c.matched ? '' : 'background:#fdecea';
+        const st = c.matched ? `<span style="color:#256b45;font-weight:700">✓ ${c.manual ? 'сшито вручную' : 'сшито'}</span>` : '<span style="color:#9b1c1c;font-weight:700">✗ нет пары</span>';
+        // выбор = текущий nmID если ручной, иначе '' (авто). Пользователь может переопределить любой.
+        const cur = c.manual ? c.nmID : '';
+        return `<tr style="${bg}">
+          <td>${seEsc(c.color)}</td>
+          <td class="num">${nf(c.units)}</td>
+          <td>${st}${c.matched && !c.manual && c.wbColor ? ` <span class="mini">(${seEsc(c.wbColor)})</span>` : ''}</td>
+          <td><select data-pc-map="${seEsc(a.articleId)}|${seEsc(c.color)}" style="min-width:220px">${wbOpts(cur)}</select></td>
+        </tr>`;
+      }).join('');
+      const extra = (a.extraWb || []).length ? `<div class="mini" style="margin-top:6px;color:#8892a0">Свободные цвета ВБ (нет пары в плане): ${a.extraWb.map((w) => `${w.nmID} · ${seEsc(w.wbColor || '—')}`).join(' · ')}</div>` : '';
+      const matched = (a.colors || []).filter((c) => c.matched).length;
+      return `<div class="panel">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <b>${seEsc(a.articleId)}${a.articleName ? ' — ' + seEsc(a.articleName) : ''}</b>
+          <span class="mini">сшито ${matched}/${(a.colors || []).length}</span>
+          <label class="mini" style="margin-left:auto;display:flex;align-items:center;gap:6px">Ключ WB:
+            <input data-pc-wbkey="${seEsc(a.articleId)}" value="${seEsc(a.wbKey)}" placeholder="nmID или префикс (023_рвп)" style="min-width:220px">
+          </label>
+        </div>
+        <table><thead><tr><th>Расцветка плана</th><th class="num">Штук</th><th>Сшивка</th><th>Карточка ВБ (nmID · цвет)</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="4" class="mini">нет активных расцветок</td></tr>'}</tbody></table>
+        ${extra}
+      </div>`;
     };
-    body = summary + `<div class="panel"><table><thead><tr>
-      <th>Артикул</th><th>Расцветка плана</th><th>Сшивка</th><th class="num">Штук в плане</th><th class="num">nmID ВБ (цвет)</th>
-    </tr></thead><tbody>${rows.map(tr).join('')}</tbody></table></div>`;
+    body = summary + (cov.articles || []).map(artBlock).join('');
   }
 
   root.innerHTML = head + body;
@@ -6021,13 +6061,23 @@ function renderPlanCut() {
   root.querySelector('#pc-build')?.addEventListener('click', async () => {
     const force = !!root.querySelector('#pc-force')?.checked;
     plancutCoverage = undefined; renderPlanCut();
-    try {
-      const r = await api('/api/plancut/coverage' + (force ? '?force=1' : ''));
-      if (r && r.ok) plancutCoverage = { rows: r.rows, summary: r.summary };
-      else { plancutCoverage = false; toast((r && r.error) || 'Не удалось построить карту', true); }
-    } catch (e) { plancutCoverage = false; toast('Ошибка: ' + e.message, true); }
-    renderPlanCut();
+    await pcRebuild(force);
   });
+  // правка Ключа WB артикула (сохранить + пересобрать)
+  root.querySelectorAll('[data-pc-wbkey]').forEach((el) => el.addEventListener('change', () => {
+    const a = state.articles.find((x) => x.id === el.dataset.pcWbkey); if (!a) return;
+    a.wbKey = String(el.value || '').trim().slice(0, 80);
+    pcPersistRebuild();
+  }));
+  // ручная сшивка цвета: пусто = авто по имени, nmID = ручное переопределение
+  root.querySelectorAll('[data-pc-map]').forEach((el) => el.addEventListener('change', () => {
+    const [artId, color] = el.dataset.pcMap.split('|');
+    const a = state.articles.find((x) => x.id === artId); if (!a) return;
+    a.wbColorMap = (a.wbColorMap && typeof a.wbColorMap === 'object') ? a.wbColorMap : {};
+    const v = String(el.value || '').trim();
+    if (v) a.wbColorMap[color] = v; else delete a.wbColorMap[color];
+    pcPersistRebuild();
+  }));
 }
 
 // ---------- ДАННЫЕ (формы) ----------
