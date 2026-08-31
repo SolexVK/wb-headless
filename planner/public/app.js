@@ -7,7 +7,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'plan-cut-phase3-apply-2026-08-31';
+const APP_BUILD = 'plan-cut-csv-collapse-2026-08-31';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -6105,6 +6105,42 @@ async function pcRollback() {
     await pcRebuild(false); await pcLoadAnalysis();
   } catch (e) { toast('Ошибка отката: ' + e.message, true); }
 }
+// свёрнуто/развёрнуто по фазам (в пределах сессии); экспорт CSV каждой фазы отдельным файлом
+let pcPhaseOpen = { p0: true, p1: true, p2: true };
+// CSV (;-разделитель, BOM для Excel-RU); строки — массив массивов
+function pcDownloadCsv(filename, rows2d) {
+  const esc = (v) => { const s = String(v == null ? '' : v); return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const text = rows2d.map((r) => r.map(esc).join(';')).join('\r\n');
+  const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const el = document.createElement('a'); el.href = url; el.download = filename; document.body.appendChild(el); el.click();
+  setTimeout(() => { URL.revokeObjectURL(url); el.remove(); }, 1000);
+}
+const pcStamp = () => new Date().toISOString().slice(0, 10);
+// Фаза 1 → CSV: продаваемость расцветок (выкупы за окно)
+function pcExportSales() {
+  const ps = plancutSales;
+  if (!ps || ps === false || !Array.isArray(ps.articles)) { toast('Сначала собери выкупы (Фаза 1)', true); return; }
+  const rows = [['Артикул', 'Название', 'Расцветка', 'nmID', 'Сшито', 'Штук в плане', 'Выкупов 6 мес', 'Выручка ₽', 'Первая продажа', 'Последняя продажа']];
+  for (const a of ps.articles) for (const c of (a.colors || [])) rows.push([
+    a.articleId, a.articleName || '', c.color, c.nmID == null ? '' : c.nmID, c.matched ? 'да' : 'нет',
+    c.units || 0, c.buyouts == null ? '' : c.buyouts, c.forPay == null ? '' : c.forPay, c.firstDate || '', c.lastDate || '',
+  ]);
+  pcDownloadCsv(`выкупы-6мес_${pcStamp()}.csv`, rows);
+}
+// Фаза 2 → CSV: разбор плана + пометка «под рез»
+function pcExportAnalysis() {
+  const an = plancutAnalysis;
+  if (!an || an === false || !Array.isArray(an.rows)) { toast('Сначала построй разбор плана (Фаза 2)', true); return; }
+  const rows = [['Артикул', 'Расцветка', 'Сшито', 'Новинка(защита)', 'Штук в плане', 'Выкупов 6 мес', 'Выручка 6 мес ₽', 'Вык/100шт', 'Под рез']];
+  const sorted = an.rows.slice().sort((a, b) => (a.articleId.localeCompare(b.articleId)) || ((b.planUnits || 0) - (a.planUnits || 0)));
+  for (const r of sorted) rows.push([
+    r.articleId, r.color, r.matched ? 'да' : 'нет', pcIsProtected(r) ? 'да' : 'нет',
+    r.planUnits || 0, r.buyouts == null ? '' : r.buyouts, r.forPay == null ? '' : r.forPay,
+    r.per100 == null ? '' : r.per100, (pcCutSel && pcCutSel.has(pcKey(r)) && !pcIsProtected(r)) ? 'да' : 'нет',
+  ]);
+  pcDownloadCsv(`разбор-плана_${pcStamp()}.csv`, rows);
+}
 function renderPlanCut() {
   const root = document.getElementById('plancut');
   if (!root) return;
@@ -6112,7 +6148,6 @@ function renderPlanCut() {
   const cov = plancutCoverage;
 
   const head = `<div class="panel">
-    <h3 style="margin:0 0 6px">✂️ Сокращение плана — Фаза 0: карта соответствия расцветок с ВБ</h3>
     <div class="mini" style="margin-bottom:8px">Сверяем сшивку каждой расцветки плана с карточкой ВБ. <b>Ключ WB</b> и <b>ручную сшивку цвета</b> можно править прямо в таблице — сохраняется автоматически, карта пересобирается. Цель — поднять покрытие (в идеале 85%+), затем идём к сбору выкупов за 6 мес.</div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-primary" id="pc-build">${cov && cov.summary ? 'Пересобрать карту' : 'Построить карту соответствия'}</button>
@@ -6178,10 +6213,10 @@ function renderPlanCut() {
   const running = !!(st && st.running);
   const salesReady = !!(ps && ps !== false && Array.isArray(ps.articles));
   const salesHead = `<div class="panel">
-    <h3 style="margin:0 0 6px">📊 Фаза 1: продаваемость расцветок (выкупы за 6 мес из кабинета ВБ)</h3>
     <div class="mini" style="margin-bottom:8px">Тянем фактические <b>выкупы</b> (продажи − возвраты) по каждой сшитой расцветке за последние 6 месяцев. Это метрика реза Эпохи 1: слабо продающиеся расцветки — первые кандидаты на удаление. Метод ВБ жёстко лимитирован — <b>1 запрос в минуту</b>, поэтому сбор идёт в фоне и может занять несколько минут.</div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-primary" id="pc-sales-go"${running ? ' disabled' : ''}>${running ? '⏳ Идёт сбор…' : (salesReady ? 'Обновить выкупы за 6 мес' : '📊 Собрать выкупы за 6 мес')}</button>
+      ${salesReady ? '<button class="btn" id="pc-sales-csv">⬇ Скачать выкупы (CSV)</button>' : ''}
       ${running ? `<span class="mini">страница ${nf(st.page)}, записей ${nf(st.records)} · лимит ВБ 1 запрос/мин — не закрывайте вкладку</span>` : ''}
       ${st && st.error && !running ? `<span class="mini bad">Ошибка сбора: ${seEsc(st.error)}</span>` : ''}
       ${salesReady && ps.collectedAt && !running ? `<span class="mini">собрано ${seEsc(String(ps.collectedAt).slice(0, 16).replace('T', ' '))} · окно ${seEsc(ps.window ? ps.window.from : '')} → ${seEsc(ps.window ? ps.window.to : '')} · всего строк ${nf(ps.records || 0)}</span>` : ''}
@@ -6233,7 +6268,6 @@ function renderPlanCut() {
   const an = plancutAnalysis;
   let cutPanel = '';
   const cutHead = `<div class="panel">
-    <h3 style="margin:0 0 6px">🎯 Фаза 2: разбор плана и симуляция реза (Эпоха 1)</h3>
     <div class="mini" style="margin-bottom:8px">Соединяем план (штуки) с выкупами. Режем в первую очередь <b>слабо продающиеся расцветки</b> (по выкупам за 6 мес), пока план не опустится до цели. Ниже — <b>предпросмотр</b>: галочки «под рез» можно править вручную. Применение (обнулить в матрице + перевести цвет в архив, с откатом) — отдельный шаг, по твоему подтверждению.</div>`;
   if (an === undefined) cutPanel = cutHead + '<div class="mini">Считаю разбор плана…</div></div>';
   else if (an === false) cutPanel = cutHead + '<div class="mini bad">Не удалось построить разбор плана.</div></div>';
@@ -6271,6 +6305,8 @@ function renderPlanCut() {
           </div></div>
         <div style="flex:1;min-width:240px"><div class="mini" style="margin-bottom:4px">🛡 Не резать (новинки/обязательные) — их авто-рез не трогает:</div>
           <div class="sp-chips">${protChips || '<span class="mini">нет артикулов</span>'}</div></div>
+        <div><div class="mini" style="margin-bottom:4px">Экспорт:</div>
+          <button class="btn" id="pc-analysis-csv">⬇ Скачать разбор плана (CSV)</button></div>
       </div></div>`;
 
     // таблица кандидатов: сшитые расцветки с планом, самые слабые по метрике сверху
@@ -6329,7 +6365,25 @@ function renderPlanCut() {
     cutPanel = cutHead + '<div class="mini">Сначала собери выкупы (Фаза 1) — тогда появится разбор плана.</div></div>';
   }
 
-  root.innerHTML = head + salesPanel + cutPanel + body;
+  // сворачиваемые фазы: summary-заголовок + краткая сводка, чтобы видеть суть в свёрнутом виде
+  const det = (id, title, hint, inner) => `<details class="pc-phase" data-pc-phase="${id}"${pcPhaseOpen[id] ? ' open' : ''} style="margin-bottom:10px;border:1px solid var(--border,#dde);border-radius:10px;background:#fbfcfe">
+    <summary style="cursor:pointer;padding:10px 12px;font-weight:800;font-size:15px;user-select:none">${title}${hint ? ` <span style="font-weight:500;font-size:12px;color:#667">— ${hint}</span>` : ''}</summary>
+    <div style="padding:0 8px 8px">${inner}</div></details>`;
+  const covHint = cov && cov.summary ? `покрытие ${cov.summary.coveragePct}% · сшито ${cov.summary.colorsMatched}/${cov.summary.colorsTotal} расцв.` : '';
+  const salesHint = salesReady && ps.summary ? `выкупов ${nf(ps.summary.totalBuyouts)} · ${nf(ps.summary.totalForPay)} ₽ за 6 мес` : (running ? 'идёт сбор…' : 'не собрано');
+  let cutHint = '';
+  if (an && an.rows) {
+    let rmv = 0; for (const r of an.rows) if (!pcIsProtected(r) && pcCutSel && pcCutSel.has(pcKey(r))) rmv += r.planUnits;
+    cutHint = `план ${nf(an.planTotal)} → останется ${nf(an.planTotal - rmv)} шт (цель ${nf(pcTarget)})`;
+  }
+  root.innerHTML =
+    det('p0', '✂️ Фаза 0 · карта соответствия расцветок с ВБ', covHint, head + body)
+    + det('p1', '📊 Фаза 1 · продаваемость расцветок (выкупы 6 мес)', salesHint, salesPanel)
+    + det('p2', '🎯 Фаза 2 · разбор плана и симуляция реза', cutHint, cutPanel);
+
+  root.querySelectorAll('[data-pc-phase]').forEach((el) => el.addEventListener('toggle', () => { pcPhaseOpen[el.dataset.pcPhase] = el.open; }));
+  root.querySelector('#pc-sales-csv')?.addEventListener('click', pcExportSales);
+  root.querySelector('#pc-analysis-csv')?.addEventListener('click', pcExportAnalysis);
 
   root.querySelector('#pc-sales-go')?.addEventListener('click', pcStartSales);
   // Фаза 2: цель, автопересчёт, ручные галочки реза
