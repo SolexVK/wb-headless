@@ -7,7 +7,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'plan-cut-phase2-mix-2026-08-31';
+const APP_BUILD = 'plan-cut-phase3-apply-2026-08-31';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -6057,6 +6057,54 @@ function pcPersistLite() {
     catch { /* оставим dirty */ }
   }, 400);
 }
+// ── Фаза 3: применить рез (обнулить в матрице + в архив) с точкой отката ──
+async function pcApplyCut() {
+  const an = plancutAnalysis;
+  if (!an || !an.rows || !pcCutSel) return;
+  const items = [];
+  for (const r of an.rows) { if (pcIsProtected(r)) continue; if (pcCutSel.has(pcKey(r))) items.push({ articleId: r.articleId, color: r.color, planUnits: r.planUnits }); }
+  if (!items.length) { toast('Ничего не выбрано под рез', true); return; }
+  const totalCut = items.reduce((n, i) => n + i.planUnits, 0);
+  const remaining = an.planTotal - totalCut;
+  const msg = `Применить рез Эпохи 1?\n\nУбрать ${items.length} расцветок · −${totalCut.toLocaleString('ru')} шт.\nОстанется в плане: ${remaining.toLocaleString('ru')} шт (цель ${pcTarget.toLocaleString('ru')}).\n\nВыбранные расцветки обнулятся в матрице и уйдут в архив. Перед применением сохранится точка отката. Пересчитаются Гант, ткань, финансы.`;
+  if (!confirm(msg)) return;
+  const btn = document.getElementById('pc-apply'); if (btn) { btn.disabled = true; btn.textContent = 'Применяю…'; }
+  try {
+    // 1) точка отката (именованный снапшот)
+    const label = `перед резом Эпоха 1 · ${new Date().toLocaleString('ru').slice(0, 16)}`;
+    let snapId = '';
+    try { const sr = await api('/api/state/snapshots', { method: 'POST', body: JSON.stringify({ label }) }); snapId = (sr && sr.id) || ''; }
+    catch { if (!confirm('Не удалось сохранить точку отката (нет БД?). Применить рез БЕЗ авто-отката?')) { if (btn) { btn.disabled = false; btn.textContent = '✂️ Применить рез'; } return; } }
+    // 2) применить к state: обнулить в планМатрице всех партий + перевести цвет в архив
+    for (const it of items) {
+      const a = state.articles.find((x) => x.id === it.articleId); if (!a || a.cutProtected) continue;
+      for (const p of (state.partias || [])) { if (p.articleId === a.id && p.planMatrix) delete p.planMatrix[it.color]; }
+      if (a.matrix && typeof a.matrix === 'object') delete a.matrix[it.color]; // легаси-матрица, если осталась
+      a.archivedColors = a.archivedColors || [];
+      if ((a.colors || []).includes(it.color) && !a.archivedColors.includes(it.color)) a.archivedColors.push(it.color);
+    }
+    // журнал последнего реза — для кнопки отката и отчёта
+    state.planCut = { appliedAt: new Date().toISOString(), target: pcTarget, metric: pcMetric, snapshotId: snapId, cutUnits: totalCut, count: items.length, items };
+    // 3) сохранить + пересчитать Гант/ткань/финансы
+    await recalc(true);
+    pcCutSel = null; plancutAnalysis = null; plancutCoverage = null;
+    toast(`Рез применён: −${totalCut.toLocaleString('ru')} шт. Гант/ткань/финансы пересчитаны.`);
+    await pcRebuild(false); await pcLoadAnalysis();
+  } catch (e) { toast('Ошибка применения: ' + e.message, true); if (btn) { btn.disabled = false; btn.textContent = '✂️ Применить рез'; } }
+}
+async function pcRollback() {
+  const pc = state.planCut;
+  if (!pc || !pc.snapshotId) { toast('Нет точки отката последнего реза', true); return; }
+  if (!confirm(`Откатить последний рез (−${(pc.cutUnits || 0).toLocaleString('ru')} шт, ${pc.count || (pc.items ? pc.items.length : 0)} расцветок)?\nТекущее состояние заменится сохранённой версией «перед резом» (само оно сохранится авто-снимком).`)) return;
+  try {
+    const r = await api(`/api/state/snapshots/${pc.snapshotId}/restore`, { method: 'POST' });
+    state = r.state; dirty = false;
+    await recalc(false);
+    pcCutSel = null; plancutAnalysis = null; plancutCoverage = null;
+    toast('Рез откачен, план восстановлен');
+    await pcRebuild(false); await pcLoadAnalysis();
+  } catch (e) { toast('Ошибка отката: ' + e.message, true); }
+}
 function renderPlanCut() {
   const root = document.getElementById('plancut');
   if (!root) return;
@@ -6265,8 +6313,16 @@ function renderPlanCut() {
       <tbody>${unm.map(unmRow).join('')}</tbody></table>
     </div>` : '';
 
+    // Фаза 3: применить рез + откат последнего
+    const lastCut = state.planCut;
+    const applyBar = `<div class="panel" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid ${cutCount ? '#e2b3b3' : 'var(--border,#dde)'}">
+      <button class="btn btn-danger" id="pc-apply"${cutCount ? '' : ' disabled'}>✂️ Применить рез (${cutCount} расцв. · −${nf(removed)} шт)</button>
+      <span class="mini">Обнулит выбранные расцветки в матрице + переведёт в архив. Перед применением — авто-точка отката. Пересчитает Гант/ткань/финансы. ${protUnits ? `Защищено: ${nf(protUnits)} шт.` : ''}</span>
+      ${lastCut && lastCut.snapshotId ? `<span class="mini" style="margin-left:auto">Последний рез: ${seEsc(String(lastCut.appliedAt || '').slice(0, 16).replace('T', ' '))} · −${nf(lastCut.cutUnits || 0)} шт · ${lastCut.count || (lastCut.items ? lastCut.items.length : 0)} расцв. <button class="btn" id="pc-rollback" style="padding:2px 8px">↩ Откат последнего реза</button></span>` : ''}
+    </div>`;
+
     const metricLbl = pcMetric === 'buyouts' ? 'выкупам' : pcMetric === 'revenue' ? 'выручке' : 'смешанной метрике';
-    cutPanel = cutHead + kpis + controls + '</div>'
+    cutPanel = cutHead + kpis + controls + '</div>' + applyBar
       + `<div class="panel"><div class="mini" style="margin-bottom:6px">Кандидаты на рез — сшитые расцветки с планом, отсортированы по ${metricLbl} (слабые сверху). Отмеченные <span style="color:#9b1c1c">красным</span> идут под рез, <span style="color:#2563a0">🛡 новинки</span> защищены.</div>${table}</div>`
       + unmBlock;
   } else {
@@ -6302,6 +6358,9 @@ function renderPlanCut() {
     if (el.checked) for (const r of plancutAnalysis.rows) if (r.articleId === a.id) pcCutSel.delete(pcKey(r));
     pcPersistLite(); renderPlanCut();
   }));
+  // Фаза 3: применить рез / откат
+  root.querySelector('#pc-apply')?.addEventListener('click', pcApplyCut);
+  root.querySelector('#pc-rollback')?.addEventListener('click', pcRollback);
 
   root.querySelector('#pc-build')?.addEventListener('click', async () => {
     const force = !!root.querySelector('#pc-force')?.checked;
