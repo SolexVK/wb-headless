@@ -1,10 +1,15 @@
 name: Сторож удержаний WB (07:00 и 18:00 МСК)
 
 on:
-  schedule:
-    # Время в UTC. МСК = UTC+3, поэтому 04:00 UTC = 07:00 МСК, 15:00 UTC = 18:00 МСК.
-    # GitHub может запускать cron с задержкой в несколько минут — это нормально.
-    - cron: '0 4,15 * * *'
+  # РАСПИСАНИЕ ВЫКЛЮЧЕНО НАМЕРЕННО (решение от 31.08).
+  # Сторож работает на Mac Mini через LaunchAgent com.wbheadless.finewatch —
+  # см. WATCH.md, раздел «Установка на Mac Mini». Если включить cron здесь,
+  # в чат будут приходить ДВА одинаковых сообщения на каждую проверку.
+  # Чтобы вернуть расписание в Actions: снять комментарии ниже и выключить
+  # LaunchAgent (launchctl bootout gui/$UID/com.wbheadless.finewatch).
+  # Время в UTC: 04:00 = 07:00 МСК, 15:00 = 18:00 МСК.
+  # schedule:
+  #   - cron: '0 4,15 * * *'
   workflow_dispatch:
     inputs:
       window:

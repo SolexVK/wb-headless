@@ -32,7 +32,11 @@
 
 ## Настройка
 
-### 1. Секреты репозитория
+### 1. Секреты репозитория (только для запуска в GitHub Actions)
+
+Если сторож работает на Mac Mini, секреты в GitHub **не нужны** — они лежат в
+локальном `.env` (см. раздел 3). Эти секреты нужны лишь для ручного запуска
+workflow или если вы вернёте расписание в Actions.
 
 Settings → Secrets and variables → Actions → New repository secret:
 
@@ -44,11 +48,18 @@ Settings → Secrets and variables → Actions → New repository secret:
 
 ### 2. Расписание
 
-`.github/workflows/wb-watch.yml`, cron `0 4,15 * * *` (UTC) —
-**07:00 и 18:00 МСК**. GitHub может задержать запуск на несколько минут.
+Работает **одно** расписание — иначе на каждую проверку в чат придут два
+одинаковых сообщения.
 
-Кнопка «Run workflow» на вкладке Actions запускает проверку вручную; там же
+Сейчас выбран **Mac Mini** (LaunchAgent `com.wbheadless.finewatch`, 07:00 и
+18:00 по времени машины) — установка в разделе ниже. Поэтому в
+`.github/workflows/wb-watch.yml` блок `schedule` **закомментирован**, а ручной
+запуск через кнопку «Run workflow» на вкладке Actions остался: там же
 переключатель `dry_run` — показать сообщение, ничего не отправляя.
+
+Чтобы переехать обратно в Actions: снять комментарии с `schedule` в workflow,
+добавить секреты репозитория и выключить агент на Mac Mini
+(`launchctl bootout gui/$UID/com.wbheadless.finewatch`).
 
 ### 3. Установка на Mac Mini (рекомендуемый способ)
 
