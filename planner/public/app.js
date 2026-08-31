@@ -7,7 +7,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'plan-cut-csv-collapse-2026-08-31';
+const APP_BUILD = 'plan-cut-sortcols-2026-08-31';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -6117,6 +6117,52 @@ function pcDownloadCsv(filename, rows2d) {
   setTimeout(() => { URL.revokeObjectURL(url); el.remove(); }, 1000);
 }
 const pcStamp = () => new Date().toISOString().slice(0, 10);
+// ── сортировка столбцов таблиц листа «Сокращение» ──
+// Состояние держим по data-sort-id (стабильный для каждой таблицы) и переприменяем после
+// каждой перерисовки (таблицы пересобираются при опросе/правках). Числа/₽/%/чекбоксы — по значению.
+let pcSortState = {}; // sortId → { col, dir(1|-1) }
+function pcCellVal(td) {
+  if (!td) return { s: '' };
+  const cb = td.querySelector('input[type=checkbox]'); if (cb) return { n: cb.checked ? 1 : 0 };
+  const t = (td.textContent || '').replace(/\s+/g, ' ').trim();
+  const num = t.replace(/[\s ]/g, '').replace(/[₽%]/g, '').replace(',', '.');
+  if (num !== '' && /^-?\d+(\.\d+)?$/.test(num)) return { n: parseFloat(num) };
+  return { s: t.toLowerCase() };
+}
+function pcSortTable(tbl, col, dir) {
+  const tb = tbl.tBodies[0]; if (!tb) return;
+  const rows = [...tb.rows].filter((r) => r.cells.length > col && r.dataset.noSort === undefined);
+  rows.sort((a, b) => {
+    const va = pcCellVal(a.cells[col]), vb = pcCellVal(b.cells[col]);
+    const c = ('n' in va && 'n' in vb) ? (va.n - vb.n)
+      : String('s' in va ? va.s : va.n).localeCompare(String('s' in vb ? vb.s : vb.n), 'ru', { numeric: true });
+    return c * dir;
+  });
+  rows.forEach((r) => tb.appendChild(r));
+}
+function pcApplySorts(root) {
+  root.querySelectorAll('table.pc-sortable').forEach((tbl) => {
+    const id = tbl.dataset.sortId || '';
+    const head = tbl.tHead && tbl.tHead.rows[0]; if (!head) return;
+    [...head.cells].forEach((th, i) => {
+      if (th.dataset.noSort !== undefined) return;
+      th.style.cursor = 'pointer';
+      if (!th.title) th.title = 'Клик — сортировать';
+      const st = pcSortState[id];
+      const ind = (st && st.col === i) ? (st.dir > 0 ? ' ▲' : ' ▼') : ' ⇅';
+      if (!/[▲▼⇅]/.test(th.textContent)) th.insertAdjacentHTML('beforeend', `<span class="pc-sort-ind" style="opacity:.5;font-size:11px">${ind}</span>`);
+      th.addEventListener('click', () => {
+        const cur = pcSortState[id];
+        pcSortState[id] = { col: i, dir: (cur && cur.col === i) ? -cur.dir : 1 };
+        pcSortTable(tbl, i, pcSortState[id].dir);
+        // обновить индикаторы без полной перерисовки
+        [...head.cells].forEach((h, k) => { const s = h.querySelector('.pc-sort-ind'); if (s) s.textContent = (k === i) ? (pcSortState[id].dir > 0 ? ' ▲' : ' ▼') : ' ⇅'; });
+      });
+    });
+    const st = pcSortState[id];
+    if (st && st.col != null) pcSortTable(tbl, st.col, st.dir); // переприменить сохранённую сортировку
+  });
+}
 // Фаза 1 → CSV: продаваемость расцветок (выкупы за окно)
 function pcExportSales() {
   const ps = plancutSales;
@@ -6199,7 +6245,7 @@ function renderPlanCut() {
             <input data-pc-wbkey="${seEsc(a.articleId)}" value="${seEsc(a.wbKey)}" placeholder="авто = номер артикула; можно задать префикс" style="min-width:220px" title="По умолчанию цвета берутся по номеру артикула (первые цифры). Впишите префикс/номер, если у карточек ВБ другой префикс.">
           </label>
         </div>
-        <table><thead><tr><th>Расцветка плана</th><th class="num">Штук</th><th>Сшивка</th><th>Карточка ВБ (nmID · цвет)</th></tr></thead>
+        <table class="pc-sortable" data-sort-id="cov-${seEsc(a.articleId)}"><thead><tr><th>Расцветка плана</th><th class="num">Штук</th><th>Сшивка</th><th data-no-sort>Карточка ВБ (nmID · цвет)</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="4" class="mini">нет активных расцветок</td></tr>'}</tbody></table>
         ${extra}
       </div>`;
@@ -6248,7 +6294,7 @@ function renderPlanCut() {
           <span class="mini">выкупов за 6 мес: <b>${nf(a.totBuyouts)}</b> шт · ${nf(a.totForPay)} ₽</span>
           ${dead ? `<span class="mini bad">${dead} расцветк${dead === 1 ? 'а' : (dead < 5 ? 'и' : '')} с 0 выкупов</span>` : ''}
         </div>
-        <table><thead><tr><th>Расцветка</th><th class="num">Выкупов шт (6 мес)</th><th class="num">₽</th><th class="num">Штук в плане</th><th>Первая продажа</th></tr></thead>
+        <table class="pc-sortable" data-sort-id="sales-${seEsc(a.articleId)}"><thead><tr><th>Расцветка</th><th class="num">Выкупов шт (6 мес)</th><th class="num">₽</th><th class="num">Штук в плане</th><th>Первая продажа</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="mini">нет расцветок</td></tr>'}</tbody></table>
       </div>`;
     };
@@ -6328,7 +6374,7 @@ function renderPlanCut() {
         <td class="num">${r.per100 != null ? r.per100 : '—'}</td>
       </tr>`;
     };
-    const table = `<table><thead><tr>
+    const table = `<table class="pc-sortable" data-sort-id="cut-cand"><thead><tr>
       <th style="width:44px">Рез</th><th>Артикул</th><th>Расцветка</th>
       <th class="num">Штук в плане</th><th class="num">Выкупов 6 мес</th><th class="num">Выручка 6 мес ₽</th><th class="num" title="выкупов на 100 штук плана — продаваемость относительно размера плана">Вык./100 шт</th>
       </tr></thead><tbody>${cand.map(row).join('')}</tbody></table>`;
@@ -6345,7 +6391,7 @@ function renderPlanCut() {
     };
     const unmBlock = unm.length ? `<div class="panel" style="margin-top:10px">
       <div class="mini" style="margin-bottom:6px"><b>${unm.length} расцветок в плане без данных ВБ</b> (${nf(an.unmatchedPlanUnits)} шт) — не сшиты, продаж не видно. В авто-рез не включаю (может быть новинка). Отметь новинку как 🛡 выше, чтобы защитить, либо реши по рез вручную.</div>
-      <table><thead><tr><th style="width:44px">Рез</th><th>Артикул</th><th>Расцветка</th><th class="num">Штук в плане</th></tr></thead>
+      <table class="pc-sortable" data-sort-id="cut-unm"><thead><tr><th style="width:44px">Рез</th><th>Артикул</th><th>Расцветка</th><th class="num">Штук в плане</th></tr></thead>
       <tbody>${unm.map(unmRow).join('')}</tbody></table>
     </div>` : '';
 
@@ -6436,6 +6482,7 @@ function renderPlanCut() {
     if (v) a.wbColorMap[color] = v; else delete a.wbColorMap[color];
     pcPersistRebuild();
   }));
+  pcApplySorts(root); // сортируемые столбцы всех таблиц листа + переприменение сохранённой сортировки
 }
 
 // ---------- ДАННЫЕ (формы) ----------
