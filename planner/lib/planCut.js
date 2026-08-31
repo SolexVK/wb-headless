@@ -17,11 +17,12 @@ const wbColorOf = (c) => (c.color || vendorColor(c.vendorCode) || '');
 
 // Ведущие цифры строки (номер артикула): «034_рмж» → «034», «034рмж» → «034», «844264052» → как есть.
 const leadDigits = (s) => (String(s || '').trim().match(/^\d+/) || [''])[0];
-// Тег группы артикула = короткий номер (2–5 цифр). Приоритет: явный префикс из wbKey, иначе id.
-// nmID (длинные цифры) в wbKey игнорируем — они не задают группу.
+// Тег группы артикула = короткий номер (2–5 цифр). ПРИОРИТЕТ: номер из id артикула (003, 034).
+// Только если у id нет номера — берём ЯВНЫЙ префикс из wbKey (цифры+буквы, напр. «034_рмж»).
+// Голые/списочные nmID в wbKey игнорируем — они НЕ задают группу (обрывок nmID мог дать ложный тег).
 function artTag(a) {
-  for (const t of String(a.wbKey || '').split(/[,;\n]+/)) { const d = leadDigits(t); if (/^\d{2,5}$/.test(d)) return d; }
   const idd = leadDigits(a.id); if (/^\d{2,5}$/.test(idd)) return idd;
+  for (const t of String(a.wbKey || '').split(/[,;\n]+/)) { const s = t.trim(); if (/^\d{2,5}[_a-zа-я-]/i.test(s)) return leadDigits(s); }
   const m = String(a.id || '').match(/\d{2,5}/); return m ? m[0] : '';
 }
 
