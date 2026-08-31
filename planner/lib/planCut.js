@@ -4,25 +4,25 @@
 // сшита со своей карточкой ВБ (nmID). Сшивка: авто по названию цвета + РУЧНАЯ через
 // a.wbColorMap { расцветка → nmID } (пользователь правит в интерфейсе). Штуки плана берём
 // из партий (planMatrix), МАКС по этапам — чтобы не задваивать (одна вещь проходит все этапы).
+//
+// ГРУППА АРТИКУЛА (строго!): цвета берутся ТОЛЬКО из карточек, чей vendorCode начинается на
+// номер артикула (первые цифры, напр. «034» → 034_рмж_цвет_пк). Так исключено смешивание с
+// другими артикулами и подтягиваются ВСЕ цвета группы (в т.ч. те, чьи nmID не перечисляли).
 
-import { fetchCards, resolveArticleCards, vendorColor } from './wb/wbApi.js';
+import { fetchCards, vendorColor } from './wb/wbApi.js';
 
 // Нормализация названия цвета для авто-сопоставления: регистр, ё→е, убрать пунктуацию/пробелы.
 const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^0-9a-zа-я]+/gi, ' ').trim();
 const wbColorOf = (c) => (c.color || vendorColor(c.vendorCode) || '');
 
-// Расширить набор карточек до ВСЕЙ цветовой семьи по imtID: цвета одного товара на ВБ
-// объединены imtID. Дав один nmID/префикс, подтягиваем все цвета этого товара — чтобы в
-// выборе были все расцветки (напр. «морская волна»), даже если их nmID не перечислили.
-function expandByImt(sibs, cards) {
-  const imts = new Set(); const nms = new Set();
-  for (const c of sibs) { if (c.imtID != null) imts.add(c.imtID); nms.add(String(c.nmID)); }
-  const seen = new Set(); const out = [];
-  for (const c of cards) {
-    const inFamily = (c.imtID != null && imts.has(c.imtID)) || nms.has(String(c.nmID));
-    if (inFamily && !seen.has(String(c.nmID))) { seen.add(String(c.nmID)); out.push(c); }
-  }
-  return out;
+// Ведущие цифры строки (номер артикула): «034_рмж» → «034», «034рмж» → «034», «844264052» → как есть.
+const leadDigits = (s) => (String(s || '').trim().match(/^\d+/) || [''])[0];
+// Тег группы артикула = короткий номер (2–5 цифр). Приоритет: явный префикс из wbKey, иначе id.
+// nmID (длинные цифры) в wbKey игнорируем — они не задают группу.
+function artTag(a) {
+  for (const t of String(a.wbKey || '').split(/[,;\n]+/)) { const d = leadDigits(t); if (/^\d{2,5}$/.test(d)) return d; }
+  const idd = leadDigits(a.id); if (/^\d{2,5}$/.test(idd)) return idd;
+  const m = String(a.id || '').match(/\d{2,5}/); return m ? m[0] : '';
 }
 
 // Штук плана по артикул→цвет из партий (status=plan, не historical); по размеру берём МАКС
@@ -56,7 +56,6 @@ function planUnitsByArticleColor(state) {
  */
 export async function buildCoverage(state, { force = false } = {}) {
   const cards = await fetchCards({ force });
-  const byNm = new Map(cards.map((c) => [String(c.nmID), c]));
   const planU = planUnitsByArticleColor(state);
 
   const out = { articles: [], summary: {} };
@@ -67,8 +66,9 @@ export async function buildCoverage(state, { force = false } = {}) {
     const activeColors = (a.colors || []).filter((c) => !((a.archivedColors || []).includes(c)));
     const units = planU[a.id] || {};
     const map = (a.wbColorMap && typeof a.wbColorMap === 'object') ? a.wbColorMap : {};
-    let sibs = a.wbKey ? resolveArticleCards(a.wbKey, cards, byNm) : [];
-    if (sibs.length) sibs = expandByImt(sibs, cards); // подтянуть все цвета товара по imtID
+    // СТРОГО: группа артикула = карточки, чей vendorCode начинается на номер артикула (тег).
+    const tag = artTag(a);
+    const sibs = tag ? cards.filter((c) => leadDigits(c.vendorCode) === tag) : [];
 
     const wbByColor = new Map(); // норм-цвет ВБ → карточка (для авто-сшивки)
     const wbByNm = new Map();    // nmID → карточка (для ручной сшивки)
@@ -91,8 +91,8 @@ export async function buildCoverage(state, { force = false } = {}) {
       colors.push({ color, units: u, matched: !!card, manual, nmID: card ? card.nmID : null, wbColor: card ? wbColorOf(card) : '' });
     }
     const extraWb = wbCards.filter((w) => !usedNm.has(String(w.nmID)));
-    if (!a.wbKey) noKey.push({ articleId: a.id, articleName: a.name });
-    out.articles.push({ articleId: a.id, articleName: a.name || '', wbKey: a.wbKey || '', colors, wbCards, extraWb });
+    if (!sibs.length) noKey.push({ articleId: a.id, articleName: a.name, tag });
+    out.articles.push({ articleId: a.id, articleName: a.name || '', wbKey: a.wbKey || '', tag, groupCount: sibs.length, colors, wbCards, extraWb });
   }
 
   out.summary = {

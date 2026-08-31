@@ -7,7 +7,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'code-login-2026-08-30';
+const APP_BUILD = 'plan-cut-strict-group-2026-08-30';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -6017,7 +6017,7 @@ function renderPlanCut() {
     const summary = `<div class="panel"><div style="display:flex;gap:10px;flex-wrap:wrap">
         ${kpi('Покрытие плана данными ВБ', `<span style="color:${pctColor}">${s.coveragePct}%</span>`, `${nf(s.matchedUnits)} из ${nf(s.totalUnits)} шт сшито`)}
         ${kpi('Расцветки сшиты', `${s.colorsMatched} / ${s.colorsTotal}`, `${s.colorsUnmatched} без пары в ВБ`)}
-        ${kpi('Артикулы без «Ключа WB»', String(s.noKey.length), s.noKey.length ? 'их продажи не подтянуть' : 'все привязаны')}
+        ${kpi('Артикулы без карточек ВБ', String(s.noKey.length), s.noKey.length ? 'группа не найдена — проверьте префикс' : 'у всех есть группа')}
         ${kpi('Карточек в кабинете ВБ', nf(s.cardsCount), '')}
       </div></div>`;
 
@@ -6040,12 +6040,14 @@ function renderPlanCut() {
       }).join('');
       const extra = (a.extraWb || []).length ? `<div class="mini" style="margin-top:6px;color:#8892a0">Свободные цвета ВБ (нет пары в плане): ${a.extraWb.map((w) => `${w.nmID} · ${seEsc(w.wbColor || '—')}`).join(' · ')}</div>` : '';
       const matched = (a.colors || []).filter((c) => c.matched).length;
+      const grp = a.tag ? `<span class="mini" style="color:${a.groupCount ? '#256b45' : '#9b1c1c'}">группа ВБ: <b>${seEsc(a.tag)}</b> · ${a.groupCount || 0} карточек</span>` : '<span class="mini" style="color:#9b1c1c">номер артикула не распознан</span>';
       return `<div class="panel">
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
           <b>${seEsc(a.articleId)}${a.articleName ? ' — ' + seEsc(a.articleName) : ''}</b>
           <span class="mini">сшито ${matched}/${(a.colors || []).length}</span>
-          <label class="mini" style="margin-left:auto;display:flex;align-items:center;gap:6px">Ключ WB:
-            <input data-pc-wbkey="${seEsc(a.articleId)}" value="${seEsc(a.wbKey)}" placeholder="nmID или префикс (023_рвп)" style="min-width:220px">
+          ${grp}
+          <label class="mini" style="margin-left:auto;display:flex;align-items:center;gap:6px">Префикс ВБ:
+            <input data-pc-wbkey="${seEsc(a.articleId)}" value="${seEsc(a.wbKey)}" placeholder="авто = номер артикула; можно задать префикс" style="min-width:220px" title="По умолчанию цвета берутся по номеру артикула (первые цифры). Впишите префикс/номер, если у карточек ВБ другой префикс.">
           </label>
         </div>
         <table><thead><tr><th>Расцветка плана</th><th class="num">Штук</th><th>Сшивка</th><th>Карточка ВБ (nmID · цвет)</th></tr></thead>
