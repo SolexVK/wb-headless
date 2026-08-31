@@ -153,6 +153,9 @@ export async function run(opts = {}) {
     rows: cache.rows, baselineRows: cache.baselineRows, returns: cache.returns,
     orders: cache.orders, fbsOrders: cache.fbsOrders, warehouses: cache.warehouses,
     thresholds, state,
+    // Считаем «сейчас» моментом сбора кэша: на свежем прогоне это одно и то же,
+    // а на повторном разборе старого кэша цифры не поедут.
+    asOf: cache.collectedAt,
   });
 
   const attachments = result.severity === 'ok' ? [] : buildAttachments({ result, cache, period });
