@@ -7,7 +7,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'plan-cut-phase2-2026-08-31';
+const APP_BUILD = 'plan-cut-phase2-mix-2026-08-31';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -6016,11 +6016,28 @@ async function pcStartSales() {
 let plancutAnalysis = null;  // null — не грузили; undefined — идёт запрос; {rows,planTotal,...} | false — ошибка
 let pcTarget = 200000;       // цель Эпохи 1 (штук), редактируется
 let pcCutSel = null;         // Set('artId|color') — выбранные под рез; null = ещё не инициализировали жадным
+let pcMetric = 'mixed';      // 'buyouts' | 'mixed' | 'revenue' — метрика ранжирования «слабых»
 const pcKey = (r) => r.articleId + '|' + r.color;
-// жадный выбор: режем худших по выкупам (при равных — тех, где больше штук плана) до достижения цели
-function pcGreedy(rows, planTotal, target) {
+const pcIsProtected = (r) => !!(state.articles.find((a) => a.id === r.articleId) || {}).cutProtected;
+// «сила» расцветки (больше = ценнее, режем последней). Для 'mixed' — блендим выкупы и выручку,
+// нормируя обе величины к 0..1 по максимуму среди кандидатов (разные цены → честнее в долях).
+function pcScorer(rows, metric) {
+  const cand = rows.filter((r) => r.matched);
+  const maxB = Math.max(1, ...cand.map((r) => r.buyouts || 0));
+  const maxR = Math.max(1, ...cand.map((r) => r.forPay || 0));
+  return (r) => {
+    if (metric === 'buyouts') return r.buyouts || 0;
+    if (metric === 'revenue') return r.forPay || 0;
+    return ((r.buyouts || 0) / maxB) * 0.5 + ((r.forPay || 0) / maxR) * 0.5; // mixed 50/50
+  };
+}
+// жадный выбор: режем самых слабых по метрике (при равных — где больше штук плана) до цели.
+// Новинки/защищённые артикулы (a.cutProtected) в авто-рез НЕ попадают.
+function pcGreedy(rows, planTotal, target, metric) {
   const need = Math.max(0, planTotal - target);
-  const cand = rows.filter((r) => r.matched).slice().sort((a, b) => (a.buyouts - b.buyouts) || (b.planUnits - a.planUnits));
+  const score = pcScorer(rows, metric || pcMetric);
+  const cand = rows.filter((r) => r.matched && !pcIsProtected(r)).slice()
+    .sort((a, b) => (score(a) - score(b)) || (b.planUnits - a.planUnits));
   const sel = new Set(); let removed = 0;
   for (const r of cand) { if (removed >= need) break; sel.add(pcKey(r)); removed += r.planUnits; }
   return sel;
@@ -6028,8 +6045,17 @@ function pcGreedy(rows, planTotal, target) {
 async function pcLoadAnalysis() {
   try { const r = await api('/api/plancut/analysis'); plancutAnalysis = (r && r.ok) ? r : false; }
   catch { plancutAnalysis = false; }
-  if (plancutAnalysis && plancutAnalysis.rows && pcCutSel === null) pcCutSel = pcGreedy(plancutAnalysis.rows, plancutAnalysis.planTotal, pcTarget);
+  if (plancutAnalysis && plancutAnalysis.rows && pcCutSel === null) pcCutSel = pcGreedy(plancutAnalysis.rows, plancutAnalysis.planTotal, pcTarget, pcMetric);
   if (activeTab === 'plancut') renderPlanCut();
+}
+// сохранить state (защита артикулов) без пересборки карты; затем перерисовать
+function pcPersistLite() {
+  dirty = true; setStatus();
+  clearTimeout(pcSaveT);
+  pcSaveT = setTimeout(async () => {
+    try { await api('/api/state', { method: 'PUT', body: JSON.stringify(state) }); dirty = false; setStatus(); }
+    catch { /* оставим dirty */ }
+  }, 400);
 }
 function renderPlanCut() {
   const root = document.getElementById('plancut');
@@ -6164,10 +6190,13 @@ function renderPlanCut() {
   if (an === undefined) cutPanel = cutHead + '<div class="mini">Считаю разбор плана…</div></div>';
   else if (an === false) cutPanel = cutHead + '<div class="mini bad">Не удалось построить разбор плана.</div></div>';
   else if (an && an.rows) {
-    if (pcCutSel === null) pcCutSel = pcGreedy(an.rows, an.planTotal, pcTarget);
-    // текущий срез (учёт ручных правок)
-    let removed = 0, cutCount = 0;
-    for (const r of an.rows) if (pcCutSel.has(pcKey(r))) { removed += r.planUnits; cutCount += 1; }
+    if (pcCutSel === null) pcCutSel = pcGreedy(an.rows, an.planTotal, pcTarget, pcMetric);
+    // текущий срез (учёт ручных правок), защищённые не режем даже вручную по ошибке
+    let removed = 0, cutCount = 0, protUnits = 0;
+    for (const r of an.rows) {
+      if (pcIsProtected(r)) { protUnits += r.planUnits; continue; }
+      if (pcCutSel.has(pcKey(r))) { removed += r.planUnits; cutCount += 1; }
+    }
     const remaining = an.planTotal - removed;
     const remColor = remaining <= pcTarget ? '#256b45' : '#9b1c1c';
     const kpi = (label, val, sub) => `<div style="flex:1;min-width:140px;padding:10px 12px;background:#fff;border:1px solid var(--border,#dde);border-radius:10px">
@@ -6179,39 +6208,66 @@ function renderPlanCut() {
       ${kpi('Останется в плане', `<span style="color:${remColor}">${nf(remaining)} шт</span>`, remaining <= pcTarget ? '✓ цель достигнута' : `ещё ${nf(remaining - pcTarget)} шт выше цели`)}
     </div>`;
 
-    // таблица кандидатов: сшитые расцветки с планом, худшие по выкупам сверху
-    const cand = an.rows.filter((r) => r.matched).slice().sort((a, b) => (a.buyouts - b.buyouts) || (b.planUnits - a.planUnits));
+    // метрика ранжирования + защита новинок
+    const mBtn = (id, lbl, hint) => `<button class="btn${pcMetric === id ? ' btn-primary' : ''}" data-pc-metric="${id}" style="padding:3px 10px;font-size:12px" title="${hint}">${lbl}</button>`;
+    const protIds = state.articles.filter((a) => a.cutProtected).map((a) => a.id);
+    const artIds = [...new Set(an.rows.map((r) => r.articleId))].sort();
+    const protChips = artIds.map((id) => `<label class="sp-chip${protIds.includes(id) ? ' on' : ''}" style="cursor:pointer"><input type="checkbox" data-pc-protect="${seEsc(id)}"${protIds.includes(id) ? ' checked' : ''}> ${seEsc(id)}</label>`).join('');
+    const controls = `<div class="panel" style="margin-bottom:0">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">
+        <div><div class="mini" style="margin-bottom:4px">Метрика «слабой» расцветки:</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${mBtn('buyouts', 'Выкупы шт', 'Ранжировать по числу выкупов за 6 мес')}
+            ${mBtn('mixed', 'Смешанная 50/50', 'Блендим выкупы и выручку (обе в долях от максимума)')}
+            ${mBtn('revenue', 'Выручка ₽', 'Ранжировать по фактической выручке за 6 мес')}
+          </div></div>
+        <div style="flex:1;min-width:240px"><div class="mini" style="margin-bottom:4px">🛡 Не резать (новинки/обязательные) — их авто-рез не трогает:</div>
+          <div class="sp-chips">${protChips || '<span class="mini">нет артикулов</span>'}</div></div>
+      </div></div>`;
+
+    // таблица кандидатов: сшитые расцветки с планом, самые слабые по метрике сверху
+    const score = pcScorer(an.rows, pcMetric);
+    const cand = an.rows.filter((r) => r.matched).slice()
+      .sort((a, b) => (pcIsProtected(a) - pcIsProtected(b)) || (score(a) - score(b)) || (b.planUnits - a.planUnits));
     const row = (r) => {
-      const sel = pcCutSel.has(pcKey(r));
-      const bg = sel ? 'background:#fdecea' : '';
+      const prot = pcIsProtected(r);
+      const sel = !prot && pcCutSel.has(pcKey(r));
+      const bg = prot ? 'background:#eef6ff' : (sel ? 'background:#fdecea' : '');
       const dead = (r.buyouts || 0) <= 0;
       return `<tr style="${bg}">
-        <td style="text-align:center"><input type="checkbox" data-pc-cut="${seEsc(pcKey(r))}"${sel ? ' checked' : ''}></td>
-        <td>${seEsc(r.articleId)}</td>
+        <td style="text-align:center">${prot ? '🛡' : `<input type="checkbox" data-pc-cut="${seEsc(pcKey(r))}"${sel ? ' checked' : ''}>`}</td>
+        <td>${seEsc(r.articleId)}${prot ? ' <span class="mini" style="color:#2563a0">новинка</span>' : ''}</td>
         <td>${seEsc(r.color)}</td>
         <td class="num">${nf(r.planUnits)}</td>
-        <td class="num"${dead ? ' style="color:#9b1c1c;font-weight:700"' : ''}>${nf(r.buyouts)}</td>
+        <td class="num"${dead && !prot ? ' style="color:#9b1c1c;font-weight:700"' : ''}>${nf(r.buyouts)}</td>
+        <td class="num">${r.forPay != null ? nf(r.forPay) : '—'}</td>
         <td class="num">${r.per100 != null ? r.per100 : '—'}</td>
-        <td class="num">${r.estRevenue != null ? nf(r.estRevenue) : '—'}</td>
       </tr>`;
     };
     const table = `<table><thead><tr>
       <th style="width:44px">Рез</th><th>Артикул</th><th>Расцветка</th>
-      <th class="num">Штук в плане</th><th class="num">Выкупов 6 мес</th><th class="num" title="выкупов на 100 штук плана — продаваемость относительно размера плана">Вык./100 шт</th><th class="num">Оценка выручки ₽</th>
+      <th class="num">Штук в плане</th><th class="num">Выкупов 6 мес</th><th class="num">Выручка 6 мес ₽</th><th class="num" title="выкупов на 100 штук плана — продаваемость относительно размера плана">Вык./100 шт</th>
       </tr></thead><tbody>${cand.map(row).join('')}</tbody></table>`;
 
     // несшитые расцветки с планом — нет данных ВБ, решать вручную
     const unm = an.rows.filter((r) => !r.matched);
+    const unmRow = (r) => {
+      const prot = pcIsProtected(r);
+      const sel = !prot && pcCutSel.has(pcKey(r));
+      return `<tr style="${prot ? 'background:#eef6ff' : (sel ? 'background:#fdecea' : 'background:#f4f5f7')}">
+        <td style="text-align:center">${prot ? '🛡' : `<input type="checkbox" data-pc-cut="${seEsc(pcKey(r))}"${sel ? ' checked' : ''}>`}</td>
+        <td>${seEsc(r.articleId)}${prot ? ' <span class="mini" style="color:#2563a0">новинка</span>' : ''}</td>
+        <td>${seEsc(r.color)} <span class="mini">(не сшито)</span></td><td class="num">${nf(r.planUnits)}</td></tr>`;
+    };
     const unmBlock = unm.length ? `<div class="panel" style="margin-top:10px">
-      <div class="mini" style="margin-bottom:6px"><b>${unm.length} расцветок в плане без данных ВБ</b> (${nf(an.unmatchedPlanUnits)} шт) — не сшиты, продаж не видно. В авто-рез не включаю (может быть новый цвет). Досшей в Фазе 0 или отметь под рез вручную.</div>
+      <div class="mini" style="margin-bottom:6px"><b>${unm.length} расцветок в плане без данных ВБ</b> (${nf(an.unmatchedPlanUnits)} шт) — не сшиты, продаж не видно. В авто-рез не включаю (может быть новинка). Отметь новинку как 🛡 выше, чтобы защитить, либо реши по рез вручную.</div>
       <table><thead><tr><th style="width:44px">Рез</th><th>Артикул</th><th>Расцветка</th><th class="num">Штук в плане</th></tr></thead>
-      <tbody>${unm.map((r) => `<tr style="${pcCutSel.has(pcKey(r)) ? 'background:#fdecea' : 'background:#f4f5f7'}">
-        <td style="text-align:center"><input type="checkbox" data-pc-cut="${seEsc(pcKey(r))}"${pcCutSel.has(pcKey(r)) ? ' checked' : ''}></td>
-        <td>${seEsc(r.articleId)}</td><td>${seEsc(r.color)} <span class="mini">(не сшито)</span></td><td class="num">${nf(r.planUnits)}</td></tr>`).join('')}</tbody></table>
+      <tbody>${unm.map(unmRow).join('')}</tbody></table>
     </div>` : '';
 
-    cutPanel = cutHead + kpis + '</div>'
-      + `<div class="panel"><div class="mini" style="margin-bottom:6px">Кандидаты на рез — сшитые расцветки с планом, отсортированы по выкупам (худшие сверху). Отмеченные <span style="color:#9b1c1c">красным</span> идут под рез.</div>${table}</div>`
+    const metricLbl = pcMetric === 'buyouts' ? 'выкупам' : pcMetric === 'revenue' ? 'выручке' : 'смешанной метрике';
+    cutPanel = cutHead + kpis + controls + '</div>'
+      + `<div class="panel"><div class="mini" style="margin-bottom:6px">Кандидаты на рез — сшитые расцветки с планом, отсортированы по ${metricLbl} (слабые сверху). Отмеченные <span style="color:#9b1c1c">красным</span> идут под рез, <span style="color:#2563a0">🛡 новинки</span> защищены.</div>${table}</div>`
       + unmBlock;
   } else {
     cutPanel = cutHead + '<div class="mini">Сначала собери выкупы (Фаза 1) — тогда появится разбор плана.</div></div>';
@@ -6232,6 +6288,19 @@ function renderPlanCut() {
     const k = el.dataset.pcCut; if (!pcCutSel) pcCutSel = new Set();
     if (el.checked) pcCutSel.add(k); else pcCutSel.delete(k);
     renderPlanCut();
+  }));
+  // смена метрики — пересчитать жадный выбор под новую метрику
+  root.querySelectorAll('[data-pc-metric]').forEach((el) => el.addEventListener('click', () => {
+    pcMetric = el.dataset.pcMetric;
+    pcCutSel = pcGreedy(plancutAnalysis.rows, plancutAnalysis.planTotal, pcTarget, pcMetric);
+    renderPlanCut();
+  }));
+  // защита артикула (новинка) — сохранить в state, убрать из реза, пересчитать
+  root.querySelectorAll('[data-pc-protect]').forEach((el) => el.addEventListener('change', () => {
+    const a = state.articles.find((x) => x.id === el.dataset.pcProtect); if (!a) return;
+    a.cutProtected = el.checked;
+    if (el.checked) for (const r of plancutAnalysis.rows) if (r.articleId === a.id) pcCutSel.delete(pcKey(r));
+    pcPersistLite(); renderPlanCut();
   }));
 
   root.querySelector('#pc-build')?.addEventListener('click', async () => {

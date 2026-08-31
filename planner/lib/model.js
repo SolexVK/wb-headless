@@ -321,6 +321,9 @@ export function normalizeState(input) {
     { const cm = (a.wbColorMap && typeof a.wbColorMap === 'object') ? a.wbColorMap : {}; const clean = {};
       for (const [k, v] of Object.entries(cm)) { const nm = String(v || '').trim(); if (a.colors.includes(k) && /^\d{3,}$/.test(nm)) clean[k] = nm; }
       a.wbColorMap = clean; }
+    // «Сокращение плана»: защита артикула от авто-реза (новинка/обязательный) — его расцветки
+    // никогда не попадают в жадный выбор под рез. Булево.
+    a.cutProtected = !!a.cutProtected;
     // «начинать пошив не раньше» (сезонное окно артикула): пошив этого артикула не ставится в
     // график до этой даты. Пусто = без ограничения. Планировщик берёт позднейшую из этой и
     // пер-партийной earliestStart, распределяя нагрузку по цехам по мощности.

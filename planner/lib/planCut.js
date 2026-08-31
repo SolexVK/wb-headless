@@ -26,10 +26,11 @@ function artTag(a) {
   const m = String(a.id || '').match(/\d{2,5}/); return m ? m[0] : '';
 }
 
-// Штук плана по артикул→цвет из партий (status=plan, не historical); по размеру берём МАКС
-// по этапам (одна вещь = один комплект, проходит все этапы, суммировать этапы нельзя).
+// Штук плана по артикул→цвет из партий (status=plan, не historical). СУММА по всем партиям
+// и этапам: каждый «этап» — отдельная волна продаж/производства, поэтому штуки складываются
+// (одна и та же формула, что в дашборде: demand = Σ matrixSum(planMatrix) по plan-партиям).
 function planUnitsByArticleColor(state) {
-  const tmp = {}; // articleId → color → size → maxQty
+  const tmp = {}; // articleId → color → size → sumQty
   for (const p of (state.partias || [])) {
     if (p.historical || p.status !== 'plan') continue;
     const m = p.planMatrix || {};
@@ -38,7 +39,7 @@ function planUnitsByArticleColor(state) {
       const bs = a[color] || (a[color] = {});
       for (const sz of Object.keys(m[color] || {})) {
         const q = Math.max(0, Math.round(+m[color][sz] || 0));
-        bs[sz] = Math.max(bs[sz] || 0, q);
+        bs[sz] = (bs[sz] || 0) + q;
       }
     }
   }
