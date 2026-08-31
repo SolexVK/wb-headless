@@ -141,3 +141,42 @@ export function buildSalesView(coverage, salesByNm, window) {
     },
   };
 }
+
+// ── ФАЗА 2: разбор плана — плоский список «артикул×расцветка» с планом и выкупами ──
+// В рез участвуют ТОЛЬКО расцветки с планом (planUnits>0): убрать расцветку без плана
+// ничего не даёт к цели. estRevenue = planUnits × средняя цена выкупа (оценка выручки плана).
+// buyouts = null — расцветка не сшита с ВБ (данных нет, решать вручную).
+export function buildCutAnalysis(coverage, salesByNm) {
+  const byNm = salesByNm || {};
+  const rows = [];
+  for (const a of (coverage.articles || [])) {
+    for (const c of (a.colors || [])) {
+      const planUnits = c.units || 0;
+      if (planUnits <= 0) continue;
+      const s = (c.matched && c.nmID != null) ? (byNm[String(c.nmID)] || null) : null;
+      const buyouts = s ? s.net : (c.matched ? 0 : null);
+      const forPay = s ? Math.round(s.forPay) : null;
+      const avgPrice = (s && s.buyouts > 0) ? (s.forPay / s.buyouts) : null;
+      const estRevenue = avgPrice != null ? Math.round(avgPrice * planUnits) : null;
+      // «выкупов на 100 шт плана» — продаваемость относительно размера плана (меньше = слабее)
+      const per100 = (buyouts != null && planUnits > 0) ? Math.round((buyouts / planUnits) * 1000) / 10 : null;
+      rows.push({
+        articleId: a.articleId, articleName: a.articleName, color: c.color, nmID: c.nmID,
+        matched: c.matched, planUnits, buyouts, forPay, estRevenue, per100,
+      });
+    }
+  }
+  const planTotal = rows.reduce((n, r) => n + r.planUnits, 0);
+  const matched = rows.filter((r) => r.matched);
+  const unmatched = rows.filter((r) => !r.matched);
+  return {
+    planTotal,
+    estRevenueTotal: rows.reduce((n, r) => n + (r.estRevenue || 0), 0),
+    colorsPlanned: rows.length,
+    matchedPlanned: matched.length,
+    unmatchedPlanned: unmatched.length,
+    matchedPlanUnits: matched.reduce((n, r) => n + r.planUnits, 0),
+    unmatchedPlanUnits: unmatched.reduce((n, r) => n + r.planUnits, 0),
+    rows,
+  };
+}

@@ -28,7 +28,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'plan-cut-sales-phase1-2026-08-31';
+const BACKEND_BUILD = 'plan-cut-phase2-2026-08-31';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -957,6 +957,21 @@ app.get('/api/plancut/sales', requireView('data'), async (req, res) => {
     const cov = await planCut.buildCoverage(state, {}); // свежая сшивка (карточки из кэша)
     const view = planCut.buildSalesView(cov, cached.byNm, cached.window);
     res.json({ ok: true, status, collectedAt: cached.collectedAt, records: cached.records, ...view });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// Фаза 2: разбор плана — план×выкупы по расцветкам (для симуляции реза до цели, предпросмотр)
+app.get('/api/plancut/analysis', requireView('data'), async (req, res) => {
+  try {
+    const cached = salesLoad();
+    const state = loadState();
+    const cov = await planCut.buildCoverage(state, {}); // свежая сшивка (карточки из кэша)
+    const analysis = planCut.buildCutAnalysis(cov, cached ? cached.byNm : {});
+    res.json({
+      ok: true, hasSales: !!cached,
+      window: cached ? cached.window : null, collectedAt: cached ? cached.collectedAt : null,
+      ...analysis,
+    });
   } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
 });
 
