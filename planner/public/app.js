@@ -7,7 +7,7 @@ import { canonColor, aliasKey, normColor } from './colorNorm.js';
 
 // Метка сборки — по ней в консоли браузера видно, что загружен свежий app.js
 // (если после обновления её нет — браузер держит старый кэш, нужен hard-reload).
-const APP_BUILD = 'plan-cut-group-idfix-2026-08-30';
+const APP_BUILD = 'plan-cut-sales-phase1-2026-08-31';
 console.log('[planner] UI build:', APP_BUILD);
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -197,7 +197,7 @@ function renderCurrent() {
   else if (activeTab === 'season') renderSeason();
   else if (activeTab === 'reports') renderReports();
   else if (activeTab === 'supply') renderSupply();
-  else if (activeTab === 'plancut') renderPlanCut();
+  else if (activeTab === 'plancut') { renderPlanCut(); if (plancutSales === null) { plancutSales = undefined; pcLoadSales(); } }
   else if (activeTab === 'unit') renderUnit();
   else if (activeTab === 'data') renderData();
   applyCollapsibles();
@@ -5991,6 +5991,23 @@ function pcPersistRebuild() {
     await pcRebuild(false);
   }, 500);
 }
+// ── Фаза 1: выкупы за 6 мес ──
+let plancutSales = null;     // {status, articles, summary, window, collectedAt} | null
+let pcSalesPollT = null;
+async function pcLoadSales() {
+  try { const r = await api('/api/plancut/sales'); plancutSales = (r && r.ok) ? r : false; }
+  catch { plancutSales = false; }
+  if (activeTab === 'plancut') renderPlanCut();
+  clearTimeout(pcSalesPollT);
+  if (plancutSales && plancutSales.status && plancutSales.status.running) pcSalesPollT = setTimeout(pcLoadSales, 5000); // опрос, пока идёт сбор
+}
+async function pcStartSales() {
+  try {
+    const r = await api('/api/plancut/sales/collect', { method: 'POST', body: JSON.stringify({ months: 6 }) });
+    if (r && r.ok) { toast(r.running ? 'Сбор уже идёт' : 'Запустил сбор выкупов (может занять минуты)'); pcLoadSales(); }
+    else toast((r && r.error) || 'Не удалось запустить сбор', true);
+  } catch (e) { toast('Ошибка: ' + e.message, true); }
+}
 function renderPlanCut() {
   const root = document.getElementById('plancut');
   if (!root) return;
@@ -6058,7 +6075,66 @@ function renderPlanCut() {
     body = summary + (cov.articles || []).map(artBlock).join('');
   }
 
-  root.innerHTML = head + body;
+  // ── Фаза 1: панель «продаваемость расцветок» (выкупы за 6 мес) ──
+  const ps = plancutSales;
+  const st = ps && ps !== false && ps.status ? ps.status : null;
+  const running = !!(st && st.running);
+  const salesReady = !!(ps && ps !== false && Array.isArray(ps.articles));
+  const salesHead = `<div class="panel">
+    <h3 style="margin:0 0 6px">📊 Фаза 1: продаваемость расцветок (выкупы за 6 мес из кабинета ВБ)</h3>
+    <div class="mini" style="margin-bottom:8px">Тянем фактические <b>выкупы</b> (продажи − возвраты) по каждой сшитой расцветке за последние 6 месяцев. Это метрика реза Эпохи 1: слабо продающиеся расцветки — первые кандидаты на удаление. Метод ВБ жёстко лимитирован — <b>1 запрос в минуту</b>, поэтому сбор идёт в фоне и может занять несколько минут.</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-primary" id="pc-sales-go"${running ? ' disabled' : ''}>${running ? '⏳ Идёт сбор…' : (salesReady ? 'Обновить выкупы за 6 мес' : '📊 Собрать выкупы за 6 мес')}</button>
+      ${running ? `<span class="mini">страница ${nf(st.page)}, записей ${nf(st.records)} · лимит ВБ 1 запрос/мин — не закрывайте вкладку</span>` : ''}
+      ${st && st.error && !running ? `<span class="mini bad">Ошибка сбора: ${seEsc(st.error)}</span>` : ''}
+      ${salesReady && ps.collectedAt && !running ? `<span class="mini">собрано ${seEsc(String(ps.collectedAt).slice(0, 16).replace('T', ' '))} · окно ${seEsc(ps.window ? ps.window.from : '')} → ${seEsc(ps.window ? ps.window.to : '')} · всего строк ${nf(ps.records || 0)}</span>` : ''}
+    </div>`;
+
+  let salesBody = '';
+  if (salesReady && ps.summary) {
+    const cell = (c) => {
+      // цвет строки: не сшито — серый; сшито и 0 выкупов — красный; лидеры зелёные
+      const grey = !c.matched, dead = c.matched && (c.buyouts || 0) <= 0;
+      const bg = grey ? 'background:#f4f5f7;color:#8892a0' : dead ? 'background:#fdecea' : '';
+      const bo = grey ? '—' : nf(c.buyouts);
+      const rub = grey ? '—' : nf(c.forPay);
+      const first = c.firstDate ? seEsc(c.firstDate) : (grey ? '' : '—');
+      return `<tr style="${bg}">
+        <td>${seEsc(c.color)}${grey ? ' <span class="mini">(не сшито)</span>' : ''}</td>
+        <td class="num"${!grey && !dead ? ' style="font-weight:700;color:#256b45"' : (dead ? ' style="font-weight:700;color:#9b1c1c"' : '')}>${bo}</td>
+        <td class="num">${rub}</td>
+        <td class="num">${nf(c.units)}</td>
+        <td>${first}</td>
+      </tr>`;
+    };
+    const artSales = (a) => {
+      const rows = (a.colors || []).map(cell).join('');
+      const dead = (a.colors || []).filter((c) => c.matched && (c.buyouts || 0) <= 0).length;
+      return `<div class="panel">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <b>${seEsc(a.articleId)}${a.articleName ? ' — ' + seEsc(a.articleName) : ''}</b>
+          <span class="mini">выкупов за 6 мес: <b>${nf(a.totBuyouts)}</b> шт · ${nf(a.totForPay)} ₽</span>
+          ${dead ? `<span class="mini bad">${dead} расцветк${dead === 1 ? 'а' : (dead < 5 ? 'и' : '')} с 0 выкупов</span>` : ''}
+        </div>
+        <table><thead><tr><th>Расцветка</th><th class="num">Выкупов шт (6 мес)</th><th class="num">₽</th><th class="num">Штук в плане</th><th>Первая продажа</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="mini">нет расцветок</td></tr>'}</tbody></table>
+      </div>`;
+    };
+    const sm = ps.summary;
+    salesBody = `<div class="panel"><div class="mini">Итого по всем артикулам: <b>${nf(sm.totalBuyouts)}</b> выкупов · ${nf(sm.totalForPay)} ₽ за окно. Расцветки отсортированы по выкупам (лидеры сверху, кандидаты на рез — снизу, красным).</div></div>`
+      + (ps.articles || []).map(artSales).join('');
+  } else if (running) {
+    salesBody = '<div class="panel"><div class="mini">Собираю выкупы (идёт фоновый запрос к ВБ, 1 страница в минуту)… панель обновится автоматически.</div></div>';
+  } else if (ps === false) {
+    salesBody = '<div class="panel"><div class="mini bad">Не удалось загрузить выкупы (нет токена ВБ на сервере или ошибка). Соберите на инстансе, где задан токен ВБ.</div></div>';
+  } else if (ps && ps !== false && !salesReady) {
+    salesBody = '<div class="panel"><div class="mini">Выкупы ещё не собирались. Нажмите «📊 Собрать выкупы за 6 мес».</div></div>';
+  }
+  const salesPanel = salesHead + '</div>' + salesBody;
+
+  root.innerHTML = head + salesPanel + body;
+
+  root.querySelector('#pc-sales-go')?.addEventListener('click', pcStartSales);
 
   root.querySelector('#pc-build')?.addEventListener('click', async () => {
     const force = !!root.querySelector('#pc-force')?.checked;

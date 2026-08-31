@@ -104,3 +104,40 @@ export async function buildCoverage(state, { force = false } = {}) {
   };
   return out;
 }
+
+// ── ФАЗА 1: сбор выкупов по цветам ──
+// Все nmID, сшитые с расцветками плана (по ним тянем продажи).
+export function mappedNmIds(coverage) {
+  const s = new Set();
+  for (const a of (coverage.articles || [])) for (const c of (a.colors || [])) if (c.matched && c.nmID != null) s.add(Number(c.nmID));
+  return s;
+}
+
+// Свести карту сшивки + агрегат продаж по nmID → «продаваемость расцветок» по артикул×цвет.
+// buyouts = НЕТТО выкупов (продажи − возвраты) за окно; null = расцветка не сшита (данных нет).
+export function buildSalesView(coverage, salesByNm, window) {
+  const byNm = salesByNm || {};
+  const articles = (coverage.articles || []).map((a) => {
+    const colors = (a.colors || []).map((c) => {
+      const s = (c.matched && c.nmID != null) ? (byNm[String(c.nmID)] || null) : null;
+      return {
+        color: c.color, nmID: c.nmID, matched: c.matched, units: c.units,
+        buyouts: s ? s.net : (c.matched ? 0 : null),
+        forPay: s ? Math.round(s.forPay) : (c.matched ? 0 : null),
+        firstDate: s ? s.firstDate : '', lastDate: s ? s.lastDate : '',
+      };
+    }).sort((x, y) => (y.buyouts ?? -1) - (x.buyouts ?? -1)); // лидеры продаж сверху
+    const totBuyouts = colors.reduce((n, c) => n + (c.buyouts || 0), 0);
+    const totForPay = colors.reduce((n, c) => n + (c.forPay || 0), 0);
+    return { articleId: a.articleId, articleName: a.articleName, tag: a.tag, colors, totBuyouts, totForPay };
+  });
+  return {
+    window: window || null,
+    articles,
+    summary: {
+      articles: articles.length,
+      totalBuyouts: articles.reduce((n, a) => n + a.totBuyouts, 0),
+      totalForPay: articles.reduce((n, a) => n + a.totForPay, 0),
+    },
+  };
+}

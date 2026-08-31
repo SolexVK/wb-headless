@@ -12,6 +12,7 @@ import { computeJitLayout } from './lib/jitLayout.js';
 import { findRescues } from './lib/rescue.js';
 import { runForecast, savePlan, loadPlan, deletePlan, listPlans, searchCategories, getFeatureDict, runCandidates, getSubjectPhrases, budgetStatus } from './lib/seasonApi.js';
 import { hasWbToken, fetchCards, fetchBoxTariffs, findWarehouse, buildWbSupply, listVendorPrefixes } from './lib/wb/wbApi.js';
+import { pullSales, aggregateSalesByNm } from './lib/wb/wbSales.js';
 import { computeWbLogistics } from './lib/wb/logistics.js';
 import { fetchRates } from './lib/currency.js';
 import { dbAvailable, stateLoadJson, stateSaveJson, eventAdd, responsibleList, responsibleSet, userList, metaGet, metaSet, snapshotSave, snapshotList, snapshotGet, snapshotDelete, snapshotPrune, reportArchiveSave, reportArchiveList, reportArchiveGet, reportArchiveDelete } from './lib/db.js';
@@ -27,7 +28,7 @@ const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SAMPLES_DIR = path.join(DATA_DIR, 'samples'); // образцы ткани (картинки) на диске
 // Маркер сборки backend — по нему видно, что запущенный процесс Node подхватил свежий код
 // (модель партий/поставок). Меняется вручную вместе с правками бэкенда.
-const BACKEND_BUILD = 'plan-cut-group-idfix-2026-08-30';
+const BACKEND_BUILD = 'plan-cut-sales-phase1-2026-08-31';
 const PORT = process.env.PLANNER_PORT || 8090;
 const HOST = process.env.PLANNER_HOST || '0.0.0.0'; // слушать все интерфейсы (доступ по сети)
 
@@ -914,6 +915,48 @@ app.get('/api/plancut/coverage', requireView('data'), async (req, res) => {
     const state = loadState();
     const r = await planCut.buildCoverage(state, { force: req.query.force === '1' });
     res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// ── Фаза 1: сбор выкупов за N месяцев (фоновая задача, лимит ВБ 1 запрос/мин) ──
+const monthsAgo = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n); return d.toISOString().slice(0, 10); };
+function salesLoad() { try { const m = metaGet('plancut_sales'); return m && m.value ? JSON.parse(m.value) : null; } catch { return null; } }
+function salesSave(obj) { try { metaSet('plancut_sales', JSON.stringify(obj)); } catch { /* нет БД */ } }
+let salesJob = { running: false, startedAt: 0, finishedAt: 0, page: 0, records: 0, error: '' };
+
+async function collectSales(months) {
+  salesJob = { running: true, startedAt: Date.now(), finishedAt: 0, page: 0, records: 0, error: '' };
+  try {
+    const state = loadState();
+    const cov = await planCut.buildCoverage(state, {});
+    const nmIds = planCut.mappedNmIds(cov);
+    const from = monthsAgo(months || 6);
+    const rows = await pullSales({ dateFrom: from, nmIds, onPage: (p) => { salesJob.page = p.page; salesJob.records = p.total; } });
+    const byNm = aggregateSalesByNm(rows);
+    salesSave({ window: { from, to: new Date().toISOString().slice(0, 10), months: months || 6 }, collectedAt: new Date().toISOString(), byNm, records: rows.length });
+    salesJob.finishedAt = Date.now();
+  } catch (e) { salesJob.error = String(e.message || e); salesJob.finishedAt = Date.now(); }
+  finally { salesJob.running = false; }
+}
+
+app.post('/api/plancut/sales/collect', requireEdit('data'), (req, res) => {
+  if (!hasWbToken()) return res.json({ ok: false, error: 'нет токена WB на этом сервере' });
+  if (salesJob.running) return res.json({ ok: true, running: true, note: 'сбор уже идёт' });
+  const months = Math.max(1, Math.min(12, +(req.body && req.body.months) || 6));
+  collectSales(months); // фоном, не ждём (может идти минуты)
+  res.json({ ok: true, started: true, months });
+});
+
+app.get('/api/plancut/sales', requireView('data'), async (req, res) => {
+  try {
+    const cached = salesLoad();
+    const status = { running: salesJob.running, page: salesJob.page, records: salesJob.records, error: salesJob.error, startedAt: salesJob.startedAt, finishedAt: salesJob.finishedAt };
+    if (!cached) return res.json({ ok: true, status, view: null });
+    if (!hasWbToken()) return res.json({ ok: true, status, view: null });
+    const state = loadState();
+    const cov = await planCut.buildCoverage(state, {}); // свежая сшивка (карточки из кэша)
+    const view = planCut.buildSalesView(cov, cached.byNm, cached.window);
+    res.json({ ok: true, status, collectedAt: cached.collectedAt, records: cached.records, ...view });
   } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
 });
 
