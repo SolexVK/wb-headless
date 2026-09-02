@@ -2,13 +2,16 @@
 # 20-install-caddy.sh — Caddy (обратный прокси + авто-TLS Let's Encrypt) из офиц. репозитория.
 # Запускать от root ПОСЛЕ того, как A/AAAA-запись домена смотрит на IP этого сервера.
 #
-#   DOMAIN=tools.example.com ACME_EMAIL=you@example.com bash deploy/vps/20-install-caddy.sh
+#   bash deploy/vps/20-install-caddy.sh tools.example.com you@example.com
+#   (то же через переменные: DOMAIN=... ACME_EMAIL=... bash deploy/vps/20-install-caddy.sh)
 #
 # Идемпотентен: если /etc/caddy/Caddyfile уже наш и домен тот же — только валидация+reload.
 set -euo pipefail
 
-DOMAIN="${DOMAIN:-}"
-ACME_EMAIL="${ACME_EMAIL:-}"
+# Домен и почту можно передать позиционно (удобнее и не требует заглавных букв):
+#   bash 20-install-caddy.sh tools.example.com you@example.com
+DOMAIN="${1:-${DOMAIN:-}}"
+ACME_EMAIL="${2:-${ACME_EMAIL:-}}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
@@ -16,8 +19,8 @@ warn() { printf '\033[1;33m[!] %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m[x] %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "Запускать от root: sudo bash $0"
-[ -n "$DOMAIN" ] || die "Задай DOMAIN=<твой домен>, например DOMAIN=tools.example.com"
-[ -n "$ACME_EMAIL" ] || die "Задай ACME_EMAIL=<почта для Let's Encrypt>"
+[ -n "$DOMAIN" ] || die "Укажи домен первым аргументом: bash $0 tools.example.com you@example.com"
+[ -n "$ACME_EMAIL" ] || die "Укажи почту для Let's Encrypt вторым аргументом: bash $0 $DOMAIN you@example.com"
 export DEBIAN_FRONTEND=noninteractive
 
 if ! command -v caddy >/dev/null 2>&1; then
