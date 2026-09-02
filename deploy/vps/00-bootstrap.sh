@@ -42,7 +42,7 @@ apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold
 
 log "Ставлю базовый набор"
 apt-get install -y --no-install-recommends \
-  ca-certificates curl wget gnupg git rsync jq unzip \
+  ca-certificates curl wget gnupg git rsync jq unzip sudo \
   ufw fail2ban unattended-upgrades chrony htop tmux vim
 
 log "Часовой пояс: $TZ_NAME"
@@ -64,6 +64,20 @@ else
   adduser --disabled-password --gecos "" "$DEPLOY_USER"
 fi
 usermod -aG sudo "$DEPLOY_USER" 2>/dev/null || usermod -aG wheel "$DEPLOY_USER" 2>/dev/null || true
+
+# Пароля у пользователя нет (вход только по ключу), а sudo в Debian по умолчанию
+# требует пароль — без этого правила deploy не смог бы ничего администрировать.
+# Права даёт ssh-ключ, как в облачных образах Debian/Ubuntu.
+SUDOERS="/etc/sudoers.d/90-$DEPLOY_USER"
+if [ ! -f "$SUDOERS" ]; then
+  log "Разрешаю $DEPLOY_USER sudo без пароля (вход и так только по ключу)"
+  printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$DEPLOY_USER" > "$SUDOERS"
+  chmod 440 "$SUDOERS"
+  if ! visudo -c -q -f "$SUDOERS"; then
+    warn "sudoers-файл не прошёл проверку — удаляю, sudo будет требовать пароль"
+    rm -f "$SUDOERS"
+  fi
+fi
 
 DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6)"
 install -d -m 700 -o "$DEPLOY_USER" -g "$DEPLOY_USER" "$DEPLOY_HOME/.ssh"
