@@ -9,7 +9,7 @@
 #   APP_DIR     — куда ставим (по умолчанию /opt/wb-headless)
 #   APP_USER    — системный пользователь сервиса (wbheadless)
 #   REPO_URL    — откуда клонировать, если APP_DIR ещё не git-репозиторий
-#   BRANCH      — ветка (main)
+#   BRANCH      — ветка (по умолчанию текущая ветка в APP_DIR, для нового клона main)
 #   PORT/HOST   — что слушать (8080 / 127.0.0.1 — наружу только через Caddy)
 #   SKIP_CHROME=1 — не качать Chrome for Testing (нужен для /start, /verify и PDF-отчётов)
 #   SKIP_PULL=1   — не трогать git (деплой из уже залитых файлов, например по rsync)
@@ -18,7 +18,9 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/wb-headless}"
 APP_USER="${APP_USER:-wbheadless}"
 REPO_URL="${REPO_URL:-https://github.com/SolexVK/wb-headless.git}"
-BRANCH="${BRANCH:-main}"
+# Ветка: по умолчанию та, что уже развёрнута в APP_DIR (чтобы обновление не
+# перекидывало сервер на main), а для чистой установки — main.
+BRANCH="${BRANCH:-$(git -C "${APP_DIR:-/opt/wb-headless}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
 PORT="${PORT:-8080}"
 HOST="${HOST:-127.0.0.1}"
 SERVICE=wb-headless
