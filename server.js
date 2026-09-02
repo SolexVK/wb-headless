@@ -15,6 +15,9 @@ app.use(express.json({ limit: '1mb' }));
 
 const API_KEY = process.env.API_KEY || 'supersecret';
 const PORT = process.env.PORT || 8080;
+// На VPS сервис слушает только loopback: наружу его публикует Caddy (см. deploy/vps/).
+// По умолчанию поведение прежнее — слушаем все интерфейсы.
+const HOST = process.env.HOST || '0.0.0.0';
 const WB_AUTH_URL = 'https://seller-auth.wildberries.ru/ru/';
 
 // MPStats API: токен берём из окружения (.env), в код/git не хардкодим
@@ -421,7 +424,22 @@ function startReportScheduler() {
   console.log(`Планировщик отчёта включён: ежедневно в ${hour}:00 UTC`);
 }
 
-app.listen(PORT, () => {
-  console.log('WB headless listening on', PORT);
+const server = app.listen(PORT, HOST, () => {
+  console.log(`WB headless listening on ${HOST}:${PORT}`);
+  if (API_KEY === 'supersecret' && HOST !== '127.0.0.1' && HOST !== 'localhost') {
+    console.warn(
+      '[!] API_KEY не задан (используется дефолтный) и сервис слушает не только loopback. ' +
+      'Задай API_KEY в .env или HOST=127.0.0.1.'
+    );
+  }
   startReportScheduler();
 });
+
+// Аккуратная остановка: systemd шлёт SIGTERM при restart/stop.
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    console.log(`${sig} — закрываю HTTP-сервер`);
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 10_000).unref();
+  });
+}
