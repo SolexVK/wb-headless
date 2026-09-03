@@ -38,7 +38,18 @@ else
   log "Caddy уже установлен: $(caddy version)"
 fi
 
-install -d -m 755 -o caddy -g caddy /var/log/caddy
+# Юнит Caddy из пакета идёт с ProtectSystem=full и разрешает запись только в
+# /var/lib/caddy — каталог логов ему недоступен даже с верным владельцем.
+# LogsDirectory= заставляет systemd создать /var/log/caddy и открыть его на запись.
+install -d -m 755 /etc/systemd/system/caddy.service.d
+cat > /etc/systemd/system/caddy.service.d/10-logs.conf <<'EOF'
+# ставится deploy/vps/20-install-caddy.sh — доступ Caddy к /var/log/caddy
+[Service]
+LogsDirectory=caddy
+LogsDirectoryMode=0750
+EOF
+systemctl daemon-reload
+install -d -m 750 -o caddy -g caddy /var/log/caddy
 
 # ---------- проверка DNS: без неё Let's Encrypt всё равно не выдаст сертификат ----------
 myip4="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
@@ -71,7 +82,10 @@ caddy validate --config "$CADDYFILE" --adapter caddyfile
 systemctl enable caddy
 systemctl reload caddy 2>/dev/null || systemctl restart caddy
 sleep 2
-systemctl --no-pager --lines=5 status caddy || true
+if ! systemctl is-active --quiet caddy; then
+  systemctl --no-pager --lines=20 status caddy || true
+  die "Caddy не запустился — смотри journalctl -u caddy -n 50"
+fi
 
 log "Caddy поднят. Публичный вход: https://$DOMAIN/  (маршрут /wb → 127.0.0.1:8080)"
 echo "Новый сервис добавляй так:  bash deploy/vps/add-route.sh /mytool 9100"
