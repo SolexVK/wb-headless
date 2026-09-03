@@ -39,7 +39,7 @@
 
 ## Состояние на 03.09.2026
 
-Шаги 0–3 и 5 выполнены, проверки зелёные:
+Шаги 0–5 выполнены, сервис доступен снаружи по HTTPS.
 
 - вход только по ssh-ключу; root по ssh закрыт (`Permission denied (publickey)`),
   пароли выключены; аварийный доступ — веб-консоль (Screen) в панели;
@@ -49,11 +49,36 @@
   таймзона Europe/Moscow; swap 2 ГБ;
 - Node.js **22.23.2**, npm 10.9.8 (NodeSource);
 - `/opt/wb-headless` — ветка `claude/server-setup-fmrhlf`, сервис
-  **`wb-headless.service`** слушает `127.0.0.1:8080`, `/health` отвечает `{"ok":true}`;
-  секреты в `/opt/wb-headless/.env` (0600, владелец `wbheadless`).
+  **`wb-headless.service`** на `127.0.0.1:8080`; секреты в `.env` (0600, `wbheadless`);
+- **Caddy 2.11.4** на 80/443, сертификат Let's Encrypt, логи в journald
+  (`journalctl -u caddy`). Публичный вход: **https://159-195-41-88.sslip.io/**,
+  маршрут `/wb` → сервис. Проверено снаружи: `/wb/health` → `{"ok":true}`,
+  сертификат валиден, `http` → `https` редиректом 308;
+- снапшот-точка возврата в SCP: `base-debian13-node-wbheadless` (Offline, 03.09.2026).
 
-Осталось: шаг 4 (домен → DNS → Caddy, ждём домен), шаг 6 (снапшот и бэкапы),
-шаг 7 (переезд сервисов с Mac Mini), шаг 8 (БД, когда понадобится).
+### Почему временное имя, а не домен
+
+`aidemiko.ru` и `aidemiko.online` **не резолвятся**. В реестре делегирование
+корректное (whois TCI: `ns3-l2`, `ns4-l2`, `ns8-l2`, `ns4-cloud`, `ns8-cloud`,
+state `REGISTERED, DELEGATED, VERIFIED`), зоны в DNS-master созданы и
+опубликованы (`tools A 159.195.41.88`, `tools AAAA 2a0a:4cc0:c1:8fbd:d44a:5eff:fe71:f3cf`),
+но серверы услуги не отвечают авторитативно: Google, Cloudflare и AdGuard дают
+SERVFAIL, Cloudflare с `EDE 22 No Reachable Authority at delegation`. Заведено
+обращение в поддержку RU-CENTER. Пока используется `sslip.io` — публичный
+wildcard-DNS, отдающий IP прямо из имени.
+
+### Переключение на домен, когда зона оживёт
+
+```bash
+sudo sed -i 's/159-195-41-88.sslip.io/tools.aidemiko.ru/' /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+sudo systemctl reload caddy
+```
+Маршруты при этом сохраняются, сертификат на новое имя Caddy выпишет сам.
+Проверка: `curl -s https://tools.aidemiko.ru/wb/health`.
+
+Осталось: шаг 6 (ежедневные бэкапы), шаг 7 (переезд сервисов с Mac Mini),
+шаг 8 (БД, когда понадобится).
 
 ## Дорожная карта
 
