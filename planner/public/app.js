@@ -173,7 +173,11 @@ function installReadonlyGuard() {
     }
     if (e.type === 'click') {
       const btn = t.closest && t.closest('button');
-      if (btn && !btn.hasAttribute('data-nav')) { e.preventDefault(); e.stopPropagation(); }
+      // data-nav — навигация, data-ro-ok — действие, которое ничего не меняет
+      // (построить отчёт, скачать Excel/PDF/CSV, свернуть-развернуть).
+      if (btn && !btn.hasAttribute('data-nav') && !btn.hasAttribute('data-ro-ok')) {
+        e.preventDefault(); e.stopPropagation();
+      }
     }
   };
   ['beforeinput', 'paste', 'drop', 'keydown', 'click'].forEach((ev) => document.addEventListener(ev, guard, true));

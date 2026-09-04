@@ -1276,7 +1276,7 @@ function sourcingPanelHtml(data, cfg) {
       <td style="padding:6px 10px;border:1px solid ${C.border};font-size:11.5px;color:#667">${p.arts.map(esc).join(', ')} · ${p.colors.length} цв · ${fmtNum(p.meters)} м</td>
       <td style="padding:6px 10px;border:1px solid ${C.border}">${srcSel('plan|' + ps, base.source || '', true)}</td>
       <td style="padding:6px 10px;border:1px solid ${C.border};text-align:right">${priceInp('plan|' + ps, base.price, 'авто')}</td>
-      <td style="padding:6px 10px;border:1px solid ${C.border};text-align:center"><button class="btn btn-subtle" data-ps-toggle="${esc(ps)}" style="font-size:11px;padding:2px 8px">${expanded ? '▾ месяцы' : '▸ по месяцам'}</button></td></tr>`;
+      <td style="padding:6px 10px;border:1px solid ${C.border};text-align:center"><button class="btn btn-subtle" data-ro-ok data-ps-toggle="${esc(ps)}" style="font-size:11px;padding:2px 8px">${expanded ? '▾ месяцы' : '▸ по месяцам'}</button></td></tr>`;
     if (expanded) for (const m of p.months) {
       const mk = `${ps}|${m.ym}`, mo = month[mk] || {}, ovm = mo.source || mo.price != null;
       rows += `<tr style="background:${ovm ? '#eaf3ff' : '#fafcff'}">
@@ -1352,7 +1352,7 @@ export function renderReportsPage(container, state, schedule, ctx = {}) {
   try { data = buildWith(); }
   catch (e) { container.innerHTML = `<div style="padding:20px;color:#c0392b">Ошибка сбора отчёта: ${esc(e.message)}</div>`; return; }
 
-  const tabBtn = (id, label) => `<button data-subtab="${id}" style="padding:8px 16px;border:1px solid ${C.border};border-bottom:none;border-radius:8px 8px 0 0;cursor:pointer;font-weight:700;font-size:13px;background:${reportsSubTab === id ? '#fff' : C.zebra};color:${reportsSubTab === id ? C.head : '#667'}">${label}</button>`;
+  const tabBtn = (id, label) => `<button data-subtab="${id}" data-ro-ok style="padding:8px 16px;border:1px solid ${C.border};border-bottom:none;border-radius:8px 8px 0 0;cursor:pointer;font-weight:700;font-size:13px;background:${reportsSubTab === id ? '#fff' : C.zebra};color:${reportsSubTab === id ? C.head : '#667'}">${label}</button>`;
 
   container.innerHTML = `
     <div style="margin:0 0 4px"><div style="font-size:20px;font-weight:800;color:${C.head}">Отчёты</div>
@@ -1479,7 +1479,7 @@ function renderBuild(panel, data, ctx) {
         <select id="rep-sel" style="min-width:340px;padding:7px 10px;border:1px solid ${C.border};border-radius:8px;font-size:13px">
           ${REPORTS.map((r) => `<option value="${r.id}">${esc(r.name)}</option>`).join('')}
         </select></div>
-      <button id="rep-get" class="btn btn-accent">Получить отчёт</button>
+      <button id="rep-get" class="btn btn-accent" data-ro-ok>Получить отчёт</button>
     </div>
     <div style="color:#889;font-size:12px;margin:0 0 14px">Отчёт строится на текущих данных. В архив он попадёт только после нажатия «Сохранить отчёт».</div>
     <div id="rep-result"></div>`;
@@ -1606,9 +1606,9 @@ function showReport(result, rep, data, genAtIso, ctx) {
     <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin:0 0 10px">
       ${periodCtl}
       <button class="btn btn-accent" id="rep-save">💾 Сохранить отчёт</button>
-      <button class="btn" id="rep-xlsx">⤓ Excel</button>
+      <button class="btn" id="rep-xlsx" data-ro-ok>⤓ Excel</button>
       <button class="btn" id="rep-gsheet" title="Выгрузить в Google Sheets">📗 Google</button>
-      <button class="btn" id="rep-pdf">⤓ PDF</button>
+      <button class="btn" id="rep-pdf" data-ro-ok>⤓ PDF</button>
     </div>
     ${filterBar}
     ${reportHeaderHtml(rep, genAtIso)}
@@ -1738,9 +1738,9 @@ async function renderArchive(panel, ctx) {
         <td style="padding:7px 12px;border:1px solid ${C.border};font-weight:600">${esc(reportById(it.reportKind).name)}</td>
         <td style="padding:7px 12px;border:1px solid ${C.border}">${esc(dmyhm(it.savedAt))}</td>
         <td style="padding:7px 12px;border:1px solid ${C.border};text-align:right;white-space:nowrap">
-          <button class="btn" data-view="${it.id}">Просмотр</button>
-          <button class="btn" data-xlsx="${it.id}">Excel</button>
-          <button class="btn" data-pdf="${it.id}">PDF</button>
+          <button class="btn" data-ro-ok data-view="${it.id}">Просмотр</button>
+          <button class="btn" data-ro-ok data-xlsx="${it.id}">Excel</button>
+          <button class="btn" data-ro-ok data-pdf="${it.id}">PDF</button>
           <button class="btn btn-subtle" data-del="${it.id}" title="Удалить из архива">✕</button>
         </td></tr>`).join('')}
     </tbody></table>`;
@@ -1751,7 +1751,7 @@ async function renderArchive(panel, ctx) {
   panel.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', async () => {
     try { const e = await fetchEntry(b.dataset.view); const rep = reportById(e.reportKind);
       viewBox.innerHTML = `<div style="border:1px solid ${C.border};border-radius:10px;padding:16px;margin:0 0 16px;background:#fff">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 8px"><div style="font-weight:800;color:${C.head}">Просмотр из архива</div><button class="btn btn-subtle" id="arch-close">Закрыть</button></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 8px"><div style="font-weight:800;color:${C.head}">Просмотр из архива</div><button class="btn btn-subtle" id="arch-close" data-ro-ok>Закрыть</button></div>
         ${reportHeaderHtml(rep, e.savedAt)}${rep.html(e.data)}</div>`;
       viewBox.querySelector('#arch-close').addEventListener('click', () => { viewBox.innerHTML = ''; });
       viewBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
