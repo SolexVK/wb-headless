@@ -64,6 +64,9 @@ if [ ! -f "$ENV_FILE" ]; then
     echo "PLANNER_HOST=$HOST"
     echo "PLANNER_PORT=$PORT"
     echo "PLANNER_INSTANCE_LABEL=ДЕМО"
+    echo "# Витрина: любой заход открывает гостевой просмотр сразу, без ссылок с кодами."
+    echo "GUEST_AUTO=1"
+    echo "# Запасной вход по ссылке /guest?c=КОД — на случай, если авто-режим выключат."
     echo "GUEST_LINK_CODE=$GUEST_CODE"
     echo "SESSION_SECRET=$(rand 48)"
     echo "# Токен бота нужен только чтобы владельцу приходили уведомления о заходах."
@@ -72,7 +75,7 @@ if [ ! -f "$ENV_FILE" ]; then
     echo "OWNER_TELEGRAM_ID="
     echo "# Токенов MPStats и WB здесь НЕТ и быть не должно: демо не ходит во внешние API."
   } > "$ENV_FILE"
-  warn "Гостевая ссылка: https://demo.aidemiko.ru/guest?c=$GUEST_CODE"
+  warn "Демо открыто по адресу https://demo.aidemiko.ru/ — без ссылок с кодами"
   warn "Впиши TELEGRAM_BOT_TOKEN/USERNAME и OWNER_TELEGRAM_ID в $ENV_FILE — иначе уведомлений о гостях не будет"
 else
   log ".env демо-стенда уже есть — не трогаю"
@@ -142,4 +145,4 @@ done
 [ -n "$code" ] && [ "$code" != "000" ] || { systemctl --no-pager --lines=30 status "$SERVICE" || true; die "Демо-стенд не ответил"; }
 log "Демо-стенд поднят: http://127.0.0.1:$PORT (ответ /api/health: $code)"
 log "Опубликовать: sudo bash $HERE/add-site.sh demo.aidemiko.ru $PORT"
-log "Гостевая ссылка — строка GUEST_LINK_CODE в $ENV_FILE"
+log "Гостям давать просто https://demo.aidemiko.ru/ — вход открывается сам"
