@@ -53,7 +53,8 @@ elif [ -d "$APP_DIR/.git" ]; then
   log "Обновляю код в $APP_DIR (ветка $BRANCH)"
   git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
   git -C "$APP_DIR" fetch --prune origin "$BRANCH"
-  git -C "$APP_DIR" checkout -B "$BRANCH" "origin/$BRANCH"
+  # -f: не спотыкаться о файлы, созданные npm (package-lock.json)
+  git -C "$APP_DIR" checkout -f -B "$BRANCH" "origin/$BRANCH"
 else
   log "Клонирую $REPO_URL → $APP_DIR (ветка $BRANCH)"
   install -d -m 755 "$(dirname "$APP_DIR")"
@@ -94,7 +95,7 @@ chown "$APP_USER:$APP_USER" "$ENV_FILE"; chmod 600 "$ENV_FILE"
 # ---------- зависимости ----------
 log "npm install в $PLANNER_DIR (только express, без скриптов установки)"
 as_app env HOME="/var/lib/$APP_USER" npm --prefix "$PLANNER_DIR" install \
-  --omit=dev --ignore-scripts --no-audit --no-fund
+  --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
 
 # ---------- systemd ----------
 log "Ставлю юнит /etc/systemd/system/$SERVICE.service"

@@ -45,7 +45,8 @@ if [ -d "$APP_DIR/.git" ]; then
   log "Обновляю код демо-стенда (ветка $BRANCH)"
   git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
   git -C "$APP_DIR" fetch --prune origin "$BRANCH"
-  git -C "$APP_DIR" checkout -B "$BRANCH" "origin/$BRANCH"
+  # -f: не спотыкаться о файлы, созданные npm (package-lock.json)
+  git -C "$APP_DIR" checkout -f -B "$BRANCH" "origin/$BRANCH"
 else
   log "Клонирую $REPO_URL → $APP_DIR"
   git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
@@ -81,7 +82,7 @@ chown "$APP_USER:$APP_USER" "$ENV_FILE"; chmod 600 "$ENV_FILE"
 # ---------- зависимости ----------
 log "npm install в $PLANNER_DIR"
 as_app env HOME="/var/lib/$APP_USER" npm --prefix "$PLANNER_DIR" install \
-  --omit=dev --ignore-scripts --no-audit --no-fund
+  --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
 
 # ---------- systemd ----------
 log "Ставлю юнит /etc/systemd/system/$SERVICE.service"
@@ -109,6 +110,23 @@ if [ "$NEED_SEED" = "1" ]; then
     "$PLANNER_DIR/tools/seed-demo.mjs" "$DEMO_DB" || die "Не удалось записать демо-данные"
   # состояние из JSON-файла больше не нужно: источник правды — база
   rm -f "$DATA_DIR/state.json"
+
+  # Контроль: в базе не должно остаться следов работы (пользователи, планы сезонности,
+  # архив отчётов, снимки). Если остались — стенд НЕ поднимаем.
+  CHECK="$(as_app env HOME="/var/lib/$APP_USER" node --experimental-sqlite -e "
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(process.argv[1]);
+    const n = (t) => db.prepare('SELECT count(*) c FROM ' + t).get().c;
+    const dirty = ['users', 'season_plans', 'report_archive', 'state_snapshots', 'prod_events']
+      .filter((t) => n(t) > 0);
+    console.log(dirty.length ? 'FAIL:' + dirty.join(',') : 'OK');
+  " "$DEMO_DB" 2>/dev/null | tail -1)"
+  if [ "$CHECK" != "OK" ]; then
+    systemctl disable --now "$SERVICE" 2>/dev/null || true
+    die "В демо-базе остались рабочие данные ($CHECK) — стенд остановлен и не опубликован"
+  fi
+  log "Контроль пройден: рабочих данных в демо-базе нет"
+
   systemctl start "$SERVICE"
 else
   log "Демо-данные уже на месте (пересоздать: sudo REFRESH_DB=1 bash $0)"
