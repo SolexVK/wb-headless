@@ -1,7 +1,7 @@
-# planner.service — ставится скриптом deploy/vps/40-deploy-planner.sh
-# в /etc/systemd/system/planner.service ({{...}} подставляются при установке).
+# Шаблон юнита planner. Ставится скриптами deploy/vps/40-deploy-planner.sh (боевой)
+# и 41-deploy-planner-demo.sh (демо-стенд); {{...}} подставляются при установке.
 [Unit]
-Description=planner (производственный план)
+Description={{DESC}}
 Documentation=https://github.com/SolexVK/wb-headless/blob/claude/production-plan-twv8ki/planner/README.md
 After=network-online.target
 Wants=network-online.target
@@ -21,10 +21,10 @@ RestartSec=5
 TimeoutStopSec=20
 KillMode=mixed
 
-# логи в journald: journalctl -u planner -f
+# логи в journald: journalctl -u {{SERVICE}} -f
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=planner
+SyslogIdentifier={{SERVICE}}
 
 # Ограничения: пишет только в свой data/ (БД, состояние, образцы тканей).
 NoNewPrivileges=yes

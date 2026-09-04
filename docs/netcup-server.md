@@ -201,6 +201,8 @@ journalctl -u wb-headless -n 50
 
 - [x] **planner** — `https://planner.aidemiko.ru/`, порт 9100,
       [`docs/planner-migration.md`](planner-migration.md)
+- [x] **planner ДЕМО** — `https://demo.aidemiko.ru/`, порт 9101, обезличенная копия базы,
+      вход по гостевой ссылке без Telegram ([`docs/planner-demo.md`](planner-demo.md))
 - [ ] FBS-аналитика, getcourse, wbcalc, telegram-бот, дашборд остатков
 - [ ] UNIT-калькулятор (порт 8899) — решаем позже, код пока не локализован
 

@@ -99,6 +99,7 @@ as_app env HOME="/var/lib/$APP_USER" npm --prefix "$PLANNER_DIR" install \
 # ---------- systemd ----------
 log "Ставлю юнит /etc/systemd/system/$SERVICE.service"
 sed -e "s|{{APP_DIR}}|$APP_DIR|g" -e "s|{{APP_USER}}|$APP_USER|g" -e "s|{{DATA_DIR}}|$DATA_DIR|g" \
+    -e "s|{{SERVICE}}|$SERVICE|g" -e "s|{{DESC}}|planner (производственный план)|g" \
   "$HERE/planner.service" > "/etc/systemd/system/$SERVICE.service"
 chmod 644 "/etc/systemd/system/$SERVICE.service"
 systemctl daemon-reload

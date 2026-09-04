@@ -43,11 +43,12 @@ systemctl restart wb-headless                        # после правки .
 | `20-install-caddy.sh` | Caddy из офиц. репозитория + `Caddyfile` под твой домен, проверка DNS |
 | `30-deploy-service.sh` | Клон/обновление кода, `.env`, зависимости, Chrome for Testing, systemd-юнит, health-check |
 | `40-deploy-planner.sh` | То же для planner («производственный план»): клон ветки, `express`, `.env`, systemd-юнит, проверка |
+| `41-deploy-planner-demo.sh` | Демо-стенд planner: тот же код, отдельная **обезличенная** копия базы (`VACUUM INTO` + анонимизатор) |
 | `add-route.sh` | Добавить маршрут нового сервиса в Caddy по пути (валидация + откат при ошибке) |
 | `add-site.sh` | Опубликовать сервис на отдельном поддомене (валидация + откат при ошибке) |
 | `Caddyfile.template` | Шаблон общего конфига Caddy с маркерами `BEGIN/END ROUTES` |
 | `wb-headless.service` | Шаблон systemd-юнита (loopback, авто-рестарт, journald, ограничения) |
-| `planner.service` | Шаблон systemd-юнита planner (запуск с `--experimental-sqlite`, запись только в `data/`) |
+| `planner.service` | Шаблон systemd-юнита planner — общий для боевого и демо (`{{SERVICE}}`, `{{DESC}}`) |
 
 Все скрипты идемпотентны: повторный запуск = обновление, а не поломка.
 
@@ -59,7 +60,8 @@ systemctl restart wb-headless                        # после правки .
 |---|---|---|---|
 | 8080 | wb-headless | `https://tools.aidemiko.ru/wb/` | `wb-headless.service` |
 | 9100 | planner (производственный план) | `https://planner.aidemiko.ru/` | `planner.service` |
-| 9101+ | свободны под переезд с Mac Mini (tandemtrace, getcourse, wbcalc, telegram-бот) | — | — |
+| 9101 | planner ДЕМО (обезличенная копия) | `https://demo.aidemiko.ru/` | `planner-demo.service` |
+| 9102+ | свободны под переезд с Mac Mini (tandemtrace, getcourse, wbcalc, telegram-бот) | — | — |
 | 2019 | Caddy admin (loopback) | — | `caddy.service` |
 
 Проверить, свободен ли порт: `ss -lntp | grep :9100 || echo свободен`
