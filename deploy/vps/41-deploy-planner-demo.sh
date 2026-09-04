@@ -92,18 +92,31 @@ else
   log "Снимаю копию боевой базы (VACUUM INTO — корректно забирает и WAL-журнал)"
   systemctl stop "$SERVICE" 2>/dev/null || true
   rm -f "$DEMO_DB" "$DEMO_DB-wal" "$DEMO_DB-shm"
-  # снимок делаем от владельца боевой базы, чтобы не менять её права
-  runuser -u planner -- node --experimental-sqlite -e "
+  # Снимок делает владелец боевой базы (planner) — иначе пришлось бы менять её права.
+  # Но писать в каталог демо-стенда он не может, поэтому кладём во временный каталог,
+  # а уже root переносит файл на место и отдаёт пользователю демо.
+  SRC_OWNER="$(stat -c %U "$SRC_DB")"
+  TMP_SNAP="$(mktemp -d /tmp/planner-demo-snap.XXXXXX)"
+  chown "$SRC_OWNER:$SRC_OWNER" "$TMP_SNAP"; chmod 700 "$TMP_SNAP"
+  trap 'rm -rf "$TMP_SNAP"' EXIT
+  runuser -u "$SRC_OWNER" -- node --experimental-sqlite -e "
     const { DatabaseSync } = require('node:sqlite');
     const db = new DatabaseSync(process.argv[1]);
     db.prepare('VACUUM INTO ?').run(process.argv[2]);
     db.close();
-  " "$SRC_DB" "$DEMO_DB" || die "Не удалось снять копию базы"
+  " "$SRC_DB" "$TMP_SNAP/snapshot.db" || die "Не удалось снять копию базы"
+  mv "$TMP_SNAP/snapshot.db" "$DEMO_DB"
+  rm -rf "$TMP_SNAP"; trap - EXIT
   chown "$APP_USER:$APP_USER" "$DEMO_DB"
 
   log "Обезличиваю копию (артикулы, поставщики, цены, токены, пользователи)"
-  as_app node --experimental-sqlite "$PLANNER_DIR/tools/anonymize-db.mjs" "$DEMO_DB" \
-    || die "Обезличивание не прошло — демо-базу НЕ публикуем"
+  # Если обезличивание не прошло — копию с настоящими данными УДАЛЯЕМ. Иначе следующий
+  # запуск скрипта примет её за готовую демо-базу и опубликует боевые данные наружу.
+  if ! as_app env HOME="/var/lib/$APP_USER" node --experimental-sqlite \
+      "$PLANNER_DIR/tools/anonymize-db.mjs" "$DEMO_DB"; then
+    rm -f "$DEMO_DB" "$DEMO_DB-wal" "$DEMO_DB-shm"
+    die "Обезличивание не прошло — копию удалил, демо-стенд НЕ публикуем"
+  fi
 fi
 
 # ---------- systemd ----------
