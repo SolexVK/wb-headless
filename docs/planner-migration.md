@@ -38,9 +38,16 @@
 На сервере (`ssh deploy@159.195.41.88`):
 
 ```bash
-cd /opt/wb-headless && git pull
-sudo bash deploy/vps/40-deploy-planner.sh
+sudo git config --global --add safe.directory /opt/wb-headless   # один раз на сервер
+sudo git -C /opt/wb-headless pull
+sudo chown -R wbheadless:wbheadless /opt/wb-headless
+sudo bash /opt/wb-headless/deploy/vps/40-deploy-planner.sh
 ```
+
+> Почему не просто `git pull`: каталог принадлежит системному пользователю `wbheadless`,
+> а мы под `deploy`. Git на такое ругается («dubious ownership») и ничего не скачивает,
+> да и писать в чужой каталог мы не можем. Поэтому обновляемся от root и возвращаем
+> владельца — иначе `wb-headless.service` потеряет доступ к своим файлам.
 
 Скрипт: заведёт системного пользователя `planner`, склонирует ветку в `/opt/planner`,
 поставит `express` (только в `planner/`, без puppeteer), создаст `.env` со случайным паролем,
