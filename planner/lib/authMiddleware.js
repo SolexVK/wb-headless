@@ -18,6 +18,8 @@
 //   SESSION_SECRET         — секрет подписи сессий (если пуст — генерируем и храним в БД)
 //   INVITE_STAFF_CODE      — код приглашения для сотрудников: /login?i=КОД → роль staff
 //   INVITE_GUEST_CODE      — код гостевой ссылки: /login?i=КОД → роль guest (демо-стенд)
+//   GUEST_LINK_CODE        — демо-вход БЕЗ Telegram: /guest?c=КОД → общая гостевая сессия.
+//                            Задавать ТОЛЬКО на демо-стенде с обезличенной базой.
 //   Смена кода мгновенно обесценивает старые ссылки; выданный ранее доступ сохраняется.
 //
 // Если TELEGRAM_BOT_TOKEN не задан — авторизация ВЫКЛЮЧЕНА (как раньше, открытый доступ
@@ -50,6 +52,10 @@ export function requireEdit(tab) {
 }
 
 const COOKIE = 'planner_session';
+// Общий аккаунт демо-гостей. Отрицательный id не может прийти из Telegram, поэтому
+// не столкнётся с настоящим пользователем. Ограничение «одна сессия на аккаунт»
+// на него не распространяется — иначе гости выбивали бы друг друга.
+const GUEST_TID = -1;
 const INVITE_COOKIE = 'planner_invite';
 const INVITE_TTL_SEC = 900;             // 15 минут: успеть пройти виджет Telegram
 const SESSION_TTL_SEC = 30 * 24 * 3600; // 30 дней
@@ -203,8 +209,9 @@ export function installAuth(app) {
     const user = userGet(payload.tid);
     if (!user) return null;
     if (accessDenial(user)) return null;
-    // одна активная сессия на аккаунт: sid должен совпадать
-    if (user.activeSession && payload.sid !== user.activeSession) return null;
+    // одна активная сессия на аккаунт: sid должен совпадать.
+    // Демо-гости — общий аккаунт, их сессии не вытесняют друг друга.
+    if (user.telegramId !== GUEST_TID && user.activeSession && payload.sid !== user.activeSession) return null;
     return user;
   }
 
@@ -218,7 +225,7 @@ export function installAuth(app) {
   });
 
   // Публичные пути (без входа): страница логина, health, сам callback авторизации.
-  const PUBLIC_EXACT = new Set(['/login', '/login.html', '/api/health', '/auth/telegram', '/auth/code', '/api/me']);
+  const PUBLIC_EXACT = new Set(['/login', '/login.html', '/api/health', '/auth/telegram', '/auth/code', '/api/me', '/guest']);
   const isPublic = (p) => PUBLIC_EXACT.has(p) || p.startsWith('/styles') || p === '/favicon.ico';
 
   // ── Callback Telegram Login Widget: проверка подписи → allowlist → сессия ──
@@ -267,6 +274,38 @@ export function installAuth(app) {
     }, sid);
     const token = signSession({ tid, sid, iat: Math.floor(Date.now() / 1000) }, SECRET);
     setSessionCookie(req, res, token);
+    res.redirect('/');
+  });
+
+  // ── Демо-вход по гостевой ссылке (без Telegram) ──
+  // Задуман только для стенда с обезличенной базой: пускает любого, кто открыл ссылку,
+  // на общий гостевой аккаунт с правами роли guest. Владельцу приходит уведомление.
+  const GUEST_CODE = (process.env.GUEST_LINK_CODE || '').trim();
+  const guestSeen = new Map(); // ip → время последнего уведомления (чтобы не спамить)
+  app.get('/guest', (req, res) => {
+    if (GUEST_CODE.length < 8) return res.status(404).send(noticePage('Демо-вход на этом экземпляре не включён.'));
+    if (!safeEqualStr(String(req.query.c || '').trim(), GUEST_CODE)) {
+      return res.status(403).send(noticePage('Ссылка недействительна. Запросите актуальную ссылку на демо.'));
+    }
+    if (!dbAvailable()) return res.status(503).send('Демо временно недоступно');
+    let guest = userGet(GUEST_TID);
+    if (!guest) {
+      userUpsert({
+        telegramId: GUEST_TID, name: 'Гость демо', status: 'active', isAdmin: 0,
+        role: 'guest', perms: { tabs: presetTabs('guest') }, note: 'демо-доступ по ссылке',
+      });
+      guest = userGet(GUEST_TID);
+    }
+    const token = signSession({ tid: GUEST_TID, sid: newSessionId(), iat: Math.floor(Date.now() / 1000) }, SECRET);
+    setSessionCookie(req, res, token);
+    // Уведомление владельцу — не чаще раза в полчаса с одного адреса.
+    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    const now = Date.now();
+    if (!guestSeen.has(ip) || now - guestSeen.get(ip) > 30 * 60 * 1000) {
+      guestSeen.set(ip, now);
+      if (guestSeen.size > 500) guestSeen.clear(); // простая защита от роста в памяти
+      notifyOwner(`👀 Заход на демо-стенд\nIP: ${ip || 'неизвестен'}\nВремя: ${new Date().toLocaleString('ru-RU')}`);
+    }
     res.redirect('/');
   });
 
@@ -398,6 +437,16 @@ export function installAuth(app) {
   });
 
   return { enabled: true };
+}
+
+// Короткое сообщение без телеграм-id — для гостевых ссылок.
+function noticePage(msg) {
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Демо</title>
+<style>body{font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e6e6e6;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+.card{max-width:420px;padding:28px;background:#181b22;border:1px solid #262a33;border-radius:14px;text-align:center}</style>
+</head><body><div class="card"><h2>${msg}</h2></div></body></html>`;
 }
 
 // Мини-страница «доступ запрещён» с телеграм-id для заявки админу.
