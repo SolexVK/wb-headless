@@ -6,3 +6,6 @@ reports-output/
 
 # planner runtime data (пользовательское состояние)
 planner/data/
+
+# создаётся npm install на сервере; блокировал git checkout при обновлении
+planner/package-lock.json
