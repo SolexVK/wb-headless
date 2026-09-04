@@ -16,7 +16,12 @@
 //   TELEGRAM_BOT_USERNAME  — имя бота без @ (для виджета входа)
 //   OWNER_TELEGRAM_ID      — числовой Telegram-id владельца (сеется как админ)
 //   SESSION_SECRET         — секрет подписи сессий (если пуст — генерируем и храним в БД)
-//   INVITE_STAFF_CODE      — код приглашения для сотрудников: /login?i=КОД → роль staff
+//   STAFF_CHAT_ID          — id рабочей группы в Telegram. Кто состоит в ней — входит
+//                            сотрудником САМ, без приглашений и ссылок с кодами. Убрали
+//                            человека из группы — доступ снимается при следующей проверке.
+//   GUEST_AUTO=1           — демо-режим: любой заход открывает гостевую сессию сразу,
+//                            без ссылки с кодом. Только для стенда с вымышленными данными.
+//   INVITE_STAFF_CODE      — (необязательно) запасной путь: /login?i=КОД → роль staff
 //   INVITE_GUEST_CODE      — код гостевой ссылки: /login?i=КОД → роль guest (демо-стенд)
 //   GUEST_LINK_CODE        — демо-вход БЕЗ Telegram: /guest?c=КОД → общая гостевая сессия.
 //                            Задавать ТОЛЬКО на демо-стенде с обезличенной базой.
@@ -169,6 +174,43 @@ export function installAuth(app) {
     return INVITES.find((i) => safeEqualStr(v, i.code)) || null;
   };
 
+  // ── Кто сотрудник: членство в рабочей группе Telegram ──
+  // Единственное условие доступа: человек состоит в группе. Права выдаются сами,
+  // отзываются тоже сами — достаточно убрать его из группы.
+  const STAFF_CHAT_ID = (process.env.STAFF_CHAT_ID || '').trim();
+  const IN_GROUP = new Set(['creator', 'administrator', 'member', 'restricted']);
+  async function isStaffMember(tid) {
+    if (!STAFF_CHAT_ID || !BOT_TOKEN) return false;
+    try {
+      const url = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember`
+        + `?chat_id=${encodeURIComponent(STAFF_CHAT_ID)}&user_id=${encodeURIComponent(tid)}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const j = await r.json();
+      if (!j || !j.ok || !j.result) return false;
+      if (!IN_GROUP.has(j.result.status)) return false;
+      // «ограниченный» участник мог быть уже исключён — у него это отдельный флаг
+      return j.result.is_member !== false;
+    } catch { return false; } // сеть отвалилась — не выдаём доступ, но и не отзываем
+  }
+
+  // Периодическая перепроверка уже вошедших: раз в час на человека, в фоне.
+  const memberChecked = new Map(); // tid → время последней проверки
+  function recheckMembership(user) {
+    if (!STAFF_CHAT_ID || !user || user.isAdmin || user.telegramId < 0) return;
+    if (user.role !== 'staff') return;
+    const now = Date.now();
+    const last = memberChecked.get(user.telegramId) || 0;
+    if (now - last < 60 * 60 * 1000) return;
+    memberChecked.set(user.telegramId, now);
+    isStaffMember(user.telegramId).then((ok) => {
+      if (ok) return;
+      userSetStatus(user.telegramId, 'blocked');
+      userMarkLogin(user.telegramId, {}, null); // сессию сразу вон
+      console.log(`[planner] ${user.telegramId} больше не в группе сотрудников — доступ снят`);
+      notifyOwner(`🚪 Доступ снят: ${user.name || user.telegramId} вышел(а) из рабочей группы.`);
+    }).catch(() => {});
+  }
+
   // Уведомление владельцу в личку бота (HTTPS-API — исходящий SMTP у netcup закрыт).
   // Тихое: любая ошибка отправки не должна ломать вход пользователя.
   const notifyOwner = (text) => {
@@ -229,7 +271,7 @@ export function installAuth(app) {
   const isPublic = (p) => PUBLIC_EXACT.has(p) || p.startsWith('/styles') || p === '/favicon.ico';
 
   // ── Callback Telegram Login Widget: проверка подписи → allowlist → сессия ──
-  app.get('/auth/telegram', (req, res) => {
+  app.get('/auth/telegram', async (req, res) => {
     const data = { ...req.query };
     if (!verifyTelegramAuth(data, BOT_TOKEN)) {
       return res.status(401).send(loginRedirect('bad_signature'));
@@ -243,24 +285,36 @@ export function installAuth(app) {
     };
     // Владелец может войти всегда (на случай пустого allowlist).
     if (!user && tid === OWNER_ID) { userUpsert({ telegramId: tid, isAdmin: 1, role: 'admin', status: 'active', note: 'owner' }); user = userGet(tid); }
-    // Незнакомый аккаунт принимаем ТОЛЬКО по действующему коду приглашения.
-    // Права выдаются пресетом роли, зашитым в код: сотрудник или гость.
+    // Незнакомый аккаунт: пускаем, если человек состоит в рабочей группе Telegram.
+    // Запасной путь (если группа не настроена) — код приглашения в ссылке.
     if (!user) {
       const invite = matchInvite(parseCookies(req)[INVITE_COOKIE]);
-      if (!invite) {
+      const member = invite ? false : await isStaffMember(tid);
+      if (!invite && !member) {
         clearInviteCookie(res);
         return res.status(403).send(deniedPage('not_allowed', tid, data.username));
       }
+      const role = invite ? invite.role : 'staff';
+      const how = invite ? `по приглашению (${invite.label})` : 'по группе сотрудников';
       userUpsert({
         telegramId: tid, ...profile,
-        status: 'active', isAdmin: 0, role: invite.role,
-        perms: { tabs: presetTabs(invite.role) },
-        note: `по приглашению (${invite.label})`,
+        status: 'active', isAdmin: 0, role,
+        perms: { tabs: presetTabs(role) },
+        note: how,
       });
       user = userGet(tid);
       const who = [profile.name, profile.username ? '@' + profile.username : null]
         .filter(Boolean).join(' ') || 'без имени';
-      notifyOwner(`👤 Новый вход в planner\nРоль: ${invite.label}\n${who}\nTelegram-ID: ${tid}\n\nПрава можно изменить: /admin`);
+      notifyOwner(`👤 Новый вход в planner\n${who}\nTelegram-ID: ${tid}\nДоступ: ${how}\n\nПрава можно изменить: /admin`);
+    } else if (STAFF_CHAT_ID && !user.isAdmin && user.role === 'staff') {
+      // Повторный вход сотрудника — сверяем, что он всё ещё в группе.
+      if (!(await isStaffMember(tid))) {
+        userSetStatus(tid, 'blocked');
+        userMarkLogin(tid, {}, null);
+        return res.status(403).send(deniedPage('blocked', tid, data.username));
+      }
+      if (user.status === 'blocked') { userSetStatus(tid, 'active'); user = userGet(tid); }
+      memberChecked.set(tid, Date.now());
     }
     clearInviteCookie(res);
     const denial = accessDenial(user); // теперь блокирует только явно blocked/expired
@@ -281,31 +335,37 @@ export function installAuth(app) {
   // Задуман только для стенда с обезличенной базой: пускает любого, кто открыл ссылку,
   // на общий гостевой аккаунт с правами роли guest. Владельцу приходит уведомление.
   const GUEST_CODE = (process.env.GUEST_LINK_CODE || '').trim();
+  const GUEST_AUTO = process.env.GUEST_AUTO === '1';
   const guestSeen = new Map(); // ip → время последнего уведомления (чтобы не спамить)
-  app.get('/guest', (req, res) => {
-    if (GUEST_CODE.length < 8) return res.status(404).send(noticePage('Демо-вход на этом экземпляре не включён.'));
-    if (!safeEqualStr(String(req.query.c || '').trim(), GUEST_CODE)) {
-      return res.status(403).send(noticePage('Ссылка недействительна. Запросите актуальную ссылку на демо.'));
-    }
-    if (!dbAvailable()) return res.status(503).send('Демо временно недоступно');
+
+  // Выдать сессию общего гостевого аккаунта и уведомить владельца о заходе.
+  function startGuestSession(req, res) {
+    if (!dbAvailable()) return null;
     let guest = userGet(GUEST_TID);
     if (!guest) {
       userUpsert({
         telegramId: GUEST_TID, name: 'Гость демо', status: 'active', isAdmin: 0,
-        role: 'guest', perms: { tabs: presetTabs('guest') }, note: 'демо-доступ по ссылке',
+        role: 'guest', perms: { tabs: presetTabs('guest') }, note: 'демо-доступ',
       });
       guest = userGet(GUEST_TID);
     }
     const token = signSession({ tid: GUEST_TID, sid: newSessionId(), iat: Math.floor(Date.now() / 1000) }, SECRET);
     setSessionCookie(req, res, token);
-    // Уведомление владельцу — не чаще раза в полчаса с одного адреса.
     const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     const now = Date.now();
     if (!guestSeen.has(ip) || now - guestSeen.get(ip) > 30 * 60 * 1000) {
       guestSeen.set(ip, now);
-      if (guestSeen.size > 500) guestSeen.clear(); // простая защита от роста в памяти
+      if (guestSeen.size > 500) guestSeen.clear();
       notifyOwner(`👀 Заход на демо-стенд\nIP: ${ip || 'неизвестен'}\nВремя: ${new Date().toLocaleString('ru-RU')}`);
     }
+    return guest;
+  }
+  app.get('/guest', (req, res) => {
+    if (GUEST_CODE.length < 8) return res.status(404).send(noticePage('Демо-вход на этом экземпляре не включён.'));
+    if (!safeEqualStr(String(req.query.c || '').trim(), GUEST_CODE)) {
+      return res.status(403).send(noticePage('Ссылка недействительна. Запросите актуальную ссылку на демо.'));
+    }
+    if (!startGuestSession(req, res)) return res.status(503).send('Демо временно недоступно');
     res.redirect('/');
   });
 
@@ -369,13 +429,17 @@ export function installAuth(app) {
   // ── Guard: всё остальное требует активной сессии; вычисляем права ──
   app.use((req, res, next) => {
     if (isPublic(req.path)) return next();
-    const u = currentUser(req);
+    let u = currentUser(req);
+    // Демо-стенд: гостю не нужны ни вход, ни ссылка с кодом — открыл адрес и смотришь.
+    // Включается только переменной GUEST_AUTO и только там, где данные вымышленные.
+    if (!u && GUEST_AUTO) { u = startGuestSession(req, res); }
     if (!u) {
       if (req.path.startsWith('/api/')) return res.status(401).json({ ok: false, error: 'auth_required' });
       return res.redirect('/login');
     }
     req.user = u;
     req.perms = permsFor(u);
+    recheckMembership(u);
     next();
   });
 
