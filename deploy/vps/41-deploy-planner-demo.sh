@@ -3,15 +3,16 @@
 # Запускать от root. Идемпотентен.
 #
 #   sudo bash deploy/vps/41-deploy-planner-demo.sh              # развернуть/обновить код
-#   sudo REFRESH_DB=1 bash deploy/vps/41-deploy-planner-demo.sh # ещё и пересобрать базу из боевой
+#   sudo REFRESH_DB=1 bash deploy/vps/41-deploy-planner-demo.sh # ещё и пересоздать демо-данные
 #
-# Почему отдельный экземпляр, а не роль внутри боевого: живые данные компании
-# (себестоимость, объёмы, поставщики) в демо не попадают физически — их там нет.
+# Данные демо-стенда ГЕНЕРИРУЮТСЯ из сида репозитория (вымышленная фабрика), а не
+# копируются из боевой базы. Копия с заменёнными названиями осталась бы настоящим
+# производственным планом — те же сроки, партии и размерные раскладки; для витрины,
+# которую раздают кому угодно, это неверно. Здесь боевых данных нет физически.
 #
 # Переменные:
-#   APP_DIR      — /opt/planner-demo         DEMO_PORT — 9101
-#   SRC_DB       — боевая база, откуда берём снимок (/opt/planner/planner/data/planner.db)
-#   REFRESH_DB=1 — пересоздать демо-базу из боевой (иначе существующую не трогаем)
+#   APP_DIR      — /opt/planner-demo         PORT — 9101
+#   REFRESH_DB=1 — пересоздать демо-данные (иначе существующую базу не трогаем)
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/planner-demo}"
@@ -20,7 +21,6 @@ REPO_URL="${REPO_URL:-https://github.com/SolexVK/wb-headless.git}"
 BRANCH="${BRANCH:-claude/production-plan-twv8ki}"
 PORT="${PORT:-9101}"
 HOST="${HOST:-127.0.0.1}"
-SRC_DB="${SRC_DB:-/opt/planner/planner/data/planner.db}"
 SERVICE=planner-demo
 PLANNER_DIR="$APP_DIR/planner"
 DATA_DIR="$PLANNER_DIR/data"
@@ -83,51 +83,36 @@ log "npm install в $PLANNER_DIR"
 as_app env HOME="/var/lib/$APP_USER" npm --prefix "$PLANNER_DIR" install \
   --omit=dev --ignore-scripts --no-audit --no-fund
 
-# ---------- база ----------
-DEMO_DB="$DATA_DIR/planner.db"
-if [ -f "$DEMO_DB" ] && [ "${REFRESH_DB:-0}" != "1" ]; then
-  log "Демо-база уже есть — оставляю (пересобрать: sudo REFRESH_DB=1 bash $0)"
-else
-  [ -f "$SRC_DB" ] || die "Нет боевой базы $SRC_DB"
-  log "Снимаю копию боевой базы (VACUUM INTO — корректно забирает и WAL-журнал)"
-  systemctl stop "$SERVICE" 2>/dev/null || true
-  rm -f "$DEMO_DB" "$DEMO_DB-wal" "$DEMO_DB-shm"
-  # Снимок делает владелец боевой базы (planner) — иначе пришлось бы менять её права.
-  # Но писать в каталог демо-стенда он не может, поэтому кладём во временный каталог,
-  # а уже root переносит файл на место и отдаёт пользователю демо.
-  SRC_OWNER="$(stat -c %U "$SRC_DB")"
-  TMP_SNAP="$(mktemp -d /tmp/planner-demo-snap.XXXXXX)"
-  chown "$SRC_OWNER:$SRC_OWNER" "$TMP_SNAP"; chmod 700 "$TMP_SNAP"
-  trap 'rm -rf "$TMP_SNAP"' EXIT
-  runuser -u "$SRC_OWNER" -- node --experimental-sqlite -e "
-    const { DatabaseSync } = require('node:sqlite');
-    const db = new DatabaseSync(process.argv[1]);
-    db.prepare('VACUUM INTO ?').run(process.argv[2]);
-    db.close();
-  " "$SRC_DB" "$TMP_SNAP/snapshot.db" || die "Не удалось снять копию базы"
-  mv "$TMP_SNAP/snapshot.db" "$DEMO_DB"
-  rm -rf "$TMP_SNAP"; trap - EXIT
-  chown "$APP_USER:$APP_USER" "$DEMO_DB"
-
-  log "Обезличиваю копию (артикулы, поставщики, цены, токены, пользователи)"
-  # Если обезличивание не прошло — копию с настоящими данными УДАЛЯЕМ. Иначе следующий
-  # запуск скрипта примет её за готовую демо-базу и опубликует боевые данные наружу.
-  if ! as_app env HOME="/var/lib/$APP_USER" node --experimental-sqlite \
-      "$PLANNER_DIR/tools/anonymize-db.mjs" "$DEMO_DB"; then
-    rm -f "$DEMO_DB" "$DEMO_DB-wal" "$DEMO_DB-shm"
-    die "Обезличивание не прошло — копию удалил, демо-стенд НЕ публикуем"
-  fi
-fi
-
 # ---------- systemd ----------
 log "Ставлю юнит /etc/systemd/system/$SERVICE.service"
 sed -e "s|{{APP_DIR}}|$APP_DIR|g" -e "s|{{APP_USER}}|$APP_USER|g" -e "s|{{DATA_DIR}}|$DATA_DIR|g" \
-    -e "s|{{SERVICE}}|$SERVICE|g" -e "s|{{DESC}}|planner ДЕМО (обезличенная копия)|g" \
+    -e "s|{{SERVICE}}|$SERVICE|g" -e "s|{{DESC}}|planner ДЕМО (вымышленные данные)|g" \
   "$HERE/planner.service" > "/etc/systemd/system/$SERVICE.service"
 chmod 644 "/etc/systemd/system/$SERVICE.service"
 systemctl daemon-reload
 systemctl enable "$SERVICE"
 systemctl restart "$SERVICE"
+
+# ---------- демо-данные ----------
+# Схему базы создаёт сам сервис при старте, поэтому сначала даём ему подняться.
+DEMO_DB="$DATA_DIR/planner.db"
+NEED_SEED=0
+[ -f "$DEMO_DB" ] || NEED_SEED=1
+[ "${REFRESH_DB:-0}" = "1" ] && NEED_SEED=1
+
+if [ "$NEED_SEED" = "1" ]; then
+  log "Готовлю демо-данные (вымышленная фабрика из сида репозитория)"
+  for _ in $(seq 1 20); do [ -f "$DEMO_DB" ] && break; sleep 1; done
+  [ -f "$DEMO_DB" ] || die "Сервис не создал базу — смотри journalctl -u $SERVICE -n 50"
+  systemctl stop "$SERVICE"
+  as_app env HOME="/var/lib/$APP_USER" node --experimental-sqlite \
+    "$PLANNER_DIR/tools/seed-demo.mjs" "$DEMO_DB" || die "Не удалось записать демо-данные"
+  # состояние из JSON-файла больше не нужно: источник правды — база
+  rm -f "$DATA_DIR/state.json"
+  systemctl start "$SERVICE"
+else
+  log "Демо-данные уже на месте (пересоздать: sudo REFRESH_DB=1 bash $0)"
+fi
 
 log "Проверяю"
 code=""
