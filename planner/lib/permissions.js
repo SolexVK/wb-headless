@@ -19,19 +19,44 @@ export const TABS = [
   { key: 'fabric', label: 'Заказ ткани' },
   { key: 'dashboard', label: 'Дашборд' },
   { key: 'season', label: 'Ранг сезонности' },
+  { key: 'reports', label: 'Отчёты' },
+  { key: 'supply', label: 'Остатки и поставки' },
+  { key: 'plancut', label: 'Сокращение' },
   { key: 'unit', label: 'Юнит-экономика' },
   { key: 'data', label: 'Данные' },
 ];
 export const TAB_KEYS = TABS.map((t) => t.key);
 
-// Права по умолчанию для нового (автопринятого) пользователя — минимум, только просмотр.
+// Права по умолчанию для роли «наблюдатель» — минимум, только просмотр дашборда.
 export const DEFAULT_VIEWER_TABS = { dashboard: 'view' };
+
+// Сотрудник компании: смотрит рабочие листы и выгружает из них файлы, ничего не меняет.
+// Юнит-экономика тоже 'view' — но её экран работает как ЛИЧНЫЙ ЧЕРНОВИК: правки считаются
+// в браузере сотрудника и не уходят в общую базу (см. unitPersist в public/app.js).
+export const STAFF_TABS = {
+  gantt: 'view',
+  matrix: 'view',
+  season: 'view',
+  reports: 'view',
+  unit: 'view',
+};
+
+// Гость демо-стенда: показать инструмент, не показывая внутренней кухни.
+// Работает на отдельном экземпляре с обезличенной базой — см. docs/planner-demo.md.
+export const GUEST_TABS = {
+  gantt: 'view',
+  matrix: 'view',
+  season: 'view',
+  reports: 'view',
+};
 
 // Пресеты ролей (шаблоны прав). role='custom' — произвольная карта в user.perms.
 export function presetTabs(role) {
   if (role === 'admin' || role === 'editor') {
     const t = {}; for (const k of TAB_KEYS) t[k] = 'edit'; return t;
   }
+  if (role === 'staff') return { ...STAFF_TABS };
+  if (role === 'guest') return { ...GUEST_TABS };
   // viewer
   return { ...DEFAULT_VIEWER_TABS };
 }

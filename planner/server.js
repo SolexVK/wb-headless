@@ -551,7 +551,7 @@ app.post('/api/workshop/remove', requireEdit('gantt'), (req, res) => {
 
 // ── Курсы валют (НБ КР): сом↔$, ₽↔сом, ₽↔$ ──
 // GET — вернуть закэшированные (или подтянуть, если кэша нет). POST /refresh — обновить из интернета.
-app.get('/api/currency', requireView('data'), async (req, res) => {
+app.get('/api/currency', async (req, res) => {
   try {
     let cached = null;
     try { const m = metaGet('currency_rates'); if (m && m.value) cached = JSON.parse(m.value); } catch { /* нет БД/кэша */ }
@@ -561,7 +561,7 @@ app.get('/api/currency', requireView('data'), async (req, res) => {
     res.json({ ok: true, rates, cached: false });
   } catch (e) { res.status(502).json({ ok: false, error: String(e.message || e) }); }
 });
-app.post('/api/currency/refresh', requireView('data'), async (req, res) => {
+app.post('/api/currency/refresh', requireEdit('data'), async (req, res) => {
   try {
     const rates = await fetchRates();
     try { metaSet('currency_rates', JSON.stringify(rates)); } catch { /* нет БД */ }
@@ -588,7 +588,7 @@ function googleRedirectUri(req) {
   const base = (process.env.PLANNER_PUBLIC_URL || '').replace(/\/+$/, '') || `${req.protocol}://${req.get('host')}`;
   return base + '/api/google/callback';
 }
-app.get('/api/google/status', requireView('data'), (req, res) => {
+app.get('/api/google/status', requireView('reports'), (req, res) => {
   const t = googleLoadTokens();
   res.json({ ok: true, enabled: google.isEnabled(), connected: googleConnected(t), email: (t && t.email) || '' });
 });
@@ -610,7 +610,7 @@ app.get('/api/google/callback', async (req, res) => {
     res.status(400).type('html').send('<meta charset="utf-8"><body style="font-family:sans-serif;padding:28px">Ошибка подключения Google: ' + String(e.message || e) + '.<br><a href="/">Назад</a></body>');
   }
 });
-app.post('/api/google/disconnect', requireView('data'), (req, res) => { googleSaveTokens({}); res.json({ ok: true }); });
+app.post('/api/google/disconnect', requireEdit('reports'), (req, res) => { googleSaveTokens({}); res.json({ ok: true }); });
 // прочитать байты образца ткани по пути (/samples/<файл> или data:-URL)
 function readSampleBuffer(p) {
   const s = String(p || '');
@@ -651,7 +651,7 @@ async function googleResolveImageCells(accessToken, sheets) {
     if (typeof v === 'string' && v.startsWith('@IMG:')) { const id = cache[v.slice(5)]; row[c] = id ? google.imageFormula(id) : ''; }
   }
 }
-app.post('/api/google/export', requireView('data'), async (req, res) => {
+app.post('/api/google/export', requireEdit('reports'), async (req, res) => {
   try {
     if (!google.isEnabled()) return res.status(400).json({ ok: false, error: 'Google OAuth не настроен на сервере' });
     const { title, sheets, reportKind } = req.body || {};
@@ -677,7 +677,7 @@ app.post('/api/google/export', requireView('data'), async (req, res) => {
 
 // ── Архив отчётов ──
 // Клиент считает отчёт (public/reports.js) и присылает его данные; сервер сохраняет снимок с датой/временем.
-app.post('/api/reports/archive', requireView('data'), (req, res) => {
+app.post('/api/reports/archive', requireEdit('reports'), (req, res) => {
   try {
     const { reportKind, label, data } = req.body || {};
     if (!reportKind || data == null) return res.status(400).json({ ok: false, error: 'нужны reportKind и data' });
@@ -686,27 +686,27 @@ app.post('/api/reports/archive', requireView('data'), (req, res) => {
     res.json({ ok: true, id: r.id, savedAt: r.savedAt });
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
-app.get('/api/reports/archive', requireView('data'), (req, res) => {
+app.get('/api/reports/archive', requireView('reports'), (req, res) => {
   try { res.json({ ok: true, items: reportArchiveList() }); }
   catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
-app.get('/api/reports/archive/:id', requireView('data'), (req, res) => {
+app.get('/api/reports/archive/:id', requireView('reports'), (req, res) => {
   try {
     const row = reportArchiveGet(+req.params.id);
     if (!row) return res.status(404).json({ ok: false, error: 'отчёт не найден' });
     res.json({ ok: true, id: row.id, reportKind: row.reportKind, label: row.label, savedAt: row.savedAt, data: JSON.parse(row.json) });
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
-app.delete('/api/reports/archive/:id', requireEdit('data'), (req, res) => {
+app.delete('/api/reports/archive/:id', requireEdit('reports'), (req, res) => {
   try { reportArchiveDelete(+req.params.id); res.json({ ok: true }); }
   catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 
 // ── «Умный» разбор запроса (нейросеть Anthropic) → структурный фильтр отчёта ──
-app.get('/api/reports/nlq-status', requireView('data'), (req, res) => {
+app.get('/api/reports/nlq-status', requireView('reports'), (req, res) => {
   res.json({ ok: true, ...nlq.status() });
 });
-app.post('/api/reports/nl-query', requireView('data'), async (req, res) => {
+app.post('/api/reports/nl-query', requireEdit('reports'), async (req, res) => {
   try {
     const { query, dimensions, reportKind } = req.body || {};
     if (!query || !String(query).trim()) return res.status(400).json({ ok: false, error: 'пустой запрос' });
@@ -734,7 +734,7 @@ app.delete('/api/settings/anthropic', requireEdit('data'), (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 // Прокси + токен Claude Code (подписка). Пустая строка в поле = очистить.
-app.get('/api/settings/nlq', requireView('data'), (req, res) => res.json({ ok: true, ...nlqRuntimeStatus() }));
+app.get('/api/settings/nlq', requireView('reports'), (req, res) => res.json({ ok: true, ...nlqRuntimeStatus() }));
 app.put('/api/settings/nlq', requireEdit('data'), (req, res) => {
   try {
     const b = req.body || {};
@@ -758,7 +758,7 @@ app.put('/api/settings/nlq', requireEdit('data'), (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 // Проверка соединения: пробный вызов через прокси+токен. Классифицирует сбой (прокси/авторизация).
-app.post('/api/reports/nlq-test', requireView('data'), async (req, res) => {
+app.post('/api/reports/nlq-test', requireEdit('reports'), async (req, res) => {
   try { res.json({ ok: true, ...(await nlq.healthCheck()) }); }
   catch (e) { res.status(500).json({ ok: false, reason: 'server', detail: String(e.message || e) }); }
 });
@@ -876,7 +876,7 @@ app.post('/api/season/build', requireEdit('season'), async (req, res) => {
 });
 
 // Остатки/поставки: тянем опубликованный Google-CSV по ссылке (обходим CORS браузера)
-app.get('/api/supply/csv', requireView('season'), async (req, res) => {
+app.get('/api/supply/csv', requireView('supply'), async (req, res) => {
   const url = String(req.query.url || '').trim();
   if (!/^https:\/\//i.test(url)) return res.status(400).json({ ok: false, error: 'Нужна https-ссылка на опубликованный CSV (Файл → Опубликовать в интернете → CSV).' });
   try {
@@ -890,7 +890,7 @@ app.get('/api/supply/csv', requireView('season'), async (req, res) => {
 
 // Автоподтяжка остатков WB (FBW) в предложение: по nmID → imtID → цвета → остатки по складам.
 // Доступный остаток = quantity + inWayFromClient + inWayToClient×(1 − выкуп%). buyoutPct настраиваемый.
-app.post('/api/supply/wb-pull', requireEdit('season'), async (req, res) => {
+app.post('/api/supply/wb-pull', requireEdit('supply'), async (req, res) => {
   try {
     if (!hasWbToken()) return res.status(400).json({ ok: false, error: 'WB-токен не задан в окружении службы (WB_API_TOKEN).' });
     const items = Array.isArray(req.body && req.body.items) ? req.body.items.filter((x) => x && x.articleId && (x.key || x.nmID)) : [];
@@ -901,7 +901,7 @@ app.post('/api/supply/wb-pull', requireEdit('season'), async (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
 });
 // Список артикулов продавца (префиксы vendorCode) — помощь в подборе «Ключа WB».
-app.get('/api/supply/wb-vendors', requireView('season'), async (req, res) => {
+app.get('/api/supply/wb-vendors', requireView('supply'), async (req, res) => {
   try {
     if (!hasWbToken()) return res.status(400).json({ ok: false, error: 'WB-токен не задан.' });
     res.json({ ok: true, ...(await listVendorPrefixes({ force: req.query.force === '1' })) });
@@ -909,7 +909,7 @@ app.get('/api/supply/wb-vendors', requireView('season'), async (req, res) => {
 });
 
 // ── Сокращение плана (Фаза 0): карта соответствия «расцветка ↔ карточка WB» + покрытие ──
-app.get('/api/plancut/coverage', requireView('data'), async (req, res) => {
+app.get('/api/plancut/coverage', requireView('plancut'), async (req, res) => {
   try {
     if (!hasWbToken()) return res.json({ ok: false, error: 'нет токена WB (WB_API_TOKEN / Wildberries_API) на этом сервере' });
     const state = loadState();
@@ -939,7 +939,7 @@ async function collectSales(months) {
   finally { salesJob.running = false; }
 }
 
-app.post('/api/plancut/sales/collect', requireEdit('data'), (req, res) => {
+app.post('/api/plancut/sales/collect', requireEdit('plancut'), (req, res) => {
   if (!hasWbToken()) return res.json({ ok: false, error: 'нет токена WB на этом сервере' });
   if (salesJob.running) return res.json({ ok: true, running: true, note: 'сбор уже идёт' });
   const months = Math.max(1, Math.min(12, +(req.body && req.body.months) || 6));
@@ -947,7 +947,7 @@ app.post('/api/plancut/sales/collect', requireEdit('data'), (req, res) => {
   res.json({ ok: true, started: true, months });
 });
 
-app.get('/api/plancut/sales', requireView('data'), async (req, res) => {
+app.get('/api/plancut/sales', requireView('plancut'), async (req, res) => {
   try {
     const cached = salesLoad();
     const status = { running: salesJob.running, page: salesJob.page, records: salesJob.records, error: salesJob.error, startedAt: salesJob.startedAt, finishedAt: salesJob.finishedAt };
@@ -961,7 +961,7 @@ app.get('/api/plancut/sales', requireView('data'), async (req, res) => {
 });
 
 // Фаза 2: разбор плана — план×выкупы по расцветкам (для симуляции реза до цели, предпросмотр)
-app.get('/api/plancut/analysis', requireView('data'), async (req, res) => {
+app.get('/api/plancut/analysis', requireView('plancut'), async (req, res) => {
   try {
     const cached = salesLoad();
     const state = loadState();

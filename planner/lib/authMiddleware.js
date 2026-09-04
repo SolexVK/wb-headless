@@ -3,6 +3,9 @@
 // Модель доступа (жёсткая привязка к Telegram-аккаунту):
 //   1. Вход только через Telegram Login Widget → подпись проверяется HMAC (auth.js).
 //   2. Пускаем ТОЛЬКО аккаунты из allowlist (таблица users): status=active и не просрочен.
+//      Незнакомый аккаунт попадает в allowlist ОДНИМ способом — по ссылке-приглашению
+//      с кодом (INVITE_STAFF_CODE / INVITE_GUEST_CODE). Без кода — отказ: «сам себя»
+//      зарегистрировать нельзя, сколько бы аккаунтов Telegram человек ни завёл.
 //   3. Сессия — подписанный cookie; в нём tid + sid. sid сверяется с users.activeSession,
 //      поэтому активна ОДНА сессия на аккаунт (новый вход вытесняет старый).
 //   4. Права/статус/срок проверяются по БД на КАЖДОМ запросе → мгновенный отзыв.
@@ -13,6 +16,9 @@
 //   TELEGRAM_BOT_USERNAME  — имя бота без @ (для виджета входа)
 //   OWNER_TELEGRAM_ID      — числовой Telegram-id владельца (сеется как админ)
 //   SESSION_SECRET         — секрет подписи сессий (если пуст — генерируем и храним в БД)
+//   INVITE_STAFF_CODE      — код приглашения для сотрудников: /login?i=КОД → роль staff
+//   INVITE_GUEST_CODE      — код гостевой ссылки: /login?i=КОД → роль guest (демо-стенд)
+//   Смена кода мгновенно обесценивает старые ссылки; выданный ранее доступ сохраняется.
 //
 // Если TELEGRAM_BOT_TOKEN не задан — авторизация ВЫКЛЮЧЕНА (как раньше, открытый доступ
 // для локальной сети). Так локальная разработка не ломается.
@@ -24,7 +30,7 @@ import {
   userSetPerms, userSetAccessRequest,
 } from './db.js';
 import { verifyTelegramAuth, verifySession, signSession, newSessionId } from './auth.js';
-import { permsFor, canView, canEdit, TABS, TAB_KEYS, presetTabs, DEFAULT_VIEWER_TABS } from './permissions.js';
+import { permsFor, canView, canEdit, TABS, TAB_KEYS, presetTabs } from './permissions.js';
 
 // Мидлвары-гейты для маршрутов server.js. Если авторизация выключена (req.perms нет) —
 // пропускаем (локальная сеть). Иначе проверяем право просмотра/редактирования листа.
@@ -44,6 +50,8 @@ export function requireEdit(tab) {
 }
 
 const COOKIE = 'planner_session';
+const INVITE_COOKIE = 'planner_invite';
+const INVITE_TTL_SEC = 900;             // 15 минут: успеть пройти виджет Telegram
 const SESSION_TTL_SEC = 30 * 24 * 3600; // 30 дней
 const LEVELS = new Set(['none', 'view', 'edit']);
 
@@ -86,6 +94,19 @@ function setSessionCookie(req, res, token) {
 }
 function clearSessionCookie(res) {
   res.append('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+// Код приглашения кладём в короткоживущий cookie на странице входа: виджет Telegram
+// уводит человека на telegram.org и возвращает на /auth/telegram уже без наших параметров.
+function setInviteCookie(req, res, code) {
+  const parts = [
+    `${INVITE_COOKIE}=${encodeURIComponent(code)}`,
+    'Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${INVITE_TTL_SEC}`,
+  ];
+  if (isHttps(req)) parts.push('Secure');
+  res.append('Set-Cookie', parts.join('; '));
+}
+function clearInviteCookie(res) {
+  res.append('Set-Cookie', `${INVITE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 }
 
 // ── секрет подписи сессий: env → БД(meta) → сгенерировать и сохранить ──
@@ -131,9 +152,32 @@ export function installAuth(app) {
   const LOGIN_CODE = (process.env.PLANNER_LOGIN_CODE || '').trim();
   let codeFails = 0, codeLockUntil = 0; // простой троттлинг перебора
 
+  // Коды приглашений: единственный способ попасть в allowlist без участия админа.
+  const INVITES = [
+    { code: (process.env.INVITE_STAFF_CODE || '').trim(), role: 'staff', label: 'сотрудник' },
+    { code: (process.env.INVITE_GUEST_CODE || '').trim(), role: 'guest', label: 'гость' },
+  ].filter((i) => i.code.length >= 8); // короткий код = подбираемый, такой не принимаем
+  const matchInvite = (raw) => {
+    const v = String(raw || '').trim();
+    if (!v) return null;
+    return INVITES.find((i) => safeEqualStr(v, i.code)) || null;
+  };
+
+  // Уведомление владельцу в личку бота (HTTPS-API — исходящий SMTP у netcup закрыт).
+  // Тихое: любая ошибка отправки не должна ломать вход пользователя.
+  const notifyOwner = (text) => {
+    if (!BOT_TOKEN || !OWNER_ID) return;
+    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: OWNER_ID, text, disable_web_page_preview: true }),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => { /* не критично */ });
+  };
+
   // Владелец всегда админ с бессрочным доступом (bootstrap при старте).
   if (OWNER_ID && dbAvailable()) {
-    userUpsert({ telegramId: OWNER_ID, isAdmin: 1, status: 'active', note: 'owner' });
+    userUpsert({ telegramId: OWNER_ID, isAdmin: 1, role: 'admin', status: 'active', note: 'owner' });
   }
 
   if (!BOT_TOKEN) {
@@ -164,6 +208,15 @@ export function installAuth(app) {
     return user;
   }
 
+  // Ссылка-приглашение вида /login?i=КОД — код запоминаем в cookie и отдаём страницу
+  // дальше по цепочке (её рисует server.js). Сам код в адресной строке не оставляем.
+  app.get(['/login', '/login.html'], (req, res, next) => {
+    const code = String(req.query.i || '').trim();
+    if (!code) return next();
+    setInviteCookie(req, res, code);
+    return res.redirect('/login');
+  });
+
   // Публичные пути (без входа): страница логина, health, сам callback авторизации.
   const PUBLIC_EXACT = new Set(['/login', '/login.html', '/api/health', '/auth/telegram', '/auth/code', '/api/me']);
   const isPublic = (p) => PUBLIC_EXACT.has(p) || p.startsWith('/styles') || p === '/favicon.ico';
@@ -182,17 +235,27 @@ export function installAuth(app) {
       photoUrl: data.photo_url || null,
     };
     // Владелец может войти всегда (на случай пустого allowlist).
-    if (!user && tid === OWNER_ID) { userUpsert({ telegramId: tid, isAdmin: 1, status: 'active', note: 'owner' }); user = userGet(tid); }
-    // Автоприём: новый аккаунт сразу активен, но с минимальными правами (роль viewer,
-    // только Дашборд на просмотр). Расширение доступа — по заявке админу.
+    if (!user && tid === OWNER_ID) { userUpsert({ telegramId: tid, isAdmin: 1, role: 'admin', status: 'active', note: 'owner' }); user = userGet(tid); }
+    // Незнакомый аккаунт принимаем ТОЛЬКО по действующему коду приглашения.
+    // Права выдаются пресетом роли, зашитым в код: сотрудник или гость.
     if (!user) {
+      const invite = matchInvite(parseCookies(req)[INVITE_COOKIE]);
+      if (!invite) {
+        clearInviteCookie(res);
+        return res.status(403).send(deniedPage('not_allowed', tid, data.username));
+      }
       userUpsert({
         telegramId: tid, ...profile,
-        status: 'active', isAdmin: 0, role: 'viewer',
-        perms: { tabs: { ...DEFAULT_VIEWER_TABS } }, note: 'автоприём',
+        status: 'active', isAdmin: 0, role: invite.role,
+        perms: { tabs: presetTabs(invite.role) },
+        note: `по приглашению (${invite.label})`,
       });
       user = userGet(tid);
+      const who = [profile.name, profile.username ? '@' + profile.username : null]
+        .filter(Boolean).join(' ') || 'без имени';
+      notifyOwner(`👤 Новый вход в planner\nРоль: ${invite.label}\n${who}\nTelegram-ID: ${tid}\n\nПрава можно изменить: /admin`);
     }
+    clearInviteCookie(res);
     const denial = accessDenial(user); // теперь блокирует только явно blocked/expired
     if (denial) return res.status(403).send(deniedPage(denial, tid, data.username));
     // Успех: ротируем сессию (вытесняем прочие), пишем профиль, ставим cookie.
@@ -222,7 +285,7 @@ export function installAuth(app) {
     codeFails = 0;
     // вход как владелец: гарантируем аккаунт-владельца, выдаём сессию (ротация вытесняет прочие)
     let user = userGet(OWNER_ID);
-    if (!user) { userUpsert({ telegramId: OWNER_ID, isAdmin: 1, status: 'active', note: 'owner' }); user = userGet(OWNER_ID); }
+    if (!user) { userUpsert({ telegramId: OWNER_ID, isAdmin: 1, role: 'admin', status: 'active', note: 'owner' }); user = userGet(OWNER_ID); }
     const sid = newSessionId();
     userMarkLogin(OWNER_ID, { name: (user && user.name) || 'Владелец' }, sid);
     const token = signSession({ tid: OWNER_ID, sid, iat: Math.floor(now / 1000) }, SECRET);

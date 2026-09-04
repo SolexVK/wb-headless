@@ -25,7 +25,7 @@
   <div class="card">
     <div class="logo">🧵</div>
     <h1>Производственный план</h1>
-    <p class="sub">Вход по Telegram-аккаунту. Доступ выдаётся администратором.</p>
+    <p class="sub">Вход по Telegram-аккаунту.<br>Доступ открывается по ссылке-приглашению от администратора.</p>
     <div id="err" class="err" style="display:none"></div>
     <div id="widget"><span class="spin">Загрузка…</span></div>
     <div id="codebox" style="display:none;margin-top:18px;border-top:1px solid #262a33;padding-top:16px">
@@ -46,6 +46,7 @@
       var errMsg = {
         bad_signature: 'Не удалось проверить подпись Telegram. Попробуйте ещё раз.',
         auth_required: 'Требуется вход.',
+        no_invite: 'Нужна ссылка-приглашение. Откройте ссылку, которую дал администратор, и войдите по ней.',
       };
       if (errCode) {
         var e = document.getElementById('err');
@@ -96,7 +97,8 @@
         s.onerror = function () { w.innerHTML = '<span class="spin">Не удалось загрузить виджет Telegram.</span>'; };
         w.appendChild(s);
         document.getElementById('hint').innerHTML =
-          'Нет доступа? После входа вы увидите свой Telegram-ID — передайте его администратору.';
+          'Первый вход — только по ссылке-приглашению. Если её нет, после попытки входа '
+          + 'вы увидите свой Telegram-ID — передайте его администратору.';
       }).catch(function () {
         document.getElementById('widget').innerHTML = '<span class="spin">Сервер недоступен.</span>';
       });

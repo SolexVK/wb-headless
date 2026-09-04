@@ -39,6 +39,7 @@ async function api(path, opts) {
 }
 async function loadAll() {
   state = await api('/api/state');
+  unitDraftApply();   // режим песочницы: поверх общих данных ложится личный черновик
   const r = await api('/api/schedule', { method: 'POST', body: JSON.stringify({}) });
   schedule = r.schedule;
 }
@@ -66,6 +67,38 @@ async function loadPerms() {
   catch { PERMS = null; }
 }
 function tabAllowed(key) { if (!PERMS) return true; const l = PERMS.tabs[key]; return l === 'view' || l === 'edit'; }
+
+// ---------- личный черновик юнит-экономики ----------
+// У сотрудника юнит-экономика открыта на просмотр: писать в общую базу он не может
+// (сервер отрежет), но калькулятор должен оставаться рабочим инструментом. Поэтому его
+// правки живут в браузере: тот же экран и те же формулы, только сохранение — локальное.
+const UNIT_DRAFT_KEY = 'planner:unitDraft:v1';
+function unitSandbox() { return !!(PERMS && PERMS.tabs && PERMS.tabs.unit === 'view'); }
+function unitDraftSave() {
+  try {
+    const articles = {};
+    for (const a of state.articles || []) {
+      if (a.unit != null || a.buyoutPct != null) articles[a.id] = { unit: a.unit, buyoutPct: a.buyoutPct };
+    }
+    localStorage.setItem(UNIT_DRAFT_KEY, JSON.stringify({
+      savedAt: new Date().toISOString(), unit: state.unit || null, articles,
+    }));
+  } catch { /* приватный режим или переполнение — черновик просто не сохранится */ }
+}
+function unitDraftApply() {
+  if (!unitSandbox()) return;
+  let d = null;
+  try { d = JSON.parse(localStorage.getItem(UNIT_DRAFT_KEY) || 'null'); } catch { d = null; }
+  if (!d) return;
+  if (d.unit) state.unit = { ...(state.unit || {}), ...d.unit };
+  for (const a of state.articles || []) {
+    const saved = d.articles && d.articles[a.id];
+    if (!saved) continue;
+    if (saved.unit != null) a.unit = saved.unit;
+    if (saved.buyoutPct != null) a.buyoutPct = saved.buyoutPct;
+  }
+}
+function unitDraftClear() { try { localStorage.removeItem(UNIT_DRAFT_KEY); } catch { /* нечего чистить */ } }
 function tabEditable(key) { if (!PERMS) return true; return PERMS.tabs[key] === 'edit'; }
 function canEditAny() { if (!PERMS) return true; return Object.values(PERMS.tabs).some((v) => v === 'edit'); }
 async function requestAccess() {
@@ -75,7 +108,8 @@ async function requestAccess() {
   catch (e) { toast('Не удалось отправить: ' + e.message, true); }
 }
 function firstAllowedTab() {
-  const order = ['gantt', 'matrix', 'salesplan', 'fact', 'fabric', 'dashboard', 'season', 'unit', 'data'];
+  const order = ['gantt', 'matrix', 'salesplan', 'fact', 'timing', 'fabric', 'dashboard',
+    'season', 'reports', 'supply', 'plancut', 'unit', 'data'];
   return order.find(tabAllowed) || 'dashboard';
 }
 // Спрятать запрещённые вкладки, пометить листы «только просмотр» классом ro,
@@ -88,10 +122,12 @@ function applyAccessUI() {
     btn.style.display = vis ? '' : 'none';
     const view = document.getElementById('view-' + key);
     if (view) {
-      const ro = vis && !tabEditable(key);
+      const sandbox = vis && key === 'unit' && unitSandbox();
+      const ro = vis && !tabEditable(key) && !sandbox;
+      if (sandbox) addSandboxBanner(view);
       view.classList.toggle('ro', ro);
       // баннер «режим просмотра» (один раз на лист)
-      let b = view.querySelector(':scope > .ro-banner');
+      let b = view.querySelector(':scope > .ro-banner:not(.sandbox)');
       if (ro && !b) {
         b = document.createElement('div');
         b.className = 'ro-banner';
@@ -104,6 +140,21 @@ function applyAccessUI() {
   }
   const save = document.getElementById('btn-save');
   if (save && !canEditAny()) save.style.display = 'none';
+}
+// Баннер режима черновика на листе «Юнит-экономика» (ставится один раз).
+function addSandboxBanner(view) {
+  if (view.querySelector(':scope > .ro-banner.sandbox')) return;
+  const b = document.createElement('div');
+  b.className = 'ro-banner sandbox';
+  b.innerHTML = '🧪 Черновик — считайте что угодно: цифры видны только вам в этом браузере '
+    + 'и в общую базу не попадают. '
+    + '<button class="ro-req btn" style="margin-left:8px;padding:2px 10px">Сбросить черновик</button>';
+  b.querySelector('.ro-req').addEventListener('click', () => {
+    if (!confirm('Удалить личный черновик и вернуться к общим цифрам?')) return;
+    unitDraftClear();
+    location.reload();
+  });
+  view.insertBefore(b, view.firstChild);
 }
 // Блокировка ввода в листах «только просмотр» (класс ro на .view). Один перехватчик на
 // документе — переживает перерисовки. Селекты (навигация/фильтры) не трогаем; правки
@@ -5616,6 +5667,7 @@ const uFmtP = (v) => (v == null || !Number.isFinite(v) ? '—' : (v * 100).toFix
 // перерисовки), чтобы введённое не терялось при перезагрузке страницы.
 let unitSaveT;
 function unitPersist() {
+  if (unitSandbox()) { unitDraftSave(); dirty = false; setStatus(); return; }
   clearTimeout(unitSaveT);
   unitSaveT = setTimeout(() => {
     api('/api/state', { method: 'PUT', body: JSON.stringify(state) })
