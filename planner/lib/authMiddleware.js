@@ -241,6 +241,9 @@ export function installAuth(app) {
   }
 
   console.log(`[planner] Telegram-авторизация ВКЛЮЧЕНА (бот @${BOT_USERNAME || '?'}${OWNER_ID ? ', владелец ' + OWNER_ID : ''}).`);
+  if (STAFF_CHAT_ID) console.log(`[planner] сотрудники — по членству в группе ${STAFF_CHAT_ID}`);
+  else if (INVITES.length) console.log('[planner] сотрудники — по коду приглашения (группа не задана)');
+  else console.log('[planner] ВНИМАНИЕ: ни группа сотрудников, ни коды приглашений не заданы — войти сможет только владелец');
 
   // Достать текущего пользователя из cookie (null, если нет/невалиден).
   function currentUser(req) {
@@ -336,6 +339,7 @@ export function installAuth(app) {
   // на общий гостевой аккаунт с правами роли guest. Владельцу приходит уведомление.
   const GUEST_CODE = (process.env.GUEST_LINK_CODE || '').trim();
   const GUEST_AUTO = process.env.GUEST_AUTO === '1';
+  if (GUEST_AUTO) console.log('[planner] ДЕМО-РЕЖИМ: любой заход открывает гостевой просмотр');
   const guestSeen = new Map(); // ip → время последнего уведомления (чтобы не спамить)
 
   // Выдать сессию общего гостевого аккаунта и уведомить владельца о заходе.
