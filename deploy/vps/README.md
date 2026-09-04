@@ -44,6 +44,7 @@ systemctl restart wb-headless                        # после правки .
 | `30-deploy-service.sh` | Клон/обновление кода, `.env`, зависимости, Chrome for Testing, systemd-юнит, health-check |
 | `40-deploy-planner.sh` | То же для planner («производственный план»): клон ветки, `express`, `.env`, systemd-юнит, проверка |
 | `41-deploy-planner-demo.sh` | Демо-стенд planner: тот же код, отдельная **обезличенная** копия базы (`VACUUM INTO` + анонимизатор) |
+| `50-install-backups.sh` | Ежедневные резервные копии (снимок SQLite, конфиги, ротация 14 дней) + systemd-таймер |
 | `add-route.sh` | Добавить маршрут нового сервиса в Caddy по пути (валидация + откат при ошибке) |
 | `add-site.sh` | Опубликовать сервис на отдельном поддомене (валидация + откат при ошибке) |
 | `Caddyfile.template` | Шаблон общего конфига Caddy с маркерами `BEGIN/END ROUTES` |
