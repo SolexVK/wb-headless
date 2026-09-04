@@ -109,16 +109,21 @@ systemctl restart "$SERVICE"
 
 # ---------- проверка ----------
 log "Проверяю, что сервис отвечает"
-# /api/health закрыт паролем, поэтому 401 — тоже успех: сервер жив и защищён.
+# Проверяем КОРЕНЬ, а не /api/health: health публичен по замыслу и при включённой
+# Telegram-авторизации отдаёт 200 — по нему нельзя судить о защите.
+#   302 → редирект на страницу входа (Telegram-авторизация)
+#   401 → запрос пароля (легаси-защита, пока Telegram не настроен)
+#   200 → защиты нет вообще
 code=""
 for _ in $(seq 1 20); do
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$PORT/api/health" || true)"
-  case "$code" in 200|401) break ;; esac
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$PORT/" || true)"
+  case "$code" in 200|302|401) break ;; esac
   sleep 1
 done
 case "$code" in
-  200) warn "Ответ 200 без пароля — авторизация ВЫКЛЮЧЕНА. Впиши PLANNER_PASSWORD в $ENV_FILE и перезапусти." ;;
+  302) log "Сервис поднят, вход через Telegram: http://127.0.0.1:$PORT" ;;
   401) log "Сервис поднят и закрыт паролем: http://127.0.0.1:$PORT" ;;
+  200) warn "Сервис открыт БЕЗ авторизации. Задай TELEGRAM_BOT_TOKEN (или PLANNER_PASSWORD) в $ENV_FILE и перезапусти." ;;
   *)   systemctl --no-pager --lines=30 status "$SERVICE" || true
        die "Сервис не ответил (код «$code») — смотри journalctl -u $SERVICE -n 50" ;;
 esac
