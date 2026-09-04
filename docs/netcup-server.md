@@ -97,9 +97,22 @@ tools.aidemiko.ru, 159-195-41-88.sslip.io {
 
 ### Переезд сервисов — начали 04.09.2026
 
-Первым едет **planner** («производственный план»): порт `127.0.0.1:9100`, отдельный поддомен
-`planner.aidemiko.ru` (во фронтенде зашиты абсолютные `/api/…` и `/admin` — под префиксом не
-заработает). Пошаговая инструкция с переносом базы: [`docs/planner-migration.md`](planner-migration.md).
+**planner («производственный план») переехал 04.09.2026.** Живёт на `127.0.0.1:9100`,
+снаружи — **https://planner.aidemiko.ru/** (отдельный поддомен: во фронтенде зашиты абсолютные
+`/api/…` и `/admin`, под префиксом не заработает), сертификат Let's Encrypt, вход по паролю
+(`admin` + `PLANNER_PASSWORD` из `/opt/planner/planner/data/.env`). База с Mac Mini перенесена
+целиком (`planner.db` 117 МБ, `samples/`, `plans/`, `wb-cache/`), сохранённые версии на месте,
+launchd-агент на Mac Mini выключен. Инструкция: [`docs/planner-migration.md`](planner-migration.md).
+
+Что заметили по дороге:
+
+- `/opt/wb-headless` принадлежит `wbheadless`, а работаем мы под `deploy` — `git pull` падает
+  на «dubious ownership» и молча ничего не обновляет. Обновлять от root
+  (`sudo git config --global --add safe.directory …`), потом возвращать владельца.
+- В `planner/data` на Mac Mini рядом с `.env` лежали `.env.bak` и `.env.save` — при упаковке
+  исключать `.env*`, иначе старые секреты уезжают на сервер.
+- У Mac Mini не было своего ssh-ключа: завели `~/.ssh/id_ed25519` и добавили в
+  `authorized_keys` пользователя `deploy` — понадобится и для остальных сервисов.
 
 Осталось: шаг 6 (ежедневные бэкапы), шаг 7 (остальные сервисы с Mac Mini),
 шаг 8 (БД, когда понадобится).

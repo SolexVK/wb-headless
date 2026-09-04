@@ -64,7 +64,20 @@ curl -s -u admin:ПАРОЛЬ http://127.0.0.1:9100/api/health                  
 
 ## Шаг 3. Перенести базу с Mac Mini
 
-**На Mac Mini** — сначала остановить сервис, чтобы SQLite дописал всё на диск:
+Вход на сервер — только по ключу, а у Mac Mini своего ключа не было. Сначала заводим его
+(пригодится и для переезда остальных сервисов).
+
+**На Mac Mini:**
+```bash
+ssh-keygen -t ed25519 -C "macmini" -f ~/.ssh/id_ed25519 -N ""   # если есть — скажет already exists
+cat ~/.ssh/id_ed25519.pub                                       # скопировать строку целиком
+```
+**На сервере** (в открытой ssh-сессии) — дописать ключ в конец файла:
+```bash
+nano ~/.ssh/authorized_keys      # вставлять ПРАВЫМ КЛИКОМ: Ctrl+V в PowerShell теряет заглавные
+```
+
+**На Mac Mini** — остановить сервис, чтобы SQLite дописал всё на диск:
 
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.wbheadless.planner.plist
@@ -75,7 +88,7 @@ cd ~/wb-headless/planner/data && ls -la          # убедиться, что з
 
 ```bash
 cd ~/wb-headless/planner
-tar czf /tmp/planner-data.tgz --exclude='*.log' --exclude='.env' data
+tar czf /tmp/planner-data.tgz --exclude='*.log' --exclude='.env*' data
 scp /tmp/planner-data.tgz deploy@159.195.41.88:/tmp/
 ```
 
@@ -85,12 +98,16 @@ scp /tmp/planner-data.tgz deploy@159.195.41.88:/tmp/
 sudo systemctl stop planner
 sudo tar xzf /tmp/planner-data.tgz -C /opt/planner/planner
 sudo chown -R planner:planner /opt/planner/planner/data
-sudo chmod 600 /opt/planner/planner/data/.env
+sudo rm -f /opt/planner/planner/data/.env.bak /opt/planner/planner/data/.env.save /tmp/planner-data.tgz
 sudo systemctl start planner
-rm /tmp/planner-data.tgz
+sudo -u planner ls -la /opt/planner/planner/data
 ```
 
-`--exclude='.env'` при упаковке — чтобы серверный `.env` (свой пароль, порт `9100`,
+Маска `--exclude='.env*'` важна: рядом с `.env` на Mac Mini лежали `.env.bak` и `.env.save`
+со старыми секретами. Маска `--exclude='.env'` их не ловит — при первом переезде они уехали
+на сервер и их пришлось удалять руками (команда `rm` выше осталась как страховка).
+
+Исключаем `.env*` при упаковке, чтобы серверный `.env` (свой пароль, порт `9100`,
 `PLANNER_HOST=127.0.0.1`) не затёрся файлом с Mac Mini. Всё остальное распаковывается
 поверх: `state.json`, который сервер создал пустым при первом старте, должен замениться
 настоящим — поэтому распаковываем без `--keep-newer-files`.
@@ -101,7 +118,12 @@ rm /tmp/planner-data.tgz
 Токен — секрет: в git и в переписку не попадает.
 
 **Проверка:** `curl -s -u admin:ПАРОЛЬ http://127.0.0.1:9100/api/health` → `{"ok":true,...}`,
-`journalctl -u planner -n 30 --no-pager` — без ошибок SQLite.
+`journalctl -u planner -n 30 --no-pager` — без ошибок SQLite. Полнота данных: размер
+`planner.db` совпадает с оригиналом, число файлов в `data/samples` — тоже.
+
+> Листинг `ls -l` на Linux и macOS считает ссылки каталогов по-разному (APFS показывает
+> число элементов, ext4 — число подкаталогов), поэтому «`2`» напротив `samples` на сервере
+> ничего не значит. Считать надо содержимое: `ls data/samples | wc -l`.
 
 ## Шаг 4. Опубликовать наружу
 
