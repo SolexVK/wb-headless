@@ -95,7 +95,13 @@ tools.aidemiko.ru, 159-195-41-88.sslip.io {
 После правки: `sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`
 и `sudo systemctl reload caddy`. Сертификат на новое имя Caddy выпишет сам.
 
-Осталось: шаг 6 (ежедневные бэкапы), шаг 7 (переезд сервисов с Mac Mini),
+### Переезд сервисов — начали 04.09.2026
+
+Первым едет **planner** («производственный план»): порт `127.0.0.1:9100`, отдельный поддомен
+`planner.aidemiko.ru` (во фронтенде зашиты абсолютные `/api/…` и `/admin` — под префиксом не
+заработает). Пошаговая инструкция с переносом базы: [`docs/planner-migration.md`](planner-migration.md).
+
+Осталось: шаг 6 (ежедневные бэкапы), шаг 7 (остальные сервисы с Mac Mini),
 шаг 8 (БД, когда понадобится).
 
 ## Дорожная карта
@@ -175,9 +181,15 @@ journalctl -u wb-headless -n 50
 
 ### Шаг 7. Переезд сервисов с Mac Mini
 По одному, по инструкции «Перенос сервисов» в [`docs/vps-setup.md`](vps-setup.md):
-код → свободный loopback-порт (9100+) → systemd-юнит → `add-route.sh /path 9100` → проверка
+код → свободный loopback-порт (9100+) → systemd-юнит → публикация (`add-route.sh /path 9101`
+на общем домене или `add-site.sh sub.aidemiko.ru 9101` отдельным поддоменом) → проверка
 снаружи → и только потом гасим сервис на Mac Mini. После каждого — обновляем реестр портов
 в [`deploy/vps/README.md`](../deploy/vps/README.md).
+
+- [x] **planner** — `https://planner.aidemiko.ru/`, порт 9100,
+      [`docs/planner-migration.md`](planner-migration.md)
+- [ ] FBS-аналитика, getcourse, wbcalc, telegram-бот, дашборд остатков
+- [ ] UNIT-калькулятор (порт 8899) — решаем позже, код пока не локализован
 
 ### Шаг 8. База данных
 Отдельным шагом, когда станет ясно, что храним (история отчётов, очередь задач, пользователи).

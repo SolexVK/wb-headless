@@ -42,9 +42,12 @@ systemctl restart wb-headless                        # после правки .
 | `10-install-node.sh` | Node.js LTS из репозитория NodeSource (`NODE_MAJOR=22`) |
 | `20-install-caddy.sh` | Caddy из офиц. репозитория + `Caddyfile` под твой домен, проверка DNS |
 | `30-deploy-service.sh` | Клон/обновление кода, `.env`, зависимости, Chrome for Testing, systemd-юнит, health-check |
-| `add-route.sh` | Добавить маршрут нового сервиса в Caddy (валидация + откат при ошибке) |
+| `40-deploy-planner.sh` | То же для planner («производственный план»): клон ветки, `express`, `.env`, systemd-юнит, проверка |
+| `add-route.sh` | Добавить маршрут нового сервиса в Caddy по пути (валидация + откат при ошибке) |
+| `add-site.sh` | Опубликовать сервис на отдельном поддомене (валидация + откат при ошибке) |
 | `Caddyfile.template` | Шаблон общего конфига Caddy с маркерами `BEGIN/END ROUTES` |
 | `wb-headless.service` | Шаблон systemd-юнита (loopback, авто-рестарт, journald, ограничения) |
+| `planner.service` | Шаблон systemd-юнита planner (запуск с `--experimental-sqlite`, запись только в `data/`) |
 
 Все скрипты идемпотентны: повторный запуск = обновление, а не поломка.
 
@@ -54,8 +57,9 @@ systemctl restart wb-headless                        # после правки .
 
 | Порт (127.0.0.1) | Сервис | Публичный путь | systemd unit |
 |---|---|---|---|
-| 8080 | wb-headless | `https://<домен>/wb/` | `wb-headless.service` |
-| 9100+ | свободны под переезд с Mac Mini (planner, tandemtrace, getcourse, wbcalc) | — | — |
+| 8080 | wb-headless | `https://tools.aidemiko.ru/wb/` | `wb-headless.service` |
+| 9100 | planner (производственный план) | `https://planner.aidemiko.ru/` | `planner.service` |
+| 9101+ | свободны под переезд с Mac Mini (tandemtrace, getcourse, wbcalc, telegram-бот) | — | — |
 | 2019 | Caddy admin (loopback) | — | `caddy.service` |
 
 Проверить, свободен ли порт: `ss -lntp | grep :9100 || echo свободен`
@@ -63,13 +67,19 @@ systemctl restart wb-headless                        # после правки .
 ## Добавить новый сервис
 
 ```bash
-# 1) сервис слушает 127.0.0.1:9100, автозапуск — свой systemd-юнит (за образец: wb-headless.service)
-# 2) публикуем по пути /mytool:
-sudo bash deploy/vps/add-route.sh /mytool 9100          # префикс срезается (сервис живёт на /)
-sudo bash deploy/vps/add-route.sh /mytool 9100 --keep   # префикс сохраняется
+# 1) сервис слушает 127.0.0.1:9101, автозапуск — свой systemd-юнит (за образец: wb-headless.service)
+# 2) публикуем — по пути на общем домене:
+sudo bash deploy/vps/add-route.sh /mytool 9101          # префикс срезается (сервис живёт на /)
+sudo bash deploy/vps/add-route.sh /mytool 9101 --keep   # префикс сохраняется
+#    или на отдельном поддомене (если сервис требует корень сайта):
+sudo bash deploy/vps/add-site.sh mytool.aidemiko.ru 9101
 # 3) проверяем
 curl -s https://<домен>/mytool/health
 ```
+
+**Путь или поддомен?** По пути — дешевле (одна запись DNS на всё). Поддомен нужен, когда
+во фронтенде зашиты абсолютные пути (`/api/…`, `/admin`) или cookie на корень: переписывать
+их дороже, чем завести имя. По этой причине planner живёт на `planner.aidemiko.ru`.
 
 ## Чего НЕ делать
 
