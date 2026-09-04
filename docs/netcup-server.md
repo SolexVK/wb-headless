@@ -51,8 +51,9 @@
 - `/opt/wb-headless` — ветка `claude/server-setup-fmrhlf`, сервис
   **`wb-headless.service`** на `127.0.0.1:8080`; секреты в `.env` (0600, `wbheadless`);
 - **Caddy 2.11.4** на 80/443, сертификат Let's Encrypt, логи в journald
-  (`journalctl -u caddy`). Публичный вход: **https://159-195-41-88.sslip.io/**,
-  маршрут `/wb` → сервис. Проверено снаружи: `/wb/health` → `{"ok":true}`,
+  (`journalctl -u caddy`). Публичный вход: **https://tools.aidemiko.ru/**, резервный —
+  **https://159-195-41-88.sslip.io/** (оба имени в одном блоке Caddyfile);
+  маршрут `/wb` → сервис. Проверено снаружи на обоих именах: `/wb/health` → `{"ok":true}`,
   сертификат валиден, `http` → `https` редиректом 308;
 - снапшот-точка возврата в SCP: `base-debian13-node-wbheadless` (Offline, 03.09.2026);
 - **цепочка проверена end-to-end**: запрос снаружи на `/wb/reports/niche` вернул
@@ -67,26 +68,32 @@
 - Проверять секреты, не раскрывая их:
   `printf %s "$tok" | tr -cd '[:upper:]' | wc -c` — если заглавных ноль, значение битое.
 
-### Почему временное имя, а не домен
+### Домен — подключён 04.09.2026
 
-`aidemiko.ru` и `aidemiko.online` **не резолвятся**. В реестре делегирование
-корректное (whois TCI: `ns3-l2`, `ns4-l2`, `ns8-l2`, `ns4-cloud`, `ns8-cloud`,
-state `REGISTERED, DELEGATED, VERIFIED`), зоны в DNS-master созданы и
-опубликованы (`tools A 159.195.41.88`, `tools AAAA 2a0a:4cc0:c1:8fbd:d44a:5eff:fe71:f3cf`),
-но серверы услуги не отвечают авторитативно: Google, Cloudflare и AdGuard дают
-SERVFAIL, Cloudflare с `EDE 22 No Reachable Authority at delegation`. Заведено
-обращение в поддержку RU-CENTER. Пока используется `sslip.io` — публичный
-wildcard-DNS, отдающий IP прямо из имени.
+`tools.aidemiko.ru` резолвится (`A 159.195.41.88`, `AAAA 2a0a:4cc0:c1:8fbd:d44a:5eff:fe71:f3cf`),
+зона на серверах DNS-master отвечает, сертификат Let's Encrypt выписан.
 
-### Переключение на домен, когда зона оживёт
+История вопроса: сутки домены `aidemiko.ru` и `aidemiko.online` не резолвились вообще —
+делегирование в реестре было корректным (whois TCI: `ns3-l2`, `ns4-l2`, `ns8-l2`, `ns4-cloud`,
+`ns8-cloud`), зоны в DNS-master заполнены и опубликованы, но серверы услуги не отвечали
+авторитативно: Google, Cloudflare и AdGuard давали SERVFAIL, Cloudflare с
+`EDE 22 No Reachable Authority at delegation`. Починилось на стороне RU-CENTER.
+`aidemiko.online` на 04.09.2026 всё ещё не резолвится — нам он не нужен.
 
-```bash
-sudo sed -i 's/159-195-41-88.sslip.io/tools.aidemiko.ru/' /etc/caddy/Caddyfile
-sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-sudo systemctl reload caddy
+Уроки: панель регистратора показывает намерение, а не факт. Проверять надо резолверами
+(`https://dns.google/resolve?name=…`, `https://cloudflare-dns.com/dns-query?name=…` — у Cloudflare
+полезная расшифровка EDE) и whois реестра (`https://api.whois.vu/?q=aidemiko.ru`).
+Пока домен лежал, работали через `sslip.io` — публичный wildcard-DNS, отдающий IP прямо из имени;
+это позволило не ждать регистратора и поднять рабочий HTTPS сразу.
+
+### Как добавить ещё одно имя к сайту
+
+В `/etc/caddy/Caddyfile` имена перечисляются через запятую в строке блока:
 ```
-Маршруты при этом сохраняются, сертификат на новое имя Caddy выпишет сам.
-Проверка: `curl -s https://tools.aidemiko.ru/wb/health`.
+tools.aidemiko.ru, 159-195-41-88.sslip.io {
+```
+После правки: `sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`
+и `sudo systemctl reload caddy`. Сертификат на новое имя Caddy выпишет сам.
 
 Осталось: шаг 6 (ежедневные бэкапы), шаг 7 (переезд сервисов с Mac Mini),
 шаг 8 (БД, когда понадобится).

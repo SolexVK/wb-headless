@@ -20,20 +20,18 @@
 - Node.js 22.23.2, npm 10.9.8 (NodeSource).
 - `wb-headless.service` слушает `127.0.0.1:8080`, автозапуск, секреты в `/opt/wb-headless/.env`
   (0600, владелец `wbheadless`).
-- Caddy 2.11.4 на 80/443, сертификат Let's Encrypt, логи в journald. Публичный вход:
-  **https://159-195-41-88.sslip.io/**, маршрут `/wb` → сервис.
+- Caddy 2.11.4 на 80/443, сертификаты Let's Encrypt, логи в journald. Публичный вход:
+  **https://tools.aidemiko.ru/**, резервный — **https://159-195-41-88.sslip.io/**
+  (оба имени в одном блоке Caddyfile), маршрут `/wb` → сервис.
 - Цепочка проверена end-to-end: запрос снаружи на `/wb/reports/niche` вернул `http 200`
   и полный JSON-анализ ниши (интернет → Caddy → сервис → MPStats).
 - Снапшот-точка возврата в SCP: `base-debian13-node-wbheadless` (Offline, 03.09.2026) — сделан
   ДО установки Caddy и до правки токена.
 
 Что красное:
-- **Домены `aidemiko.ru` и `aidemiko.online` не резолвятся вообще.** Делегирование в реестре
-  корректное (whois TCI: `ns3-l2`, `ns4-l2`, `ns8-l2`, `ns4-cloud`, `ns8-cloud`, состояние
-  `REGISTERED, DELEGATED, VERIFIED`), зоны в DNS-master заполнены и опубликованы, но серверы услуги
-  не отвечают авторитативно. Google, Cloudflare и AdGuard дают SERVFAIL; Cloudflare с расшифровкой
-  `EDE 22 No Reachable Authority at delegation`. Это сторона RU-CENTER, из кабинета не чинится.
-  Обходимся временным именем через `sslip.io`.
+- `aidemiko.online` по-прежнему не резолвится (SERVFAIL). Нам он не нужен — работаем на `.ru`.
+  (`aidemiko.ru` лежал сутки по той же причине и починился на стороне RU-CENTER 04.09.2026;
+  подробности и уроки — в `docs/netcup-server.md`.)
 
 Параметры сервера (полный паспорт — `docs/netcup-server.md`): VPS 4000 G12, Nuremberg,
 12 vCPU / 32 ГБ / 1 ТБ, IPv4 `159.195.41.88`, IPv6 `2a0a:4cc0:c1:8fbd:d44a:5eff:fe71:f3cf`,
@@ -117,13 +115,13 @@ sudo ss -lntp | grep -E ':(80|443|8080)'       # 8080 только на 127.0.0.
 ufw status verbose                             # активен, открыты 22/80/443
 
 # 3. Снаружи (из PowerShell на своём компьютере — именно curl.exe)
-curl.exe -s https://159-195-41-88.sslip.io/wb/health          # {"ok":true,...}
-curl.exe -s -o nul -w "%{http_code}\n" https://159-195-41-88.sslip.io/wb/reports/niche  # 401 без ключа
+curl.exe -s https://tools.aidemiko.ru/wb/health                # {"ok":true,...}
+curl.exe -s -o nul -w "%{http_code}\n" https://tools.aidemiko.ru/wb/reports/niche  # 401 без ключа
 
 # 4. Боевой отчёт (на сервере, ключ читаем из .env — не вставляем руками)
 key=$(sudo grep -i '^api_key=' /opt/wb-headless/.env | cut -d= -f2 | tr -d '\r')
 curl -s --header "x-api-key: $key" -o /tmp/niche.json -w 'http %{http_code}\n' \
-  "https://159-195-41-88.sslip.io/wb/reports/niche?path=%d0%96%d0%b5%d0%bd%d1%89%d0%b8%d0%bd%d0%b0%d0%bc/%d0%9e%d0%b4%d0%b5%d0%b6%d0%b4%d0%b0/%d0%9f%d0%bb%d0%b0%d1%82%d1%8c%d1%8f&maxRows=200"
+  "https://tools.aidemiko.ru/wb/reports/niche?path=%d0%96%d0%b5%d0%bd%d1%89%d0%b8%d0%bd%d0%b0%d0%bc/%d0%9e%d0%b4%d0%b5%d0%b6%d0%b4%d0%b0/%d0%9f%d0%bb%d0%b0%d1%82%d1%8c%d1%8f&maxRows=200"
 head -c 300 /tmp/niche.json
 
 # 5. Состояние DNS доменов (с любой машины с интернетом)
@@ -134,18 +132,15 @@ sudo journalctl -u wb-headless -n 50 --no-pager
 sudo journalctl -u caddy -n 50 --no-pager
 ```
 
-**Ожидаемое состояние (зелёное на 03.09.2026):** `bash -n` и `node --check` — OK;
+**Ожидаемое состояние (зелёное на 04.09.2026):** `bash -n` и `node --check` — OK;
 `wb-headless` и `caddy` — `active`; снаружи `/wb/health` → `{"ok":true}`, без ключа → `401`,
 с ключом `/wb/reports/niche` → `http 200` и JSON с данными; сертификат валиден, `http` → `https` (308).
-**Красное и ожидаемо красное:** `tools.aidemiko.ru` и `tools.aidemiko.online` не резолвятся
-(`Status 2` / SERVFAIL) — это проблема RU-CENTER, не наша конфигурация. Если завтра `/wb/health`
-не отвечает, а DNS всё так же красный — сломалось что-то другое, смотреть логи по п.6.
+**Красное и ожидаемо красное:** `tools.aidemiko.online` не резолвится (`Status 2` / SERVFAIL) —
+домен `.online` мы не используем. Если `/wb/health` перестанет отвечать — смотреть логи по п.6.
 
 ## Открытые вопросы (нужно решение пользователя)
-- **Ответ RU-CENTER по зонам.** Если поддержка не поднимет зоны в разумный срок — переносим DNS
-  в Cloudflare (бесплатно): в RU-CENTER остаётся только вписать два NS Cloudflare, записи ведём там,
-  проксирование для наших записей выключено (иначе Caddy не выпустит сертификат).
-  Рекомендация: дать поддержке один рабочий день, дальше уходить на Cloudflare. ЖДУ РЕШЕНИЯ.
+- ~~Ответ RU-CENTER по зонам~~ — закрыт: зона `aidemiko.ru` заработала 04.09.2026,
+  домен подключён, переезд на Cloudflare не понадобился.
 - **Влить ли ветку `claude/server-setup-fmrhlf` в `main`.** Сейчас сервер работает именно с этой
   ветки, а в `main` скриптов нет. Рекомендация: открыть PR и влить, чтобы `main` был источником
   правды, а на сервере переключиться на `main`. ЖДУ РЕШЕНИЯ (PR не открывался).
@@ -156,8 +151,8 @@ sudo journalctl -u caddy -n 50 --no-pager
 
 ## Следующий шаг
 Сделать свежий снапшот в SCP (Media → Snapshots, Offline) с именем вроде
-`base-debian13-caddy-wbheadless` — текущая точка возврата сделана до установки Caddy и до
-исправления токена. После этого выбрать первый сервис для переезда с Mac Mini и пройти процедуру
+`base-debian13-caddy-domain` — текущая точка возврата сделана до установки Caddy, до исправления
+токена и до подключения домена. После этого выбрать первый сервис для переезда с Mac Mini и пройти процедуру
 из раздела «Перенос сервисов» в `docs/vps-setup.md`: код на сервер → свободный порт 9100+ →
 systemd-юнит по образцу `deploy/vps/wb-headless.service` → `sudo bash deploy/vps/add-route.sh /calc 9100`
 → проверка снаружи → и только потом гасим сервис на Mac Mini.
