@@ -1,0 +1,43 @@
+# fbs.service — ставится скриптом deploy/vps/60-deploy-fbs.sh
+# ({{...}} подставляются при установке).
+[Unit]
+Description=FBS-аналитика (мульти-тенант отчёты Wildberries)
+Documentation=https://github.com/SolexVK/wb-headless/tree/claude/fbs-fullfilment-branch-cfvgir/service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{APP_USER}}
+Group={{APP_USER}}
+# Отчёты запускаются как отдельные процессы (node scripts/…, python3 …) с рабочим
+# каталогом репозитория — поэтому WorkingDirectory именно корень, а не service/.
+WorkingDirectory={{APP_DIR}}
+EnvironmentFile={{APP_DIR}}/service/.env
+Environment=HOME=/var/lib/{{APP_USER}}
+Environment=NODE_ENV=production
+# node:sqlite до сих пор за флагом (Node 22)
+ExecStart=/usr/bin/node --experimental-sqlite {{APP_DIR}}/service/server.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+KillMode=mixed
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fbs
+
+# Пишет только в свой data/ (база, снимки остатков, артефакты отчётов по кабинетам).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ReadWritePaths={{DATA_DIR}}
+# Chromium для PDF форкает процессы
+LimitNOFILE=16384
+TasksMax=2048
+
+[Install]
+WantedBy=multi-user.target

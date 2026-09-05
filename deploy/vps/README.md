@@ -44,11 +44,13 @@ systemctl restart wb-headless                        # после правки .
 | `30-deploy-service.sh` | Клон/обновление кода, `.env`, зависимости, Chrome for Testing, systemd-юнит, health-check |
 | `40-deploy-planner.sh` | То же для planner («производственный план»): клон ветки, `express`, `.env`, systemd-юнит, проверка |
 | `41-deploy-planner-demo.sh` | Демо-стенд planner: тот же код, отдельная **обезличенная** копия базы (`VACUUM INTO` + анонимизатор) |
+| `60-deploy-fbs.sh` | FBS-аналитика: код, python3+openpyxl (Excel), Playwright+Chromium (PDF), systemd-юнит |
 | `50-install-backups.sh` | Ежедневные резервные копии (снимок SQLite, конфиги, ротация 14 дней) + systemd-таймер |
 | `add-route.sh` | Добавить маршрут нового сервиса в Caddy по пути (валидация + откат при ошибке) |
 | `add-site.sh` | Опубликовать сервис на отдельном поддомене (валидация + откат при ошибке) |
 | `Caddyfile.template` | Шаблон общего конфига Caddy с маркерами `BEGIN/END ROUTES` |
 | `wb-headless.service` | Шаблон systemd-юнита (loopback, авто-рестарт, journald, ограничения) |
+| `fbs.service` | Шаблон systemd-юнита FBS (рабочий каталог — корень репозитория: отчёты запускаются как отдельные процессы) |
 | `planner.service` | Шаблон systemd-юнита planner — общий для боевого и демо (`{{SERVICE}}`, `{{DESC}}`) |
 
 Все скрипты идемпотентны: повторный запуск = обновление, а не поломка.
@@ -60,8 +62,10 @@ systemctl restart wb-headless                        # после правки .
 | Порт (127.0.0.1) | Сервис | Публичный путь | systemd unit |
 |---|---|---|---|
 | 8080 | wb-headless | `https://tools.aidemiko.ru/wb/` | `wb-headless.service` |
-| 9100 | planner (производственный план) | `https://planner.aidemiko.ru/` | `planner.service` |
+| 9100 | planner (производственный план) | `https://planner.aidemiko.ru/` | `fbs.service` | Шаблон systemd-юнита FBS (рабочий каталог — корень репозитория: отчёты запускаются как отдельные процессы) |
+| `planner.service` |
 | 9101 | planner ДЕМО (обезличенная копия) | `https://demo.aidemiko.ru/` | `planner-demo.service` |
+| 9110 | FBS-аналитика (мульти-тенант отчёты WB) | `https://tools.aidemiko.ru/fbs/` | `fbs.service` |
 | 9102+ | свободны под переезд с Mac Mini (tandemtrace, getcourse, wbcalc, telegram-бот) | — | — |
 | 2019 | Caddy admin (loopback) | — | `caddy.service` |
 
