@@ -270,9 +270,11 @@
       <p class="tag">Риск низкий · сразу даёт пять отчётов и четыре навыка</p>
     </li>
     <li>
-      <h3>Выбрать эталон для <code>lib/mpstats.js</code></h3>
-      <p>Четыре версии, ни одна не надмножество. Нужно решение человека: скорее всего основой берётся версия <code>main</code> как самая полная, а функции сезонности и каскада доносятся из двух других. Механически слить нельзя.</p>
-      <p class="tag">Требует вашего решения · блокирует всё дальнейшее</p>
+      <h3>Свести <code>lib/mpstats.js</code>: main плюс четыре функции</h3>
+      <p><strong>Проверено по экспортам, а не по размерам файлов — вывод мягче, чем я писал раньше.</strong> Версия <code>main</code> покрывает <code>database</code> целиком и <code>wildberries-tools</code> по составу функций: <code>fetchItemDailySales</code> и <code>fetchSearchResults</code> есть в обеих, а шесть категорийных функций — только в <code>main</code>.</p>
+      <p>Уникальное есть лишь в <code>sales-plan</code>, четыре функции: <code>fetchCategoryItems</code>, <code>normalizeCategoryItem</code>, <code>dateAxis</code> и <code>extractItemDailyFromGraphs</code>. Последняя и даёт тот самый приём «весь прогноз за четыре запроса» — дневные ряды вытаскиваются из графиков категории вместо опроса каждого товара.</p>
+      <p>Значит план простой: берём <code>main</code> как основу и переносим в неё эти четыре функции. Различия в общих функциях между <code>main</code> и <code>wildberries-tools</code> косметические — вынесенные хелперы <code>apiGet</code>/<code>apiPost</code> и <code>pickRows</code>.</p>
+      <p class="tag">Решения не требует · сверить прогоном после переноса</p>
     </li>
     <li>
       <h3>Перенести доступ к WB</h3>
