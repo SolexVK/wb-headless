@@ -45,6 +45,9 @@ snap_db() { # $1 — путь к базе, $2 — имя в архиве
   # а не открываем весь временный каталог. VACUUM INTO — единственный корректный способ
   # скопировать живую базу SQLite: обычный cp не заберёт данные из WAL-журнала.
   local snapdir="$WORK/.snap-$owner"
+  # 711 на временный каталог: владелец базы должен ВОЙТИ в свой подкаталог, но не
+  # читать соседние файлы. Без этого снимок молча не создавался (каталог был 700 root).
+  chmod 711 "$WORK"
   install -d -m 700 -o "$owner" -g "$owner" "$snapdir"
   if runuser -u "$owner" -- node --experimental-sqlite -e "
       const { DatabaseSync } = require('node:sqlite');
@@ -57,6 +60,7 @@ snap_db() { # $1 — путь к базе, $2 — имя в архиве
     echo "[backup] не удалось снять $1" >&2
   fi
   rm -rf "$snapdir"
+  chmod 700 "$WORK"
 }
 
 # базы данных сервисов
@@ -91,8 +95,18 @@ find "$BACKUP_DIR" -maxdepth 1 -name 'planner-*.tar.gz' -mtime "+$KEEP_DAYS" -de
 SIZE="$(du -h "$OUT" | cut -f1)"
 echo "[backup] готово: $OUT ($SIZE)"
 
-# Проверка: архив читается и база в нём открывается. Битый бэкап хуже отсутствующего.
+# Проверки. Битый или пустой бэкап хуже отсутствующего: он создаёт ложное спокойствие.
 if ! tar tzf "$OUT" >/dev/null 2>&1; then echo "[backup] АРХИВ БИТЫЙ: $OUT" >&2; exit 1; fi
+if [ -f /opt/planner/planner/data/planner.db ]; then
+  DB_BYTES="$(tar tzvf "$OUT" | awk '$NF ~ /planner\.db$/ {print $3; exit}')"
+  if [ -z "$DB_BYTES" ]; then
+    echo "[backup] В АРХИВЕ НЕТ planner.db — снимок базы не удался" >&2; exit 1
+  fi
+  if [ "$DB_BYTES" -lt 1000000 ]; then
+    echo "[backup] planner.db в архиве подозрительно мал ($DB_BYTES байт)" >&2; exit 1
+  fi
+  echo "[backup] база в архиве: $DB_BYTES байт"
+fi
 EOF
 chmod 755 /usr/local/sbin/planner-backup
 
