@@ -1,0 +1,39 @@
+# wb-headless.service — ставится скриптом deploy/vps/30-deploy-service.sh
+# в /etc/systemd/system/wb-headless.service ({{...}} подставляются при установке).
+[Unit]
+Description=wb-headless (WB API + отчёты MPStats)
+Documentation=https://github.com/SolexVK/wb-headless
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{APP_USER}}
+Group={{APP_USER}}
+WorkingDirectory={{APP_DIR}}
+EnvironmentFile={{APP_DIR}}/.env
+ExecStart=/usr/bin/node {{APP_DIR}}/server.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+KillMode=mixed
+
+# логи в journald: journalctl -u wb-headless -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wb-headless
+
+# Ограничения: сервису нужен только свой каталог (puppeteer пишет профили в /tmp).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ReadWritePaths={{APP_DIR}}
+# chromium форкает много процессов
+LimitNOFILE=65535
+TasksMax=4096
+
+[Install]
+WantedBy=multi-user.target

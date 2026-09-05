@@ -1,0 +1,41 @@
+# Шаблон юнита planner. Ставится скриптами deploy/vps/40-deploy-planner.sh (боевой)
+# и 41-deploy-planner-demo.sh (демо-стенд); {{...}} подставляются при установке.
+[Unit]
+Description={{DESC}}
+Documentation=https://github.com/SolexVK/wb-headless/blob/claude/production-plan-twv8ki/planner/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{APP_USER}}
+Group={{APP_USER}}
+# server.js резолвит data/ и public/ относительно себя, но start.sh на Mac Mini
+# запускал его из корня репозитория — держим то же поведение.
+WorkingDirectory={{APP_DIR}}
+EnvironmentFile={{DATA_DIR}}/.env
+# node:sqlite до сих пор за флагом --experimental-sqlite (Node 22)
+ExecStart=/usr/bin/node --experimental-sqlite {{APP_DIR}}/planner/server.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+KillMode=mixed
+
+# логи в journald: journalctl -u {{SERVICE}} -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier={{SERVICE}}
+
+# Ограничения: пишет только в свой data/ (БД, состояние, образцы тканей).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ReadWritePaths={{DATA_DIR}}
+LimitNOFILE=8192
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

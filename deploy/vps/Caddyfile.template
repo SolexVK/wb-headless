@@ -1,0 +1,34 @@
+# Caddyfile — единый вход для ВСЕХ сервисов на этом VPS.
+# Ставится скриптом deploy/vps/20-install-caddy.sh в /etc/caddy/Caddyfile
+# ({{DOMAIN}} и {{EMAIL}} подставляются при установке).
+#
+# ЗОЛОТОЕ ПРАВИЛО (то же, что на Mac Mini): новый сервис = новый блок здесь,
+# слушает 127.0.0.1:<порт>, наружу не торчит. Ничего, кроме Caddy, на 80/443.
+# Добавлять маршруты удобнее скриптом: deploy/vps/add-route.sh /mytool 9100
+
+{
+	email {{EMAIL}}
+	# admin по умолчанию только на 127.0.0.1:2019
+}
+
+{{DOMAIN}} {
+	encode zstd gzip
+	# Логи доступа — в journald (systemd): journalctl -u caddy -f
+	# Файловый лог не используем: юнит Caddy идёт с ProtectSystem=full,
+	# и запись в /var/log/caddy стабильно упирается в права.
+
+	# --- BEGIN ROUTES (добавляем ВЫШЕ маркера END: специфичные пути раньше общего) ---
+
+	# wb-headless: снаружи https://{{DOMAIN}}/wb/health → внутрь 127.0.0.1:8080/health
+	redir /wb /wb/
+	handle_path /wb/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# --- END ROUTES ---
+
+	# всё остальное
+	handle {
+		respond "wb-headless VPS. Сервисы живут по путям, см. deploy/vps/README.md" 200
+	}
+}
