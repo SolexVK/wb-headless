@@ -60,6 +60,11 @@ auth-state.json
 *.sqlite
 *.sqlite-*
 *.tar.gz
+.env
+.env.*
+*.env
+logs/
+*.log
 X
 rsync -a --exclude-from="$EXCL" "$WS/" "$REPO/workspace/"
 ok "$(find "$REPO/workspace" -type f | wc -l | tr -d ' ') файлов"
@@ -99,7 +104,7 @@ ls -la "$OC" > "$REPO/config/openclaw-dir-listing.txt" 2>/dev/null || true
 log "Postgres: схемы, расширения, размеры → repo; полные дампы → data"
 mkdir -p "$REPO/db/postgres" "$DATA/postgres"
 if command -v psql >/dev/null 2>&1 && psql -lqt >/dev/null 2>&1; then
-  psql -lqt | cut -d'|' -f1 | sed 's/ //g' | grep -vE '^(template0|template1|postgres|)$' > "$REPO/db/postgres/databases.txt"
+  psql -lqt | cut -d'|' -f1 | sed 's/ //g' | grep -vE '^(template0|template1|postgres)?$' > "$REPO/db/postgres/databases.txt"
   while read -r db; do
     [ -n "$db" ] || continue
     pg_dump -s "$db" > "$REPO/db/postgres/$db.schema.sql" 2>/dev/null && ok "схема $db"
@@ -181,9 +186,23 @@ node_modules/
 venv/
 .venv/
 __pycache__/
+.git/
+hermes-agent/
+sessions/
+request_dump_*
+*.log
 X
   mkdir -p "$REPO/helios" "$DATA/sqlite"
   rsync -a --exclude-from="$OUT/.rsync-exclude-hermes" "$HERMES/" "$REPO/helios/"
+  # исходники движка Hermes в git не кладём — только откуда они и какой коммит
+  if [ -d "$HERMES/hermes-agent/.git" ]; then
+    { echo "remote: $(git -C "$HERMES/hermes-agent" remote get-url origin 2>/dev/null)"
+      echo "commit: $(git -C "$HERMES/hermes-agent" rev-parse HEAD 2>/dev/null)"
+      echo "branch: $(git -C "$HERMES/hermes-agent" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    } > "$REPO/helios/HERMES-SOURCE.txt"
+  fi
+  # история сессий Гелиоса → data (без сырых дампов запросов: в них ключи)
+  [ -d "$HERMES/sessions" ] && tar -czf "$DATA/helios-sessions.tar.gz" --exclude='request_dump_*' -C "$HERMES" sessions 2>/dev/null && ok "helios sessions → data"
   # текстовые конфиги: строки с ключами/токенами → <redacted>
   find "$REPO/helios" -maxdepth 2 -type f \( -name '*.yaml' -o -name '*.yml' -o -name '*.json' -o -name '*.toml' \) | while read -r cf; do
     sed -i '' -E 's/^([[:space:]]*"?[A-Za-z_]*(token|secret|password|passwd|api_?key|apikey|private|credential|auth)[A-Za-z_]*"?[[:space:]]*[:=][[:space:]]*).*$/\1<redacted>/I' "$cf" 2>/dev/null || true
@@ -204,6 +223,33 @@ X
 else
   warn "~/.hermes не найден — Гелиос пропущен"
 fi
+
+# ---------------------------------------------------------------- 5c. База готовых агентов (Markdown), если указана
+if [ -n "${AGENTS_DIR:-}" ] && [ -d "$AGENTS_DIR" ]; then
+  log "База агентов $AGENTS_DIR → repo/agents-library"
+  mkdir -p "$REPO/agents-library"
+  rsync -a --exclude='.git/' --exclude='node_modules/' --exclude='.env' "$AGENTS_DIR/" "$REPO/agents-library/"
+  ok "$(find "$REPO/agents-library" -type f | wc -l | tr -d ' ') файлов"
+fi
+
+# ---------------------------------------------------------------- 5d. HANDOFF от архитектора + README
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+[ -f "$SELF_DIR/../docs/sirius-handoff.md" ] && cp "$SELF_DIR/../docs/sirius-handoff.md" "$REPO/HANDOFF.md" && ok "HANDOFF.md"
+cat > "$REPO/README.md" <<'R'
+# sirius
+
+Сириус — личный ИИ-ассистент (переезд с Mac Mini / OpenClaw на VPS / Claude Code) и его брат Гелиос (Hermes).
+
+- `HANDOFF.md` — состояние проекта и план переноса. **Начинать чтение отсюда.**
+- `INVENTORY.md` — что где лежало на Mac Mini (размеры, даты, процессы).
+- `workspace/` — рабочее пространство Сириуса: SOUL, IDENTITY, USER, MEMORY, memory/ (дневники, dreaming), scripts/, skills/, projects/, docs/.
+- `helios/` — знания Гелиоса (без исходников движка Hermes, см. `helios/HERMES-SOURCE.txt`).
+- `config/` — конфиг OpenClaw (секреты вырезаны), launchd, crontab, пакеты.
+- `db/` — схемы всех баз (Postgres, SQLite) с числом строк; маленькие дампы Postgres.
+- `agents-library/` — база готовых агентов (если экспортирована).
+
+Полные данные (SQLite, дампы Postgres, история сессий) — НЕ в git: архив `sirius-data-*.tar.gz` на VPS в `/opt/sirius/memory/import/`.
+R
 
 # ---------------------------------------------------------------- 6. INVENTORY.md
 log "INVENTORY.md"
@@ -241,7 +287,23 @@ auth-profiles.json
 *.db
 *.sqlite
 *.sqlite-*
+.env
+.env.*
+*.env
 G
+# сначала вырезаем известные форматы ключей из текстовых файлов (файлы с приватными ключами удаляем целиком)
+grep -rIlE -- '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' "$REPO" 2>/dev/null | while read -r f; do rm -f "$f"; warn "удалён (приватный ключ): ${f#$REPO/}"; done
+find "$REPO" -type f -size -2000k \( -name '*.md' -o -name '*.txt' -o -name '*.json' -o -name '*.py' -o -name '*.sh' -o -name '*.yaml' -o -name '*.yml' -o -name '*.toml' -o -name '*.migrated' -o -name '*.jsonl' -o -name '*.tsv' \) 2>/dev/null | while read -r f; do
+  LC_ALL=C sed -i '' -E \
+    -e 's/sk-ant-[A-Za-z0-9_-]{20,}/<redacted>/g' \
+    -e 's/sk-[A-Za-z0-9_-]{20,}/<redacted>/g' \
+    -e 's/ghp_[A-Za-z0-9]{20,}/<redacted>/g' \
+    -e 's/github_pat_[A-Za-z0-9_]{20,}/<redacted>/g' \
+    -e 's/xox[abp]-[A-Za-z0-9-]{10,}/<redacted>/g' \
+    -e 's/AKIA[0-9A-Z]{16}/<redacted>/g' \
+    -e 's/[0-9]{8,}:[A-Za-z0-9_-]{35}/<redacted>/g' \
+    "$f" 2>/dev/null || true
+done
 HITS="$(grep -rIlE '(sk-ant-|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|xox[abp]-|AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|[0-9]{8,}:[A-Za-z0-9_-]{35})' "$REPO" 2>/dev/null || true)"
 if [ -n "$HITS" ]; then
   warn "Похоже на секреты — ПРОВЕРЬ и вычисти перед push:"; echo "$HITS" | sed 's/^/      /'
