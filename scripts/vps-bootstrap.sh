@@ -54,7 +54,7 @@ fi
 
 # --- 5. git: доверять /opt/wb-headless, даже если владелец другой -------------
 log "git safe.directory"
-for d in /opt/wb-headless /opt/sirius; do
+for d in /opt/wb-headless /opt/sirius /opt/sirius/wb-headless; do
   if [ -d "$d" ]; then
     git config --global --add safe.directory "$d" 2>/dev/null || true
     ok "$d"
@@ -81,7 +81,7 @@ cat <<'NEXT'
 Дальше — руками, один раз (после этого ручной ввод заканчивается):
   1) source ~/.bashrc
   2) tmux new -s sirius            # постоянная сессия
-  3) cd /opt/wb-headless && claude # войти подпиской: /login
+  3) cd /opt/sirius/wb-headless && claude   # войти подпиской: /login
   4) внутри Claude Code:
        /plugin marketplace add anthropics/claude-plugins-official
        /plugin install telegram@claude-plugins-official     # scope: user
