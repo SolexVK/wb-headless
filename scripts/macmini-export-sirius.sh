@@ -191,9 +191,44 @@ hermes-agent/
 sessions/
 request_dump_*
 *.log
+.archive/
+env/
+venv*/
+.venv*/
+site-packages/
+lib/python*/
+bin/
+models/
+browser/
+user-data/
+.cache/
+Cache/
+dist/
+build/
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
+*.onnx
+*.whl
+*.zip
+*.tar
+*.dmg
+*.pkg
+*.mp3
+*.mp4
+*.wav
+*.ogg
+*.m4a
 X
   mkdir -p "$REPO/helios" "$DATA/sqlite"
   rsync -a --exclude-from="$OUT/.rsync-exclude-hermes" "$HERMES/" "$REPO/helios/"
+  # что именно занимает место — в файл и на экран (для настройки исключений)
+  { echo "== размер каталогов helios =="; du -sh "$REPO/helios"/* 2>/dev/null | sort -rh | head -20
+    echo; echo "== число файлов по каталогам (2 уровня) =="
+    find "$REPO/helios" -type f | awk -F/ '{print $(NF-2)"/"$(NF-1)}' | sort | uniq -c | sort -rn | head -20
+  } | tee "$REPO/helios/TREE-SIZES.txt"
   # исходники движка Hermes в git не кладём — только откуда они и какой коммит
   if [ -d "$HERMES/hermes-agent/.git" ]; then
     { echo "remote: $(git -C "$HERMES/hermes-agent" remote get-url origin 2>/dev/null)"
@@ -293,7 +328,7 @@ auth-profiles.json
 G
 # сначала вырезаем известные форматы ключей из текстовых файлов (файлы с приватными ключами удаляем целиком)
 grep -rIlE -- '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' "$REPO" 2>/dev/null | while read -r f; do rm -f "$f"; warn "удалён (приватный ключ): ${f#$REPO/}"; done
-find "$REPO" -type f -size -2000k \( -name '*.md' -o -name '*.txt' -o -name '*.json' -o -name '*.py' -o -name '*.sh' -o -name '*.yaml' -o -name '*.yml' -o -name '*.toml' -o -name '*.migrated' -o -name '*.jsonl' -o -name '*.tsv' \) 2>/dev/null | while read -r f; do
+find "$REPO" -type f -size -20000k \( -name '*.md' -o -name '*.txt' -o -name '*.json' -o -name '*.py' -o -name '*.sh' -o -name '*.yaml' -o -name '*.yml' -o -name '*.toml' -o -name '*.migrated' -o -name '*.jsonl' -o -name '*.tsv' \) 2>/dev/null | while read -r f; do
   LC_ALL=C sed -i '' -E \
     -e 's/sk-ant-[A-Za-z0-9_-]{20,}/<redacted>/g' \
     -e 's/sk-[A-Za-z0-9_-]{20,}/<redacted>/g' \
@@ -312,6 +347,13 @@ else
 fi
 
 # ---------------------------------------------------------------- 8. git + архив
+log "Размер repo по каталогам"
+du -sh "$REPO"/* 2>/dev/null | sort -rh | head -12 | sed 's/^/    /'
+REPO_MB=$(du -sm "$REPO" | cut -f1)
+if [ "$REPO_MB" -gt 300 ]; then
+  warn "repo занимает ${REPO_MB} МБ — для GitHub это много. Смотри helios/TREE-SIZES.txt и пришли его: добавим исключения."
+fi
+
 log "git-репозиторий"
 cd "$REPO" && git init -q -b main 2>/dev/null || git init -q
 git add -A && git -c user.name="Sirius export" -c user.email="solexvk@gmail.com" commit -qm "Экспорт Сириуса с Mac Mini $STAMP" && ok "коммит готов ($(git ls-files | wc -l | tr -d ' ') файлов, $(du -sh . | cut -f1))"
