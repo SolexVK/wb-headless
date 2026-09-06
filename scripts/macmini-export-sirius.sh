@@ -69,6 +69,9 @@ logs/
 *.db-shm
 session-corpus/
 archive-migrated-*/
+content-factory/
+tmp/
+*.bak
 *.gz
 *.zip
 media/
