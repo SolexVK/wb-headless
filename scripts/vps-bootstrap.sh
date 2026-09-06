@@ -61,8 +61,12 @@ for d in /opt/wb-headless /opt/sirius /opt/sirius/wb-headless; do
   fi
 done
 
-# --- 6. Каталог Сириуса -------------------------------------------------------
-log "Каталог /opt/sirius (память, голос, логи)"
+# --- 6. Дом Сириуса -----------------------------------------------------------
+# /opt/sirius            — проект Сириуса (CLAUDE.md, .claude/, voice/), отдельный git-репозиторий
+# /opt/sirius/memory     — данные памяти (вне git, бэкапы таймером)
+# /opt/sirius/wb-headless — рабочая копия wb-headless (в git Сириуса игнорируется)
+# /opt/wb-headless       — боевой сервис (пользователь wbheadless), обновляется ТОЛЬКО deploy/vps/30-deploy-service.sh
+log "Дом Сириуса /opt/sirius (память, голос, логи)"
 if [ ! -d /opt/sirius ]; then
   sudo mkdir -p /opt/sirius
   sudo chown "$(id -u):$(id -g)" /opt/sirius
@@ -72,8 +76,9 @@ ok "/opt/sirius/{memory,voice,logs}"
 
 # --- 7. Итог ------------------------------------------------------------------
 log "Проверка"
+ver() { case "$1" in ffmpeg) ffmpeg -version 2>&1 | head -1 ;; tmux) tmux -V ;; *) "$1" --version 2>&1 | head -1 ;; esac; }
 for c in node bun claude ffmpeg jq tmux git python3; do
-  printf '    %-8s ' "$c"; command -v "$c" >/dev/null && "$c" --version 2>&1 | head -1 || echo "НЕТ"
+  printf '    %-8s ' "$c"; command -v "$c" >/dev/null 2>&1 && ver "$c" || echo "НЕТ"
 done
 
 cat <<'NEXT'
@@ -81,7 +86,7 @@ cat <<'NEXT'
 Дальше — руками, один раз (после этого ручной ввод заканчивается):
   1) source ~/.bashrc
   2) tmux new -s sirius            # постоянная сессия
-  3) cd /opt/sirius/wb-headless && claude   # войти подпиской: /login
+  3) cd /opt/sirius && claude                # дом Сириуса; войти подпиской: /login
   4) внутри Claude Code:
        /plugin marketplace add anthropics/claude-plugins-official
        /plugin install telegram@claude-plugins-official     # scope: user
