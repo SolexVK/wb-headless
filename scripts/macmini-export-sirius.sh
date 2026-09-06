@@ -155,6 +155,56 @@ if [ -d "$AGENT/sessions" ]; then
 fi
 [ -d "$WS/memory/.dreams" ] && cp -R "$WS/memory/.dreams" "$DATA/dreams" && ok ".dreams"
 
+# ---------------------------------------------------------------- 5b. Гелиос (Hermes) → repo/helios + data
+HERMES="$HOME/.hermes"
+if [ -d "$HERMES" ]; then
+  log "Гелиос (Hermes, $HERMES): знания → repo/helios, базы → data"
+  cat > "$OUT/.rsync-exclude-hermes" <<'X'
+.env
+*.env
+.env.*
+auth*
+credentials/
+keys/
+*service-account*.json
+*.pem
+*.key
+*.db
+*.sqlite
+*.sqlite-*
+*.tar.gz
+backups/
+comfy/
+cache/
+logs/
+node_modules/
+venv/
+.venv/
+__pycache__/
+X
+  mkdir -p "$REPO/helios" "$DATA/sqlite"
+  rsync -a --exclude-from="$OUT/.rsync-exclude-hermes" "$HERMES/" "$REPO/helios/"
+  # текстовые конфиги: строки с ключами/токенами → <redacted>
+  find "$REPO/helios" -maxdepth 2 -type f \( -name '*.yaml' -o -name '*.yml' -o -name '*.json' -o -name '*.toml' \) | while read -r cf; do
+    sed -i '' -E 's/^([[:space:]]*"?[A-Za-z_]*(token|secret|password|passwd|api_?key|apikey|private|credential|auth)[A-Za-z_]*"?[[:space:]]*[:=][[:space:]]*).*$/\1<redacted>/I' "$cf" 2>/dev/null || true
+  done
+  ok "$(find "$REPO/helios" -type f | wc -l | tr -d ' ') файлов"
+  find "$HERMES" -maxdepth 3 -type f \( -name '*.db' -o -name '*.sqlite' \) -size +0 -not -path '*/comfy/*' -not -path '*/backups/*' | while read -r f; do
+    name="helios__$(echo "$f" | sed "s#$HERMES/##; s#/#__#g")"
+    {
+      echo "-- $f  ($(stat -f %z "$f") bytes, mtime $(stat -f %Sm "$f"))"
+      sqlite3 "$f" .schema
+      echo; echo "-- row counts"
+      sqlite3 "$f" "select name from sqlite_master where type='table'" | while read -r t; do
+        printf '%s\t%s\n' "$t" "$(sqlite3 "$f" "select count(*) from \"$t\"" 2>/dev/null)"
+      done
+    } > "$REPO/db/sqlite/$name.schema.sql" 2>/dev/null
+    sqlite3 "$f" ".backup '$DATA/sqlite/$name'" 2>/dev/null && ok "$name"
+  done
+else
+  warn "~/.hermes не найден — Гелиос пропущен"
+fi
+
 # ---------------------------------------------------------------- 6. INVENTORY.md
 log "INVENTORY.md"
 {
@@ -173,7 +223,7 @@ log "INVENTORY.md"
   (cd "$WS" && find . -type d -not -path '*/node_modules*' -not -path './.git*' | sort | head -80)
   echo '```'
   echo; echo "## Postgres"; echo '```'; cat "$REPO/db/postgres/databases.txt" 2>/dev/null || echo "(нет)"; echo '```'
-  echo; echo "## Другие агенты на машине (не экспортированы, уточнить)"; echo '```'
+  echo; echo "## Гелиос (Hermes) и прочие агенты на машине"; echo '```'
   ls -la "$HOME/.hermes" 2>/dev/null | head -20; echo; ls -la "$OC/caveman-claw" 2>/dev/null | head
   echo '```'
 } > "$REPO/INVENTORY.md"
