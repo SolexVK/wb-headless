@@ -88,8 +88,10 @@ Mac Mini на движке OpenClaw, — на VPS поверх **Claude Code** (
   `~/sirius-export/sirius-data-<дата>.tar.gz` (полные данные, → `/opt/sirius/memory/import/`).
 - Секреты (credentials/, auth-profiles.json, .pgconfig, .env) исключены; известные форматы ключей
   в текстах заменены на `<redacted>`. Перенос секретов — руками, отдельно.
-- Первый прогон 2026-09-06 21:37: Postgres-шаг упал (баг grep — исправлен), в repo попали исходники
-  Hermes (исправлено) и .env (исправлено). **Нужен повторный прогон.**
+- Итоговый прогон 2026-09-06 22:53 успешен. Postgres на Mac Mini: 7 баз — `memory_db`, `tandem_db`,
+  `openclaw`, `self_awareness_db`, `wb_analytics`, `wb_production`, `wb_unit` (схемы в `db/postgres/`,
+  полные дампы в архиве). Секреты по-прежнему только на Mac Mini (`~/.openclaw/workspace/credentials/`,
+  `.pgconfig`, `.env`, `agents/main/agent/auth-profiles.json`).
 
 ## 3. Статус шагов
 
@@ -98,9 +100,10 @@ Mac Mini на движке OpenClaw, — на VPS поверх **Claude Code** (
 | VPS bootstrap (Claude Code, Bun, ffmpeg, tmux, /opt/sirius) | ✅ выполнен |
 | Логин Claude Code подпиской на VPS, tmux-сессия | ⬜ не сделано (шаги печатает bootstrap в конце) |
 | Telegram-бот (BotFather) + плагин + pairing | ⬜ не сделано |
-| Репозиторий `SolexVK/sirius` (приватный, пустой) | ✅ создан; доступ Claude-приложению выдан |
-| Экспорт с Mac Mini | 🔁 повторить после исправлений |
-| Push знаний в `sirius`, scp данных на VPS | ⬜ после повторного экспорта |
+| Репозиторий `SolexVK/sirius` (приватный) | ✅ создан; доступ Claude-приложению выдан; SSH-ключ Mac Mini добавлен в GitHub |
+| Экспорт с Mac Mini | ✅ 2026-09-06 22:53 — 7 баз Postgres, 5 SQLite, 5115 сессий, dreaming, Гелиос |
+| Push знаний в `sirius` (main) | ✅ 51 МБ, 2349 файлов. В git НЕТ `workspace/content-factory` (266 МБ), `tmp/`, `*.bak`, корпусов dreaming, медиа, cron-вывода Гелиоса — всё это в архиве |
+| Архив данных на VPS | ✅ `/opt/sirius/memory/import/sirius-data-20260906_225348.tar.gz` (1,9 ГБ): `data-*/postgres/*.full.sql.gz`, `data-*/sqlite/*`, `sessions.tar.gz`, `dreams/`, `workspace-full.tar.gz` (1,5 ГБ, полный workspace без секретов), `helios-full.tar.gz` (113 МБ), `helios-sessions.tar.gz` |
 | DNS `sirius.aidemiko.ru` → IP VPS | ⬜ попросить пользователя |
 | Изучение памяти/Гелиоса/базы агентов | ⬜ следующая сессия, в репозитории `sirius` |
 | CLAUDE.md Сириуса, .claude/agents, первый субагент «дежурный по остаткам» | ⬜ |
@@ -108,6 +111,8 @@ Mac Mini на движке OpenClaw, — на VPS поверх **Claude Code** (
 
 ## 4. Следующий шаг (с чего начинать новой сессии в репозитории `sirius`)
 
+0. На VPS распаковать архив: `cd /opt/sirius/memory/import && tar -xzf sirius-data-*.tar.gz`
+   (внутри `data-<дата>/`). Ничего из Mac Mini не выключать.
 1. Прочитать `INVENTORY.md`, `workspace/SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`,
    `workspace/memory/memory-system-plan.md`, `docs/task-tracker-architecture.md`, `db/**/*.schema.sql`,
    `config/openclaw.redacted.json`, скрипты памяти в `workspace/scripts/`, затем `helios/`.

@@ -1,3 +1,7 @@
+> **Ветка `claude/agents-team-branch-cb0h32` — проект «Сириус» (личный ассистент на VPS).**
+> Актуальный хендофф этого проекта: [`docs/sirius-handoff.md`](docs/sirius-handoff.md).
+> Ниже — хендофф предыдущей задачи (анализ ниши), оставлен для истории.
+
 # Handoff — Анализ ниши Wildberries
 
 ## Цель
