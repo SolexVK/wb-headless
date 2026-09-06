@@ -65,9 +65,31 @@ auth-state.json
 *.env
 logs/
 *.log
+*.db-wal
+*.db-shm
+session-corpus/
+archive-migrated-*/
+*.gz
+*.zip
+media/
+*.mp3
+*.mp4
+*.wav
+*.ogg
+*.m4a
+*.mov
 X
 rsync -a --exclude-from="$EXCL" "$WS/" "$REPO/workspace/"
 ok "$(find "$REPO/workspace" -type f | wc -l | tr -d ' ') файлов"
+{ echo "== размер каталогов workspace =="; du -sh "$REPO/workspace"/* "$REPO/workspace"/.[a-z]* 2>/dev/null | sort -rh | head -15
+  echo; echo "== число файлов по каталогам (2 уровня) =="
+  find "$REPO/workspace" -type f | awk -F/ '{print $(NF-2)"/"$(NF-1)}' | sort | uniq -c | sort -rn | head -15
+} | tee "$REPO/workspace/TREE-SIZES.txt"
+# ПОЛНАЯ копия workspace (без секретов) → data, чтобы ничего не потерять при чистке git-версии
+mkdir -p "$DATA"
+tar -czf "$DATA/workspace-full.tar.gz" -C "$WS/.." --exclude='.git' --exclude='node_modules' --exclude='credentials' \
+  --exclude='*service-account*.json' --exclude='auth-profiles.json' --exclude='.pgconfig' --exclude='.env' --exclude='.env.*' \
+  "$(basename "$WS")" 2>/dev/null && ok "workspace-full.tar.gz → data ($(du -sh "$DATA/workspace-full.tar.gz" | cut -f1))"
 
 # ---------------------------------------------------------------- 2. конфиги
 log "Конфиг OpenClaw (секреты заменены на <redacted>), launchd, crontab, пакеты"
@@ -192,6 +214,12 @@ sessions/
 request_dump_*
 *.log
 .archive/
+cron/output/
+output/
+*_cache.json
+*.db-wal
+*.db-shm
+lsp/
 env/
 venv*/
 .venv*/
@@ -236,6 +264,11 @@ X
       echo "branch: $(git -C "$HERMES/hermes-agent" rev-parse --abbrev-ref HEAD 2>/dev/null)"
     } > "$REPO/helios/HERMES-SOURCE.txt"
   fi
+  # ПОЛНАЯ копия ~/.hermes (без движка, окружений, ComfyUI и секретов) → data
+  tar -czf "$DATA/helios-full.tar.gz" -C "$HOME" --exclude='.hermes/hermes-agent' --exclude='.hermes/comfy' \
+    --exclude='venv' --exclude='.venv' --exclude='node_modules' --exclude='.git' --exclude='.env' --exclude='*.env' \
+    --exclude='auth*' --exclude='credentials' --exclude='request_dump_*' .hermes 2>/dev/null \
+    && ok "helios-full.tar.gz → data ($(du -sh "$DATA/helios-full.tar.gz" | cut -f1))"
   # история сессий Гелиоса → data (без сырых дампов запросов: в них ключи)
   [ -d "$HERMES/sessions" ] && tar -czf "$DATA/helios-sessions.tar.gz" --exclude='request_dump_*' -C "$HERMES" sessions 2>/dev/null && ok "helios sessions → data"
   # текстовые конфиги: строки с ключами/токенами → <redacted>
@@ -347,6 +380,9 @@ else
 fi
 
 # ---------------------------------------------------------------- 8. git + архив
+log "Файлы крупнее 50 МБ — убираю из repo (лимит GitHub 100 МБ; полные копии есть в data)"
+find "$REPO" -type f -size +50000k 2>/dev/null | while read -r f; do rm -f "$f"; warn "убран: ${f#$REPO/}"; done
+
 log "Размер repo по каталогам"
 du -sh "$REPO"/* 2>/dev/null | sort -rh | head -12 | sed 's/^/    /'
 REPO_MB=$(du -sm "$REPO" | cut -f1)
